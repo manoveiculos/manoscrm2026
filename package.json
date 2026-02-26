@@ -1,0 +1,12 @@
+{
+    "name": "crm-manos-root",
+    "version": "1.0.0",
+    "private": true,
+    "scripts": {
+        "dev": "npm run dev --prefix admin-panel",
+        "build": "npm run build --prefix admin-panel",
+        "start": "npm run start --prefix admin-panel",
+        "lint": "npm run lint --prefix admin-panel"
+    },
+    "description": "Root configuration for CRM Manos to delegate commands to the admin-panel."
+}

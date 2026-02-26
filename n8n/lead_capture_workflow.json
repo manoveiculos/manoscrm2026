@@ -1,0 +1,151 @@
+{
+  "name": "Manos Veiculos - Lead Capture V2 (Parsing Meta JSON)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lead-capture",
+        "options": {}
+      },
+      "id": "webhook-node",
+      "name": "Webhook Lead",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const lead = items[0].json;\nconst fieldData = lead.field_data || [];\n\nconst clean = (val) => {\n  if (!val) return '';\n  return val.replace(/_/g, ' ').replace(/\\b\\w/g, l => l.toUpperCase());\n};\n\nconst result = {\n  name: lead.name || 'Sem Nome',\n  phone: lead.phone || '',\n  observacoes: '',\n  id_meta: lead.id,\n  id_formulario: lead.form_id,\n  meta_id_anuncio: lead.ad_id,\n  meta_id_conjunto: lead.adset_id,\n  meta_id_campanha: lead.campaign_id,\n  plataforma_meta: lead.platform,\n  data_criacao_meta: lead.created_time,\n  dados_brutos: lead,\n  source: 'Facebook Leads',\n  utm_source: 'fb_ads',\n  valor_investimento: '',\n  metodo_compra: '',\n  carro_troca: '',\n  prazo_troca: ''\n};\n\nconst customQuestions = [];\n\nfieldData.forEach(field => {\n  const fieldName = (field.name || '').toLowerCase();\n  const value = field.values ? field.values[0] : '';\n\n  if (fieldName === 'full name' || fieldName === 'full_name' || fieldName === 'nome_completo') {\n    result.name = value;\n  } else if (fieldName === 'phone_number' || fieldName === 'telefone') {\n    result.phone = value;\n  } else if (fieldName.includes('investir')) {\n    result.valor_investimento = clean(value);\n  } else if (fieldName.includes('comprar_seu_carro')) {\n    result.metodo_compra = clean(value);\n  } else if (fieldName.includes('dar_na_troca')) {\n    result.carro_troca = clean(value);\n  } else if (fieldName.includes('prazo')) {\n    result.prazo_troca = clean(value);\n  } else {\n    const cleanLabel = fieldName.replace(/^[\\?]+|[\\?]+$/g, '').replace(/_/g, ' ').toUpperCase();\n    customQuestions.push(`${cleanLabel}: ${clean(value)}`);\n  }\n});\n\nif (customQuestions.length > 0) {\n  result.observacoes = customQuestions.join('\\n');\n}\n\nreturn [ { json: result } ];"
+      },
+      "id": "code-node",
+      "name": "Parse Meta Fields",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$json.phone}}",
+              "operation": "notEmpty"
+            }
+          ]
+        }
+      },
+      "id": "filter-node",
+      "name": "Valid Lead?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        400,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "modelDescription": "gemini-1.5-pro",
+        "prompt": "Você é um Analista de Vendas Senior da Manos Veículos. Analise os dados do lead: Nome: {{$json.name}} / Observações: {{$json.observacoes}} / Investimento: {{$json.valor_investimento}} / Troca: {{$json.carro_troca}}. \n\nRetorne um JSON com:\n- score: (0-100)\n- classification: (hot, warm, cold)\n- reason: (Um resumo executivo de 1 frase justificando o interesse e perfil do cliente em Português-BR)",
+        "options": {
+          "responseFormat": "json_object"
+        }
+      },
+      "id": "google-ai-studio",
+      "name": "AI Score & Classify",
+      "type": "n8n-nodes-base.googleAiStudio",
+      "typeVersion": 1,
+      "position": [
+        600,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": "public",
+        "table": "leads_manos_crm",
+        "columns": [
+          "name",
+          "phone",
+          "id_meta",
+          "id_formulario",
+          "meta_id_anuncio",
+          "meta_id_conjunto",
+          "meta_id_campanha",
+          "plataforma_meta",
+          "data_criacao_meta",
+          "dados_brutos",
+          "observacoes",
+          "ai_score",
+          "ai_classification",
+          "utm_source",
+          "valor_investimento",
+          "metodo_compra",
+          "carro_troca",
+          "prazo_troca"
+        ]
+      },
+      "id": "supabase-insert",
+      "name": "Save Lead to DB",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        800,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "webhook-node": {
+      "main": [
+        [
+          {
+            "node": "code-node",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "code-node": {
+      "main": [
+        [
+          {
+            "node": "filter-node",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "filter-node": {
+      "main": [
+        [
+          {
+            "node": "google-ai-studio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "google-ai-studio": {
+      "main": [
+        [
+          {
+            "node": "supabase-insert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
