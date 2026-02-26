@@ -40,7 +40,7 @@ export const Navigation = () => {
     const pathname = usePathname();
     const router = useRouter();
     const [user, setUser] = useState<NavUser | null>(null);
-    const [role, setRole] = useState<string>('consultant');
+    const [role, setRole] = useState<string | null>(null);
 
     const handleLogoClick = () => {
         window.location.reload();
@@ -51,16 +51,18 @@ export const Navigation = () => {
             const { data: { session } } = await supabase.auth.getSession();
             if (session?.user) {
                 setUser(session.user);
-                // Force admin if it's Alexandre
-                if (session.user.email === 'alexandre_gorges@hotmail.com') {
+                const { data: consultant } = await supabase
+                    .from('consultants_manos_crm')
+                    .select('role')
+                    .eq('auth_id', session.user.id)
+                    .maybeSingle();
+
+                if (consultant) {
+                    setRole(consultant.role);
+                } else if (session.user.email === 'alexandre_gorges@hotmail.com') {
                     setRole('admin');
                 } else {
-                    const { data: consultant } = await supabase
-                        .from('consultants_manos_crm')
-                        .select('role')
-                        .eq('auth_id', session.user.id)
-                        .maybeSingle();
-                    if (consultant) setRole(consultant.role);
+                    setRole('consultant');
                 }
             }
         };
@@ -165,7 +167,7 @@ export const Navigation = () => {
                                 {user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Usuário'}
                             </p>
                             <p className="text-[8px] text-white/30 font-bold uppercase tracking-widest truncate">
-                                {role === 'admin' ? 'Acesso Gerencial' : 'Consultor Manos'}
+                                {role === 'admin' ? 'Acesso Gerencial' : role === 'consultant' ? 'Consultor Manos' : 'Processando...'}
                             </p>
                         </div>
                     </div>

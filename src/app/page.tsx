@@ -38,21 +38,25 @@ export default function Dashboard() {
   const [recentLeads, setRecentLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
   const [aiStatus, setAiStatus] = useState<'checking' | 'ok' | 'error'>('checking');
-  const [userRole, setUserRole] = useState<'admin' | 'consultant'>('consultant');
+  const [userRole, setUserRole] = useState<'admin' | 'consultant' | null>(null);
   const [consultantInfo, setConsultantInfo] = useState<{ id: string; name: string } | null>(null);
 
   useEffect(() => {
     async function loadData() {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.user) {
+          // Se não houver sessão, redireciona imediatamente
+          window.location.href = '/login';
+          return;
+        }
 
-        // Default role is admin for specific email
+        // Default role is consultant
         let role: 'admin' | 'consultant' = 'consultant';
         let info = null;
 
-        if (session?.user?.email === 'alexandre_gorges@hotmail.com') {
+        if (session.user.email === 'alexandre_gorges@hotmail.com') {
           role = 'admin';
-        } else if (session?.user) {
+        } else {
           const { data: consultant } = await supabase
             .from('consultants_manos_crm')
             .select('id, name, role')
@@ -63,10 +67,6 @@ export default function Dashboard() {
             role = consultant.role as 'admin' | 'consultant';
             info = { id: consultant.id, name: consultant.name };
           }
-        } else {
-          // No user, the middleware should have redirected, but as fallback:
-          setLoading(false);
-          return;
         }
 
         setUserRole(role);
@@ -97,8 +97,21 @@ export default function Dashboard() {
     );
   }
 
+  if (!userRole) {
+    return (
+      <div className="flex h-[80vh] flex-col items-center justify-center space-y-4">
+        <p className="text-white/40 font-bold uppercase tracking-widest text-[10px]">Verificando Acesso...</p>
+        <div className="h-10 w-10 border-4 border-red-500 border-t-transparent rounded-full animate-spin shadow-[0_0_15px_rgba(239,68,68,0.2)]" />
+      </div>
+    );
+  }
+
   if (userRole === 'consultant' && consultantInfo) {
     return <ConsultantDashboard consultantId={consultantInfo.id} consultantName={consultantInfo.name} />;
+  }
+
+  if (userRole !== 'admin') {
+    return null; // Should have redirected
   }
 
   return (
