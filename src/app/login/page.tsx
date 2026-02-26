@@ -244,6 +244,8 @@ export default function LoginPage() {
                                                 type="email"
                                                 value={email}
                                                 onChange={(e) => setEmail(e.target.value)}
+                                                autoComplete="off"
+                                                spellCheck={false}
                                                 className="w-full bg-[#0a0c10] border border-white/10 rounded-2xl py-5 pl-14 pr-8 text-sm text-white focus:outline-none focus:ring-1 focus:ring-red-500/50 transition-all font-medium"
                                             />
                                         </div>
@@ -258,6 +260,7 @@ export default function LoginPage() {
                                                 type="password"
                                                 value={password}
                                                 onChange={(e) => setPassword(e.target.value)}
+                                                autoComplete="off"
                                                 className="w-full bg-[#0a0c10] border border-white/10 rounded-2xl py-5 pl-14 pr-8 text-sm text-white focus:outline-none focus:ring-1 focus:ring-red-500/50 transition-all font-medium"
                                             />
                                         </div>
@@ -274,13 +277,9 @@ export default function LoginPage() {
                                     </button>
 
                                     <div className="text-center pt-2">
-                                        <button
-                                            type="button"
-                                            onClick={() => setMode(mode === 'login' ? 'register' : 'login')}
-                                            className="text-[10px] font-black text-white/30 hover:text-white uppercase tracking-widest transition-all hover:scale-105"
-                                        >
-                                            {mode === 'login' ? 'Criar Nova Solicitação' : 'Já sou consultor aprovado'}
-                                        </button>
+                                        <p className="text-[10px] font-black text-white/10 uppercase tracking-[0.3em] italic">
+                                            Acesso exclusivo para consultores autorizados
+                                        </p>
                                     </div>
                                 </motion.form>
                             )}
