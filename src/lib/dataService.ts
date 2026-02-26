@@ -4,6 +4,7 @@ import { Lead, Campaign, Sale, InventoryItem, LeadStatus } from './types';
 export const dataService = {
     // Leads
     async getLeads(consultantId?: string) {
+        // 1. Fetch from main table
         let query = supabase
             .from('leads_manos_crm')
             .select('*, consultants_manos_crm(name)')
@@ -14,9 +15,72 @@ export const dataService = {
             query = query.eq('assigned_consultant_id', consultantId);
         }
 
+        const { data: mainLeads, error: mainError } = await query;
+        if (mainError) throw mainError;
+
+        // 2. Fetch from CRM 26 table
+        let consultantName = undefined;
+        if (consultantId) {
+            const { data: consultant } = await supabase
+                .from('consultants_manos_crm')
+                .select('name')
+                .eq('id', consultantId)
+                .single();
+            consultantName = consultant?.name;
+        }
+
+        try {
+            const crm26Leads = await this.getLeadsCRM26(consultantName);
+            // Merge and sort
+            const merged = [...(mainLeads || []), ...crm26Leads].sort((a, b) =>
+                new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+            );
+            return merged;
+        } catch (err) {
+            console.warn("Error fetching leads from CRM 26 source:", err);
+            return mainLeads || [];
+        }
+    },
+
+    async getLeadsCRM26(consultantName?: string) {
+        let query = supabase
+            .from('leads_distribuicao_crm_26')
+            .select('*')
+            .order('criado_em', { ascending: false });
+
+        if (consultantName) {
+            query = query.ilike('vendedor', `%${consultantName}%`);
+        }
+
         const { data, error } = await query;
-        if (error) throw error;
-        return data;
+        if (error) {
+            console.error("Error on leads_distribuicao_crm_26:", error);
+            return [];
+        }
+
+        // Filter: name and phone are mandatory
+        // Map to Lead type
+        return (data || [])
+            .filter(item => item.nome && item.nome.trim() !== '' && item.telefone && item.telefone.trim() !== '')
+            .map(item => ({
+                id: `crm26_${item.id}`,
+                name: item.nome,
+                phone: item.telefone,
+                vehicle_interest: item.interesse || '',
+                region: item.cidade || '',
+                ai_classification: item.ai_classification || 'warm',
+                status: 'received' as LeadStatus,
+                created_at: item.criado_em,
+                updated_at: item.criado_em,
+                source: 'WhatsApp',
+                consultants_manos_crm: { name: item.vendedor || 'Pendente' },
+                ai_summary: item.resumo || '',
+                carro_troca: item.troca || '',
+                // Additional fields for compatibility
+                ai_score: 50,
+                email: '',
+                estimated_ticket: 0
+            })) as unknown as Lead[];
     },
 
     async getOldLeads(consultantId?: string) {
@@ -425,5 +489,14 @@ export const dataService = {
 
         if (error) throw error;
         return data;
+    },
+
+    async deleteLead(leadId: string) {
+        const { error } = await supabase
+            .from('leads_manos_crm')
+            .delete()
+            .eq('id', leadId);
+
+        if (error) throw error;
     }
 };

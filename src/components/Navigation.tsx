@@ -39,11 +39,8 @@ interface NavUser {
 export const Navigation = () => {
     const pathname = usePathname();
     const router = useRouter();
-    const [user, setUser] = useState<NavUser | null>({
-        email: 'alexandre_gorges@hotmail.com',
-        user_metadata: { full_name: 'Alexandre Gorges' }
-    });
-    const [role, setRole] = useState<string>('admin');
+    const [user, setUser] = useState<NavUser | null>(null);
+    const [role, setRole] = useState<string>('consultant');
 
     const handleLogoClick = () => {
         window.location.reload();

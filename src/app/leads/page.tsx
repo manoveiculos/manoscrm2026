@@ -279,6 +279,29 @@ function LeadsContent() {
         }
     };
 
+    const handleDeleteLead = async () => {
+        if (!actionLead) return;
+        if (userRole !== 'admin') {
+            alert("Apenas administradores podem excluir leads.");
+            return;
+        }
+
+        if (!confirm(`Tem certeza que deseja EXCLUIR PERMANENTEMENTE o lead ${actionLead.name}? Esta ação não pode ser desfeita.`)) {
+            return;
+        }
+
+        try {
+            await dataService.deleteLead(actionLead.id);
+            setLeads(prev => prev.filter(l => l.id !== actionLead.id));
+            if (selectedLead?.id === actionLead.id) setSelectedLead(null);
+            setActionLead(null);
+            showToast("Lead removido com sucesso!", "success");
+        } catch (err: any) {
+            console.error("Error deleting lead:", err);
+            alert(`Erro ao excluir lead: ${err.message || 'Erro desconhecido'}`);
+        }
+    };
+
 
 
 
@@ -475,18 +498,40 @@ function LeadsContent() {
     };
 
     const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
+        const files = e.target.files;
+        if (!files || files.length === 0) return;
 
-        const reader = new FileReader();
-        reader.onload = (event) => {
-            const text = event.target?.result as string;
-            if (text && text.length > 10) {
-                setChatText(text);
-                alert("Script carregado! Agora clique em 'Analisar e Sugerir'.");
-            }
-        };
-        reader.readAsText(file);
+        // Tentar encontrar o arquivo de chat dentro da pasta ou o arquivo selecionado diretamente
+        const filesArray = Array.from(files);
+        const chatFile = filesArray.find(f => 
+            f.name.toLowerCase().includes('_chat.txt') || 
+            f.name.toLowerCase().includes('chat.txt') || 
+            (files.length === 1 && f.type === 'text/plain')
+        );
+
+        if (chatFile) {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const text = event.target?.result as string;
+                if (text && text.length > 10) {
+                    setChatText(text);
+                    
+                    // Tentar extrair o telefone do caminho (nome da pasta)
+                    // O caminho no webkitRelativePath costuma ser "Nome da Pasta/arquivo.txt"
+                    const path = chatFile.webkitRelativePath || chatFile.name;
+                    const phoneMatch = path.match(/\+?\d{2}\s?\(?\d{2}\)?\s?\d{4,5}-?\d{4}/);
+                    
+                    if (phoneMatch) {
+                        showToast(`Conversa carregada! Telefone detectado: ${phoneMatch[0]}`, 'success');
+                    } else {
+                        showToast("Conversa carregada com sucesso!", 'success');
+                    }
+                }
+            };
+            reader.readAsText(chatFile);
+        } else {
+            showToast("Não foi possível encontrar um arquivo de chat (.txt) válido nos arquivos selecionados.", 'error');
+        }
     };
 
     const analyzeConversation = async () => {
@@ -1004,19 +1049,31 @@ function LeadsContent() {
                                             <h4 className="text-[9px] font-black uppercase tracking-[0.3em] text-white/30">Resumo do Formulario</h4>
                                         </div>
 
-                                        <div className="space-y-3 overflow-y-auto custom-scrollbar pr-1">
+                                        <div className="space-y-4 overflow-y-auto custom-scrollbar pr-1 flex-1">
                                             <div className="flex justify-between items-center bg-white/5 p-4 rounded-2xl border border-white/5">
                                                 <span className="text-[9px] font-black uppercase text-white/20 tracking-wider">Interesse Principal</span>
                                                 <span className="text-xs font-black text-white">{selectedLead.vehicle_interest || 'Geral'}</span>
                                             </div>
-                                            <div className="flex justify-between items-center bg-white/5 p-4 rounded-2xl border border-white/5">
-                                                <span className="text-[9px] font-black uppercase text-white/20 tracking-wider">Investimento</span>
-                                                <span className="text-xs font-black text-white text-emerald-500">{selectedLead.valor_investimento || 'Nao informado'}</span>
-                                            </div>
-                                            <div className="flex justify-between items-center bg-white/5 p-4 rounded-2xl border border-white/5">
-                                                <span className="text-[9px] font-black uppercase text-white/20 tracking-wider">Possui Troca</span>
-                                                <span className="text-xs font-black text-white">{selectedLead.carro_troca || 'Nao informado'}</span>
-                                            </div>
+                                            
+                                            {selectedLead.source === 'WhatsApp' ? (
+                                                <div className="flex flex-col gap-3 bg-emerald-500/5 p-5 rounded-2xl border border-emerald-500/10 h-full min-h-0">
+                                                    <span className="text-[9px] font-black uppercase text-emerald-500/40 tracking-wider">Resumo do Atendimento (IA)</span>
+                                                    <div className="text-[11px] leading-relaxed text-white/70 italic overflow-y-auto custom-scrollbar pr-2 whitespace-pre-wrap">
+                                                        {selectedLead.ai_summary || 'Sem resumo disponível.'}
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <>
+                                                    <div className="flex justify-between items-center bg-white/5 p-4 rounded-2xl border border-white/5">
+                                                        <span className="text-[9px] font-black uppercase text-white/20 tracking-wider">Investimento</span>
+                                                        <span className="text-xs font-black text-white text-emerald-500">{selectedLead.valor_investimento || 'Nao informado'}</span>
+                                                    </div>
+                                                    <div className="flex justify-between items-center bg-white/5 p-4 rounded-2xl border border-white/5">
+                                                        <span className="text-[9px] font-black uppercase text-white/20 tracking-wider">Possui Troca</span>
+                                                        <span className="text-xs font-black text-white">{selectedLead.carro_troca || 'Nao informado'}</span>
+                                                    </div>
+                                                </>
+                                            )}
                                         </div>
                                     </div>
                                 </div>
@@ -1349,31 +1406,37 @@ function LeadsContent() {
                                                             <label className="text-[9px] font-black uppercase text-white/20 tracking-widest pl-2">Veículo de Troca</label>
                                                             <input
                                                                 type="text"
+                                                                disabled={userRole !== 'admin'}
                                                                 value={editDetails.carro_troca || ''}
                                                                 onChange={(e) => setEditDetails({ ...editDetails, carro_troca: e.target.value })}
-                                                                className="w-full bg-white/5 border border-white/10 rounded-2xl py-3 px-4 text-xs text-white focus:outline-none focus:ring-1 focus:ring-red-500/50"
+                                                                className={`w-full bg-white/5 border border-white/10 rounded-2xl py-3 px-4 text-xs text-white focus:outline-none focus:ring-1 focus:ring-red-500/50 ${userRole !== 'admin' ? 'opacity-50 cursor-not-allowed' : ''}`}
                                                             />
                                                         </div>
-                                                        <div className="space-y-2">
-                                                            <label className="text-[9px] font-black uppercase text-white/20 tracking-widest pl-2">Valor Estimado</label>
-                                                            <input
-                                                                type="text"
-                                                                value={editDetails.valor_investimento || ''}
-                                                                onChange={(e) => {
-                                                                    const formatted = formatCurrencyInput(e.target.value);
-                                                                    setEditDetails({ ...editDetails, valor_investimento: formatted });
-                                                                }}
-                                                                placeholder="R$ 0,00"
-                                                                className="w-full bg-white/5 border border-white/10 rounded-2xl py-3 px-4 text-xs text-white focus:outline-none focus:ring-1 focus:ring-red-500/50"
-                                                            />
-                                                        </div>
+                                                        {actionLead.source !== 'WhatsApp' && (
+                                                            <div className="space-y-2">
+                                                                <label className="text-[9px] font-black uppercase text-white/20 tracking-widest pl-2">Valor Estimado</label>
+                                                                <input
+                                                                    type="text"
+                                                                    disabled={userRole !== 'admin'}
+                                                                    value={editDetails.valor_investimento || ''}
+                                                                    onChange={(e) => {
+                                                                        const formatted = formatCurrencyInput(e.target.value);
+                                                                        setEditDetails({ ...editDetails, valor_investimento: formatted });
+                                                                    }}
+                                                                    placeholder="R$ 0,00"
+                                                                    className={`w-full bg-white/5 border border-white/10 rounded-2xl py-3 px-4 text-xs text-white focus:outline-none focus:ring-1 focus:ring-red-500/50 ${userRole !== 'admin' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                                />
+                                                            </div>
+                                                        )}
                                                     </div>
-                                                    <button
-                                                        onClick={handleSaveDetails}
-                                                        className="w-full py-4 rounded-2xl bg-red-600 text-white text-[10px] font-black uppercase tracking-widest shadow-xl shadow-red-600/20 hover:bg-red-500 transition-all flex items-center justify-center gap-2"
-                                                    >
-                                                        <BadgeCheck size={16} /> Confirmar Alterações
-                                                    </button>
+                                                    {userRole === 'admin' && (
+                                                        <button
+                                                            onClick={handleSaveDetails}
+                                                            className="w-full py-4 rounded-2xl bg-red-600 text-white text-[10px] font-black uppercase tracking-widest shadow-xl shadow-red-600/20 hover:bg-red-500 transition-all flex items-center justify-center gap-2"
+                                                        >
+                                                            <BadgeCheck size={16} /> Confirmar Alterações
+                                                        </button>
+                                                    )}
                                                 </div>
                                             </section>
 
@@ -1409,7 +1472,7 @@ function LeadsContent() {
                                                         <FileText size={18} className="text-emerald-500" />
                                                         <h4 className="text-[10px] font-black uppercase tracking-widest text-white/60">Notas e Descricao do Atendimento</h4>
                                                     </div>
-                                                    {actionLead.ai_summary && (
+                                                    {userRole === 'admin' && actionLead.ai_summary && (
                                                         <button
                                                             onClick={handleClearNotes}
                                                             className="text-[9px] font-black text-rose-500/40 hover:text-rose-500 transition-colors uppercase"
@@ -1420,7 +1483,7 @@ function LeadsContent() {
                                                 </div>
                                                 <div className="glass-card rounded-3xl p-6 bg-emerald-500/5 border-emerald-500/10 flex flex-col gap-4">
                                                     {actionLead.ai_summary && (
-                                                        <div className="bg-black/40 rounded-2xl p-4 text-[11px] text-white/60 max-h-[150px] overflow-y-auto custom-scrollbar italic whitespace-pre-wrap border border-white/5">
+                                                        <div className="bg-black/40 rounded-2xl p-5 text-[13px] leading-relaxed text-white/80 max-h-[400px] overflow-y-auto custom-scrollbar italic whitespace-pre-wrap border border-white/10 shadow-inner">
                                                             {actionLead.ai_summary}
                                                         </div>
                                                     )}
@@ -1451,6 +1514,15 @@ function LeadsContent() {
                                                     >
                                                         <Upload size={14} /> Subir Script
                                                     </button>
+                                                    <input
+                                                        type="file"
+                                                        ref={fileInputRef}
+                                                        onChange={handleFileUpload}
+                                                        className="hidden"
+                                                        webkitdirectory=""
+                                                        directory=""
+                                                        multiple
+                                                    />
                                                 </div>
 
                                                 <div className="glass-card rounded-3xl p-6 space-y-4 bg-red-600/[0.02] border-red-500/10">
@@ -1547,10 +1619,18 @@ function LeadsContent() {
                                     </a>
                                     <button
                                         onClick={() => setIsFinishing(true)}
-                                        className="hidden md:flex py-5 rounded-[2rem] bg-red-600/10 border border-red-600/20 text-red-500 text-[11px] font-black hover:bg-red-600 hover:text-white transition-all items-center justify-center gap-3 uppercase"
+                                        className="py-5 rounded-[2rem] bg-red-600/10 border border-red-600/20 text-red-500 text-[11px] font-black hover:bg-red-600 hover:text-white transition-all flex items-center justify-center gap-3 uppercase"
                                     >
                                         Finalizar Atendimento
                                     </button>
+                                    {userRole === 'admin' && (
+                                        <button
+                                            onClick={handleDeleteLead}
+                                            className="col-span-2 md:col-span-1 py-5 rounded-[2rem] bg-rose-950/20 border border-rose-500/20 text-rose-500 text-[11px] font-black hover:bg-rose-600 hover:text-white transition-all flex items-center justify-center gap-3 uppercase"
+                                        >
+                                            <AlertCircle size={18} /> Excluir Lead
+                                        </button>
+                                    )}
                                 </footer>
                             </motion.div>
                         </div>
@@ -1666,7 +1746,7 @@ function LeadsContent() {
                                                 try {
                                                     const newLead = await dataService.createLead({
                                                         ...newLeadData,
-                                                        source: 'Registro Manual',
+                                                        source: userName ? `Registro ${userName}` : 'Registro Manual',
                                                         ai_classification: 'warm',
                                                         ai_score: 50,
                                                         status: 'attempt',

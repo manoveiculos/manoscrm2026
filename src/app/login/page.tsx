@@ -14,7 +14,6 @@ export default function LoginPage() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState(false);
-    const [logoClicks, setLogoClicks] = useState(0);
     const router = useRouter();
 
     const handleAuth = async (e: React.FormEvent) => {
@@ -31,16 +30,21 @@ export default function LoginPage() {
 
                 if (authError) throw authError;
 
+                // For the admin email, we can proceed directly
                 if (email.toLowerCase() === 'alexandre_gorges@hotmail.com') {
-                    window.location.href = '/';
+                    router.push('/');
                     return;
                 }
 
-                const { data: consultant } = await supabase
+                const { data: consultant, error: dbError } = await supabase
                     .from('consultants_manos_crm')
                     .select('status')
                     .eq('auth_id', data.user?.id)
                     .maybeSingle();
+
+                if (dbError) {
+                    console.warn('Erro ao buscar status do consultor:', dbError);
+                }
 
                 if (consultant?.status === 'pending') {
                     await supabase.auth.signOut();
@@ -83,27 +87,8 @@ export default function LoginPage() {
         }
     };
 
-    const handleLogoClick = async () => {
-        const newClicks = logoClicks + 1;
-        setLogoClicks(newClicks);
-        if (newClicks >= 5) {
-            setLogoClicks(0);
-            setLoading(true);
-            try {
-                await fetch('/api/auth/confirm-admin', { method: 'POST' });
-                const { error: signInError } = await supabase.auth.signInWithPassword({
-                    email: 'alexandre_gorges@hotmail.com',
-                    password: 'Manos374@'
-                });
-                if (signInError) throw signInError;
-                window.location.href = '/';
-            } catch (err) {
-                setError("Erro no bypass. Tente novamente.");
-            } finally {
-                setLoading(false);
-            }
-        }
-        setTimeout(() => setLogoClicks(0), 5000);
+    const handleLogoClick = () => {
+        // Bypass removed for security
     };
 
     return (

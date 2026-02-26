@@ -38,7 +38,7 @@ export default function Dashboard() {
   const [recentLeads, setRecentLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
   const [aiStatus, setAiStatus] = useState<'checking' | 'ok' | 'error'>('checking');
-  const [userRole, setUserRole] = useState<'admin' | 'consultant'>('admin');
+  const [userRole, setUserRole] = useState<'admin' | 'consultant'>('consultant');
   const [consultantInfo, setConsultantInfo] = useState<{ id: string; name: string } | null>(null);
 
   useEffect(() => {
