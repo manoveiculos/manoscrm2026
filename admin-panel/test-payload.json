@@ -1,0 +1,14 @@
+{
+    "contents": [
+        {
+            "parts": [
+                {
+                    "text": "Diga 'confirmado' em formato JSON: {\"status\": \"ok\"}"
+                }
+            ]
+        }
+    ],
+    "generationConfig": {
+        "responseMimeType": "application/json"
+    }
+}
