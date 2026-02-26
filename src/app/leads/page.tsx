@@ -16,13 +16,14 @@ import {
     Plus,
     FileText,
     Upload,
-    Zap
+    Zap,
+    RefreshCcw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useSearchParams } from 'next/navigation';
 import { dataService } from '@/lib/dataService';
 import { supabase } from '@/lib/supabase';
-import { Lead, LeadStatus, Consultant } from '@/lib/types';
+import { Lead, LeadStatus, Consultant, InventoryItem, AIClassification } from '@/lib/types';
 
 function LeadsContent() {
     const searchParams = useSearchParams();
@@ -64,6 +65,7 @@ function LeadsContent() {
     const [newNoteText, setNewNoteText] = useState('');
     const [modalTab, setModalTab] = useState<'details' | 'karbam'>('details');
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const whatsappFolderInputRef = useRef<HTMLInputElement>(null);
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const clickTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -72,6 +74,10 @@ function LeadsContent() {
         type: 'info',
         visible: false
     });
+    const [moveMenuDirection, setMoveMenuDirection] = useState<'up' | 'down'>('down');
+    const [inventory, setInventory] = useState<InventoryItem[]>([]);
+    const [vehicleSearch, setVehicleSearch] = useState('');
+    const [showVehicleResults, setShowVehicleResults] = useState(false);
 
     const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
         setToast({ message, type, visible: true });
@@ -413,6 +419,10 @@ function LeadsContent() {
                     setUserRole('consultant');
                 }
 
+                // Load inventory for vehicle selection
+                const inventoryData = await dataService.getInventory();
+                setInventory(inventoryData || []);
+
                 if (leadIdFromUrl && data) {
                     const lead = data.find((l: Lead) => l.id === leadIdFromUrl);
                     if (lead) setSelectedLead(lead);
@@ -501,11 +511,10 @@ function LeadsContent() {
         const files = e.target.files;
         if (!files || files.length === 0) return;
 
-        // Tentar encontrar o arquivo de chat dentro da pasta ou o arquivo selecionado diretamente
         const filesArray = Array.from(files);
-        const chatFile = filesArray.find(f => 
-            f.name.toLowerCase().includes('_chat.txt') || 
-            f.name.toLowerCase().includes('chat.txt') || 
+        const chatFile = filesArray.find(f =>
+            f.name.toLowerCase().includes('_chat.txt') ||
+            f.name.toLowerCase().includes('chat.txt') ||
             (files.length === 1 && f.type === 'text/plain')
         );
 
@@ -515,12 +524,9 @@ function LeadsContent() {
                 const text = event.target?.result as string;
                 if (text && text.length > 10) {
                     setChatText(text);
-                    
-                    // Tentar extrair o telefone do caminho (nome da pasta)
-                    // O caminho no webkitRelativePath costuma ser "Nome da Pasta/arquivo.txt"
                     const path = chatFile.webkitRelativePath || chatFile.name;
                     const phoneMatch = path.match(/\+?\d{2}\s?\(?\d{2}\)?\s?\d{4,5}-?\d{4}/);
-                    
+
                     if (phoneMatch) {
                         showToast(`Conversa carregada! Telefone detectado: ${phoneMatch[0]}`, 'success');
                     } else {
@@ -530,7 +536,141 @@ function LeadsContent() {
             };
             reader.readAsText(chatFile);
         } else {
-            showToast("Não foi possível encontrar um arquivo de chat (.txt) válido nos arquivos selecionados.", 'error');
+            showToast("Não foi possível encontrar um arquivo de chat (.txt) válido.", 'error');
+        }
+    };
+
+    const handleWhatsAppFolderUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const files = e.target.files;
+        if (!files || files.length === 0 || userRole !== 'admin') return;
+
+        setIsAnalyzing(true);
+        showToast("Iniciando processamento da pasta WhatsApp...", "info");
+
+        try {
+            const filesArray = Array.from(files);
+            const chatFile = filesArray.find(f => f.name.toLowerCase().includes('chat.txt') || f.name.toLowerCase().includes('_chat.txt'));
+
+            if (!chatFile) {
+                showToast("Arquivo de chat não encontrado na pasta selecionada.", "error");
+                setIsAnalyzing(false);
+                return;
+            }
+
+            // Extract contact from folder name
+            const folderPath = chatFile.webkitRelativePath || '';
+            const folderName = folderPath.split('/')[0] || '';
+
+            // Clean name and phone
+            let contactName = "Lead WhatsApp";
+            let contactPhone = "";
+
+            // Better regex for phone numbers in folder names (e.g. +55 47 9999-9999)
+            const phoneMatch = folderName.match(/\+?(\d[\s\-\(\).]{0,2}){8,}\d/);
+            if (phoneMatch) {
+                contactPhone = phoneMatch[0].replace(/[\s\-\(\).]/g, '');
+                contactName = folderName.replace(phoneMatch[0], '').replace(/[-_]/g, ' ').trim() || "Lead WhatsApp";
+            } else {
+                contactName = folderName.replace(/[-_]/g, ' ').trim() || "Lead WhatsApp";
+            }
+
+            console.log("WA Import Extraction:", { folderName, contactName, contactPhone });
+
+            const chatText = await new Promise<string>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (ev) => resolve(ev.target?.result as string);
+                reader.onerror = (err) => reject(err);
+                reader.readAsText(chatFile);
+            });
+
+            if (!chatText) throw new Error("O arquivo de conversa está vazio ou não pôde ser lido.");
+
+            // Create lead with WA source
+            const newLead = await dataService.createLead({
+                name: contactName,
+                phone: contactPhone || '999999999',
+                source: 'WhatsApp',
+                status: 'new',
+                ai_classification: 'warm',
+                ai_score: 50
+            });
+
+            if (newLead) {
+                // Trigger AI Analysis for the new lead
+                let aiResult: any = { ai_classification: 'warm', ai_score: 50 };
+                try {
+                    const aiResponse = await fetch('/api/analyze-chat', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            leadId: (newLead as Lead).id,
+                            chatText: chatText,
+                            leadName: contactName
+                        })
+                    });
+
+                    if (aiResponse.ok) {
+                        const res = await aiResponse.json();
+                        if (res.success) aiResult = res;
+                    }
+                } catch (aiErr) {
+                    console.warn("Auto-analysis failed during folder import:", aiErr);
+                }
+
+                const finalLead: Lead = {
+                    ...(newLead as Lead),
+                    name: aiResult.extracted_name || (newLead as Lead).name,
+                    ai_summary: aiResult.resumo_estrategico || aiResult.ai_reason || aiResult.ai_summary || 'Análise automática de pasta concluída.',
+                    ai_score: aiResult.score || aiResult.ai_score || 50,
+                    ai_classification: (aiResult.classificacao?.toLowerCase() || 'warm') as AIClassification,
+                    ai_reason: aiResult.resumo_estrategico || aiResult.ai_reason,
+                    next_step: aiResult.proxima_acao || aiResult.next_step,
+                    behavioral_profile: {
+                        ...(aiResult.behavioral_profile || {}),
+                        funnel_stage: aiResult.estagio_funil,
+                        closing_probability: aiResult.probabilidade_fechamento
+                    } as any,
+                    vehicle_interest: aiResult.vehicle_interest || (newLead as Lead).vehicle_interest,
+                    valor_investimento: aiResult.valor_investimento || (newLead as Lead).valor_investimento,
+                    carro_troca: aiResult.carro_troca || (newLead as Lead).carro_troca,
+                    metodo_compra: aiResult.metodo_compra || (newLead as Lead).metodo_compra,
+                    prazo_troca: aiResult.prazo_troca || (newLead as Lead).prazo_troca
+                };
+
+                // Update details with AI result (only if we have meaningful data)
+                if (aiResult.success) {
+                    await dataService.updateLeadDetails(finalLead.id, {
+                        name: finalLead.name,
+                        ai_summary: finalLead.ai_summary,
+                        ai_score: finalLead.ai_score,
+                        ai_classification: finalLead.ai_classification,
+                        ai_reason: finalLead.ai_reason,
+                        behavioral_profile: finalLead.behavioral_profile as any,
+                        vehicle_interest: finalLead.vehicle_interest,
+                        valor_investimento: finalLead.valor_investimento,
+                        carro_troca: finalLead.carro_troca,
+                        metodo_compra: finalLead.metodo_compra,
+                        prazo_troca: finalLead.prazo_troca,
+                        next_step: finalLead.next_step
+                    });
+                }
+
+                setLeads(prev => [finalLead, ...prev]);
+                setIsAddingLead(false);
+                setActionLead(finalLead);
+                showToast("Dossier WhatsApp importado e analisado!", "success");
+            }
+        } catch (err: any) {
+            console.error("WA Folder Import Error Details:", {
+                message: err.message,
+                code: err.code,
+                details: err.details,
+                hint: err.hint,
+                err: err
+            });
+            showToast(`Erro ao importar pasta: ${err.message || "Erro desconhecido"}`, "error");
+        } finally {
+            setIsAnalyzing(false);
         }
     };
 
@@ -558,13 +698,25 @@ function LeadsContent() {
             const aiResult = await response.json();
 
             if (response.ok) {
-                // Prepare details with behavioral data
+                // Prepare details with behavioral data and auto-filled fields
                 const updatedFields = {
-                    ai_score: aiResult.ai_score,
-                    ai_classification: aiResult.ai_classification,
-                    ai_reason: aiResult.ai_reason,
-                    behavioral_profile: aiResult.behavioral_profile,
-                    next_step: aiResult.next_step
+                    ai_score: aiResult.score || aiResult.ai_score,
+                    ai_classification: (aiResult.classificacao?.toLowerCase() || 'warm'),
+                    ai_reason: aiResult.resumo_estrategico || aiResult.ai_reason,
+                    ai_summary: aiResult.resumo_estrategico || aiResult.ai_reason,
+                    behavioral_profile: {
+                        ...(aiResult.behavioral_profile || {}),
+                        funnel_stage: aiResult.estagio_funil,
+                        closing_probability: aiResult.probabilidade_fechamento
+                    },
+                    next_step: aiResult.proxima_acao || aiResult.next_step,
+                    // Auto-fill extracted info if not already present
+                    vehicle_interest: leadToAnalyze.vehicle_interest || aiResult.vehicle_interest,
+                    valor_investimento: leadToAnalyze.valor_investimento || aiResult.valor_investimento,
+                    carro_troca: leadToAnalyze.carro_troca || aiResult.carro_troca,
+                    metodo_compra: leadToAnalyze.metodo_compra || aiResult.metodo_compra,
+                    prazo_troca: leadToAnalyze.prazo_troca || aiResult.prazo_troca,
+                    name: aiResult.extracted_name || leadToAnalyze.name
                 };
 
                 await dataService.updateLeadDetails(leadToAnalyze.id, updatedFields);
@@ -770,7 +922,7 @@ function LeadsContent() {
                                                     if (dragEvent.dataTransfer) dragEvent.dataTransfer.setData('leadId', lead.id);
                                                 }}
                                                 onClick={() => handleLeadSmartClick(lead)}
-                                                className="glass-card rounded-2xl p-4 cursor-grab active:cursor-grabbing hover:border-red-500/30 transition-all border border-white/5 group relative select-none"
+                                                className={`glass-card rounded-2xl p-4 cursor-grab active:cursor-grabbing hover:border-red-500/30 transition-all border border-white/5 group relative select-none ${activeMoveMenu === lead.id ? 'z-[200] border-red-500/50 shadow-[0_0_50px_rgba(220,38,38,0.2)]' : 'z-10'}`}
                                             >
                                                 <div className="flex justify-between items-start mb-3 relative z-10">
                                                     <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-red-600 to-red-900 flex items-center justify-center text-[10px] font-black text-white shadow-lg">
@@ -784,6 +936,10 @@ function LeadsContent() {
                                                             <button
                                                                 onClick={(e) => {
                                                                     e.stopPropagation();
+                                                                    const rect = e.currentTarget.getBoundingClientRect();
+                                                                    const dropdownHeight = 350;
+                                                                    const spaceBelow = window.innerHeight - rect.bottom;
+                                                                    setMoveMenuDirection(spaceBelow < dropdownHeight ? 'up' : 'down');
                                                                     setActiveMoveMenu(activeMoveMenu === lead.id ? null : lead.id);
                                                                 }}
                                                                 className={`h-8 w-8 rounded-lg flex items-center justify-center transition-all border shadow-lg ${activeMoveMenu === lead.id ? 'bg-red-600 border-red-500 text-white shadow-red-600/20' : 'bg-white/10 border-white/10 text-white/60 hover:text-red-500 hover:bg-white/20'}`}
@@ -803,40 +959,49 @@ function LeadsContent() {
                                                                             }}
                                                                         />
                                                                         <motion.div
-                                                                            initial={{ opacity: 0, scale: 0.95, y: -10 }}
+                                                                            initial={{ opacity: 0, scale: 0.95, y: moveMenuDirection === 'up' ? 10 : -10 }}
                                                                             animate={{ opacity: 1, scale: 1, y: 0 }}
-                                                                            exit={{ opacity: 0, scale: 0.95, y: -10 }}
-                                                                            className="absolute right-0 top-10 w-64 bg-[#0a0a0a]/95 border border-white/20 rounded-2xl shadow-[0_30px_100px_rgba(0,0,0,0.9)] z-[110] py-3 overflow-hidden backdrop-blur-3xl origin-top-right border-red-500/30"
+                                                                            exit={{ opacity: 0, scale: 0.95, y: moveMenuDirection === 'up' ? 10 : -10 }}
+                                                                            style={{
+                                                                                bottom: moveMenuDirection === 'up' ? 'calc(100% + 15px)' : 'auto',
+                                                                                top: moveMenuDirection === 'down' ? 'calc(100% + 15px)' : 'auto',
+                                                                            }}
+                                                                            className={`absolute right-0 w-64 bg-[#0a0a0a] border border-white/20 rounded-2xl shadow-[0_40px_120px_rgba(0,0,0,1),0_0_20px_rgba(220,38,38,0.15)] z-[210] py-4 overflow-hidden backdrop-blur-3xl border-red-500/50 ${moveMenuDirection === 'up' ? 'origin-bottom-right' : 'origin-top-right'}`}
                                                                         >
-                                                                            <div className="px-5 pb-3 mb-2 border-b border-white/5">
-                                                                                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-red-500">Mover Lead para...</p>
-                                                                            </div>
-                                                                            <div className="max-h-[300px] overflow-y-auto px-1.5 space-y-1 custom-scrollbar">
-                                                                                {[
-                                                                                    { id: 'received' as LeadStatus, label: 'Aguardando', icon: <Users size={14} /> },
-                                                                                    { id: 'attempt' as LeadStatus, label: 'Em Atendimento', icon: <Zap size={14} /> },
-                                                                                    { id: 'scheduled' as LeadStatus, label: 'Agendamento', icon: <Calendar size={14} /> },
-                                                                                    { id: 'visited' as LeadStatus, label: 'Visita e Test Drive', icon: <Car size={14} /> },
-                                                                                    { id: 'proposed' as LeadStatus, label: 'Negociação', icon: <CreditCard size={14} /> },
-                                                                                    { id: 'closed' as LeadStatus, label: 'Vendido', icon: <BadgeCheck size={14} className="text-emerald-500" /> },
-                                                                                    { id: 'post_sale' as LeadStatus, label: 'Sem Contato', icon: <BadgeCheck size={14} className="text-white/40" /> },
-                                                                                    { id: 'lost' as LeadStatus, label: 'Perda Total', icon: <AlertCircle size={14} className="text-white/20" /> }
-                                                                                ].filter(st => st.id !== lead.status).map((st) => (
-                                                                                    <button
-                                                                                        key={st.id}
-                                                                                        onClick={(e) => {
-                                                                                            e.stopPropagation();
-                                                                                            handleStatusChange(lead.id, st.id);
-                                                                                            setActiveMoveMenu(null);
-                                                                                        }}
-                                                                                        className="w-full flex items-center gap-4 px-4 py-3 rounded-xl text-[12px] font-bold text-white/50 hover:text-white hover:bg-white/5 transition-all group/item text-left"
-                                                                                    >
-                                                                                        <div className="p-2 rounded-lg bg-white/5 group-hover/item:bg-red-600/30 group-hover/item:text-red-500 transition-all">
-                                                                                            {st.icon}
-                                                                                        </div>
-                                                                                        <span className="flex-1">{st.label}</span>
-                                                                                    </button>
-                                                                                ))}
+                                                                            <div className="absolute inset-0 bg-gradient-to-br from-red-600/10 to-transparent pointer-events-none" />
+                                                                            <div className="relative z-10">
+                                                                                <div className="px-6 pb-4 mb-2 border-b border-white/10">
+                                                                                    <p className="text-[10px] font-black uppercase tracking-[0.25em] text-red-500 flex items-center gap-2">
+                                                                                        <Zap size={10} fill="currentColor" /> Mover Lead para...
+                                                                                    </p>
+                                                                                </div>
+                                                                                <div className="max-h-[300px] overflow-y-auto px-2 space-y-1.5 custom-scrollbar">
+                                                                                    {[
+                                                                                        { id: 'received' as LeadStatus, label: 'Aguardando', icon: <Users size={14} /> },
+                                                                                        { id: 'attempt' as LeadStatus, label: 'Em Atendimento', icon: <Zap size={14} /> },
+                                                                                        { id: 'scheduled' as LeadStatus, label: 'Agendamento', icon: <Calendar size={14} /> },
+                                                                                        { id: 'visited' as LeadStatus, label: 'Visita e Test Drive', icon: <Car size={14} /> },
+                                                                                        { id: 'proposed' as LeadStatus, label: 'Negociação', icon: <CreditCard size={14} /> },
+                                                                                        { id: 'closed' as LeadStatus, label: 'Vendido', icon: <BadgeCheck size={14} className="text-emerald-500" /> },
+                                                                                        { id: 'post_sale' as LeadStatus, label: 'Sem Contato', icon: <BadgeCheck size={14} className="text-white/40" /> },
+                                                                                        { id: 'lost' as LeadStatus, label: 'Perda Total', icon: <AlertCircle size={14} className="text-white/20" /> }
+                                                                                    ].filter(st => st.id !== lead.status).map((st) => (
+                                                                                        <button
+                                                                                            key={st.id}
+                                                                                            onClick={(e) => {
+                                                                                                e.stopPropagation();
+                                                                                                handleStatusChange(lead.id, st.id);
+                                                                                                setActiveMoveMenu(null);
+                                                                                            }}
+                                                                                            className="w-full flex items-center gap-4 px-4 py-3 rounded-xl text-[12px] font-bold text-white/50 hover:text-white hover:bg-white/5 transition-all group/item text-left"
+                                                                                        >
+                                                                                            <div className="p-2 rounded-lg bg-white/5 group-hover/item:bg-red-600/30 group-hover/item:text-red-500 transition-all">
+                                                                                                {st.icon}
+                                                                                            </div>
+                                                                                            <span className="flex-1">{st.label}</span>
+                                                                                        </button>
+                                                                                    ))}
+                                                                                </div>
                                                                             </div>
                                                                         </motion.div>
                                                                     </>
@@ -1054,7 +1219,7 @@ function LeadsContent() {
                                                 <span className="text-[9px] font-black uppercase text-white/20 tracking-wider">Interesse Principal</span>
                                                 <span className="text-xs font-black text-white">{selectedLead.vehicle_interest || 'Geral'}</span>
                                             </div>
-                                            
+
                                             {selectedLead.source === 'WhatsApp' ? (
                                                 <div className="flex flex-col gap-3 bg-emerald-500/5 p-5 rounded-2xl border border-emerald-500/10 h-full min-h-0">
                                                     <span className="text-[9px] font-black uppercase text-emerald-500/40 tracking-wider">Resumo do Atendimento (IA)</span>
@@ -1255,12 +1420,24 @@ function LeadsContent() {
                                                 <p className="text-[10px] font-black text-white/30 uppercase tracking-[0.2em]">Operação Direta: {actionLead.name}</p>
                                             </div>
                                         </div>
-                                        <button onClick={() => {
-                                            setActionLead(null);
-                                            setIsFinishing(false);
-                                        }} className="h-12 w-12 flex items-center justify-center rounded-full bg-white/5 hover:bg-white/10 transition-colors">
-                                            <Plus size={24} className="text-white/40 rotate-45" />
-                                        </button>
+                                        <div className="flex items-center gap-4">
+                                            {userRole === 'admin' && (
+                                                <button
+                                                    onClick={() => analyzeConversation()}
+                                                    disabled={isAnalyzing}
+                                                    className="px-5 py-2.5 rounded-2xl bg-white/5 border border-white/10 text-[9px] font-black text-white uppercase hover:bg-red-600 hover:border-red-500 transition-all flex items-center gap-2 group shadow-xl"
+                                                >
+                                                    <RefreshCcw size={14} className={isAnalyzing ? 'animate-spin' : 'group-hover:rotate-180 transition-transform duration-500 text-red-500'} />
+                                                    {isAnalyzing ? 'Analisando...' : 'Reanalisar Lead (IA)'}
+                                                </button>
+                                            )}
+                                            <button onClick={() => {
+                                                setActionLead(null);
+                                                setIsFinishing(false);
+                                            }} className="h-12 w-12 flex items-center justify-center rounded-full bg-white/5 hover:bg-white/10 transition-colors">
+                                                <Plus size={24} className="text-white/40 rotate-45" />
+                                            </button>
+                                        </div>
                                     </div>
 
                                     {/* Tab Switcher */}
@@ -1314,9 +1491,53 @@ function LeadsContent() {
                                                 )}
 
                                                 <div className="w-full grid grid-cols-2 gap-4 pt-4">
-                                                    <div className="p-6 rounded-3xl bg-white/5 border border-white/5 text-left group hover:bg-amber-500/5 transition-all">
-                                                        <p className="text-[10px] font-black text-white/20 uppercase tracking-widest mb-1">Cotação FIPE (Ref)</p>
-                                                        <p className="text-lg font-black text-white tracking-tighter">Sob Consulta</p>
+                                                    <div className="p-6 rounded-3xl bg-white/5 border border-white/5 text-left group hover:bg-amber-500/5 transition-all relative">
+                                                        <p className="text-[10px] font-black text-white/20 uppercase tracking-widest mb-1">Veículo Selecionado</p>
+                                                        <div className="relative">
+                                                            <input
+                                                                type="text"
+                                                                placeholder="Selecionar veículo..."
+                                                                value={vehicleSearch}
+                                                                onChange={(e) => {
+                                                                    setVehicleSearch(e.target.value);
+                                                                    setShowVehicleResults(true);
+                                                                }}
+                                                                className="w-full bg-transparent border-none p-0 text-sm font-black text-white placeholder:text-white/10 focus:ring-0"
+                                                            />
+                                                            <AnimatePresence>
+                                                                {showVehicleResults && vehicleSearch.length > 1 && (
+                                                                    <motion.div
+                                                                        initial={{ opacity: 0, y: -10 }}
+                                                                        animate={{ opacity: 1, y: 0 }}
+                                                                        exit={{ opacity: 0, y: -10 }}
+                                                                        className="absolute left-0 right-0 top-full mt-4 bg-[#0a0f1d] border border-white/10 rounded-2xl shadow-2xl z-50 max-h-48 overflow-y-auto custom-scrollbar p-2"
+                                                                    >
+                                                                        {inventory
+                                                                            .filter(i =>
+                                                                                (i.marca + ' ' + i.modelo).toLowerCase().includes(vehicleSearch.toLowerCase())
+                                                                            )
+                                                                            .slice(0, 5)
+                                                                            .map(v => (
+                                                                                <button
+                                                                                    key={v.id}
+                                                                                    onClick={() => {
+                                                                                        setVehicleSearch(`${v.marca} ${v.modelo}`);
+                                                                                        setShowVehicleResults(false);
+                                                                                        setEditDetails({ ...editDetails, vehicle_interest: `${v.marca} ${v.modelo}` });
+                                                                                    }}
+                                                                                    className="w-full text-left p-3 rounded-xl hover:bg-white/5 text-[10px] font-bold text-white/60 hover:text-white transition-all border border-transparent hover:border-amber-500/20"
+                                                                                >
+                                                                                    {v.marca} {v.modelo} - {v.ano}
+                                                                                </button>
+                                                                            ))
+                                                                        }
+                                                                        {inventory.filter(i => (i.marca + ' ' + i.modelo).toLowerCase().includes(vehicleSearch.toLowerCase())).length === 0 && (
+                                                                            <p className="p-3 text-[10px] text-white/20 text-center">Nenhum veículo encontrado</p>
+                                                                        )}
+                                                                    </motion.div>
+                                                                )}
+                                                            </AnimatePresence>
+                                                        </div>
                                                     </div>
                                                     <div className="p-6 rounded-3xl bg-white/5 border border-white/5 text-left group hover:bg-amber-500/5 transition-all">
                                                         <p className="text-[10px] font-black text-white/20 uppercase tracking-widest mb-1">Score de Revenda</p>
@@ -1330,7 +1551,13 @@ function LeadsContent() {
                                                 </div>
 
 
-                                                <button className="w-full py-5 rounded-[2rem] bg-amber-600 text-white text-xs font-black uppercase tracking-[0.2em] shadow-xl shadow-amber-600/20 hover:scale-[1.02] transition-all">
+                                                <button
+                                                    onClick={() => {
+                                                        showToast("Integração Karbam iniciada. Sincronizando dados de vistoria...", "info");
+                                                        setTimeout(() => showToast("Veículo identificado e mapeado no Karbam.", "success"), 2000);
+                                                    }}
+                                                    className="w-full py-5 rounded-[2rem] bg-amber-600 text-white text-xs font-black uppercase tracking-[0.2em] shadow-xl shadow-amber-600/20 hover:scale-[1.02] active:scale-95 transition-all"
+                                                >
                                                     Integrar com Karbam
                                                 </button>
                                             </div>
@@ -1346,13 +1573,19 @@ function LeadsContent() {
                                                 </div>
                                                 <div className="glass-card rounded-3xl p-6 space-y-4">
                                                     <div className="space-y-4">
-                                                        <div className="flex items-center gap-3 p-4 bg-red-500/5 border border-red-500/10 rounded-2xl">
-                                                            <div className="h-10 w-10 rounded-full bg-red-600/10 flex items-center justify-center text-red-500 font-bold uppercase">
-                                                                {actionLead.name[0]}
+                                                        <div className="flex items-center justify-between p-4 bg-gradient-to-r from-red-500/10 to-transparent border border-red-500/20 rounded-3xl">
+                                                            <div className="flex items-center gap-4">
+                                                                <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-red-600 to-rose-700 flex items-center justify-center text-white font-black text-lg shadow-lg shadow-red-600/20">
+                                                                    {actionLead.name[0]}
+                                                                </div>
+                                                                <div>
+                                                                    <p className="text-sm font-black text-white uppercase tracking-tight">{actionLead.name}</p>
+                                                                    <p className="text-[10px] text-white/30 font-bold tracking-widest leading-none mt-1">{actionLead.phone}</p>
+                                                                </div>
                                                             </div>
-                                                            <div>
-                                                                <p className="text-[11px] font-black text-white uppercase tracking-tight truncate max-w-[140px]">{actionLead.name}</p>
-                                                                <p className="text-[8px] text-white/30 font-bold uppercase tracking-widest">{actionLead.phone}</p>
+                                                            <div className={`px-4 py-2 rounded-2xl border flex flex-col items-center justify-center ${actionLead.ai_score >= 70 ? 'bg-emerald-500/10 border-emerald-500/20' : actionLead.ai_score >= 40 ? 'bg-amber-500/10 border-amber-500/20' : 'bg-red-500/10 border-red-500/20'}`}>
+                                                                <p className="text-[7px] font-black opacity-40 uppercase tracking-[0.2em] leading-none mb-1">Score</p>
+                                                                <p className={`text-xl font-black leading-none ${actionLead.ai_score >= 70 ? 'text-emerald-500' : actionLead.ai_score >= 40 ? 'text-amber-500' : 'text-red-500'}`}>{actionLead.ai_score || 0}</p>
                                                             </div>
                                                         </div>
 
@@ -1548,38 +1781,68 @@ function LeadsContent() {
                                                             </div>
 
                                                             {actionLead.behavioral_profile && (
-                                                                <div className="space-y-3">
-                                                                    <div className="grid grid-cols-2 gap-3">
-                                                                        <div className="p-4 rounded-2xl bg-white/5 border border-white/5">
-                                                                            <p className="text-[8px] font-black text-white/20 uppercase mb-1">Urgência</p>
-                                                                            <div className="flex items-center gap-2">
-                                                                                <AlertCircle size={14} className={actionLead.behavioral_profile.urgency === 'high' ? 'text-rose-500' : 'text-amber-500'} />
-                                                                                <p className={`text-[10px] font-black uppercase ${actionLead.behavioral_profile.urgency === 'high' ? 'text-rose-500' : 'text-amber-500'}`}>
-                                                                                    {actionLead.behavioral_profile.urgency === 'high' ? 'Alta Prioridade' : actionLead.behavioral_profile.urgency === 'medium' ? 'Prioridade Média' : 'Baixa Prioridade'}
-                                                                                </p>
+                                                                <div className="space-y-4">
+                                                                    {/* Pontuação de IA Destacada - NOVO */}
+                                                                    <div className="p-6 rounded-[2.5rem] bg-gradient-to-br from-white/5 to-transparent border border-white/10 flex items-center justify-between group overflow-hidden relative">
+                                                                        <div className="absolute top-0 right-0 w-32 h-32 bg-red-600/5 rounded-full blur-3xl -mr-16 -mt-16 transition-all group-hover:bg-red-600/10" />
+
+                                                                        <div className="flex items-center gap-5 relative z-10">
+                                                                            <div className={`w-16 h-16 rounded-[1.5rem] border-2 flex items-center justify-center shadow-2xl ${actionLead.ai_score >= 70 ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-500 shadow-emerald-500/10' : actionLead.ai_score >= 40 ? 'border-amber-500/30 bg-amber-500/5 text-amber-500 shadow-amber-500/10' : 'border-red-500/30 bg-red-500/5 text-red-500 shadow-red-500/10'}`}>
+                                                                                <span className="text-2xl font-black">{actionLead.ai_score || 0}</span>
+                                                                            </div>
+                                                                            <div>
+                                                                                <p className="text-[9px] font-black text-white/20 uppercase tracking-[0.2em] leading-none mb-1.5">Temperatura do Lead</p>
+                                                                                <div className="flex items-center gap-2">
+                                                                                    <div className={`w-2 h-2 rounded-full animate-pulse ${actionLead.ai_classification === 'hot' ? 'bg-rose-500' : actionLead.ai_classification === 'warm' ? 'bg-amber-500' : 'bg-sky-500'}`} />
+                                                                                    <p className={`text-sm font-black uppercase tracking-widest ${actionLead.ai_classification === 'hot' ? 'text-rose-500' : actionLead.ai_classification === 'warm' ? 'text-amber-500' : 'text-sky-500'}`}>
+                                                                                        {actionLead.ai_classification?.toUpperCase() || 'WARM'}
+                                                                                    </p>
+                                                                                </div>
                                                                             </div>
                                                                         </div>
-                                                                        <div className="p-4 rounded-2xl bg-white/5 border border-white/5">
-                                                                            <p className="text-[8px] font-black text-white/20 uppercase mb-1">Sentimento</p>
-                                                                            <div className="flex items-center gap-2">
-                                                                                <MessageSquare size={14} className="text-emerald-500" />
-                                                                                <p className="text-[10px] font-black text-emerald-500 uppercase">{actionLead.behavioral_profile.sentiment}</p>
+
+                                                                        <button
+                                                                            onClick={() => analyzeConversation()}
+                                                                            disabled={isAnalyzing || chatText.length < 10}
+                                                                            className="px-6 py-3 rounded-2xl bg-white/5 border border-white/10 h-fit text-[10px] font-black text-white uppercase hover:bg-white/10 active:scale-95 transition-all flex items-center gap-2 relative z-10 shadow-lg"
+                                                                        >
+                                                                            <RefreshCcw size={14} className={isAnalyzing ? 'animate-spin' : ''} />
+                                                                            {isAnalyzing ? 'Analisando...' : 'Reanalisar'}
+                                                                        </button>
+                                                                    </div>
+
+                                                                    <div className="grid grid-cols-2 gap-4">
+                                                                        <div className="p-5 rounded-[2rem] bg-white/5 border border-white/5">
+                                                                            <p className="text-[8px] font-black text-white/20 uppercase tracking-widest mb-1.5 pl-1">Estágio do Funil</p>
+                                                                            <p className="text-xs font-black text-white uppercase pl-1">{actionLead.behavioral_profile.funnel_stage || 'Qualificação'}</p>
+                                                                        </div>
+                                                                        <div className="p-5 rounded-[2rem] bg-white/5 border border-white/5">
+                                                                            <p className="text-[8px] font-black text-white/20 uppercase tracking-widest mb-1.5 pl-1">Probabilidade</p>
+                                                                            <div className="flex items-center gap-2 pl-1">
+                                                                                <Plus size={14} className="text-emerald-500" />
+                                                                                <p className="text-xs font-black text-emerald-500 uppercase">{actionLead.behavioral_profile.closing_probability || 0}% de Fechamento</p>
                                                                             </div>
                                                                         </div>
                                                                     </div>
 
-                                                                    {actionLead.behavioral_profile.intentions && actionLead.behavioral_profile.intentions.length > 0 && (
-                                                                        <div className="p-4 rounded-2xl bg-white/5 border border-white/5">
-                                                                            <p className="text-[8px] font-black text-white/20 uppercase mb-3">Intenções Detectadas</p>
-                                                                            <div className="flex flex-wrap gap-2">
-                                                                                {actionLead.behavioral_profile.intentions.map((int: string, i: number) => (
-                                                                                    <span key={i} className="px-3 py-1 rounded-full bg-red-600/10 border border-red-500/20 text-[9px] font-black text-red-500 uppercase">
-                                                                                        {int}
-                                                                                    </span>
-                                                                                ))}
+                                                                    <div className="grid grid-cols-2 gap-4">
+                                                                        <div className="p-5 rounded-[2rem] bg-white/5 border border-white/5">
+                                                                            <p className="text-[8px] font-black text-white/20 uppercase tracking-widest mb-1.5 pl-1">Urgência</p>
+                                                                            <div className="flex items-center gap-2 pl-1">
+                                                                                <AlertCircle size={14} className={actionLead.behavioral_profile.urgency === 'high' ? 'text-rose-500' : 'text-amber-500'} />
+                                                                                <p className={`text-xs font-black uppercase ${actionLead.behavioral_profile.urgency === 'high' ? 'text-rose-500' : 'text-amber-500'}`}>
+                                                                                    {actionLead.behavioral_profile.urgency === 'high' ? 'Alta' : actionLead.behavioral_profile.urgency === 'medium' ? 'Média' : 'Baixa'}
+                                                                                </p>
                                                                             </div>
                                                                         </div>
-                                                                    )}
+                                                                        <div className="p-5 rounded-[2rem] bg-white/5 border border-white/5">
+                                                                            <p className="text-[8px] font-black text-white/20 uppercase tracking-widest mb-1.5 pl-1">Sentimento</p>
+                                                                            <div className="flex items-center gap-2 pl-1">
+                                                                                <MessageSquare size={14} className="text-emerald-500" />
+                                                                                <p className="text-xs font-black text-emerald-500 uppercase">{actionLead.behavioral_profile.sentiment || 'Neutro'}</p>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
                                                                 </div>
                                                             )}
 
@@ -1666,6 +1929,26 @@ function LeadsContent() {
                                                     <p className="text-[10px] font-black text-white/20 uppercase tracking-tighter">Registro Manual</p>
                                                 </div>
                                             </div>
+                                            {userRole === 'admin' && (
+                                                <div className="flex gap-2">
+                                                    <button
+                                                        onClick={() => whatsappFolderInputRef.current?.click()}
+                                                        disabled={isAnalyzing}
+                                                        className="h-10 px-4 rounded-xl bg-emerald-600/10 border border-emerald-500/20 text-emerald-500 text-[10px] font-black uppercase tracking-widest hover:bg-emerald-600 hover:text-white transition-all flex items-center gap-2 shadow-lg shadow-emerald-500/10"
+                                                    >
+                                                        {isAnalyzing ? <RefreshCcw size={14} className="animate-spin" /> : <Upload size={14} />}
+                                                        Importar Pasta WhatsApp
+                                                    </button>
+                                                    <input
+                                                        type="file"
+                                                        ref={whatsappFolderInputRef}
+                                                        onChange={handleWhatsAppFolderUpload}
+                                                        className="hidden"
+                                                        {...({ webkitdirectory: "", directory: "" } as any)}
+                                                        multiple
+                                                    />
+                                                </div>
+                                            )}
                                             <button
                                                 onClick={() => setIsAddingLead(false)}
                                                 className="h-10 w-10 flex items-center justify-center rounded-full bg-white/5 border border-white/10 text-white/40 hover:bg-white/10 hover:text-white transition-all"

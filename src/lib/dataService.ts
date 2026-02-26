@@ -69,12 +69,12 @@ export const dataService = {
                 vehicle_interest: item.interesse || '',
                 region: item.cidade || '',
                 ai_classification: item.ai_classification || 'warm',
-                status: 'received' as LeadStatus,
+                status: (item.status as LeadStatus) || (item.resumo?.match(/\[STATUS:(.*?)\]/)?.[1] as LeadStatus) || 'received',
                 created_at: item.criado_em,
                 updated_at: item.criado_em,
                 source: 'WhatsApp',
                 consultants_manos_crm: { name: item.vendedor || 'Pendente' },
-                ai_summary: item.resumo || '',
+                ai_summary: (item.resumo || '').replace(/\[STATUS:.*?\]\s*/g, ''),
                 carro_troca: item.troca || '',
                 // Additional fields for compatibility
                 ai_score: 50,
@@ -129,6 +129,25 @@ export const dataService = {
     },
 
     async assignConsultant(leadId: string, consultantId: string) {
+        if (leadId.startsWith('crm26_')) {
+            const realId = leadId.replace('crm26_', '');
+
+            // For CRM26, we need the consultant name to store in 'vendedor' field
+            const { data: consultant } = await supabase
+                .from('consultants_manos_crm')
+                .select('name')
+                .eq('id', consultantId)
+                .single();
+
+            const { error } = await supabase
+                .from('leads_distribuicao_crm_26')
+                .update({ vendedor: consultant?.name || 'Desconhecido' })
+                .eq('id', realId);
+
+            if (error) throw error;
+            return;
+        }
+
         const { error } = await supabase
             .from('leads_manos_crm')
             .update({
@@ -144,6 +163,41 @@ export const dataService = {
     },
 
     async updateLeadStatus(leadId: string, status: LeadStatus, oldStatus?: LeadStatus, notes?: string) {
+        if (leadId.startsWith('crm26_')) {
+            const realId = leadId.replace('crm26_', '');
+
+            // Try updating status directly first
+            const { error: directError } = await supabase
+                .from('leads_distribuicao_crm_26')
+                .update({ status })
+                .eq('id', realId);
+
+            if (directError && (
+                directError.code === '42703' ||
+                directError.message.includes('column "status" does not exist') ||
+                directError.message.includes('schema cache')
+            )) {
+                // Fallback: Persist status inside 'resumo' field
+                const { data } = await supabase
+                    .from('leads_distribuicao_crm_26')
+                    .select('resumo')
+                    .eq('id', realId)
+                    .single();
+
+                const currentResumo = data?.resumo || '';
+                const cleanResumo = currentResumo.replace(/\[STATUS:.*?\]\s*/g, '');
+                const newResumo = `[STATUS:${status}] ${cleanResumo}`.trim();
+
+                await supabase
+                    .from('leads_distribuicao_crm_26')
+                    .update({ resumo: newResumo })
+                    .eq('id', realId);
+            } else if (directError) {
+                throw directError;
+            }
+            return null;
+        }
+
         const { data, error } = await supabase
             .from('leads_manos_crm')
             .update({ status, updated_at: new Date().toISOString() })
@@ -158,6 +212,20 @@ export const dataService = {
     },
 
     async updateLeadAI(leadId: string, aiData: { ai_score: number, ai_classification: string, ai_reason: string }) {
+        if (leadId.startsWith('crm26_')) {
+            const realId = leadId.replace('crm26_', '');
+            const { data, error } = await supabase
+                .from('leads_distribuicao_crm_26')
+                .update({
+                    // Merge classification into summary as column is missing in CRM26 schema
+                    resumo: `[${aiData.ai_classification.toUpperCase()}] ${aiData.ai_reason}`
+                })
+                .eq('id', realId);
+
+            if (error) throw error;
+            return data;
+        }
+
         const { data, error } = await supabase
             .from('leads_manos_crm')
             .update({
@@ -171,6 +239,37 @@ export const dataService = {
     },
 
     async updateLeadDetails(leadId: string, details: Partial<Lead>) {
+        if (leadId.startsWith('crm26_')) {
+            const realId = leadId.replace('crm26_', '');
+
+            // Map common fields to CRM26 table fields
+            const updateObj: any = {};
+            if (details.ai_summary || details.ai_classification) {
+                const cls = details.ai_classification || '';
+                const sum = details.ai_summary || '';
+                updateObj.resumo = cls ? `[${cls.toUpperCase()}] ${sum}` : sum;
+            }
+            if (details.vehicle_interest) updateObj.interesse = details.vehicle_interest;
+            if (details.carro_troca) updateObj.troca = details.carro_troca;
+            if (details.region) updateObj.cidade = details.region;
+            if (details.status) {
+                // We use the same 'resumo' tag logic for status consistency
+                const { data: current } = await supabase.from('leads_distribuicao_crm_26').select('resumo').eq('id', realId).single();
+                const clean = (current?.resumo || '').replace(/\[STATUS:.*?\]\s*/g, '');
+                updateObj.resumo = `[STATUS:${details.status}] ${updateObj.resumo || clean}`.trim();
+            }
+
+            if (Object.keys(updateObj).length === 0) return null;
+
+            const { data, error } = await supabase
+                .from('leads_distribuicao_crm_26')
+                .update(updateObj)
+                .eq('id', realId);
+
+            if (error) throw error;
+            return data;
+        }
+
         const { data, error } = await supabase
             .from('leads_manos_crm')
             .update({
@@ -184,8 +283,13 @@ export const dataService = {
     },
 
     async logHistory(leadId: string, newStatus: LeadStatus, oldStatus?: LeadStatus, notes?: string) {
+        if (leadId.startsWith('crm26_')) {
+            // Skip history logging for CRM26 leads as it requires a UUID lead_id
+            return;
+        }
+
         const { error } = await supabase
-            .from('interactions_manos_crm') // Redirect to interactions as history
+            .from('interactions_manos_crm')
             .insert([{
                 lead_id: leadId,
                 old_status: oldStatus,
@@ -193,7 +297,11 @@ export const dataService = {
                 notes: notes,
                 created_at: new Date().toISOString()
             }]);
-        if (error) console.error("Error logging lead history:", error.message || error);
+        if (error) {
+            // Using warn instead of error to avoid UI-blocking overlays in Next.js development mode
+            // the root cause is usually RLS policies missing for this table
+            console.warn("History log skipped (RLS/Database):", error.message || error);
+        }
     },
 
     async createLead(leadData: Partial<Lead>) {
@@ -439,6 +547,13 @@ export const dataService = {
 
         try {
             const response = await fetch(`https://graph.facebook.com/v19.0/act_${adAccountId}/campaigns?fields=name,status,objective,insights{spend,inline_link_clicks,reach,impressions,cpc,ctr}&access_token=${token}`);
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error("Meta API error response:", errorText);
+                throw new Error(`Meta API error: ${response.status} - ${errorText}`);
+            }
+
             const result = await response.json();
 
             if (result.error) throw new Error(result.error.message);
@@ -466,7 +581,26 @@ export const dataService = {
                     .from('campaigns_manos_crm')
                     .upsert(upsertData, { onConflict: 'name' });
 
-                if (error) throw new Error(`Supabase Upsert: ${error.message}`);
+                if (error) {
+                    // Fallback: If cpc/ctr/reach columns are missing, try a simpler upsert
+                    if (error.code === '42703' || error.message.includes('column') || error.message.includes('not find')) {
+                        console.warn("⚠️ Advanced analytics columns missing in campaigns_manos_crm. Retrying with basic fields...");
+                        const basicUpsertData = upsertData.map((d: any) => ({
+                            name: d.name as string,
+                            platform: d.platform as string,
+                            status: d.status as string,
+                            total_spend: d.total_spend as number,
+                            updated_at: d.updated_at as string
+                        }));
+                        const { error: retryError } = await supabase
+                            .from('campaigns_manos_crm')
+                            .upsert(basicUpsertData, { onConflict: 'name' });
+
+                        if (retryError) throw new Error(`Supabase Upsert Fallback: ${retryError.message}`);
+                    } else {
+                        throw new Error(`Supabase Upsert: ${error.message}`);
+                    }
+                }
             }
 
             return upsertData.length;
@@ -492,6 +626,17 @@ export const dataService = {
     },
 
     async deleteLead(leadId: string) {
+        if (leadId.startsWith('crm26_')) {
+            const realId = leadId.replace('crm26_', '');
+            const { error } = await supabase
+                .from('leads_distribuicao_crm_26')
+                .delete()
+                .eq('id', realId);
+
+            if (error) throw error;
+            return;
+        }
+
         const { error } = await supabase
             .from('leads_manos_crm')
             .delete()

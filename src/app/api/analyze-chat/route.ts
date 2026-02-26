@@ -1,10 +1,17 @@
 import { OpenAI } from 'openai';
 import { NextResponse } from 'next/server';
 
-// Inicializa a OpenAI
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-});
+// OpenAI initialization will happen inside the handler to ensure env vars are loaded
+let openaiInstance: OpenAI | null = null;
+
+function getOpenAI() {
+    if (!openaiInstance && process.env.OPENAI_API_KEY) {
+        openaiInstance = new OpenAI({
+            apiKey: process.env.OPENAI_API_KEY,
+        });
+    }
+    return openaiInstance;
+}
 
 export async function POST(req: Request) {
     try {
@@ -27,13 +34,18 @@ export async function POST(req: Request) {
             );
         }
 
+        const openai = getOpenAI();
+        if (!openai) {
+            throw new Error("Falha ao inicializar OpenAI. Chave não encontrada.");
+        }
+
         // 3. Chamada OpenAI usando SDK oficial e gpt-4o-mini
         const response = await openai.chat.completions.create({
             model: 'gpt-4o-mini',
             messages: [
                 {
                     role: 'system',
-                    content: 'Você é um Especialista em Vendas de Veículos de uma concessionária premium. Sua tarefa é analisar conversas de WhatsApp e extrair dados estruturados em JSON para auxiliar o vendedor.'
+                    content: 'Você é um analista comercial especialista em concessionárias.'
                 },
                 {
                     role: 'user',
@@ -42,16 +54,25 @@ export async function POST(req: Request) {
             CONVERSA:
             ${chatText}
             
-            EXTRAIA OS SEGUINTES DADOS (JSON estrito):
-            - ai_score: (número 0-100) nível de interesse e prontidão para compra.
-            - ai_classification: ('hot', 'warm', 'cold').
-            - ai_reason: um resumo executivo de 1 parágrafo destacando a principal intenção do cliente, o carro de interesse e detalhes da troca.
-            - behavioral_profile: {
-                urgency: ('high', 'medium', 'low'),
-                sentiment: (positivo, neutro, negativo, defensivo),
-                intentions: (lista de strings: ex: 'quer ver o carro', 'reclamou do preço', 'curioso', etc)
-            }
-            - next_step: Uma recomendação curta (1 frase) de qual deve ser a próxima ação do vendedor para fechar o negócio.
+            EXTRAIA OS SEGUINTES DADOS EM JSON (Estritamente conforme as chaves abaixo):
+            
+            1. ANÁLISE ESTRATÉGICA:
+            - classificacao: ('HOT', 'WARM', 'COLD') baseado no interesse e urgência.
+            - score: (número 0-100) nível de prontidão para compra.
+            - estagio_funil: (ex: 'Descoberta', 'Qualificação', 'Negociação', 'Fechamento').
+            - proxima_acao: Sugira a próxima ação prática para o vendedor.
+            - probabilidade_fechamento: (número 0-100) probabilidade de venda em %.
+            - resumo_estrategico: Um resumo estratégico de exatamente 1 linha (máx 100 caracteres).
+            
+            2. DADOS DE CADASTRO (Se disponíveis):
+            - extracted_name: Nome real do cliente (string ou null).
+            - vehicle_interest: Modelo/marca do carro (string ou null).
+            - valor_investimento: Dinheiro disponível ou parcelas (string ou null).
+            - carro_troca: Detalhes do carro atual (string ou null).
+            - metodo_compra: Forma de pagamento (string ou null).
+            - prazo_troca: Quando pretende comprar (string ou null).
+            
+            Considere: Urgência, Interesse financeiro, Interesse em visita, Tempo de resposta, Clareza na intenção.
             
             Retorne APENAS o JSON puro.`
                 }
@@ -59,14 +80,14 @@ export async function POST(req: Request) {
             response_format: { type: "json_object" }
         });
 
-        // 4. Acesso seguro ao conteúdo usando a lógica solicitada
+        // 4. Acesso seguro ao conteúdo
         const output_text = response.choices[0]?.message?.content;
 
         if (!output_text) {
             throw new Error("Resposta da OpenAI veio vazia");
         }
 
-        // 5. Parse seguro e retorno em formato JSON consistente
+        // 5. Parse seguro
         try {
             const aiData = JSON.parse(output_text);
             return NextResponse.json({
@@ -74,19 +95,16 @@ export async function POST(req: Request) {
                 ...aiData
             });
         } catch (parseError: any) {
-            console.error('JSON Parse Error. Raw text:', output_text, parseError);
+            console.error('JSON Parse Error:', output_text);
             throw new Error('A resposta da IA não está em formato JSON válido.');
         }
 
     } catch (error: any) {
         console.error('AI Chat Analysis Error:', error);
-
-        // Tratamento de erros detalhado conforme solicitado
         return NextResponse.json({
             success: false,
             error: 'Falha na conexão com o servidor de IA',
-            details: error.message || "Erro interno ao processar análise",
-            code: error.code || "AI_MODERN_API_ERROR"
+            details: error.message
         }, { status: 500 });
     }
 }

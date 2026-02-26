@@ -1,4 +1,4 @@
-export type LeadStatus = 'received' | 'attempt' | 'contacted' | 'confirmed' | 'scheduled' | 'visited' | 'test_drive' | 'proposed' | 'negotiation' | 'closed' | 'post_sale' | 'lost';
+export type LeadStatus = 'new' | 'received' | 'attempt' | 'contacted' | 'confirmed' | 'scheduled' | 'visited' | 'test_drive' | 'proposed' | 'negotiation' | 'closed' | 'post_sale' | 'lost';
 export type AIClassification = 'hot' | 'warm' | 'cold';
 export type Platform = 'facebook' | 'google' | 'instagram' | 'whatsapp' | 'site';
 
@@ -78,6 +78,8 @@ export interface Lead {
     urgency: 'high' | 'medium' | 'low';
     sentiment: string;
     intentions: string[];
+    funnel_stage?: string;
+    closing_probability?: number;
   };
   next_step?: string;
   consultants_manos_crm?: { name: string };
