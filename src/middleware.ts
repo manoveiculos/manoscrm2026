@@ -2,10 +2,8 @@ import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
 export async function middleware(request: NextRequest) {
-    let response = NextResponse.next({
-        request: {
-            headers: request.headers,
-        },
+    let supabaseResponse = NextResponse.next({
+        request,
     });
 
     const supabase = createServerClient(
@@ -17,14 +15,12 @@ export async function middleware(request: NextRequest) {
                     return request.cookies.getAll();
                 },
                 setAll(cookiesToSet) {
-                    cookiesToSet.forEach(({ name, value }) =>
-                        request.cookies.set(name, value)
-                    );
-                    response = NextResponse.next({
+                    cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
+                    supabaseResponse = NextResponse.next({
                         request,
                     });
                     cookiesToSet.forEach(({ name, value, options }) =>
-                        response.cookies.set(name, value, options)
+                        supabaseResponse.cookies.set(name, value, options)
                     );
                 },
             },
@@ -35,13 +31,12 @@ export async function middleware(request: NextRequest) {
     const { data: { user } } = await supabase.auth.getUser();
 
     const isLoginPage = request.nextUrl.pathname.startsWith('/login');
-    const isPublicRoute = isLoginPage || request.nextUrl.pathname.startsWith('/api/auth/callback');
+    const isPublicRoute = isLoginPage || request.nextUrl.pathname.startsWith('/api/auth');
 
     // Se não houver usuário e não for uma rota pública, redireciona para login
     if (!user && !isPublicRoute) {
         const url = request.nextUrl.clone();
         url.pathname = '/login';
-        // Mantém parâmetros de busca (query params) se houver
         return NextResponse.redirect(url);
     }
 
@@ -52,18 +47,19 @@ export async function middleware(request: NextRequest) {
         return NextResponse.redirect(url);
     }
 
-    return response;
+    return supabaseResponse;
 }
 
 export const config = {
     matcher: [
         /*
          * Corresponde a todos os caminhos de solicitação, exceto:
-         * - api (exceto as de auth especificadas)
+         * - api (exceto as de auth)
          * - _next/static (arquivos estáticos)
          * - _next/image (arquivos de otimização de imagem)
          * - favicon.ico (arquivo favicon)
+         * - arquivos com extensões comuns
          */
-        '/((?!api|_next/static|_next/image|favicon.ico).*)',
+        '/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
     ],
 };
