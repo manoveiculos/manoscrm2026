@@ -47,20 +47,23 @@ export default function Dashboard() {
         const { data: { session } } = await supabase.auth.getSession();
 
         // Default role is admin for specific email
-        let role: 'admin' | 'consultant' = 'admin';
-        let info = null;
-
-        if (session?.user?.email !== 'alexandre_gorges@hotmail.com') {
+        if (session?.user?.email === 'alexandre_gorges@hotmail.com') {
+          role = 'admin';
+        } else if (session?.user) {
           const { data: consultant } = await supabase
             .from('consultants_manos_crm')
             .select('id, name, role')
-            .eq('auth_id', session?.user.id)
+            .eq('auth_id', session.user.id)
             .maybeSingle();
 
           if (consultant) {
             role = consultant.role as 'admin' | 'consultant';
             info = { id: consultant.id, name: consultant.name };
           }
+        } else {
+          // No user, the middleware should have redirected, but as fallback:
+          setLoading(false);
+          return;
         }
 
         setUserRole(role);
