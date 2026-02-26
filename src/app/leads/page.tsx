@@ -1519,8 +1519,7 @@ function LeadsContent() {
                                                         ref={fileInputRef}
                                                         onChange={handleFileUpload}
                                                         className="hidden"
-                                                        webkitdirectory=""
-                                                        directory=""
+                                                        {...{ webkitdirectory: "", directory: "" }}
                                                         multiple
                                                     />
                                                 </div>
