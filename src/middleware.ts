@@ -17,10 +17,12 @@ export async function middleware(request: NextRequest) {
                     return request.cookies.get(name)?.value;
                 },
                 set(name: string, value: string, options: CookieOptions) {
+                    // Forçar cookie de sessão removendo expiração
+                    const { maxAge, expires, ...rest } = options;
                     request.cookies.set({
                         name,
                         value,
-                        ...options,
+                        ...rest,
                     });
                     response = NextResponse.next({
                         request: {
@@ -30,14 +32,15 @@ export async function middleware(request: NextRequest) {
                     response.cookies.set({
                         name,
                         value,
-                        ...options,
+                        ...rest,
                     });
                 },
                 remove(name: string, options: CookieOptions) {
+                    const { maxAge, expires, ...rest } = options;
                     request.cookies.set({
                         name,
                         value: '',
-                        ...options,
+                        ...rest,
                     });
                     response = NextResponse.next({
                         request: {
@@ -47,7 +50,7 @@ export async function middleware(request: NextRequest) {
                     response.cookies.set({
                         name,
                         value: '',
-                        ...options,
+                        ...rest,
                     });
                 },
             },

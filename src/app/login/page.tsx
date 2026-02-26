@@ -244,7 +244,7 @@ export default function LoginPage() {
                                                 type="email"
                                                 value={email}
                                                 onChange={(e) => setEmail(e.target.value)}
-                                                autoComplete="off"
+                                                autoComplete="username"
                                                 spellCheck={false}
                                                 className="w-full bg-[#0a0c10] border border-white/10 rounded-2xl py-5 pl-14 pr-8 text-sm text-white focus:outline-none focus:ring-1 focus:ring-red-500/50 transition-all font-medium"
                                             />
@@ -260,7 +260,7 @@ export default function LoginPage() {
                                                 type="password"
                                                 value={password}
                                                 onChange={(e) => setPassword(e.target.value)}
-                                                autoComplete="off"
+                                                autoComplete="new-password"
                                                 className="w-full bg-[#0a0c10] border border-white/10 rounded-2xl py-5 pl-14 pr-8 text-sm text-white focus:outline-none focus:ring-1 focus:ring-red-500/50 transition-all font-medium"
                                             />
                                         </div>
