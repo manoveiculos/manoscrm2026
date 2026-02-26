@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, Suspense } from 'react';
 import {
     Search,
     MessageSquare,
@@ -24,7 +24,7 @@ import { dataService } from '@/lib/dataService';
 import { supabase } from '@/lib/supabase';
 import { Lead, LeadStatus, Consultant } from '@/lib/types';
 
-export default function LeadsPage() {
+function LeadsContent() {
     const searchParams = useSearchParams();
     const leadIdFromUrl = searchParams.get('id');
     const viewFromUrl = searchParams.get('view');
@@ -1727,6 +1727,18 @@ export default function LeadsPage() {
                 )}
             </AnimatePresence>
         </div >
+    );
+}
+
+export default function LeadsPage() {
+    return (
+        <Suspense fallback={
+            <div className="flex h-[60vh] items-center justify-center">
+                <div className="h-12 w-12 border-4 border-red-500 border-t-transparent rounded-full animate-spin" />
+            </div>
+        }>
+            <LeadsContent />
+        </Suspense>
     );
 }
 
