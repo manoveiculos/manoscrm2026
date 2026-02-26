@@ -55,11 +55,10 @@ export const config = {
         /*
          * Corresponde a todos os caminhos de solicitação, exceto:
          * - api (exceto as de auth)
-         * - _next/static (arquivos estáticos)
-         * - _next/image (arquivos de otimização de imagem)
+         * - _next (arquivos internos do Next.js)
          * - favicon.ico (arquivo favicon)
-         * - arquivos com extensões comuns
+         * - arquivos com extensões comuns (imagens, etc)
          */
-        '/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+        '/((?!api|_next|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
     ],
 };
