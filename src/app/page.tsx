@@ -47,6 +47,9 @@ export default function Dashboard() {
         const { data: { session } } = await supabase.auth.getSession();
 
         // Default role is admin for specific email
+        let role: 'admin' | 'consultant' = 'consultant';
+        let info = null;
+
         if (session?.user?.email === 'alexandre_gorges@hotmail.com') {
           role = 'admin';
         } else if (session?.user) {
