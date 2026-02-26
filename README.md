@@ -1,36 +1,36 @@
-# Manos Veículos - Lead Platform
+This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
-Plataforma profissional de distribuição e controle de leads com inteligência artificial.
+## Getting Started
 
-## 🚀 Tecnologias
-- **Frontend**: Next.js 14 (App Router, Tailwind CSS, Framer Motion)
-- **Database**: Supabase (PostgreSQL)
-- **Automação**: n8n
-- **IA**: Google AI Studio (Gemini 1.5 Pro)
+First, run the development server:
 
-## 📁 Estrutura do Projeto
-- `/admin-panel`: Painel administrativo web para gestão de leads e ROI.
-- `/supabase`: Migrações do banco de dados e políticas de segurança.
-- `/n8n`: Templates de fluxos de automação para captura e enriquecimento.
+```bash
+npm run dev
+# or
+yarn dev
+# or
+pnpm dev
+# or
+bun dev
+```
 
-## 🛠️ Como Iniciar
+Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-### 1. Banco de Dados
-1. Crie um projeto no [Supabase](https://supabase.com).
-2. Execute o SQL contido em `supabase/migrations/20240224000000_initial_schema.sql` no SQL Editor do Supabase.
+You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
-### 2. Automação (n8n)
-1. Importe o arquivo `n8n/lead_capture_workflow.json` no seu n8n.
-2. Configure as credenciais do Supabase e Google AI Studio no n8n.
+This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
-### 3. Painel Administrativo
-1. Acesse a pasta `admin-panel`.
-2. Renomeie `.env.example` para `.env.local` e preencha as chaves.
-3. Instale as dependências: `npm install`.
-4. Inicie o servidor: `npm run dev`.
+## Learn More
 
-## 🧠 Lógica de Distribuição
-A plataforma utiliza uma lógica de **Round Robin** aprimorada por performance. O n8n verifica qual consultor está disponível e tem o menor tempo médio de resposta para atribuir o lead imediatamente via WhatsApp.
+To learn more about Next.js, take a look at the following resources:
 
-## 📊 Business Intelligence
-O cálculo de ROI é feito cruzando os dados de investimento das APIs de Ads (Meta/Google) com o fechamento de vendas registrado na tabela `sales`.
+- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
+- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+
+You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+
+## Deploy on Vercel
+
+The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+
+Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
