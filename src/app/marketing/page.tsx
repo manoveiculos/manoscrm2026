@@ -42,7 +42,14 @@ export default function MarketingPage() {
     };
 
     useEffect(() => {
-        loadData();
+        loadData().then(() => {
+            // Auto-trigger sync on load if credentials exist
+            const token = process.env.NEXT_PUBLIC_META_ACCESS_TOKEN;
+            const adAccountId = process.env.NEXT_PUBLIC_META_AD_ACCOUNT_ID;
+            if (token && adAccountId) {
+                handleSync();
+            }
+        });
     }, []);
 
     const handleSync = async () => {

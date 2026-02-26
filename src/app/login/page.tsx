@@ -7,13 +7,13 @@ import { Mail, Lock, User, Sparkles, ArrowRight, AlertCircle, CheckCircle2 } fro
 import { useRouter } from 'next/navigation';
 
 export default function LoginPage() {
-    const [mode, setMode] = useState<'login' | 'register'>('login');
+    const [mode, setMode] = useState<'login' | 'register' | 'forgot-password'>('login');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [name, setName] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [success, setSuccess] = useState(false);
+    const [success, setSuccess] = useState<'register' | 'forgot-password' | null>(null);
     const router = useRouter();
 
     const handleAuth = async (e: React.FormEvent) => {
@@ -56,7 +56,7 @@ export default function LoginPage() {
                 }
 
                 router.push('/');
-            } else {
+            } else if (mode === 'register') {
                 const { data, error: registerError } = await supabase.auth.signUp({
                     email,
                     password,
@@ -73,7 +73,13 @@ export default function LoginPage() {
                         status: 'pending'
                     }]);
 
-                setSuccess(true);
+                setSuccess('register');
+            } else if (mode === 'forgot-password') {
+                const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
+                    redirectTo: `${window.location.origin}/login?type=recovery`,
+                });
+                if (resetError) throw resetError;
+                setSuccess('forgot-password');
             }
         } catch (err: unknown) {
             const error = err as Error;
@@ -176,9 +182,13 @@ export default function LoginPage() {
                             Acesso Restrito
                         </div>
                         <h2 className="text-4xl font-black text-white tracking-tight">
-                            {mode === 'login' ? 'Bem-vindo de volta' : 'Solicitar Acreditação'}
+                            {mode === 'login' ? 'Bem-vindo de volta' : mode === 'register' ? 'Solicitar Acreditação' : 'Recuperar Acesso'}
                         </h2>
-                        <p className="text-white/40 font-medium italic">Insira suas credenciais corporativas para acessar o painel.</p>
+                        <p className="text-white/40 font-medium italic">
+                            {mode === 'forgot-password'
+                                ? 'Insira seu e-mail para receber as instruções de recuperação.'
+                                : 'Insira suas credenciais corporativas para acessar o painel.'}
+                        </p>
                     </div>
 
                     <div className="glass-card rounded-[2.5rem] p-8 md:p-10 border-white/5 bg-white/[0.02] shadow-[0_30px_60px_rgba(0,0,0,0.4)]">
@@ -193,12 +203,16 @@ export default function LoginPage() {
                                     <div className="h-20 w-20 bg-emerald-500/10 border border-emerald-500/20 rounded-full flex items-center justify-center mx-auto">
                                         <CheckCircle2 size={40} className="text-emerald-500" />
                                     </div>
-                                    <h3 className="text-xl font-black text-white uppercase tracking-tight">Solicitação Enviada</h3>
+                                    <h3 className="text-xl font-black text-white uppercase tracking-tight">
+                                        {success === 'register' ? 'Solicitação Enviada' : 'E-mail Enviado'}
+                                    </h3>
                                     <p className="text-sm text-white/40 leading-relaxed italic">
-                                        Sua conta em análise. Notificaremos você assim que o acesso for liberado.
+                                        {success === 'register'
+                                            ? 'Sua conta está em análise. Notificaremos você assim que o acesso for liberado.'
+                                            : `Enviamos as instruções de recuperação para o e-mail: ${email}`}
                                     </p>
                                     <button
-                                        onClick={() => { setSuccess(false); setMode('login'); }}
+                                        onClick={() => { setSuccess(null); setMode('login'); }}
                                         className="w-full py-5 rounded-2xl bg-white/5 text-[11px] font-black uppercase tracking-widest text-white hover:bg-white/10 transition-all"
                                     >
                                         Voltar ao Início
@@ -251,35 +265,60 @@ export default function LoginPage() {
                                         </div>
                                     </div>
 
-                                    <div className="space-y-2">
-                                        <label className="text-[10px] font-black uppercase text-white/20 tracking-widest ml-4">Sua Senha</label>
-                                        <div className="relative group">
-                                            <Lock size={18} className="absolute left-6 top-1/2 -translate-y-1/2 text-white/20 group-focus-within:text-red-500 transition-colors" />
-                                            <input
-                                                required
-                                                type="password"
-                                                value={password}
-                                                onChange={(e) => setPassword(e.target.value)}
-                                                autoComplete="new-password"
-                                                className="w-full bg-[#0a0c10] border border-white/10 rounded-2xl py-5 pl-14 pr-8 text-sm text-white focus:outline-none focus:ring-1 focus:ring-red-500/50 transition-all font-medium"
-                                            />
+                                    {mode !== 'forgot-password' && (
+                                        <div className="space-y-2">
+                                            <label className="text-[10px] font-black uppercase text-white/20 tracking-widest ml-4">Sua Senha</label>
+                                            <div className="relative group">
+                                                <Lock size={18} className="absolute left-6 top-1/2 -translate-y-1/2 text-white/20 group-focus-within:text-red-500 transition-colors" />
+                                                <input
+                                                    required
+                                                    type="password"
+                                                    value={password}
+                                                    onChange={(e) => setPassword(e.target.value)}
+                                                    autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
+                                                    className="w-full bg-[#0a0c10] border border-white/10 rounded-2xl py-5 pl-14 pr-8 text-sm text-white focus:outline-none focus:ring-1 focus:ring-red-500/50 transition-all font-medium"
+                                                />
+                                            </div>
                                         </div>
-                                    </div>
+                                    )}
 
                                     <button
                                         disabled={loading}
                                         className={`w-full py-6 rounded-2xl text-[12px] font-black uppercase tracking-[0.2em] relative overflow-hidden group transition-all ${loading ? 'bg-white/5 text-white/20 cursor-wait' : 'bg-red-600 text-white shadow-xl shadow-red-600/20 active:scale-[0.98]'}`}
                                     >
                                         <span className="relative z-10 flex items-center justify-center gap-3">
-                                            {loading ? 'Acessando...' : mode === 'login' ? 'Entrar no Sistema' : 'Solicitar Acesso'}
+                                            {loading ? 'Processando...' : mode === 'login' ? 'Entrar no Sistema' : mode === 'register' ? 'Solicitar Acreditação' : 'Enviar E-mail de Recuperação'}
                                             {!loading && <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />}
                                         </span>
                                     </button>
 
-                                    <div className="text-center pt-2">
-                                        <p className="text-[10px] font-black text-white/10 uppercase tracking-[0.3em] italic">
-                                            Acesso exclusivo para consultores autorizados
-                                        </p>
+                                    <div className="flex flex-col gap-4 text-center pt-2">
+                                        {mode === 'login' ? (
+                                            <>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setMode('forgot-password')}
+                                                    className="text-[10px] font-bold text-red-500/60 hover:text-red-500 uppercase tracking-widest transition-colors"
+                                                >
+                                                    Esqueci minha senha
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setMode('register')}
+                                                    className="text-[11px] font-black text-white/40 hover:text-white uppercase tracking-[0.2em] transition-all"
+                                                >
+                                                    Não tem conta? <span className="text-red-500">Solicite acesso</span>
+                                                </button>
+                                            </>
+                                        ) : (
+                                            <button
+                                                type="button"
+                                                onClick={() => setMode('login')}
+                                                className="text-[11px] font-black text-white/40 hover:text-white uppercase tracking-[0.2em] transition-all"
+                                            >
+                                                Já tem conta? <span className="text-red-500">Faça login</span>
+                                            </button>
+                                        )}
                                     </div>
                                 </motion.form>
                             )}

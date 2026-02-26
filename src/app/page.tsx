@@ -44,6 +44,9 @@ export default function Dashboard() {
   useEffect(() => {
     async function loadData() {
       try {
+        const authResponse = await supabase.auth.getSession();
+        const session = authResponse.data?.session;
+
         if (!session?.user) {
           // Se não houver sessão, redireciona imediatamente
           window.location.href = '/login';
