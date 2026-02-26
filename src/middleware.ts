@@ -54,26 +54,25 @@ export async function middleware(request: NextRequest) {
         }
     );
 
-    const {
-        data: { session },
-    } = await supabase.auth.getSession();
+    // IMPORTANTE: Use getUser() em vez de getSession() para segurança e consistência no middleware
+    const { data: { user } } = await supabase.auth.getUser();
 
-    console.log('Middleware Path:', request.nextUrl.pathname);
-    console.log('Session exists:', !!session);
-
-    // Se estiver tentando acessar rotas protegidas sem sessão, redireciona para login
     const isLoginPage = request.nextUrl.pathname.startsWith('/login');
     const isPublicRoute = isLoginPage || request.nextUrl.pathname.startsWith('/api/auth/callback');
 
-    if (!session && !isPublicRoute) {
-        console.log('Redirecting to login: no session');
-        return NextResponse.redirect(new URL('/login', request.url));
+    // Se não houver usuário e não for uma rota pública, redireciona para login
+    if (!user && !isPublicRoute) {
+        const url = request.nextUrl.clone();
+        url.pathname = '/login';
+        // Mantém parâmetros de busca (query params) se houver
+        return NextResponse.redirect(url);
     }
 
-    // Se já estiver logado e tentar acessar a página de login, redireciona para o dashboard
-    if (session && isLoginPage) {
-        console.log('Redirecting to dashboard: session found on login page');
-        return NextResponse.redirect(new URL('/', request.url));
+    // Se houver usuário e tentar acessar login, redireciona para o dashboard
+    if (user && isLoginPage) {
+        const url = request.nextUrl.clone();
+        url.pathname = '/';
+        return NextResponse.redirect(url);
     }
 
     return response;
