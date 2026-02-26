@@ -193,7 +193,7 @@ export const dataService = {
                 notes: notes,
                 created_at: new Date().toISOString()
             }]);
-        if (error) console.error("Error logging lead history:", error);
+        if (error) console.error("Error logging lead history:", error.message || error);
     },
 
     async createLead(leadData: Partial<Lead>) {
