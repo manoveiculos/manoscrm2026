@@ -77,7 +77,7 @@ export const dataService = {
                 ai_summary: (item.resumo || '').replace(/\[STATUS:.*?\]\s*/g, ''),
                 carro_troca: item.troca || '',
                 // Additional fields for compatibility
-                ai_score: 50,
+                ai_score: 0,
                 email: '',
                 estimated_ticket: 0
             })) as unknown as Lead[];

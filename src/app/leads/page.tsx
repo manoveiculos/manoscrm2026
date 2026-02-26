@@ -597,7 +597,7 @@ function LeadsContent() {
 
             if (newLead) {
                 // Trigger AI Analysis for the new lead
-                let aiResult: any = { ai_classification: 'warm', ai_score: 50 };
+                let aiResult: any = { classificacao: 'WARM', score: 0 };
                 try {
                     const aiResponse = await fetch('/api/analyze-chat', {
                         method: 'POST',
@@ -617,11 +617,15 @@ function LeadsContent() {
                     console.warn("Auto-analysis failed during folder import:", aiErr);
                 }
 
+                // Append to historical summary with timestamp
+                const timestamp = new Date().toLocaleString('pt-BR');
+                const historicalNote = `[${timestamp}] ANALISE DE ENTRADA:\n${aiResult.resumo_detalhado || aiResult.resumo_estrategico || aiResult.ai_reason || 'Nova conversa importada.'}\n\n`;
+
                 const finalLead: Lead = {
                     ...(newLead as Lead),
                     name: aiResult.extracted_name || (newLead as Lead).name,
-                    ai_summary: aiResult.resumo_estrategico || aiResult.ai_reason || aiResult.ai_summary || 'Análise automática de pasta concluída.',
-                    ai_score: aiResult.score || aiResult.ai_score || 50,
+                    ai_summary: historicalNote,
+                    ai_score: aiResult.score !== undefined ? aiResult.score : 0,
                     ai_classification: (aiResult.classificacao?.toLowerCase() || 'warm') as AIClassification,
                     ai_reason: aiResult.resumo_estrategico || aiResult.ai_reason,
                     next_step: aiResult.proxima_acao || aiResult.next_step,
@@ -698,12 +702,17 @@ function LeadsContent() {
             const aiResult = await response.json();
 
             if (response.ok) {
+                // Append to historical summary with timestamp
+                const timestamp = new Date().toLocaleString('pt-BR');
+                const currentHistory = leadToAnalyze.ai_summary || '';
+                const newNote = `[${timestamp}] REANALISE:\n${aiResult.resumo_detalhado || aiResult.resumo_estrategico || aiResult.ai_reason}\n\n`;
+
                 // Prepare details with behavioral data and auto-filled fields
                 const updatedFields = {
-                    ai_score: aiResult.score || aiResult.ai_score,
+                    ai_score: aiResult.score !== undefined ? aiResult.score : 0,
                     ai_classification: (aiResult.classificacao?.toLowerCase() || 'warm'),
                     ai_reason: aiResult.resumo_estrategico || aiResult.ai_reason,
-                    ai_summary: aiResult.resumo_estrategico || aiResult.ai_reason,
+                    ai_summary: newNote + currentHistory, // Prepend latest
                     behavioral_profile: {
                         ...(aiResult.behavioral_profile || {}),
                         funnel_stage: aiResult.estagio_funil,
@@ -1702,36 +1711,20 @@ function LeadsContent() {
                                             <section className="space-y-4">
                                                 <div className="flex items-center justify-between">
                                                     <div className="flex items-center gap-2">
-                                                        <FileText size={18} className="text-emerald-500" />
-                                                        <h4 className="text-[10px] font-black uppercase tracking-widest text-white/60">Notas e Descricao do Atendimento</h4>
+                                                        <FileText size={18} className="text-red-500" />
+                                                        <h4 className="text-[10px] font-black uppercase tracking-widest text-white/60">Historico de Notas Estrategicas (IA)</h4>
                                                     </div>
-                                                    {userRole === 'admin' && actionLead.ai_summary && (
-                                                        <button
-                                                            onClick={handleClearNotes}
-                                                            className="text-[9px] font-black text-rose-500/40 hover:text-rose-500 transition-colors uppercase"
-                                                        >
-                                                            Limpar Historico
-                                                        </button>
-                                                    )}
                                                 </div>
-                                                <div className="glass-card rounded-3xl p-6 bg-emerald-500/5 border-emerald-500/10 flex flex-col gap-4">
-                                                    {actionLead.ai_summary && (
-                                                        <div className="bg-black/40 rounded-2xl p-5 text-[13px] leading-relaxed text-white/80 max-h-[400px] overflow-y-auto custom-scrollbar italic whitespace-pre-wrap border border-white/10 shadow-inner">
+                                                <div className="glass-card rounded-3xl p-6 bg-red-600/[0.02] border-white/5 flex flex-col gap-4">
+                                                    {actionLead.ai_summary ? (
+                                                        <div className="bg-black/40 rounded-2xl p-5 text-[13px] leading-relaxed text-white/80 max-h-[500px] overflow-y-auto custom-scrollbar italic whitespace-pre-wrap border border-white/10 shadow-inner font-medium">
                                                             {actionLead.ai_summary}
                                                         </div>
+                                                    ) : (
+                                                        <div className="py-10 text-center">
+                                                            <p className="text-[10px] font-black uppercase tracking-widest text-white/20 italic">Aguardando primeira analise para gerar historico...</p>
+                                                        </div>
                                                     )}
-                                                    <textarea
-                                                        placeholder="Escreva uma nova nota aqui..."
-                                                        value={newNoteText}
-                                                        onChange={(e) => setNewNoteText(e.target.value)}
-                                                        className="w-full bg-black/20 border border-white/10 rounded-2xl p-4 text-xs text-white min-h-[100px] focus:outline-none focus:ring-1 focus:ring-emerald-500/50 resize-none italic"
-                                                    />
-                                                    <button
-                                                        onClick={handleSaveDetails}
-                                                        className="w-full py-3 rounded-xl bg-emerald-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-emerald-500 transition-all shadow-lg shadow-emerald-600/20"
-                                                    >
-                                                        Salvar e Registrar Nota
-                                                    </button>
                                                 </div>
                                             </section>
 

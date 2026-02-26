@@ -45,36 +45,39 @@ export async function POST(req: Request) {
             messages: [
                 {
                     role: 'system',
-                    content: 'Você é um analista comercial especialista em concessionárias.'
+                    content: 'Você é um Analista Comercial Sênior especialista em conversas de concessionária de veículos.'
                 },
                 {
                     role: 'user',
-                    content: `Analise a seguinte conversa entre o vendedor e o cliente ${leadName || 'Interessado'}:
+                    content: `Analise profundamente a seguinte conversa entre o vendedor e o cliente ${leadName || 'Interessado'}.
             
             CONVERSA:
             ${chatText}
             
-            EXTRAIA OS SEGUINTES DADOS EM JSON (Estritamente conforme as chaves abaixo):
+            DIRETRIZES DE PONTUAÇÃO:
+            - Se o cliente NÃO demonstrou interesse claro, se a conversa foi muito curta ou se não há resumo possível, o score DEVE ser 0.
+            - O score vai de 0 a 100, onde 100 é intenção imediata de fechar negócio.
             
-            1. ANÁLISE ESTRATÉGICA:
-            - classificacao: ('HOT', 'WARM', 'COLD') baseado no interesse e urgência.
-            - score: (número 0-100) nível de prontidão para compra.
-            - estagio_funil: (ex: 'Descoberta', 'Qualificação', 'Negociação', 'Fechamento').
-            - proxima_acao: Sugira a próxima ação prática para o vendedor.
-            - probabilidade_fechamento: (número 0-100) probabilidade de venda em %.
-            - resumo_estrategico: Um resumo estratégico de exatamente 1 linha (máx 100 caracteres).
-            
-            2. DADOS DE CADASTRO (Se disponíveis):
-            - extracted_name: Nome real do cliente (string ou null).
-            - vehicle_interest: Modelo/marca do carro (string ou null).
-            - valor_investimento: Dinheiro disponível ou parcelas (string ou null).
-            - carro_troca: Detalhes do carro atual (string ou null).
-            - metodo_compra: Forma de pagamento (string ou null).
-            - prazo_troca: Quando pretende comprar (string ou null).
+            EXTRAIA E RESPONDA EM JSON:
+            {
+              "classificacao": "HOT" | "WARM" | "COLD",
+              "score": number (0-100),
+              "estagio_funil": string (ex: 'Qualificação', 'Negociação'),
+              "proxima_acao": string (sugestão prática para o vendedor),
+              "probabilidade_fechamento": number (0-100),
+              "resumo_estrategico": string (resumo de 1 frase),
+              "resumo_detalhado": string (parágrafo detalhado com tudo o que foi extraído para histórico),
+              
+              "extracted_name": string | null,
+              "vehicle_interest": string | null,
+              "valor_investimento": string | null,
+              "carro_troca": string | null,
+              "metodo_compra": string | null,
+              "prazo_troca": string | null
+            }
             
             Considere: Urgência, Interesse financeiro, Interesse em visita, Tempo de resposta, Clareza na intenção.
-            
-            Retorne APENAS o JSON puro.`
+            Retorne APENAS o JSON.`
                 }
             ],
             response_format: { type: "json_object" }
