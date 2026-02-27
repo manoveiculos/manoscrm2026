@@ -7,6 +7,7 @@ interface StatsCardProps {
     title: string;
     value: string | number;
     trend?: number;
+    trendLabel?: string;
     icon: LucideIcon;
     color?: string;
     delay?: number;
@@ -17,6 +18,7 @@ export const StatsCard: React.FC<StatsCardProps> = ({
     title,
     value,
     trend,
+    trendLabel,
     icon: Icon,
     color = 'blue',
     delay = 0,
@@ -55,7 +57,7 @@ export const StatsCard: React.FC<StatsCardProps> = ({
                                     {trend >= 0 ? "↑" : "↓"}
                                 </span>
                                 {Math.abs(trend)}%
-                                <span className="font-medium text-white/30">vs anteontem</span>
+                                {trendLabel && <span className="font-medium text-white/30">{trendLabel}</span>}
                             </div>
                         )}
                     </div>

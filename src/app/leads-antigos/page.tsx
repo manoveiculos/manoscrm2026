@@ -16,11 +16,11 @@ import {
     Flame,
     Thermometer,
     Snowflake,
-    ShieldCheck,
-    Lock,
-    Construction,
     Clock as ClockIcon,
-    ShieldAlert
+    ShieldAlert,
+    Zap,
+    BadgeCheck,
+    Phone
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { dataService } from '@/lib/dataService';
@@ -37,13 +37,15 @@ export default function OldLeadsPage() {
     const [loading, setLoading] = useState(true);
     const [activeCategory, setActiveCategory] = useState<Category>('all');
     const [isClassifying, setIsClassifying] = useState(false);
+    const [isDistributing, setIsDistributing] = useState(false);
     const [role, setRole] = useState<string | null>(null);
+    const [userName, setUserName] = useState<string | null>(null);
 
     useEffect(() => {
         async function initialize() {
             setLoading(true);
             try {
-                // Get Role
+                // Get Role and User Name
                 const { data: { session } } = await supabase.auth.getSession();
                 if (session?.user) {
                     if (session.user.email === 'alexandre_gorges@hotmail.com') {
@@ -51,16 +53,26 @@ export default function OldLeadsPage() {
                     } else {
                         const { data: consultant } = await supabase
                             .from('consultants_manos_crm')
-                            .select('role')
+                            .select('role, name')
                             .eq('auth_id', session.user.id)
                             .maybeSingle();
-                        if (consultant) setRole(consultant.role);
+                        if (consultant) {
+                            setRole(consultant.role);
+                            setUserName(consultant.name);
+                        }
                     }
                 }
 
                 // Load Leads
                 const data = await dataService.getDistributedLeads();
-                setLeads(data || []);
+
+                // If consultant, filter to show only their distributed leads
+                if (session?.user && session.user.email !== 'alexandre_gorges@hotmail.com') {
+                    const filtered = (data || []).filter(l => l.enviado && l.vendedor === (userName || session.user.user_metadata?.name));
+                    setLeads(filtered);
+                } else {
+                    setLeads(data || []);
+                }
             } catch (err) {
                 console.error("Error initializing page:", err);
             } finally {
@@ -95,17 +107,22 @@ export default function OldLeadsPage() {
     const runBulkClassification = async () => {
         if (leads.length === 0 || isClassifying) return;
 
-        const confirmResult = confirm(`Deseja analisar ${leads.length} leads via IA para classificação baseada nos resumos?`);
+        const unclassifiedLeads = leads.filter(l => !l.ai_classification || l.ai_classification === null);
+        if (unclassifiedLeads.length === 0) {
+            alert("Todos os leads visíveis já foram qualificados.");
+            return;
+        }
+
+        const confirmResult = confirm(`Deseja analisar ${unclassifiedLeads.length} leads pendentes via IA para classificação?`);
         if (!confirmResult) return;
 
         setIsClassifying(true);
         try {
-            // Classify in batches of 20 to avoid prompt limits
             const batchSize = 20;
             const newLeads = [...leads];
 
-            for (let i = 0; i < leads.length; i += batchSize) {
-                const batch = leads.slice(i, i + batchSize);
+            for (let i = 0; i < unclassifiedLeads.length; i += batchSize) {
+                const batch = unclassifiedLeads.slice(i, i + batchSize);
                 const response = await fetch('/api/classify-leads', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -113,35 +130,84 @@ export default function OldLeadsPage() {
                 });
 
                 if (!response.ok) throw new Error('Falha na resposta da IA');
+                const { results } = await response.json();
 
-                const { classifications } = await response.json();
-
-                // Update leads state and try to update DB
                 for (let j = 0; j < batch.length; j++) {
                     const leadId = batch[j].id;
-                    const classification = classifications[j];
+                    const result = results[j];
 
-                    // Update locally
+                    if (!result) continue;
+
                     const index = newLeads.findIndex(l => l.id === leadId);
                     if (index !== -1) {
-                        newLeads[index].ai_classification = classification;
+                        newLeads[index] = {
+                            ...newLeads[index],
+                            ai_classification: result.classification,
+                            ai_reason: result.reasoning,
+                            nivel_interesse: result.nivel_interesse,
+                            momento_compra: result.momento_compra,
+                            resumo_consultor: result.resumo_consultor,
+                            proxima_acao: result.proxima_acao
+                        };
                     }
-
-                    // Try persistent update (ignoring if column doesn't exist)
                     try {
-                        await dataService.updateDistributedLeadClassification(leadId, classification);
+                        await dataService.updateDistributedLeadAI(leadId, {
+                            ai_classification: result.classification,
+                            ai_reason: result.reasoning,
+                            nivel_interesse: result.nivel_interesse,
+                            momento_compra: result.momento_compra,
+                            resumo_consultor: result.resumo_consultor,
+                            proxima_acao: result.proxima_acao
+                        });
                     } catch (e) {
-                        // Suppress column missing error silently
+                        console.error("Error updating lead AI", leadId, e);
                     }
                 }
                 setLeads([...newLeads]);
             }
-            alert("Qualificação concluída com sucesso!");
+            alert("Qualificação concluída!");
         } catch (err: any) {
-            console.error("Bulk classification error:", err);
-            alert(`Erro na análise: ${err.message}`);
+            console.error(err);
+            alert(`Erro: ${err.message}`);
         } finally {
             setIsClassifying(false);
+        }
+    };
+
+    const handleDistribute = async () => {
+        if (isDistributing) return;
+
+        // Leads available for distribution: Qualified but not sent
+        const toDistribute = leads.filter(l => l.ai_classification && !l.enviado);
+        if (toDistribute.length === 0) {
+            alert("Não há leads novos qualificados para distribuir.");
+            return;
+        }
+
+        const confirmResult = confirm(`Deseja distribuir ${toDistribute.length} leads entre os consultores ativos?`);
+        if (!confirmResult) return;
+
+        setIsDistributing(true);
+        try {
+            const consultants = await dataService.getConsultants();
+            const activeConsultants = consultants.filter(c => c.is_active).map(c => c.name);
+
+            if (activeConsultants.length === 0) {
+                throw new Error("Não há consultores ativos para receber os leads.");
+            }
+
+            const ids = toDistribute.map(l => l.id);
+            await dataService.distributeOldLeads(ids, activeConsultants);
+
+            // Refresh leads
+            const updated = await dataService.getDistributedLeads();
+            setLeads(updated || []);
+            alert("Distribuição concluída com sucesso!");
+        } catch (err: any) {
+            console.error(err);
+            alert(`Erro na distribuição: ${err.message}`);
+        } finally {
+            setIsDistributing(false);
         }
     };
 
@@ -153,30 +219,30 @@ export default function OldLeadsPage() {
         );
     }
 
-    // Bloqueia acesso para não-admins com uma tela profissional
-    if (role !== 'admin' && role !== null) {
+    // Bloqueia acesso para não-admins APENAS se não houver leads distribuídos para eles
+    if (role !== 'admin' && leads.length === 0) {
         return (
             <div className="flex flex-col items-center justify-center h-[70vh] text-center space-y-8 animate-in fade-in zoom-in duration-700">
                 <div className="relative group">
                     <div className="absolute inset-0 bg-red-600/20 blur-[80px] rounded-full group-hover:bg-red-600/30 transition-all duration-500" />
                     <div className="relative bg-[#0a0f18] p-8 rounded-[3rem] border border-white/5 shadow-2xl">
-                        <Construction size={100} className="text-red-500 animate-pulse" strokeWidth={1} />
+                        <History size={100} className="text-red-500 animate-pulse" strokeWidth={1} />
                     </div>
                     <div className="absolute -bottom-4 -right-4 bg-red-600 p-4 rounded-2xl shadow-xl shadow-red-900/40 rotate-12">
-                        <Lock size={24} className="text-white" />
+                        <User size={24} className="text-white" />
                     </div>
                 </div>
 
                 <div className="space-y-4 max-w-xl relative z-10">
                     <h1 className="text-6xl font-black text-white tracking-tighter uppercase font-outfit">
-                        Módulo em <span className="text-red-600 italic">Construção</span>
+                        Aguardando <span className="text-red-600 italic">Leads</span>
                     </h1>
                     <p className="text-white/40 font-medium text-lg leading-relaxed">
-                        Olá! O Alexandre está preparando esta base histórica para que você possa reaquecer contatos antigos com o suporte da nossa nova IA.
+                        Olá {userName || 'Consultor'}! No momento você não possui leads do arquivo distribuídos para você.
                     </p>
                     <div className="flex items-center justify-center gap-4">
                         <p className="text-red-500/80 font-black text-[11px] uppercase tracking-[0.3em] bg-red-500/5 py-2 px-4 rounded-full border border-red-500/10 w-fit">
-                            Lançamento em Breve • Fique Atento
+                            Fique atento às notificações
                         </p>
                     </div>
                 </div>
@@ -208,21 +274,43 @@ export default function OldLeadsPage() {
                 </div>
 
                 <div className="flex flex-col md:flex-row items-center gap-4">
-                    <button
-                        onClick={runBulkClassification}
-                        disabled={isClassifying}
-                        className={`px-6 py-3.5 rounded-2xl border transition-all flex items-center gap-3 font-black text-[10px] uppercase tracking-[0.2em] shadow-2xl ${isClassifying
-                            ? 'bg-white/5 border-white/5 text-white/20 cursor-wait'
-                            : 'bg-red-500/10 border-red-500/20 text-red-500 hover:bg-red-500 hover:text-white hover:border-red-500 shadow-red-500/10 active:scale-95'
-                            }`}
-                    >
-                        {isClassifying ? (
-                            <div className="h-4 w-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
-                        ) : (
-                            <Sparkles size={16} />
-                        )}
-                        {isClassifying ? 'ANALISANDO...' : 'QUALIFICAR POR IA'}
-                    </button>
+                    {role === 'admin' && (
+                        <>
+                            {leads.some(l => !l.ai_classification) ? (
+                                <button
+                                    onClick={runBulkClassification}
+                                    disabled={isClassifying}
+                                    className={`px-6 py-3.5 rounded-2xl border transition-all flex items-center gap-3 font-black text-[10px] uppercase tracking-[0.2em] shadow-2xl ${isClassifying
+                                        ? 'bg-white/5 border-white/5 text-white/20 cursor-wait'
+                                        : 'bg-red-500/10 border-red-500/20 text-red-500 hover:bg-red-500 hover:text-white hover:border-red-500 shadow-red-500/10 active:scale-95'
+                                        }`}
+                                >
+                                    {isClassifying ? (
+                                        <div className="h-4 w-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                                    ) : (
+                                        <Sparkles size={16} />
+                                    )}
+                                    {isClassifying ? 'ANALISANDO...' : 'QUALIFICAR POR IA'}
+                                </button>
+                            ) : leads.some(l => !l.enviado) && (
+                                <button
+                                    onClick={handleDistribute}
+                                    disabled={isDistributing}
+                                    className={`px-6 py-3.5 rounded-2xl border transition-all flex items-center gap-3 font-black text-[10px] uppercase tracking-[0.2em] shadow-2xl ${isDistributing
+                                        ? 'bg-white/5 border-white/5 text-white/20 cursor-wait'
+                                        : 'bg-blue-500/10 border-blue-500/20 text-blue-500 hover:bg-blue-500 hover:text-white hover:border-blue-500 shadow-blue-500/10 active:scale-95'
+                                        }`}
+                                >
+                                    {isDistributing ? (
+                                        <div className="h-4 w-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                                    ) : (
+                                        <Copy size={16} />
+                                    )}
+                                    {isDistributing ? 'DISTRIBUINDO...' : 'DISTRIBUIR AOS CONSULTORES'}
+                                </button>
+                            )}
+                        </>
+                    )}
 
                     <div className="relative group">
                         <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20 group-focus-within:text-red-500 transition-colors" size={18} />
@@ -280,15 +368,33 @@ export default function OldLeadsPage() {
                             exit={{ opacity: 0, x: -20 }}
                             className="glass-card rounded-[2.5rem] border border-white/5 overflow-hidden flex flex-col md:flex-row min-h-[180px] hover:border-red-500/30 transition-all group relative bg-[#050608]/80 backdrop-blur-xl"
                         >
-                            {/* Classification Badge on the card */}
-                            {lead.ai_classification && (
-                                <div className="absolute top-4 right-4 z-20 flex items-center gap-2 bg-black/40 backdrop-blur px-3 py-1.5 rounded-full border border-white/5">
-                                    {lead.ai_classification === 'hot' && <Flame size={12} className="text-red-500" />}
-                                    {lead.ai_classification === 'warm' && <Thermometer size={12} className="text-amber-500" />}
-                                    {lead.ai_classification === 'cold' && <Snowflake size={12} className="text-blue-400" />}
-                                    <span className="text-[9px] font-black uppercase tracking-widest text-white/60">
-                                        {lead.ai_classification === 'hot' ? 'Quente' : lead.ai_classification === 'warm' ? 'Morno' : 'Frio'}
-                                    </span>
+                            {/* Status and Interest Level Badge */}
+                            {(lead.ai_classification || lead.nivel_interesse) && (
+                                <div className="absolute top-6 right-8 z-20 flex items-center gap-3">
+                                    {lead.nivel_interesse && (
+                                        <div className="flex items-center gap-2 bg-purple-500/10 backdrop-blur-md px-4 py-2 rounded-2xl border border-purple-500/20">
+                                            <Sparkles size={12} className="text-purple-400" />
+                                            <span className="text-[10px] font-black uppercase tracking-widest text-purple-400">
+                                                {lead.nivel_interesse}
+                                            </span>
+                                        </div>
+                                    )}
+                                    {lead.ai_classification && (
+                                        <div className={`flex items-center gap-2 backdrop-blur-md px-4 py-2 rounded-2xl border ${lead.ai_classification === 'hot' ? 'bg-red-500/10 border-red-500/20' :
+                                            lead.ai_classification === 'warm' ? 'bg-amber-500/10 border-amber-500/20' :
+                                                'bg-blue-500/10 border-blue-500/20'
+                                            }`}>
+                                            {lead.ai_classification === 'hot' && <Flame size={12} className="text-red-500" />}
+                                            {lead.ai_classification === 'warm' && <Thermometer size={12} className="text-amber-500" />}
+                                            {lead.ai_classification === 'cold' && <Snowflake size={12} className="text-blue-400" />}
+                                            <span className={`text-[10px] font-black uppercase tracking-widest ${lead.ai_classification === 'hot' ? 'text-red-500' :
+                                                lead.ai_classification === 'warm' ? 'text-amber-500' :
+                                                    'text-blue-400'
+                                                }`}>
+                                                {lead.ai_classification === 'hot' ? 'Quente' : lead.ai_classification === 'warm' ? 'Morno' : 'Frio'}
+                                            </span>
+                                        </div>
+                                    )}
                                 </div>
                             )}
 
@@ -355,16 +461,44 @@ export default function OldLeadsPage() {
                                 </div>
                             </div>
 
-                            {/* Column 3: Summary */}
-                            <div className="flex-[1.5] p-8 border-r border-white/5 flex flex-col relative z-10 bg-white/[0.01]">
-                                <div className="flex items-center gap-2 mb-4">
-                                    <Info size={16} className="text-white/20" />
-                                    <span className="text-[10px] font-black text-white/20 uppercase tracking-[0.2em]">HISTÓRICO / NOTAS</span>
+                            {/* Column 3: AI Analysis (Unified Panel) */}
+                            <div className="flex-[2] p-8 border-r border-white/5 flex flex-col relative z-10 bg-white/[0.01]">
+                                <div className="flex items-center gap-2 mb-6">
+                                    <Sparkles size={16} className="text-red-500/50" />
+                                    <span className="text-[10px] font-black text-white/20 uppercase tracking-[0.2em]">ANÁLISE ESTRATÉGICA IA</span>
                                 </div>
-                                <div className="bg-[#0a0f18]/50 p-5 rounded-2xl border border-white/5 flex-1">
-                                    <p className="text-xs text-white/40 italic leading-relaxed font-medium">
-                                        "{lead.resumo || 'Nenhuma observação automática registrada para este lead no sistema de distribuição.'}"
-                                    </p>
+                                <div className="space-y-6 flex-1">
+                                    {/* Executive Summary */}
+                                    <div className="p-5 rounded-3xl bg-red-600/10 border border-red-500/20">
+                                        <p className="text-[9px] font-black text-red-500 uppercase tracking-widest mb-1 italic">Resumo do Consultor</p>
+                                        <p className="text-[11px] font-bold text-white/80 leading-relaxed">
+                                            {lead.resumo_consultor || lead.resumo || 'Nenhuma observação automática registrada para este lead.'}
+                                        </p>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="bg-blue-500/5 p-4 rounded-2xl border border-blue-500/10">
+                                            <span className="text-[9px] font-black uppercase text-blue-500/40 tracking-wider block mb-1">Momento</span>
+                                            <span className="text-xs font-black text-white uppercase">{lead.momento_compra || 'Pesquisa'}</span>
+                                        </div>
+                                        {lead.ai_reason && (
+                                            <div className="bg-white/5 p-4 rounded-2xl border border-white/5">
+                                                <span className="text-[9px] font-black uppercase text-white/20 tracking-wider block mb-1">Score IA</span>
+                                                <span className="text-xs font-black text-white uppercase">Analisado</span>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Next Action */}
+                                    <div className="bg-emerald-500/5 p-5 rounded-3xl border border-emerald-500/10 space-y-2">
+                                        <div className="flex items-center gap-2">
+                                            <Zap size={12} className="text-emerald-500" />
+                                            <span className="text-[9px] font-black uppercase text-emerald-500/40 tracking-wider italic">Próxima Ação Sugerida</span>
+                                        </div>
+                                        <p className="text-[11px] font-black text-white leading-relaxed">
+                                            {lead.proxima_acao || 'Retomar contato para entender interesse atual.'}
+                                        </p>
+                                    </div>
                                 </div>
                             </div>
 

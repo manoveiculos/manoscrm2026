@@ -1,24 +1,27 @@
 import { supabase } from './supabase';
-import { Lead, Campaign, Sale, InventoryItem, LeadStatus } from './types';
+import { Lead, Campaign, Sale, InventoryItem, LeadStatus, AIClassification } from './types';
 
 export const dataService = {
     // Leads
     async getLeads(consultantId?: string) {
+        // Trigger background sync of assigned leads from external sources
+        this.syncAssignedLeadsToMain().catch(err => console.error("Sync Error:", err));
+
         // 1. Fetch from main table
         let query = supabase
             .from('leads_manos_crm')
             .select('*, consultants_manos_crm(name)')
-            .not('status', 'in', '("closed","lost")')
             .order('created_at', { ascending: false });
 
         if (consultantId) {
-            query = query.eq('assigned_consultant_id', consultantId);
+            // Liberar acesso: Consultor vê seus leads ativos OU QUALQUER lead encerrado (antigo)
+            query = query.or(`assigned_consultant_id.eq.${consultantId},status.in.("closed","lost")`);
         }
 
         const { data: mainLeads, error: mainError } = await query;
         if (mainError) throw mainError;
 
-        // 2. Fetch from CRM 26 table
+        // 2. Fetch from CRM 26 table (only NOT yet synced/sent)
         let consultantName = undefined;
         if (consultantId) {
             const { data: consultant } = await supabase
@@ -31,8 +34,12 @@ export const dataService = {
 
         try {
             const crm26Leads = await this.getLeadsCRM26(consultantName);
+            // Filter out those that already exist in mainLeads (by phone)
+            const mainPhones = new Set(mainLeads?.map(l => l.phone) || []);
+            const freshCrm26 = crm26Leads.filter(l => !mainPhones.has(l.phone));
+
             // Merge and sort
-            const merged = [...(mainLeads || []), ...crm26Leads].sort((a, b) =>
+            const merged = [...(mainLeads || []), ...freshCrm26].sort((a, b) =>
                 new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
             );
             return merged;
@@ -42,10 +49,110 @@ export const dataService = {
         }
     },
 
+    async syncAssignedLeadsToMain() {
+        console.log("🔄 Starting assigned leads sync...");
+
+        // 1. Fetch un-sent leads from CRM 26 that HAVE a vendedor
+        const { data: leadsToSync } = await supabase
+            .from('leads_distribuicao_crm_26')
+            .select('*')
+            .not('vendedor', 'is', null)
+            .eq('enviado', false)
+            .limit(10);
+
+        if (leadsToSync && leadsToSync.length > 0) {
+            const { data: consultants } = await supabase.from('consultants_manos_crm').select('id, name');
+
+            for (const lead of leadsToSync) {
+                const consultant = consultants?.find(c => c.name.toLowerCase() === lead.vendedor.toLowerCase());
+                if (consultant) {
+                    await this.promoteLeadToMain(lead, 'crm26', consultant.id);
+                }
+            }
+        }
+
+        // 2. Fetch from legacy leads_distribuicao too
+        const { data: legacyToSync } = await supabase
+            .from('leads_distribuicao')
+            .select('*')
+            .not('vendedor', 'is', null)
+            .eq('enviado', false)
+            .limit(10);
+
+        if (legacyToSync && legacyToSync.length > 0) {
+            const { data: consultants } = await supabase.from('consultants_manos_crm').select('id, name');
+            for (const lead of legacyToSync) {
+                const consultant = consultants?.find(c => c.name.toLowerCase() === lead.vendedor.toLowerCase());
+                if (consultant) {
+                    await this.promoteLeadToMain(lead, 'legacy', consultant.id);
+                }
+            }
+        }
+    },
+
+    async promoteLeadToMain(sourceLead: any, source: 'crm26' | 'legacy', consultantId: string) {
+        // Clean phone for duplicate check
+        const cleanPhone = (sourceLead.telephone || sourceLead.telefone || '').replace(/\D/g, '');
+        if (!cleanPhone) return;
+
+        // Check if already exists in main
+        const { data: existing } = await supabase
+            .from('leads_manos_crm')
+            .select('id')
+            .eq('phone', cleanPhone)
+            .limit(1);
+
+        if (existing && existing.length > 0) {
+            // Already exists, just mark as sent in source to stop syncing
+            await this.markLeadAsSent(sourceLead.id, source);
+            return;
+        }
+
+        // Mapping fields
+        const leadData: Partial<Lead> = {
+            name: sourceLead.nome || sourceLead.name || 'Lead Importado',
+            phone: cleanPhone,
+            vehicle_interest: sourceLead.interesse || sourceLead.vehicle_interest || '',
+            region: sourceLead.cidade || sourceLead.region || '',
+            assigned_consultant_id: consultantId,
+            status: 'new', // New active lead for the consultant
+            source: 'WhatsApp',
+            ai_score: sourceLead.ai_score || 0,
+            ai_classification: sourceLead.ai_classification || 'warm',
+            ai_reason: sourceLead.ai_reason || sourceLead.resumo_consultor || '',
+            ai_summary: sourceLead.resumo || '',
+            carro_troca: sourceLead.troca || sourceLead.carro_troca || '',
+            created_at: sourceLead.criado_em || new Date().toISOString()
+        };
+
+        const { error: insertError } = await supabase
+            .from('leads_manos_crm')
+            .insert(leadData);
+
+        if (!insertError) {
+            await this.markLeadAsSent(sourceLead.id, source);
+            console.log(`✅ Lead ${leadData.name} promoted to main CRM.`);
+        } else {
+            console.error("Error promoting lead:", insertError);
+        }
+    },
+
+    async markLeadAsSent(id: any, source: 'crm26' | 'legacy') {
+        const table = source === 'crm26' ? 'leads_distribuicao_crm_26' : 'leads_distribuicao';
+        await supabase
+            .from(table)
+            .update({ enviado: true, atualizado_em: new Date().toISOString() })
+            .eq('id', id);
+    },
+
     async getLeadsCRM26(consultantName?: string) {
+        // Trigger auto-distribution for any unassigned leads in the background
+        this.autoDistributePendingCRM26().catch(console.error);
+
         let query = supabase
             .from('leads_distribuicao_crm_26')
             .select('*')
+            .eq('enviado', false)
             .order('criado_em', { ascending: false });
 
         if (consultantName) {
@@ -59,28 +166,122 @@ export const dataService = {
         }
 
         // Filter: name and phone are mandatory
-        // Map to Lead type
         return (data || [])
             .filter(item => item.nome && item.nome.trim() !== '' && item.telefone && item.telefone.trim() !== '')
-            .map(item => ({
-                id: `crm26_${item.id}`,
-                name: item.nome,
-                phone: item.telefone,
-                vehicle_interest: item.interesse || '',
-                region: item.cidade || '',
-                ai_classification: item.ai_classification || 'warm',
-                status: (item.status as LeadStatus) || (item.resumo?.match(/\[STATUS:(.*?)\]/)?.[1] as LeadStatus) || 'received',
-                created_at: item.criado_em,
-                updated_at: item.criado_em,
-                source: 'WhatsApp',
-                consultants_manos_crm: { name: item.vendedor || 'Pendente' },
-                ai_summary: (item.resumo || '').replace(/\[STATUS:.*?\]\s*/g, ''),
-                carro_troca: item.troca || '',
-                // Additional fields for compatibility
-                ai_score: 0,
-                email: '',
-                estimated_ticket: 0
-            })) as unknown as Lead[];
+            .map(item => {
+                // Priority 1: Real AI columns (if they were added)
+                // Priority 2: JSON metadata inside 'resumo'
+                // Priority 3: Fallback mapping based on 'nivel_interesse'
+
+                let aiScore = item.ai_score;
+                let aiClass = item.ai_classification;
+
+                // Check for JSON metadata in resumo (fallback persistence)
+                if (item.resumo && item.resumo.includes('||IA_DATA||')) {
+                    try {
+                        const metadataPart = item.resumo.split('||IA_DATA||')[1];
+                        const metadata = JSON.parse(metadataPart);
+                        aiScore = metadata.score !== undefined ? metadata.score : aiScore;
+                        aiClass = metadata.classification || aiClass;
+                    } catch (e) {
+                        console.warn("Failed to parse metadata from resumo:", e);
+                    }
+                }
+
+                // Ensure aiScore is 0 if not provided for rigour
+                if (aiScore === undefined || aiScore === null) {
+                    aiScore = 0;
+                    aiClass = 'warm';
+                }
+
+                return {
+                    id: `crm26_${item.id}`,
+                    name: item.nome,
+                    phone: item.telefone,
+                    vehicle_interest: item.interesse || '',
+                    region: item.cidade || '',
+                    ai_classification: (aiClass?.toLowerCase() || 'warm') as AIClassification,
+                    ai_score: aiScore,
+                    status: (item.status as LeadStatus) || (item.resumo?.match(/\[STATUS:(.*?)\]/)?.[1] as LeadStatus) || 'received',
+                    created_at: item.criado_em,
+                    updated_at: item.atualizado_em || item.criado_em,
+                    source: 'WhatsApp',
+                    consultants_manos_crm: { name: item.vendedor || 'Pendente' },
+                    ai_summary: item.resumo_consultor || (item.resumo || '').split('||IA_DATA||')[0].replace(/\[STATUS:.*?\]\s*/g, ''),
+                    carro_troca: item.troca || '',
+                    nivel_interesse: item.nivel_interesse,
+                    momento_compra: item.momento_compra,
+                    resumo_consultor: item.resumo_consultor,
+                    proxima_acao: item.proxima_acao,
+                    email: '',
+                    estimated_ticket: 0
+                };
+            }) as unknown as Lead[];
+    },
+
+    async autoDistributePendingCRM26() {
+        // Find leads without a vendedor
+        const { data: unassigned } = await supabase
+            .from('leads_distribuicao_crm_26')
+            .select('id, nome')
+            .is('vendedor', null)
+            .limit(10);
+
+        if (!unassigned || unassigned.length === 0) return;
+
+        for (const lead of unassigned) {
+            const nextConsultant = await this.pickNextConsultant(lead.nome);
+            if (nextConsultant) {
+                // Update distribution table
+                await supabase
+                    .from('leads_distribuicao_crm_26')
+                    .update({ vendedor: nextConsultant.name })
+                    .eq('id', lead.id);
+
+                // Update consultant assignment timestamp
+                await supabase
+                    .from('consultants_manos_crm')
+                    .update({ last_lead_assigned_at: new Date().toISOString() })
+                    .eq('id', nextConsultant.id);
+            }
+        }
+    },
+
+    async pickNextConsultant(leadName?: string) {
+        // Special Rules
+        if (leadName) {
+            const name = leadName.toLowerCase();
+            if (name.includes('wilson')) {
+                const { data: sergio } = await supabase
+                    .from('consultants_manos_crm')
+                    .select('*')
+                    .ilike('name', '%Sergio%')
+                    .single();
+                if (sergio) return sergio;
+            }
+            if (name.includes('rodrigo')) {
+                const { data: victor } = await supabase
+                    .from('consultants_manos_crm')
+                    .select('*')
+                    .ilike('name', '%Victor%')
+                    .single();
+                if (victor) return victor;
+            }
+        }
+
+        // Round Robin: Active, oldest assignment
+        const { data: consultants } = await supabase
+            .from('consultants_manos_crm')
+            .select('*')
+            .eq('is_active', true)
+            .order('last_lead_assigned_at', { ascending: true, nullsFirst: true })
+            .limit(1);
+
+        if (!consultants || consultants.length === 0) {
+            return null;
+        }
+
+        return consultants[0];
     },
 
     async getOldLeads(consultantId?: string) {
@@ -106,24 +307,144 @@ export const dataService = {
             .order('criado_em', { ascending: false });
 
         if (error) throw error;
-        return data;
+
+        // Decode AI metadata or use dedicated columns
+        return (data || []).map((lead: any) => {
+            let ai_classification = lead.ai_classification;
+            let ai_reason = lead.ai_reason;
+            let resumo = lead.resumo;
+
+            // Priority 1: Use dedicated columns if they have content
+            // Priority 2: Fallback to decoding metadata from 'resumo'
+            if (resumo && resumo.includes('||IA_DATA||')) {
+                const parts = resumo.split('||IA_DATA||');
+                resumo = parts[0].trim();
+                try {
+                    const iaData = JSON.parse(parts[1].trim());
+                    if (!ai_classification) ai_classification = iaData.classification;
+                    if (!ai_reason) ai_reason = iaData.reason;
+                } catch (e) {
+                    console.warn("Error parsing IA_DATA for lead", lead.id, e);
+                }
+            }
+
+            return {
+                ...lead,
+                resumo,
+                ai_classification: ai_classification || lead.ai_classification,
+                ai_reason: ai_reason || lead.ai_reason,
+                nivel_interesse: lead.nivel_interesse,
+                momento_compra: lead.momento_compra,
+                resumo_consultor: lead.resumo_consultor,
+                proxima_acao: lead.proxima_acao
+            };
+        });
     },
 
-    async updateDistributedLeadClassification(id: number, ai_classification: string) {
-        const { data, error } = await supabase
+    async updateDistributedLeadAI(id: number, aiData: any) {
+        // First, get the current lead to preserve the original resumo
+        const { data: currentLead, error: fetchError } = await supabase
             .from('leads_distribuicao')
-            .update({ ai_classification })
+            .select('*')
+            .eq('id', id)
+            .single();
+
+        if (fetchError) throw fetchError;
+
+        // Clean resumo (remove old legacy metadata if exists)
+        let cleanResumo = currentLead?.resumo || '';
+        if (cleanResumo.includes('||IA_DATA||')) {
+            cleanResumo = cleanResumo.split('||IA_DATA||')[0].trim();
+        }
+
+        // Prepare new data structure
+        const timestamp = new Date().toISOString();
+        const iaMetadataStr = JSON.stringify({
+            classification: aiData.ai_classification,
+            reason: aiData.ai_reason,
+            nivel_interesse: aiData.nivel_interesse,
+            momento_compra: aiData.momento_compra
+        });
+
+        // Final fallback string
+        const finalResumo = `${cleanResumo} ||IA_DATA|| ${iaMetadataStr}`;
+
+        // Attempt update with REAL columns first
+        const updateData: any = {
+            ...aiData,
+            atualizado_em: timestamp,
+            resumo: finalResumo // Always keep fallback for now
+        };
+
+        const { error } = await supabase
+            .from('leads_distribuicao')
+            .update(updateData)
             .eq('id', id);
 
-        if (error) throw error;
-        return data;
+        // If it failed because of missing columns, retry with ONLY the fallback 'resumo'
+        if (error && (error.code === '42703' || error.message?.toLowerCase().includes('column'))) {
+            console.warn("⚠️ Legacy schema detected in leads_distribuicao. Using fallback persistence.");
+            const { error: retryError } = await supabase
+                .from('leads_distribuicao')
+                .update({ resumo: finalResumo })
+                .eq('id', id);
+            if (retryError) throw retryError;
+        } else if (error) {
+            throw error;
+        }
+
+        return true;
+    },
+
+    // Legacy alias to maintain compatibility during development
+    async updateDistributedLeadClassification(id: number, ai_classification: string, ai_reason?: string) {
+        return this.updateDistributedLeadAI(id, { ai_classification, ai_reason });
+    },
+
+    async distributeOldLeads(leadIds: number[], vendedores: string[]) {
+        if (vendedores.length === 0) throw new Error("Nenhum consultor disponível para distribuição.");
+
+        const timestamp = new Date().toISOString();
+        const updates = leadIds.map((id, index) => {
+            const vendedor = vendedores[index % vendedores.length];
+            return supabase
+                .from('leads_distribuicao')
+                .update({
+                    vendedor,
+                    enviado: true,
+                    atualizado_em: timestamp
+                })
+                .eq('id', id);
+        });
+
+        const results = await Promise.all(updates);
+        const firstError = results.find(r => r.error)?.error;
+
+        // Retry without atualizado_em if it fails (graceful degradation)
+        if (firstError && (firstError.code === '42703' || firstError.message?.toLowerCase().includes('atualizado_em'))) {
+            console.warn("⚠️ Column 'atualizado_em' missing in leads_distribuicao. Retrying distribution without it.");
+            const retryUpdates = leadIds.map((id, index) => {
+                const vendedor = vendedores[index % vendedores.length];
+                return supabase
+                    .from('leads_distribuicao')
+                    .update({ vendedor, enviado: true })
+                    .eq('id', id);
+            });
+            const retryResults = await Promise.all(retryUpdates);
+            const retryError = retryResults.find(r => r.error)?.error;
+            if (retryError) throw retryError;
+            return retryResults;
+        }
+
+        if (firstError) throw firstError;
+        return results;
     },
 
     async getConsultants() {
         const { data, error } = await supabase
             .from('consultants_manos_crm')
             .select('*')
-            .eq('status', 'active');
+            .eq('is_active', true);
         if (error) throw error;
         return data;
     },
@@ -345,23 +666,15 @@ export const dataService = {
         return newLead;
     },
 
-    async distributeLead(leadId: string) {
-        // Find next consultant: active, with oldest assignment
-        const { data: consultants } = await supabase
-            .from('consultants_manos_crm')
-            .select('*')
-            .eq('is_active', true)
-            .order('last_lead_assigned_at', { ascending: true, nullsFirst: true })
-            .limit(1);
+    async distributeLead(leadId: string, leadName?: string) {
+        const next = await this.pickNextConsultant(leadName);
 
-        if (!consultants || consultants.length === 0) {
+        if (!next) {
             console.warn("No consultants on duty to receive lead:", leadId);
             return null;
         }
 
-        const next = consultants[0];
-
-        // Assign
+        // Assign to main table
         await supabase
             .from('leads_manos_crm')
             .update({
@@ -370,7 +683,7 @@ export const dataService = {
             })
             .eq('id', leadId);
 
-        // Update consultant
+        // Update consultant timestamp
         await supabase
             .from('consultants_manos_crm')
             .update({ last_lead_assigned_at: new Date().toISOString() })
@@ -391,10 +704,15 @@ export const dataService = {
         const { data: salesAll } = await supabase.from('sales_manos_crm').select('*');
         // 3. Get sales (this month)
         const { data: salesMonth } = await supabase.from('sales_manos_crm').select('*').gte('created_at', startOfMonth);
-        // 4. Get total lead count (all time)
-        const { count: leadCount } = await supabase.from('leads_manos_crm').select('*', { count: 'exact', head: true });
-        // 5. Get leads (this month)
-        const { count: leadCountMonth } = await supabase.from('leads_manos_crm').select('*', { count: 'exact', head: true }).gte('created_at', startOfMonth);
+        // 4. Get total lead count (Main table)
+        const { count: leadCountMain } = await supabase.from('leads_manos_crm').select('*', { count: 'exact', head: true });
+
+        // 5. Get total lead count (CRM 26 / WhatsApp)
+        const { count: leadCount26 } = await supabase.from('leads_distribuicao_crm_26').select('*', { count: 'exact', head: true });
+
+        // 6. Get leads (this month)
+        const { count: leadCountMonthMain } = await supabase.from('leads_manos_crm').select('*', { count: 'exact', head: true }).gte('created_at', startOfMonth);
+        const { count: leadCountMonth26 } = await supabase.from('leads_distribuicao_crm_26').select('*', { count: 'exact', head: true }).gte('criado_em', startOfMonth);
 
         const totalSpend = campaigns?.reduce((acc: number, c: Campaign) => acc + (Number(c.total_spend) || 0), 0) || 0;
         const totalRevenue = salesAll?.reduce((acc: number, s: Sale) => acc + (Number(s.sale_value) || 0), 0) || 0;
@@ -406,8 +724,11 @@ export const dataService = {
         const salesCount = salesAll?.length || 0;
         const salesCountMonth = salesMonth?.length || 0;
 
+        const totalLeads = (leadCountMain || 0) + (leadCount26 || 0);
+        const totalLeadsMonth = (leadCountMonthMain || 0) + (leadCountMonth26 || 0);
+
         const cac = salesCount > 0 ? totalSpend / salesCount : 0;
-        const cpl = (leadCount || 0) > 0 ? totalSpend / (leadCount || 0) : 0;
+        const cpl = totalLeads > 0 ? totalSpend / totalLeads : 0;
         const roi = totalSpend > 0 ? (totalRevenue / totalSpend) : 0;
 
         return {
@@ -421,8 +742,8 @@ export const dataService = {
             cac,
             cpl,
             roi,
-            leadCount: leadCount || 0,
-            leadCountMonth: leadCountMonth || 0
+            leadCount: totalLeads,
+            leadCountMonth: totalLeadsMonth
         };
     },
 
@@ -432,11 +753,37 @@ export const dataService = {
         const now = new Date();
         const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
 
-        // All-time leads
-        const { data: leads } = await supabase
+        // All-time leads (Main table)
+        const { data: leadsMain } = await supabase
             .from('leads_manos_crm')
             .select('status, created_at')
             .eq('assigned_consultant_id', consultantId);
+
+        // Fetch consultant name for CRM 26 search
+        const { data: consultant } = await supabase
+            .from('consultants_manos_crm')
+            .select('name')
+            .eq('id', consultantId)
+            .single();
+
+        // Lead counts from CRM 26 (WhatsApp)
+        let leads26Count = 0;
+        let leads26StatusCounts: Record<string, number> = {};
+
+        if (consultant?.name) {
+            const { data: leads26 } = await supabase
+                .from('leads_distribuicao_crm_26')
+                .select('status, resumo')
+                .ilike('vendedor', `%${consultant.name}%`);
+
+            if (leads26) {
+                leads26Count = leads26.length;
+                leads26.forEach(l => {
+                    const status = l.status || (l.resumo?.match(/\[STATUS:(.*?)\]/)?.[1]) || 'received';
+                    leads26StatusCounts[status] = (leads26StatusCounts[status] || 0) + 1;
+                });
+            }
+        }
 
         // Sales for the current month
         const { data: salesMonth } = await supabase
@@ -451,19 +798,19 @@ export const dataService = {
             .select('sale_value, profit_margin')
             .eq('consultant_id', consultantId);
 
-        const leadCount = leads?.length || 0;
+        const totalLeads = (leadsMain?.length || 0) + leads26Count;
         const salesCount = salesMonth?.length || 0;
         const totalRevenue = salesAll?.reduce((acc, s) => acc + (Number(s.sale_value) || 0), 0) || 0;
         const monthlyRevenue = salesMonth?.reduce((acc, s) => acc + (Number(s.sale_value) || 0), 0) || 0;
 
-        const conversionRate = leadCount > 0 ? ((salesMonth?.length || 0) / leadCount) * 100 : 0;
+        const conversionRate = totalLeads > 0 ? (salesCount / totalLeads) * 100 : 0;
 
-        const statusCounts = leads?.reduce((acc: Record<string, number>, l) => {
+        const statusCounts = leadsMain?.reduce((acc: Record<string, number>, l) => {
             acc[l.status] = (acc[l.status] || 0) + 1;
             return acc;
-        }, {}) || {};
+        }, { ...leads26StatusCounts }) || leads26StatusCounts;
 
-        // Find leads scheduled for today or upcoming
+        // Find leads scheduled for today or upcoming (Main table)
         const today = new Date();
         today.setHours(0, 0, 0, 0);
 
@@ -476,7 +823,7 @@ export const dataService = {
             .order('scheduled_at', { ascending: true });
 
         return {
-            leadCount,
+            leadCount: totalLeads,
             salesCount, // Monthly count
             totalRevenue,
             monthlyRevenue,
@@ -487,13 +834,28 @@ export const dataService = {
     },
 
     async getConsultantPerformance() {
-        const { data, error } = await supabase
+        const { data: consultants, error } = await supabase
             .from('consultants_manos_crm')
             .select('*, leads_manos_crm(count), sales_manos_crm(count)')
             .eq('is_active', true);
 
         if (error) throw error;
-        return data;
+
+        // Fetch counts from CRM 26 (WhatsApp) for each consultant
+        const performance = await Promise.all((consultants || []).map(async (c: any) => {
+            const { count: count26 } = await supabase
+                .from('leads_distribuicao_crm_26')
+                .select('*', { count: 'exact', head: true })
+                .ilike('vendedor', `%${c.name}%`);
+
+            return {
+                ...c,
+                leads_total_count: (c.leads_manos_crm?.[0]?.count || 0) + (count26 || 0),
+                leads_manos_crm: [{ count: (c.leads_manos_crm?.[0]?.count || 0) + (count26 || 0) }] // Maintain backward compatibility for UI
+            };
+        }));
+
+        return performance;
     },
 
     // Inventory
@@ -543,10 +905,11 @@ export const dataService = {
 
     // Sync Meta Campaigns with advanced analytics (Clicks, Reach, CPC, etc.)
     async syncMetaCampaigns(token: string, adAccountId: string) {
-        console.log("🚀 Starting advanced analytics sync for account:", adAccountId);
+        console.log("🚀 Iniciando sincronização avançada para conta:", adAccountId);
 
         try {
-            const response = await fetch(`https://graph.facebook.com/v19.0/act_${adAccountId}/campaigns?fields=name,status,objective,insights{spend,inline_link_clicks,reach,impressions,cpc,ctr}&access_token=${token}`);
+            // Usando effective_status para capturar campanhas que estão ativas mas podem ter adsets pausados
+            const response = await fetch(`https://graph.facebook.com/v19.0/act_${adAccountId}/campaigns?fields=name,status,effective_status,objective,insights{spend,inline_link_clicks,reach,impressions,cpc,ctr}&access_token=${token}`);
 
             if (!response.ok) {
                 const errorText = await response.text();
@@ -559,13 +922,18 @@ export const dataService = {
             if (result.error) throw new Error(result.error.message);
 
             const metaCampaigns = result.data || [];
+            console.log(`📊 Meta retornou ${metaCampaigns.length} campanhas filtrando por status real...`);
 
-            const upsertData = metaCampaigns.map((c: { name?: string; status?: string; insights?: { data?: Record<string, unknown>[] } }) => {
+            const upsertData = metaCampaigns.map((c: { name?: string; status?: string; effective_status?: string; insights?: { data?: Record<string, unknown>[] } }) => {
                 const insights = c.insights?.data?.[0] || {};
+                const status = (c.effective_status || c.status || '').toLowerCase();
+
+                console.log(`- Campanha: ${c.name} | Status FB: ${c.status} | Effective: ${c.effective_status}`);
+
                 return {
                     name: c.name || 'Sem Nome',
                     platform: 'Meta Ads',
-                    status: c.status?.toLowerCase() === 'active' ? 'active' : 'paused',
+                    status: status === 'active' ? 'active' : 'paused',
                     total_spend: Number(insights.spend || 0),
                     link_clicks: Number(insights.inline_link_clicks || 0),
                     reach: Number(insights.reach || 0),

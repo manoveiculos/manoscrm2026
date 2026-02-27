@@ -15,16 +15,21 @@ import {
 import { motion } from 'framer-motion';
 import { dataService } from '@/lib/dataService';
 import { FinancialMetrics } from '@/lib/types';
-
+import { StatsCard } from '@/components/StatsCard';
 export default function ROIPage() {
     const [metrics, setMetrics] = useState<FinancialMetrics | null>(null);
     const [loading, setLoading] = useState(true);
+    const [performance, setPerformance] = useState<any[]>([]);
 
     useEffect(() => {
         async function loadMetrics() {
             try {
-                const data = await dataService.getFinancialMetrics();
-                setMetrics(data);
+                const [metricsData, perfData] = await Promise.all([
+                    dataService.getFinancialMetrics(),
+                    dataService.getConsultantPerformance()
+                ]);
+                setMetrics(metricsData);
+                setPerformance(perfData);
             } catch (err) {
                 console.error("Error loading ROI metrics:", err);
             } finally {
@@ -64,43 +69,95 @@ export default function ROIPage() {
 
             {/* Financial Matrix */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                {[
-                    { label: 'Investimento Global', value: `R$ ${(metrics?.totalSpend || 0).toLocaleString()}`, trend: 12, icon: Layers, color: 'red' },
-                    { label: 'Custo de Aquisição (CAC)', value: `R$ ${(metrics?.cac || 0).toFixed(0)}`, trend: -8, icon: Target, color: 'emerald' },
-                    { label: 'Lucro Bruto (Margem)', value: `R$ ${(metrics?.totalProfit || 0).toLocaleString()}`, trend: 15, icon: TrendingUp, color: 'red-accent' },
-                    { label: 'ROI Consolodidado', value: `${(metrics?.roi || 0).toFixed(1)}x`, trend: 5, icon: Zap, color: 'amber' },
-                ].map((stat, i) => (
-                    <motion.div
-                        key={i}
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: i * 0.1 }}
-                        className="glass-card group p-8 space-y-4 relative overflow-hidden"
-                    >
-                        <div className="flex justify-between items-center">
-                            <div className="h-12 w-12 rounded-2xl flex items-center justify-center bg-white/5 border border-white/10 text-white">
-                                <stat.icon size={22} />
-                            </div>
-                            <div className={`px-2 py-0.5 rounded-lg text-[10px] font-black ${stat.trend > 0 ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'}`}>
-                                {stat.trend > 0 ? '+' : ''}{stat.trend}%
-                            </div>
-                        </div>
-                        <div>
-                            <p className="text-xs font-bold text-white/30 uppercase tracking-widest">{stat.label}</p>
-                            <h3 className="text-4xl font-black text-white mt-1 font-outfit tracking-tighter">{stat.value}</h3>
-                        </div>
-                    </motion.div>
-                ))}
+                <StatsCard
+                    title="Investimento Global"
+                    value={`R$ ${(metrics?.totalSpend || 0).toLocaleString()}`}
+                    icon={Layers}
+                    color="red"
+                />
+                <StatsCard
+                    title="Custo de Aquisição (CAC)"
+                    value={`R$ ${(metrics?.cac || 0).toFixed(0)}`}
+                    icon={Target}
+                    color="emerald"
+                />
+                <StatsCard
+                    title="Lucro Bruto (Margem)"
+                    value={`R$ ${(metrics?.totalProfit || 0).toLocaleString()}`}
+                    icon={TrendingUp}
+                    color="red"
+                />
+                <StatsCard
+                    title="ROI Consolidado"
+                    value={`${(metrics?.roi || 0).toFixed(1)}x`}
+                    icon={Zap}
+                    color="amber"
+                />
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
                 <div className="lg:col-span-8 glass-card rounded-[3rem] p-10 space-y-10">
                     <h2 className="text-2xl font-bold flex items-center gap-3 text-white">
                         <BarIcon size={20} className="text-red-500" />
-                        Resumo de Performance Financeira
+                        Performance por Consultor (Leads Reais)
                     </h2>
-                    <div className="p-20 text-center text-white/20 font-bold border-2 border-dashed border-white/5 rounded-[2rem]">
-                        Gráficos e Detalhes por Campanha serão carregados conforme novos dados entrem.
+
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left">
+                            <thead>
+                                <tr className="border-b border-white/5 text-[10px] uppercase font-black tracking-widest text-white/20">
+                                    <th className="pb-4">Consultor</th>
+                                    <th className="pb-4">Total Leads</th>
+                                    <th className="pb-4">Vendas</th>
+                                    <th className="pb-4">Taxa de Conversão</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-white/5">
+                                {performance.map((p, i) => {
+                                    const leads = p.leads_total_count || 0;
+                                    const sales = p.sales_manos_crm?.[0]?.count || 0;
+                                    const rate = leads > 0 ? (sales / leads) * 100 : 0;
+
+                                    return (
+                                        <tr key={i} className="group hover:bg-white/[0.02] transition-colors">
+                                            <td className="py-6">
+                                                <div className="flex items-center gap-4">
+                                                    <div className="h-10 w-10 rounded-xl bg-white/5 flex items-center justify-center text-white font-bold border border-white/5 group-hover:bg-red-500/10 group-hover:text-red-500 transition-colors">
+                                                        {p.name?.[0]}
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-sm font-bold text-white">{p.name || 'Sem Nome'}</p>
+                                                        <p className="text-[10px] text-white/30 uppercase font-bold tracking-tighter">{p.role}</p>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                            <td className="py-6">
+                                                <div className="flex flex-col">
+                                                    <span className="text-sm font-black text-white">{leads}</span>
+                                                    <span className="text-[9px] text-white/20 font-bold uppercase">Leads Unificados</span>
+                                                </div>
+                                            </td>
+                                            <td className="py-6">
+                                                <div className="flex flex-col">
+                                                    <span className="text-sm font-black text-emerald-500">{sales}</span>
+                                                    <span className="text-[9px] text-white/20 font-bold uppercase">Vendas Mês</span>
+                                                </div>
+                                            </td>
+                                            <td className="py-6">
+                                                <div className="space-y-2 max-w-[120px]">
+                                                    <div className="flex justify-between text-[10px] font-bold">
+                                                        <span className="text-white/40">{rate.toFixed(1)}%</span>
+                                                    </div>
+                                                    <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">
+                                                        <div className="h-full bg-emerald-500" style={{ width: `${Math.min(rate, 100)}%` }} />
+                                                    </div>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
                     </div>
                 </div>
 

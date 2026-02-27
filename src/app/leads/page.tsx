@@ -17,7 +17,10 @@ import {
     FileText,
     Upload,
     Zap,
-    RefreshCcw
+    RefreshCcw,
+    TrendingUp,
+    Target,
+    ArrowUpRight
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useSearchParams } from 'next/navigation';
@@ -63,7 +66,7 @@ function LeadsContent() {
         carro_troca: ''
     });
     const [newNoteText, setNewNoteText] = useState('');
-    const [modalTab, setModalTab] = useState<'details' | 'karbam'>('details');
+    const [modalTab, setModalTab] = useState<'details' | 'karbam' | 'analysis'>('details');
     const fileInputRef = useRef<HTMLInputElement>(null);
     const whatsappFolderInputRef = useRef<HTMLInputElement>(null);
     const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -592,7 +595,7 @@ function LeadsContent() {
                 source: 'WhatsApp',
                 status: 'new',
                 ai_classification: 'warm',
-                ai_score: 50
+                ai_score: 0
             });
 
             if (newLead) {
@@ -792,22 +795,74 @@ function LeadsContent() {
                 </div>
             </header>
 
-            {/* View Mode Switcher */}
-            <div className="flex items-center justify-between relative">
-                <div className="flex items-center bg-white/5 border border-white/10 p-1.5 rounded-2xl shadow-2xl">
+            {/* View Mode Switcher and Actions */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pt-4 border-t border-white/5">
+                <div className="flex items-center gap-3 bg-white/5 p-1.5 rounded-2xl border border-white/10">
                     <button
                         onClick={() => setViewMode('list')}
-                        className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] transition-all flex items-center gap-2 ${viewMode === 'list' ? 'bg-red-600 text-white shadow-lg shadow-red-600/20' : 'text-white/30 hover:text-white hover:bg-white/5'}`}
+                        className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'list'
+                            ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
+                            : 'text-white/20 hover:text-white/40'
+                            }`}
                     >
-                        Lista de Leads
+                        Lista
                     </button>
                     <button
                         onClick={() => setViewMode('kanban')}
-                        className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] transition-all flex items-center gap-2 ${viewMode === 'kanban' ? 'bg-red-600 text-white shadow-lg shadow-red-600/20' : 'text-white/30 hover:text-white hover:bg-white/5'}`}
+                        className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'kanban'
+                            ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
+                            : 'text-white/20 hover:text-white/40'
+                            }`}
                     >
-                        Pipeline Comercial
+                        Kanban
                     </button>
                 </div>
+
+                {/* Team Performance Summary (Admin Only) */}
+                {userRole === 'admin' && (
+                    <div className="flex flex-wrap gap-4 animate-in fade-in slide-in-from-top-4 duration-700">
+                        {/* Card for Unassigned Leads */}
+                        {leads.filter(l => !l.assigned_consultant_id && l.status !== 'closed' && l.status !== 'lost').length > 0 && (
+                            <div className="glass-card px-5 py-4 rounded-[1.5rem] border border-red-500/30 bg-red-600/5 flex items-center gap-4 hover:bg-red-600/10 transition-all group">
+                                <div className="w-10 h-10 rounded-xl bg-red-600/20 flex items-center justify-center text-red-500 font-black text-sm uppercase shadow-lg shadow-red-600/5 group-hover:scale-110 transition-transform">
+                                    <Users size={18} />
+                                </div>
+                                <div className="flex flex-col">
+                                    <p className="text-[9px] font-black text-red-500 uppercase tracking-[0.2em] leading-none mb-1.5">Aguardando</p>
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-sm font-black tracking-tighter text-white">
+                                            {leads.filter(l => !l.assigned_consultant_id && l.status !== 'closed' && l.status !== 'lost').length} Novos
+                                        </span>
+                                        <div className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {consultants.map(c => {
+                            const count = leads.filter(l =>
+                                l.assigned_consultant_id === c.id ||
+                                (l.consultants_manos_crm?.name === c.name)
+                            ).length;
+                            return (
+                                <div key={c.id} className="glass-card px-5 py-4 rounded-[1.5rem] border border-white/5 bg-white/[0.02] flex items-center gap-4 hover:bg-white/[0.05] transition-all group">
+                                    <div className="w-10 h-10 rounded-xl bg-red-600/10 flex items-center justify-center text-red-500 font-black text-sm uppercase shadow-lg shadow-red-600/5 group-hover:scale-110 transition-transform">
+                                        {c.name[0]}
+                                    </div>
+                                    <div className="flex flex-col">
+                                        <p className="text-[9px] font-black text-white/20 uppercase tracking-[0.2em] leading-none mb-1.5">{c.name.split(' ')[0]}</p>
+                                        <div className="flex items-center gap-2">
+                                            <span className={`text-sm font-black tracking-tighter ${count > 0 ? 'text-white' : 'text-white/20'}`}>
+                                                {count} {count === 1 ? 'Lead' : 'Leads'}
+                                            </span>
+                                            {count > 0 && <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />}
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
 
                 <div className="flex items-center gap-4">
                     <button
@@ -823,14 +878,17 @@ function LeadsContent() {
                         <span className="text-[9px] font-bold text-red-500 uppercase tracking-tighter italic">Registro de Balcão</span>
                     </div>
                 </div>
+
                 <div className="hidden md:flex items-center gap-4 text-[10px] font-black text-white/20 uppercase tracking-widest">
                     <span>Total: {filteredLeads.length} Leads</span>
                     <div className="h-4 w-px bg-white/10" />
                     <span className="text-emerald-500">IA Monitorando Ativamente</span>
                 </div>
+            </div>
 
-                {/* Scroll Progress Bar (Only for Kanban) */}
-                {viewMode === 'kanban' && (
+            {/* Scroll Progress Bar (Only for Kanban) */}
+            {
+                viewMode === 'kanban' && (
                     <div
                         className="absolute -bottom-6 left-0 right-0 h-2 bg-white/5 rounded-full overflow-hidden cursor-pointer group/scroll"
                         onPointerDown={(e) => {
@@ -867,8 +925,9 @@ function LeadsContent() {
                             transition={{ type: 'spring', stiffness: 400, damping: 40 }}
                         />
                     </div>
-                )}
-            </div>
+                )
+            }
+
 
             <style jsx global>{`
                 .hide-scrollbar {
@@ -1216,38 +1275,61 @@ function LeadsContent() {
                                         </div>
                                     </div>
 
-                                    {/* Form Summary Card */}
-                                    <div className="glass-card rounded-[2rem] p-7 space-y-5 bg-white/[0.01] border-white/5 flex-1 flex flex-col min-h-0 overflow-hidden">
-                                        <div className="flex items-center gap-3 shrink-0">
-                                            <FileText size={16} className="text-red-500" />
-                                            <h4 className="text-[9px] font-black uppercase tracking-[0.3em] text-white/30">Resumo do Formulario</h4>
+                                    {/* Unified Service Panel */}
+                                    <div className="glass-card rounded-[2.5rem] p-8 space-y-6 bg-white/[0.01] border-white/5 flex-1 flex flex-col min-h-0 overflow-hidden shadow-2xl">
+                                        {/* Simple Summary Header */}
+                                        <div className="p-5 rounded-3xl bg-red-600/10 border border-red-500/20 shrink-0">
+                                            <p className="text-[9px] font-black text-red-500 uppercase tracking-widest mb-1 italic">Resumo Executivo</p>
+                                            <p className="text-[11px] font-bold text-white/80 leading-relaxed line-clamp-2">
+                                                {selectedLead.resumo_consultor || selectedLead.ai_summary || 'Inicie o contato para qualificar o interesse.'}
+                                            </p>
                                         </div>
 
-                                        <div className="space-y-4 overflow-y-auto custom-scrollbar pr-1 flex-1">
-                                            <div className="flex justify-between items-center bg-white/5 p-4 rounded-2xl border border-white/5">
-                                                <span className="text-[9px] font-black uppercase text-white/20 tracking-wider">Interesse Principal</span>
-                                                <span className="text-xs font-black text-white">{selectedLead.vehicle_interest || 'Geral'}</span>
+                                        <div className="space-y-4 overflow-y-auto custom-scrollbar pr-2 flex-1 scroll-smooth">
+                                            {/* Lead Details Grid */}
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div className="bg-white/5 p-4 rounded-2xl border border-white/5 hover:bg-white/10 transition-colors group">
+                                                    <span className="text-[9px] font-black uppercase text-white/20 tracking-wider block mb-1">Interesse</span>
+                                                    <span className="text-xs font-black text-white group-hover:text-red-400 transition-colors uppercase tracking-tighter">
+                                                        {selectedLead.vehicle_interest || 'Geral'}
+                                                    </span>
+                                                </div>
+                                                <div className="bg-white/5 p-4 rounded-2xl border border-white/5 hover:bg-white/10 transition-colors group">
+                                                    <span className="text-[9px] font-black uppercase text-white/20 tracking-wider block mb-1">Possui Troca</span>
+                                                    <span className="text-xs font-black text-white group-hover:text-red-400 transition-colors uppercase tracking-tighter">
+                                                        {selectedLead.carro_troca || 'Não'}
+                                                    </span>
+                                                </div>
                                             </div>
 
-                                            {selectedLead.source === 'WhatsApp' ? (
-                                                <div className="flex flex-col gap-3 bg-emerald-500/5 p-5 rounded-2xl border border-emerald-500/10 h-full min-h-0">
-                                                    <span className="text-[9px] font-black uppercase text-emerald-500/40 tracking-wider">Resumo do Atendimento (IA)</span>
-                                                    <div className="text-[11px] leading-relaxed text-white/70 italic overflow-y-auto custom-scrollbar pr-2 whitespace-pre-wrap">
-                                                        {selectedLead.ai_summary || 'Sem resumo disponível.'}
-                                                    </div>
+                                            {/* IA Quick Analysis */}
+                                            <div className="space-y-3">
+                                                <div className="flex items-center gap-2 mb-1 px-1">
+                                                    <Sparkles size={12} className="text-purple-500" />
+                                                    <h4 className="text-[9px] font-black uppercase tracking-[0.2em] text-white/30 italic">Insights da Análise</h4>
                                                 </div>
-                                            ) : (
-                                                <>
-                                                    <div className="flex justify-between items-center bg-white/5 p-4 rounded-2xl border border-white/5">
-                                                        <span className="text-[9px] font-black uppercase text-white/20 tracking-wider">Investimento</span>
-                                                        <span className="text-xs font-black text-white text-emerald-500">{selectedLead.valor_investimento || 'Nao informado'}</span>
-                                                    </div>
-                                                    <div className="flex justify-between items-center bg-white/5 p-4 rounded-2xl border border-white/5">
-                                                        <span className="text-[9px] font-black uppercase text-white/20 tracking-wider">Possui Troca</span>
-                                                        <span className="text-xs font-black text-white">{selectedLead.carro_troca || 'Nao informado'}</span>
-                                                    </div>
-                                                </>
-                                            )}
+
+                                                <div className="flex justify-between items-center bg-purple-500/5 p-4 rounded-2xl border border-purple-500/10">
+                                                    <span className="text-[9px] font-black uppercase text-purple-500/40 tracking-wider">Interesse</span>
+                                                    <span className="text-xs font-black text-white uppercase">{selectedLead.nivel_interesse || 'Indefinido'}</span>
+                                                </div>
+
+                                                <div className="flex justify-between items-center bg-blue-500/5 p-4 rounded-2xl border border-blue-500/10">
+                                                    <span className="text-[9px] font-black uppercase text-blue-500/40 tracking-wider">Momento</span>
+                                                    <span className="text-xs font-black text-white uppercase">{selectedLead.momento_compra || 'Pesquisa'}</span>
+                                                </div>
+                                            </div>
+
+                                            {/* Recommended Action */}
+                                            <div className="bg-emerald-500/5 p-5 rounded-3xl border border-emerald-500/10 space-y-3">
+                                                <div className="flex items-center gap-2">
+                                                    <Zap size={12} className="text-emerald-500" />
+                                                    <span className="text-[9px] font-black uppercase text-emerald-500/40 tracking-wider italic">Próxima Ação IA</span>
+                                                </div>
+                                                <p className="text-[11px] font-black text-white leading-relaxed">
+                                                    {selectedLead.proxima_acao || 'Aguardar resposta.'}
+                                                </p>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -1463,10 +1545,184 @@ function LeadsContent() {
                                         >
                                             Karbam
                                         </button>
+                                        <button
+                                            onClick={() => setModalTab('analysis')}
+                                            className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${modalTab === 'analysis' ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/20' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
+                                        >
+                                            Análise IA
+                                        </button>
                                     </div>
                                 </header>
 
-                                {modalTab === 'karbam' ? (
+                                {modalTab === 'analysis' ? (
+                                    <div className="flex-1 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 overflow-y-auto custom-scrollbar pr-4 pb-10">
+                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                                            {/* Temperatura do Lead */}
+                                            <div className="glass-card rounded-3xl p-6 bg-purple-500/5 border-purple-500/10 hover:border-purple-500/30 transition-all flex flex-col justify-between group">
+                                                <div className="flex items-center gap-3 mb-4">
+                                                    <div className="p-2 rounded-xl bg-purple-500/10 text-purple-500 group-hover:scale-110 transition-transform">
+                                                        <Zap size={18} />
+                                                    </div>
+                                                    <h4 className="text-[10px] font-black uppercase tracking-widest text-white/40">Interesse</h4>
+                                                </div>
+                                                <div className="text-2xl font-black text-white uppercase italic tracking-tighter">
+                                                    {actionLead.nivel_interesse || actionLead.ai_classification?.toUpperCase() || 'WARM'}
+                                                </div>
+                                            </div>
+
+                                            {/* Momento de Compra */}
+                                            <div className="glass-card rounded-3xl p-6 bg-blue-500/5 border-blue-500/10 hover:border-blue-500/30 transition-all flex flex-col justify-between group">
+                                                <div className="flex items-center gap-3 mb-4">
+                                                    <div className="p-2 rounded-xl bg-blue-500/10 text-blue-500 group-hover:scale-110 transition-transform">
+                                                        <Calendar size={18} />
+                                                    </div>
+                                                    <h4 className="text-[10px] font-black uppercase tracking-widest text-white/40">Momento</h4>
+                                                </div>
+                                                <div className="text-xl font-black text-white uppercase italic tracking-tighter">
+                                                    {actionLead.momento_compra || 'Pesquisa Inicial'}
+                                                </div>
+                                            </div>
+
+                                            {/* Probabilidade */}
+                                            <div className="glass-card rounded-3xl p-6 bg-emerald-500/5 border-emerald-500/10 hover:border-emerald-500/30 transition-all flex flex-col justify-between group">
+                                                <div className="flex items-center gap-3 mb-4">
+                                                    <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-500 group-hover:scale-110 transition-transform">
+                                                        <TrendingUp size={18} />
+                                                    </div>
+                                                    <h4 className="text-[10px] font-black uppercase tracking-widest text-white/40">Probabilidade</h4>
+                                                </div>
+                                                <div className="text-2xl font-black text-emerald-500 italic tracking-tighter">
+                                                    {actionLead.behavioral_profile?.closing_probability || actionLead.ai_score || 0}%
+                                                </div>
+                                            </div>
+
+                                            {/* Sentimento */}
+                                            <div className="glass-card rounded-3xl p-6 bg-rose-500/5 border-rose-500/10 hover:border-rose-500/30 transition-all flex flex-col justify-between group">
+                                                <div className="flex items-center gap-3 mb-4">
+                                                    <div className="p-2 rounded-xl bg-rose-500/10 text-rose-500 group-hover:scale-110 transition-transform">
+                                                        <Sparkles size={18} />
+                                                    </div>
+                                                    <h4 className="text-[10px] font-black uppercase tracking-widest text-white/40">Sentimento</h4>
+                                                </div>
+                                                <div className="text-xl font-black text-white uppercase italic tracking-tighter">
+                                                    {actionLead.behavioral_profile?.sentiment || 'Neutro'}
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                                            {/* Análise Estratégica */}
+                                            <div className="lg:col-span-2 space-y-6">
+                                                <div className="glass-card rounded-[2.5rem] p-10 bg-gradient-to-br from-purple-500/10 via-red-600/5 to-transparent border-white/5 space-y-8 relative overflow-hidden group">
+                                                    <div className="absolute top-0 right-0 w-64 h-64 bg-purple-600/5 rounded-full blur-[80px] -mr-32 -mt-32" />
+                                                    <div className="relative z-10 flex items-start gap-6">
+                                                        <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-red-600 to-rose-700 flex items-center justify-center text-white shadow-2xl shadow-red-600/20 group-hover:rotate-6 transition-transform">
+                                                            <Sparkles size={28} />
+                                                        </div>
+                                                        <div className="flex-1 space-y-2">
+                                                            <h4 className="text-[10px] font-black uppercase tracking-[0.3em] text-red-500">Diagnóstico Estratégico IA</h4>
+                                                            <p className="text-lg font-bold text-white leading-relaxed italic pr-10">
+                                                                "{actionLead.resumo_consultor || actionLead.ai_summary || 'Realize o contato inicial ou cole uma conversa no Laboratório de IA para que o sistema gere um diagnóstico estratégico completo para este lead.'}"
+                                                            </p>
+                                                        </div>
+                                                    </div>
+
+                                                    {(actionLead.ai_reason || actionLead.next_step) && (
+                                                        <div className="pt-8 border-t border-white/10 grid md:grid-cols-2 gap-8 relative z-10">
+                                                            <div className="space-y-4">
+                                                                <p className="text-[9px] font-black text-white/20 uppercase tracking-widest flex items-center gap-2">
+                                                                    <Target size={12} className="text-red-500" /> Gatilhos de Fechamento
+                                                                </p>
+                                                                <p className="text-xs text-white/80 leading-relaxed font-medium bg-white/5 p-4 rounded-2xl border border-white/5">
+                                                                    {actionLead.ai_reason || 'Aguardando interação para identificar gatilhos comportamentais.'}
+                                                                </p>
+                                                            </div>
+                                                            <div className="space-y-4">
+                                                                <p className="text-[9px] font-black text-white/20 uppercase tracking-widest flex items-center gap-2">
+                                                                    <Zap size={12} className="text-emerald-500" /> Próxima Ação Decisiva
+                                                                </p>
+                                                                <p className="text-xs text-emerald-500 font-black uppercase tracking-widest bg-emerald-500/10 p-4 rounded-2xl border border-emerald-500/10 flex items-center gap-3">
+                                                                    <ArrowUpRight size={18} /> {actionLead.proxima_acao || actionLead.next_step || 'Iniciar Abordagem Consultiva'}
+                                                                </p>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+
+                                            {/* Painel Behavioral */}
+                                            <div className="space-y-6">
+                                                <div className="glass-card rounded-[2.5rem] p-8 border-white/5 space-y-8 h-full bg-white/[0.01]">
+                                                    <div className="space-y-1">
+                                                        <h4 className="text-[10px] font-black uppercase tracking-widest text-white/20">Perfil Comportamental</h4>
+                                                        <p className="text-sm font-black text-white uppercase tracking-tighter">Mapeamento de Personalidade</p>
+                                                    </div>
+
+                                                    <div className="space-y-6">
+                                                        <div className="space-y-2">
+                                                            <div className="flex justify-between text-[10px] font-black uppercase tracking-widest">
+                                                                <span className="text-white/40">Urgência</span>
+                                                                <span className={actionLead.behavioral_profile?.urgency === 'high' ? 'text-red-500' : 'text-amber-500'}>
+                                                                    {actionLead.behavioral_profile?.urgency === 'high' ? 'Alta' : 'Média'}
+                                                                </span>
+                                                            </div>
+                                                            <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+                                                                <motion.div
+                                                                    initial={{ width: 0 }}
+                                                                    animate={{ width: actionLead.behavioral_profile?.urgency === 'high' ? '90%' : '60%' }}
+                                                                    className={`h-full ${actionLead.behavioral_profile?.urgency === 'high' ? 'bg-red-600 shadow-[0_0_10px_rgba(220,38,38,0.5)]' : 'bg-amber-600'}`}
+                                                                />
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="space-y-2">
+                                                            <div className="flex justify-between text-[10px] font-black uppercase tracking-widest">
+                                                                <span className="text-white/40">Fidelidade</span>
+                                                                <span className="text-emerald-500">Alta</span>
+                                                            </div>
+                                                            <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+                                                                <motion.div
+                                                                    initial={{ width: 0 }}
+                                                                    animate={{ width: '85%' }}
+                                                                    className="h-full bg-emerald-600 shadow-[0_0_10px_rgba(16,185,129,0.5)]"
+                                                                />
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="space-y-2">
+                                                            <div className="flex justify-between text-[10px] font-black uppercase tracking-widest">
+                                                                <span className="text-white/40">Nível Decisor</span>
+                                                                <span className="text-blue-500">Direto</span>
+                                                            </div>
+                                                            <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+                                                                <motion.div
+                                                                    initial={{ width: 0 }}
+                                                                    animate={{ width: '100%' }}
+                                                                    className="h-full bg-blue-600 shadow-[0_0_10px_rgba(37,99,235,0.5)]"
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="pt-6 border-t border-white/5">
+                                                        <div className="flex flex-wrap gap-2">
+                                                            {actionLead.behavioral_profile?.intentions?.map((tag, idx) => (
+                                                                <span key={idx} className="px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 text-[9px] font-black text-white/40 uppercase tracking-widest">
+                                                                    {tag}
+                                                                </span>
+                                                            )) || (
+                                                                    <>
+                                                                        <span className="px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 text-[9px] font-black text-white/40 uppercase tracking-widest">Troca Avaliada</span>
+                                                                        <span className="px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 text-[9px] font-black text-white/40 uppercase tracking-widest">Aprovação Direta</span>
+                                                                    </>
+                                                                )}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ) : modalTab === 'karbam' ? (
                                     <div className="flex-1 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
                                         <section className="space-y-4">
                                             <div className="flex items-center gap-2">
@@ -1707,183 +1963,168 @@ function LeadsContent() {
                                             </section>
                                         </div>
 
-                                        <div className="space-y-8">
+                                        <div className="space-y-6 flex-1 overflow-y-auto custom-scrollbar pr-2 pb-4">
+                                            {/* AI Strategic Analysis - High Visibility */}
                                             <section className="space-y-4">
-                                                <div className="flex items-center justify-between">
-                                                    <div className="flex items-center gap-2">
-                                                        <FileText size={18} className="text-red-500" />
-                                                        <h4 className="text-[10px] font-black uppercase tracking-widest text-white/60">Historico de Notas Estrategicas (IA)</h4>
-                                                    </div>
+                                                <div className="flex items-center gap-2">
+                                                    <Sparkles size={18} className="text-purple-500" />
+                                                    <h4 className="text-xs font-black uppercase tracking-widest text-white/60">Análise Estratégica & Diagnóstico</h4>
                                                 </div>
-                                                <div className="glass-card rounded-3xl p-6 bg-red-600/[0.02] border-white/5 flex flex-col gap-4">
-                                                    {actionLead.ai_summary ? (
-                                                        <div className="bg-black/40 rounded-2xl p-5 text-[13px] leading-relaxed text-white/80 max-h-[500px] overflow-y-auto custom-scrollbar italic whitespace-pre-wrap border border-white/10 shadow-inner font-medium">
-                                                            {actionLead.ai_summary}
+                                                <div className="glass-card rounded-[2.5rem] p-8 bg-gradient-to-br from-purple-500/10 to-transparent border-purple-500/20 space-y-5">
+                                                    <div className="space-y-4">
+                                                        <div className="flex items-center gap-3">
+                                                            <MessageSquare size={20} className="text-red-500" />
+                                                            <p className="text-sm text-white font-bold leading-relaxed italic">
+                                                                "{actionLead.resumo_consultor || actionLead.ai_summary || 'Realize o contato para que a IA analise o perfil.'}"
+                                                            </p>
                                                         </div>
-                                                    ) : (
-                                                        <div className="py-10 text-center">
-                                                            <p className="text-[10px] font-black uppercase tracking-widest text-white/20 italic">Aguardando primeira analise para gerar historico...</p>
+                                                        <div className="pt-4 border-t border-white/5 flex flex-col gap-4">
+                                                            <div className="flex items-center gap-3">
+                                                                <div className="h-8 w-8 rounded-xl bg-emerald-500/10 flex items-center justify-center text-emerald-500">
+                                                                    <ArrowRight size={16} />
+                                                                </div>
+                                                                <div>
+                                                                    <p className="text-[9px] font-black text-emerald-500/50 uppercase tracking-widest leading-none mb-1">Caminho Sugerido</p>
+                                                                    <p className="text-xs font-black text-white uppercase">{actionLead.proxima_acao || 'Iniciar Abordagem Consultiva'}</p>
+                                                                </div>
+                                                            </div>
                                                         </div>
-                                                    )}
+                                                    </div>
                                                 </div>
                                             </section>
 
                                             <section className="space-y-4">
                                                 <div className="flex items-center justify-between">
                                                     <div className="flex items-center gap-2">
-                                                        <Sparkles size={18} className="text-red-500" />
-                                                        <h4 className="text-[10px] font-black uppercase tracking-widest text-white/60">Laboratório de IA</h4>
+                                                        <FileText size={18} className="text-red-500" />
+                                                        <h4 className="text-[10px] font-black uppercase tracking-widest text-white/60">Historico de Notas Operacionais</h4>
                                                     </div>
-                                                    <button
-                                                        onClick={() => fileInputRef.current?.click()}
-                                                        className="text-[9px] font-black text-white/30 hover:text-red-500 transition-colors uppercase flex items-center gap-2"
-                                                    >
-                                                        <Upload size={14} /> Subir Script
-                                                    </button>
-                                                    <input
-                                                        type="file"
-                                                        ref={fileInputRef}
-                                                        onChange={handleFileUpload}
-                                                        className="hidden"
-                                                        {...{ webkitdirectory: "", directory: "" }}
-                                                        multiple
-                                                    />
                                                 </div>
-
-                                                <div className="glass-card rounded-3xl p-6 space-y-4 bg-red-600/[0.02] border-red-500/10">
-                                                    <textarea
-                                                        placeholder="Cole a conversa para analise estrategica..."
-                                                        value={chatText}
-                                                        onChange={(e) => setChatText(e.target.value)}
-                                                        className="w-full bg-black/20 border border-white/5 rounded-2xl p-4 text-xs text-white/60 min-h-[120px] focus:outline-none focus:ring-1 focus:ring-red-500/30 resize-none italic"
-                                                    />
-                                                    <button
-                                                        onClick={() => {
-                                                            analyzeConversation();
-                                                        }}
-                                                        disabled={isAnalyzing || chatText.length < 10}
-                                                        className={`w-full py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-all ${isAnalyzing || chatText.length < 10 ? 'bg-white/5 text-white/20 cursor-not-allowed' : 'bg-red-600 text-white shadow-xl shadow-red-600/20 hover:scale-[1.02]'}`}
-                                                    >
-                                                        {isAnalyzing ? <><Plus size={16} className="animate-spin" /> Analisando...</> : <><Zap size={16} /> Analisar e Sugerir</>}
-                                                    </button>
-
-                                                    {actionLead.ai_reason && (
-                                                        <div className="space-y-4">
-                                                            <div className="p-4 rounded-2xl bg-white/5 border border-white/5">
-                                                                <p className="text-[11px] text-white/50 leading-relaxed italic">{actionLead.ai_reason}</p>
-                                                            </div>
-
-                                                            {actionLead.behavioral_profile && (
-                                                                <div className="space-y-4">
-                                                                    {/* Pontuação de IA Destacada - NOVO */}
-                                                                    <div className="p-6 rounded-[2.5rem] bg-gradient-to-br from-white/5 to-transparent border border-white/10 flex items-center justify-between group overflow-hidden relative">
-                                                                        <div className="absolute top-0 right-0 w-32 h-32 bg-red-600/5 rounded-full blur-3xl -mr-16 -mt-16 transition-all group-hover:bg-red-600/10" />
-
-                                                                        <div className="flex items-center gap-5 relative z-10">
-                                                                            <div className={`w-16 h-16 rounded-[1.5rem] border-2 flex items-center justify-center shadow-2xl ${actionLead.ai_score >= 70 ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-500 shadow-emerald-500/10' : actionLead.ai_score >= 40 ? 'border-amber-500/30 bg-amber-500/5 text-amber-500 shadow-amber-500/10' : 'border-red-500/30 bg-red-500/5 text-red-500 shadow-red-500/10'}`}>
-                                                                                <span className="text-2xl font-black">{actionLead.ai_score || 0}</span>
-                                                                            </div>
-                                                                            <div>
-                                                                                <p className="text-[9px] font-black text-white/20 uppercase tracking-[0.2em] leading-none mb-1.5">Temperatura do Lead</p>
-                                                                                <div className="flex items-center gap-2">
-                                                                                    <div className={`w-2 h-2 rounded-full animate-pulse ${actionLead.ai_classification === 'hot' ? 'bg-rose-500' : actionLead.ai_classification === 'warm' ? 'bg-amber-500' : 'bg-sky-500'}`} />
-                                                                                    <p className={`text-sm font-black uppercase tracking-widest ${actionLead.ai_classification === 'hot' ? 'text-rose-500' : actionLead.ai_classification === 'warm' ? 'text-amber-500' : 'text-sky-500'}`}>
-                                                                                        {actionLead.ai_classification?.toUpperCase() || 'WARM'}
-                                                                                    </p>
-                                                                                </div>
-                                                                            </div>
-                                                                        </div>
-
-                                                                        <button
-                                                                            onClick={() => analyzeConversation()}
-                                                                            disabled={isAnalyzing || chatText.length < 10}
-                                                                            className="px-6 py-3 rounded-2xl bg-white/5 border border-white/10 h-fit text-[10px] font-black text-white uppercase hover:bg-white/10 active:scale-95 transition-all flex items-center gap-2 relative z-10 shadow-lg"
-                                                                        >
-                                                                            <RefreshCcw size={14} className={isAnalyzing ? 'animate-spin' : ''} />
-                                                                            {isAnalyzing ? 'Analisando...' : 'Reanalisar'}
-                                                                        </button>
-                                                                    </div>
-
-                                                                    <div className="grid grid-cols-2 gap-4">
-                                                                        <div className="p-5 rounded-[2rem] bg-white/5 border border-white/5">
-                                                                            <p className="text-[8px] font-black text-white/20 uppercase tracking-widest mb-1.5 pl-1">Estágio do Funil</p>
-                                                                            <p className="text-xs font-black text-white uppercase pl-1">{actionLead.behavioral_profile.funnel_stage || 'Qualificação'}</p>
-                                                                        </div>
-                                                                        <div className="p-5 rounded-[2rem] bg-white/5 border border-white/5">
-                                                                            <p className="text-[8px] font-black text-white/20 uppercase tracking-widest mb-1.5 pl-1">Probabilidade</p>
-                                                                            <div className="flex items-center gap-2 pl-1">
-                                                                                <Plus size={14} className="text-emerald-500" />
-                                                                                <p className="text-xs font-black text-emerald-500 uppercase">{actionLead.behavioral_profile.closing_probability || 0}% de Fechamento</p>
-                                                                            </div>
-                                                                        </div>
-                                                                    </div>
-
-                                                                    <div className="grid grid-cols-2 gap-4">
-                                                                        <div className="p-5 rounded-[2rem] bg-white/5 border border-white/5">
-                                                                            <p className="text-[8px] font-black text-white/20 uppercase tracking-widest mb-1.5 pl-1">Urgência</p>
-                                                                            <div className="flex items-center gap-2 pl-1">
-                                                                                <AlertCircle size={14} className={actionLead.behavioral_profile.urgency === 'high' ? 'text-rose-500' : 'text-amber-500'} />
-                                                                                <p className={`text-xs font-black uppercase ${actionLead.behavioral_profile.urgency === 'high' ? 'text-rose-500' : 'text-amber-500'}`}>
-                                                                                    {actionLead.behavioral_profile.urgency === 'high' ? 'Alta' : actionLead.behavioral_profile.urgency === 'medium' ? 'Média' : 'Baixa'}
-                                                                                </p>
-                                                                            </div>
-                                                                        </div>
-                                                                        <div className="p-5 rounded-[2rem] bg-white/5 border border-white/5">
-                                                                            <p className="text-[8px] font-black text-white/20 uppercase tracking-widest mb-1.5 pl-1">Sentimento</p>
-                                                                            <div className="flex items-center gap-2 pl-1">
-                                                                                <MessageSquare size={14} className="text-emerald-500" />
-                                                                                <p className="text-xs font-black text-emerald-500 uppercase">{actionLead.behavioral_profile.sentiment || 'Neutro'}</p>
-                                                                            </div>
-                                                                        </div>
-                                                                    </div>
-                                                                </div>
-                                                            )}
-
-
-                                                            {actionLead.next_step && (
-                                                                <div className="p-4 rounded-2xl bg-red-600/10 border border-red-500/20">
-                                                                    <p className="text-[8px] font-black text-red-500 uppercase tracking-widest mb-1">Estratégia Recomendada</p>
-                                                                    <p className="text-[11px] font-bold text-white leading-tight">{actionLead.next_step}</p>
-                                                                </div>
-                                                            )}
+                                                <div className="glass-card rounded-3xl p-6 bg-red-600/[0.02] border-white/5 flex flex-col gap-4">
+                                                    {actionLead.ai_summary ? (
+                                                        <div className="bg-black/40 rounded-2xl p-5 text-[12px] leading-relaxed text-white/80 max-h-[300px] overflow-y-auto custom-scrollbar italic whitespace-pre-wrap border border-white/10 shadow-inner font-medium">
+                                                            {actionLead.ai_summary}
+                                                        </div>
+                                                    ) : (
+                                                        <div className="py-10 text-center">
+                                                            <p className="text-[10px] font-black uppercase tracking-widest text-white/20 italic">Sem histórico registrado...</p>
                                                         </div>
                                                     )}
                                                 </div>
                                             </section>
                                         </div>
+
+                                        <section className="col-span-1 md:col-span-2 space-y-4">
+                                            <div className="flex items-center justify-between">
+                                                <div className="flex items-center gap-2">
+                                                    <Sparkles size={18} className="text-red-500" />
+                                                    <h4 className="text-[10px] font-black uppercase tracking-widest text-white/60">Laboratório de IA</h4>
+                                                </div>
+                                                <button
+                                                    onClick={() => fileInputRef.current?.click()}
+                                                    className="text-[9px] font-black text-white/30 hover:text-red-500 transition-colors uppercase flex items-center gap-2"
+                                                >
+                                                    <Upload size={14} /> Subir Script
+                                                </button>
+                                                <input
+                                                    type="file"
+                                                    ref={fileInputRef}
+                                                    onChange={handleFileUpload}
+                                                    className="hidden"
+                                                    {...({ webkitdirectory: "", directory: "" } as any)}
+                                                    multiple
+                                                />
+                                            </div>
+
+                                            <div className="glass-card rounded-3xl p-6 space-y-4 bg-red-600/[0.02] border-red-500/10">
+                                                <textarea
+                                                    placeholder="Cole a conversa para analise estrategica..."
+                                                    value={chatText}
+                                                    onChange={(e) => setChatText(e.target.value)}
+                                                    className="w-full bg-black/20 border border-white/5 rounded-2xl p-4 text-xs text-white/60 min-h-[120px] focus:outline-none focus:ring-1 focus:ring-red-500/30 resize-none italic"
+                                                />
+                                                <button
+                                                    onClick={() => analyzeConversation()}
+                                                    disabled={isAnalyzing || chatText.length < 10}
+                                                    className={`w-full py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-all ${isAnalyzing || chatText.length < 10 ? 'bg-white/5 text-white/20 cursor-not-allowed' : 'bg-red-600 text-white shadow-xl shadow-red-600/20 hover:scale-[1.02]'}`}
+                                                >
+                                                    {isAnalyzing ? <><Plus size={16} className="animate-spin" /> Analisando...</> : <><Zap size={16} /> Analisar e Sugerir</>}
+                                                </button>
+
+                                                {actionLead.ai_reason && (
+                                                    <div className="space-y-4">
+                                                        <div className="p-4 rounded-2xl bg-white/5 border border-white/5">
+                                                            <p className="text-[11px] text-white/50 leading-relaxed italic">{actionLead.ai_reason}</p>
+                                                        </div>
+
+                                                        {actionLead.behavioral_profile && (
+                                                            <div className="space-y-4">
+                                                                <div className="p-6 rounded-[2.5rem] bg-gradient-to-br from-white/5 to-transparent border border-white/10 flex items-center justify-between group overflow-hidden relative">
+                                                                    <div className="absolute top-0 right-0 w-32 h-32 bg-red-600/5 rounded-full blur-3xl -mr-16 -mt-16 transition-all group-hover:bg-red-600/10" />
+                                                                    <div className="flex items-center gap-5 relative z-10">
+                                                                        <div className={`w-16 h-16 rounded-[1.5rem] border-2 flex items-center justify-center shadow-2xl ${actionLead.ai_score >= 70 ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-500 shadow-emerald-500/10' : actionLead.ai_score >= 40 ? 'border-amber-500/30 bg-amber-500/5 text-amber-500 shadow-amber-500/10' : 'border-red-500/30 bg-red-500/5 text-red-500 shadow-red-500/10'}`}>
+                                                                            <span className="text-2xl font-black">{actionLead.ai_score || 0}</span>
+                                                                        </div>
+                                                                        <div>
+                                                                            <p className="text-[9px] font-black text-white/20 uppercase tracking-[0.2em] leading-none mb-1.5">Temperatura</p>
+                                                                            <div className="flex items-center gap-2">
+                                                                                <div className={`w-2 h-2 rounded-full animate-pulse ${actionLead.ai_classification === 'hot' ? 'bg-rose-500' : actionLead.ai_classification === 'warm' ? 'bg-amber-500' : 'bg-sky-500'}`} />
+                                                                                <p className={`text-sm font-black uppercase tracking-widest ${actionLead.ai_classification === 'hot' ? 'text-rose-500' : actionLead.ai_classification === 'warm' ? 'text-amber-500' : 'text-sky-500'}`}>
+                                                                                    {actionLead.ai_classification?.toUpperCase() || 'WARM'}
+                                                                                </p>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+
+                                                                <div className="grid grid-cols-2 gap-4">
+                                                                    <div className="p-5 rounded-[2rem] bg-white/5 border border-white/5">
+                                                                        <p className="text-[8px] font-black text-white/20 uppercase tracking-widest mb-1.5 pl-1">Probabilidade</p>
+                                                                        <p className="text-xs font-black text-emerald-500 uppercase pl-1">{actionLead.behavioral_profile.closing_probability || 0}%</p>
+                                                                    </div>
+                                                                    <div className="p-5 rounded-[2rem] bg-white/5 border border-white/5">
+                                                                        <p className="text-[8px] font-black text-white/20 uppercase tracking-widest mb-1.5 pl-1">Urgência</p>
+                                                                        <p className={`text-xs font-black uppercase pl-1 ${actionLead.behavioral_profile.urgency === 'high' ? 'text-rose-500' : 'text-amber-500'}`}>
+                                                                            {actionLead.behavioral_profile.urgency === 'high' ? 'Alta' : 'Média'}
+                                                                        </p>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </section>
                                     </div>
                                 )}
 
-                                <footer className="mt-12 pt-10 border-t border-white/5 grid grid-cols-2 md:grid-cols-3 gap-6">
+                                <footer className="mt-8 pt-8 border-t border-white/5 grid grid-cols-2 md:grid-cols-4 gap-4">
                                     <a
                                         href={`tel:${actionLead.phone}`}
-                                        onClick={() => setTimeout(() => setIsSubmittingCallSummary(true), 1000)}
-                                        className="py-5 rounded-[2rem] bg-white/5 border border-white/10 text-[11px] font-black text-white hover:bg-white/10 transition-all flex items-center justify-center gap-3"
+                                        className="py-3.5 rounded-[2rem] bg-white/5 border border-white/10 text-[10px] font-black text-white hover:bg-white/10 transition-all flex items-center justify-center gap-2"
                                     >
-                                        <Phone size={18} /> LIGAR AGORA
+                                        <Phone size={16} /> LIGAR
                                     </a>
                                     <a
-                                        href={`https://wa.me/${actionLead.phone.replace(/\D/g, '')}?text=${encodeURIComponent(
-                                            `Olá ${actionLead.name.split(' ')[0]}, tudo bem? Sou ${userName.toLowerCase().includes('camila') ? 'a consultora' : 'o consultor'} ${userName.split(' ')[0]} da Manos Veículos. Vi seu interesse no ${actionLead.vehicle_interest || 'nosso estoque'} e gostaria de te ajudar!`
-                                        )}`}
+                                        href={`https://wa.me/${actionLead.phone.replace(/\D/g, '')}`}
                                         target="_blank"
                                         rel="noopener noreferrer"
-                                        className="py-5 rounded-[2rem] bg-emerald-600 text-white text-[11px] font-black shadow-xl shadow-emerald-500/20 hover:bg-emerald-500 transition-all flex items-center justify-center gap-3"
+                                        className="py-3.5 rounded-[2rem] bg-emerald-600 text-white text-[10px] font-black shadow-xl shadow-emerald-500/20 hover:bg-emerald-500 transition-all flex items-center justify-center gap-2"
                                     >
-                                        <MessageSquare size={18} /> ENVIAR WHATSAPP
+                                        <MessageSquare size={16} /> WHATSAPP
                                     </a>
                                     <button
                                         onClick={() => setIsFinishing(true)}
-                                        className="py-5 rounded-[2rem] bg-red-600/10 border border-red-600/20 text-red-500 text-[11px] font-black hover:bg-red-600 hover:text-white transition-all flex items-center justify-center gap-3 uppercase"
+                                        className="py-3.5 rounded-[2rem] bg-red-600/10 border border-red-600/20 text-red-500 text-[10px] font-black hover:bg-red-600 hover:text-white transition-all flex items-center justify-center gap-2 uppercase"
                                     >
-                                        Finalizar Atendimento
+                                        Finalizar
                                     </button>
                                     {userRole === 'admin' && (
                                         <button
                                             onClick={handleDeleteLead}
-                                            className="col-span-2 md:col-span-1 py-5 rounded-[2rem] bg-rose-950/20 border border-rose-500/20 text-rose-500 text-[11px] font-black hover:bg-rose-600 hover:text-white transition-all flex items-center justify-center gap-3 uppercase"
+                                            className="py-3.5 rounded-[2rem] bg-rose-950/20 border border-rose-500/20 text-rose-500 text-[10px] font-black hover:bg-rose-600 hover:text-white transition-all flex items-center justify-center gap-2 uppercase"
                                         >
-                                            <AlertCircle size={18} /> Excluir Lead
+                                            <AlertCircle size={16} /> Excluir
                                         </button>
                                     )}
                                 </footer>
@@ -2023,7 +2264,7 @@ function LeadsContent() {
                                                         ...newLeadData,
                                                         source: userName ? `Registro ${userName}` : 'Registro Manual',
                                                         ai_classification: 'warm',
-                                                        ai_score: 50,
+                                                        ai_score: 0,
                                                         status: 'attempt',
                                                         assigned_consultant_id: currentConsultantId || undefined,
                                                         valor_investimento: newLeadData.valor_investimento,
@@ -2059,28 +2300,30 @@ function LeadsContent() {
 
             {/* Toast Notification */}
             <AnimatePresence>
-                {toast.visible && (
-                    <motion.div
-                        initial={{ opacity: 0, y: 50, scale: 0.9 }}
-                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0, y: 20, scale: 0.9 }}
-                        className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[1000] flex items-center gap-4 px-8 py-5 rounded-[2.5rem] bg-[#0a0f1d] border border-white/10 shadow-[0_30px_60px_rgba(0,0,0,0.5)] backdrop-blur-xl"
-                    >
-                        <div className={`h-12 w-12 rounded-2xl flex items-center justify-center ${toast.type === 'success' ? 'bg-emerald-500/20 text-emerald-500' :
-                            toast.type === 'error' ? 'bg-red-500/20 text-red-500' :
-                                'bg-blue-500/20 text-blue-500'
-                            }`}>
-                            {toast.type === 'success' ? <BadgeCheck size={28} /> :
-                                toast.type === 'error' ? <AlertCircle size={28} /> :
-                                    <Sparkles size={28} />}
-                        </div>
-                        <div className="pr-4">
-                            <p className="text-[10px] font-black uppercase tracking-widest text-white/30 mb-0.5">Notificação Manos</p>
-                            <p className="text-base font-black text-white tracking-tight">{toast.message}</p>
-                        </div>
-                    </motion.div>
-                )}
-            </AnimatePresence>
+                {
+                    toast.visible && (
+                        <motion.div
+                            initial={{ opacity: 0, y: 50, scale: 0.9 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: 20, scale: 0.9 }}
+                            className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[1000] flex items-center gap-4 px-8 py-5 rounded-[2.5rem] bg-[#0a0f1d] border border-white/10 shadow-[0_30px_60px_rgba(0,0,0,0.5)] backdrop-blur-xl"
+                        >
+                            <div className={`h-12 w-12 rounded-2xl flex items-center justify-center ${toast.type === 'success' ? 'bg-emerald-500/20 text-emerald-500' :
+                                toast.type === 'error' ? 'bg-red-500/20 text-red-500' :
+                                    'bg-blue-500/20 text-blue-500'
+                                }`}>
+                                {toast.type === 'success' ? <BadgeCheck size={28} /> :
+                                    toast.type === 'error' ? <AlertCircle size={28} /> :
+                                        <Sparkles size={28} />}
+                            </div>
+                            <div className="pr-4">
+                                <p className="text-[10px] font-black uppercase tracking-widest text-white/30 mb-0.5">Notificação Manos</p>
+                                <p className="text-base font-black text-white tracking-tight">{toast.message}</p>
+                            </div>
+                        </motion.div>
+                    )
+                }
+            </AnimatePresence >
         </div >
     );
 }

@@ -16,6 +16,13 @@ export interface Campaign {
   ctr?: number;
   updated_at?: string;
   leads_manos_crm?: { count: number }[];
+  ai_analysis_result?: {
+    analise_critica: string;
+    saude_campanha: string;
+    gargalo_identificado: string;
+    proximos_passos: string[];
+    score_potencial: number;
+  };
 }
 
 export interface Consultant {
@@ -83,6 +90,12 @@ export interface Lead {
   };
   next_step?: string;
   consultants_manos_crm?: { name: string };
+
+  // New AI analysis fields
+  nivel_interesse?: string;
+  momento_compra?: string;
+  resumo_consultor?: string;
+  proxima_acao?: string;
 }
 
 export interface InventoryItem {
@@ -145,4 +158,10 @@ export interface DistributedLead {
   enviado: boolean;
   criado_em: string;
   ai_classification?: AIClassification;
+  ai_reason?: string;
+  nivel_interesse?: string;
+  momento_compra?: string;
+  resumo_consultor?: string;
+  proxima_acao?: string;
+  atualizado_em?: string;
 }

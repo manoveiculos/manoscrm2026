@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
+import { dataService } from '@/lib/dataService';
 import {
     Users,
     Shield,
@@ -12,7 +13,9 @@ import {
     Search,
     UserCheck,
     UserMinus,
-    AlertCircle
+    AlertCircle,
+    Target,
+    Zap
 } from 'lucide-react';
 
 interface Consultant {
@@ -23,6 +26,8 @@ interface Consultant {
     status: 'pending' | 'active' | 'blocked';
     role: 'admin' | 'consultant';
     created_at: string;
+    leads_total_count?: number;
+    sales_manos_crm?: { count: number }[];
 }
 
 export default function EquipePage() {
@@ -33,13 +38,8 @@ export default function EquipePage() {
     const fetchEquipe = async () => {
         setLoading(true);
         try {
-            const { data, error: dbError } = await supabase
-                .from('consultants_manos_crm')
-                .select('*')
-                .order('created_at', { ascending: false });
-
-            if (dbError) throw dbError;
-            setConsultants(data || []);
+            const data = await dataService.getConsultantPerformance();
+            setConsultants(data as any);
         } catch (err: unknown) {
             console.error("Erro ao buscar equipe:", err);
         } finally {
@@ -166,6 +166,23 @@ export default function EquipePage() {
                             <div>
                                 <h3 className="text-xl font-black text-white truncate">{consultant.name || 'Sem Nome'}</h3>
                                 <p className="text-sm font-medium text-white/30 truncate italic">{consultant.email}</p>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
+                                    <div className="flex items-center gap-2 mb-1">
+                                        <Zap size={12} className="text-blue-500" />
+                                        <span className="text-[10px] font-black text-white/20 uppercase tracking-widest">Leads</span>
+                                    </div>
+                                    <p className="text-2xl font-black text-white">{consultant.leads_total_count || 0}</p>
+                                </div>
+                                <div className="bg-white/5 rounded-2xl p-4 border border-white/5">
+                                    <div className="flex items-center gap-2 mb-1">
+                                        <Target size={12} className="text-emerald-500" />
+                                        <span className="text-[10px] font-black text-white/20 uppercase tracking-widest">Vendas</span>
+                                    </div>
+                                    <p className="text-2xl font-black text-white">{consultant.sales_manos_crm?.[0]?.count || 0}</p>
+                                </div>
                             </div>
 
                             <div className="grid grid-cols-2 gap-3 pt-4 border-t border-white/5">

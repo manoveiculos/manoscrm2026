@@ -6,6 +6,10 @@ import { NextResponse, type NextRequest } from 'next/server';
  * Compatível com Next.js padrão (middleware.ts) e ambientes customizados (proxy.ts).
  */
 export async function middleware(request: NextRequest) {
+    const timestamp = new Date().toISOString();
+    const debugPath = request.nextUrl.pathname;
+    console.log(`[${timestamp}] Middleware started for path: ${debugPath}`);
+
     let supabaseResponse = NextResponse.next({
         request,
     });
@@ -31,9 +35,16 @@ export async function middleware(request: NextRequest) {
         }
     );
 
+    console.log(`[${timestamp}] Supabase client created. Attempting to get user...`);
+
     // IMPORTANTE: getUser() é mais seguro que getSession() no middleware
     // pois verifica o token contra o banco de dados do Supabase.
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+
+    if (authError) {
+        console.error(`[${timestamp}] Supabase auth error:`, authError.message);
+    }
+    console.log(`[${timestamp}] User check completed. User found: ${!!user}`);
 
     const path = request.nextUrl.pathname;
     const isLoginPage = path === '/login';
@@ -58,6 +69,7 @@ export async function middleware(request: NextRequest) {
         return NextResponse.redirect(dashboardUrl);
     }
 
+    console.log(`[${timestamp}] Middleware finishing. Path: ${path}, User: ${!!user}`);
     return supabaseResponse;
 }
 

@@ -54,30 +54,45 @@ export async function POST(req: Request) {
             CONVERSA:
             ${chatText}
             
-            DIRETRIZES DE PONTUAÇÃO:
-            - Se o cliente NÃO demonstrou interesse claro, se a conversa foi muito curta ou se não há resumo possível, o score DEVE ser 0.
-            - O score vai de 0 a 100, onde 100 é intenção imediata de fechar negócio.
+            DIRETRIZES DE PONTUAÇÃO (SEJA RIGOROSO):
+            - O score vai de 0 a 100. NÃO use valores padrão (como 50). Seja preciso.
+            - 0-20: Descuriosidade, erro de contato, ou "descadastre-me".
+            - 21-45: Curiosidade vaga, sem intenção de visita ou prazo definido.
+            - 46-70: Interesse real, perguntou sobre preço/condições, mas sem pressa imediata.
+            - 71-90: Interesse alto, aceitou simulação, agendou ou demonstrou interesse em visitar.
+            - 91-100: Intenção imediata, pronto para fechar, documentos enviados ou vindo à loja hoje.
+            
+            CRITÉRIOS DE RIGOR:
+            - Urgência (Quer o carro para quando?)
+            - Poder de Compra (Tem entrada? Tem carro na troca?)
+            - Engajamento (Responde rápido? Faz perguntas específicas?)
+            - Intenção de Visita (Aceita vir à loja?)
+            
+            Se a conversa for insuficiente para uma análise séria, o score deve ser baixo (abaixo de 20) e a classificação COLD.
             
             EXTRAIA E RESPONDA EM JSON:
             {
               "classificacao": "HOT" | "WARM" | "COLD",
-              "score": number (0-100),
-              "estagio_funil": string (ex: 'Qualificação', 'Negociação'),
-              "proxima_acao": string (sugestão prática para o vendedor),
+              "score": number (deve ser um valor específico, ex: 67, 82, não 50),
+              "estagio_funil": "Qualificação" | "Apresentação" | "Negociação" | "Fechamento",
+              "proxima_acao": string (sugestão prática e direta para o vendedor),
               "probabilidade_fechamento": number (0-100),
-              "resumo_estrategico": string (resumo de 1 frase),
-              "resumo_detalhado": string (parágrafo detalhado com tudo o que foi extraído para histórico),
+              "resumo_estrategico": string (Uma frase de impacto para o consultor),
+              "resumo_detalhado": string (Resumo técnico completo para o histórico),
               
               "extracted_name": string | null,
               "vehicle_interest": string | null,
               "valor_investimento": string | null,
               "carro_troca": string | null,
               "metodo_compra": string | null,
-              "prazo_troca": string | null
+              "prazo_troca": string | null,
+              "behavioral_profile": {
+                "perfil": string, (ex: 'Analítico', 'Decidido', 'Inseguro')
+                "temperatura_emocional": string (ex: 'Calmo', 'Ansioso', 'Entusiasmado')
+              }
             }
             
-            Considere: Urgência, Interesse financeiro, Interesse em visita, Tempo de resposta, Clareza na intenção.
-            Retorne APENAS o JSON.`
+            Retorne APENAS o JSON. SEM blocos de código markdown.`
                 }
             ],
             response_format: { type: "json_object" }

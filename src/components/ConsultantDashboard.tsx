@@ -158,7 +158,6 @@ export function ConsultantDashboard({ consultantId, consultantName }: { consulta
                 <StatsCard
                     title="Meus Leads"
                     value={metrics?.leadCount || 0}
-                    trend={8.2}
                     icon={Users}
                     color="blue"
                     href="/leads?view=list"
@@ -166,7 +165,6 @@ export function ConsultantDashboard({ consultantId, consultantName }: { consulta
                 <StatsCard
                     title="Vendas (Mês)"
                     value={metrics?.salesCount || 0}
-                    trend={15.5}
                     icon={Target}
                     color="red"
                     href="/leads?view=kanban"
@@ -174,7 +172,8 @@ export function ConsultantDashboard({ consultantId, consultantName }: { consulta
                 <StatsCard
                     title="Agendamentos do Dia"
                     value={scheduledToday.length}
-                    trend={scheduledThisWeek.length}
+                    trend={upcomingScheduled.length > 0 ? undefined : 0}
+                    trendLabel={upcomingScheduled.length > 0 ? `${upcomingScheduled.length} próximos` : undefined}
                     icon={Calendar}
                     color="amber"
                     href="/leads?view=kanban"
@@ -182,7 +181,6 @@ export function ConsultantDashboard({ consultantId, consultantName }: { consulta
                 <StatsCard
                     title="Minha Conversão"
                     value={`${metrics?.conversionRate.toFixed(1) || '0.0'}%`}
-                    trend={12.4}
                     icon={TrendingUp}
                     color="emerald"
                 />

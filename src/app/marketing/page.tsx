@@ -10,9 +10,15 @@ import {
     Sparkles,
     Facebook,
     Chrome,
-    RefreshCcw
+    RefreshCcw,
+    BarChart3,
+    Zap,
+    MessageCircle,
+    Globe,
+    Play,
+    Youtube
 } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { dataService } from '@/lib/dataService';
 import { Campaign, MarketingReport, Recommendation } from '@/lib/types';
 
@@ -23,6 +29,35 @@ export default function MarketingPage() {
     const [searchTerm, setSearchTerm] = useState('');
     const [isSyncing, setIsSyncing] = useState(false);
     const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
+    const [analyzingId, setAnalyzingId] = useState<string | null>(null);
+
+    const handleAnalyze = async (campaign: Campaign) => {
+        setAnalyzingId(campaign.id);
+        try {
+            const sLeads = campaign.leads_manos_crm?.[0]?.count || 0;
+            const res = await fetch('/api/analyze-campaign-ai', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    campaign,
+                    leadsSummary: {
+                        total: sLeads,
+                        qualified: campaign.leads_manos_crm?.filter((l: any) => l.ai_classification === 'hot' || l.ai_classification === 'warm').length || 0,
+                        statusCounts: {}
+                    }
+                })
+            });
+            const data = await res.json();
+            if (data.success) {
+                setCampaigns(prev => prev.map(c => c.id === campaign.id ? { ...c, ai_analysis_result: data } : c));
+                setSelectedCampaign(prev => prev ? { ...prev, ai_analysis_result: data } : null);
+            }
+        } catch (err) {
+            console.error(err);
+        } finally {
+            setAnalyzingId(null);
+        }
+    };
 
     const loadData = async () => {
         try {
@@ -35,7 +70,6 @@ export default function MarketingPage() {
         } catch (err: unknown) {
             const error = err as Error;
             console.error("Error loading marketing data:", error);
-            alert(`Erro ao carregar dados: ${error.message || 'Erro desconhecido'}`);
         } finally {
             setLoading(false);
         }
@@ -43,462 +77,562 @@ export default function MarketingPage() {
 
     useEffect(() => {
         loadData().then(() => {
-            // Auto-trigger sync on load if credentials exist
-            const token = process.env.NEXT_PUBLIC_META_ACCESS_TOKEN;
-            const adAccountId = process.env.NEXT_PUBLIC_META_AD_ACCOUNT_ID;
-            if (token && adAccountId) {
-                handleSync();
-            }
+            // Sincronização automática inicial via servirdor
+            handleSync();
         });
     }, []);
 
     const handleSync = async () => {
         setIsSyncing(true);
         try {
-            const token = process.env.NEXT_PUBLIC_META_ACCESS_TOKEN;
-            const adAccountId = process.env.NEXT_PUBLIC_META_AD_ACCOUNT_ID;
+            const res = await fetch('/api/sync-meta', { method: 'POST' });
+            const data = await res.json();
 
-            if (!token || !adAccountId) {
-                throw new Error("Credenciais do Meta Ads não configuradas no .env.local");
+            if (data.success) {
+                await loadData();
+            } else {
+                console.error("Sync error:", data.error);
             }
-
-            const count = await dataService.syncMetaCampaigns(token, adAccountId);
-            console.log(`Synced ${count} campaigns`);
-            await loadData();
         } catch (err) {
             console.error("Sync failed:", err);
-            alert("Erro na sincronização. Verifique o console.");
         } finally {
             setIsSyncing(false);
         }
     };
 
-    const filteredCampaigns = campaigns.filter(c => {
-        const matchesSearch = (c.name || '').toLowerCase().includes(searchTerm.toLowerCase());
-        const isActive = c.status === 'active';
-        return matchesSearch && isActive;
-    });
+    const [selectedCategory, setSelectedCategory] = useState('Todas');
 
-    // --- MOTOR DE ANÁLISE IA (100% REAL - SEM DADOS INVENTADOS) ---
-    const totalClicks = campaigns.reduce((acc, c) => acc + (Number(c.link_clicks) || 0), 0);
-    const totalImpressions = campaigns.reduce((acc, c) => acc + (Number(c.impressions) || 0), 0);
-    const totalLeads = campaigns.reduce((acc, c) => acc + (c.leads_manos_crm?.[0]?.count || 0), 0);
-    const totalSpend = campaigns.reduce((acc, c) => acc + (Number(c.total_spend) || 0), 0);
+    const filteredCampaigns = campaigns
+        .filter(c => {
+            const matchesSearch = (c.name || '').toLowerCase().includes(searchTerm.toLowerCase());
 
-    // Cálculos de Performance
+            if (selectedCategory === 'Todas') return matchesSearch;
+
+            const platform = (c.platform || '').toLowerCase();
+            const category = selectedCategory.toLowerCase().replace(' ads', '');
+
+            // Lógica flexível para bater com as categorias do usuário
+            const matchesCategory = platform.includes(category);
+
+            return matchesSearch && matchesCategory;
+        })
+        .sort((a, b) => {
+            if (!a || !b) return 0;
+            // Sempre mostrar as ativas primeiro
+            if (a.status === 'active' && b.status !== 'active') return -1;
+            if (a.status !== 'active' && b.status === 'active') return 1;
+
+            // Dentro do mesmo status, mostrar as mais recentes primeiro
+            const dateA = new Date(a.updated_at || a.created_at || 0).getTime();
+            const dateB = new Date(b.updated_at || b.created_at || 0).getTime();
+            return dateB - dateA;
+        });
+
+    // --- IA ANALYTICS CORE ---
+    const totalClicks = filteredCampaigns.reduce((acc, c) => acc + (Number(c.link_clicks) || 0), 0);
+    const totalImpressions = filteredCampaigns.reduce((acc, c) => acc + (Number(c.impressions) || 0), 0);
+    const totalLeads = filteredCampaigns.reduce((acc, c) => acc + (c.leads_manos_crm?.[0]?.count || 0), 0);
+    const totalSpend = filteredCampaigns.reduce((acc, c) => acc + (Number(c.total_spend) || 0), 0);
+
     const avgCpl = totalLeads > 0 ? totalSpend / totalLeads : 0;
     const clickToLeadRate = totalClicks > 0 ? (totalLeads / totalClicks) * 100 : 0;
     const ctr = totalImpressions > 0 ? (totalClicks / totalImpressions) * 100 : 0;
 
-    // Saúde Geral do Funil (Baseado na conversão industrial: 1% - 5% é saudável para automotivo)
-    const funnelHealthScore = Math.min((clickToLeadRate / 3) * 10, 10); // Meta de 3% para nota 10
-    const healthPercentage = Math.min((funnelHealthScore / 10) * 100, 100);
+    const funnelHealthScore = Math.min((clickToLeadRate / 3) * 10, 10);
+    const healthPercentage = (funnelHealthScore / 10) * 100;
 
-    // Gerar resumo estratégico baseado nos dados sincronizados
     const dynamicAiSummary = totalClicks > 0
-        ? `Sua operação de marketing gerou ${totalImpressions.toLocaleString()} views. Destas, ${totalClicks.toLocaleString()} pessoas clicaram e geraram ${totalLeads} leads reais. Sua eficiência de conversão está em ${(clickToLeadRate).toFixed(1)}%, com custo médio de R$ ${avgCpl.toFixed(2)} por contato.`
-        : "Aguardando sincronização de dados reais do Meta Ads para iniciar análise estratégica.";
+        ? `Sua operação de marketing gerou ${totalImpressions.toLocaleString()} visualizações. Destas, ${totalClicks.toLocaleString()} pessoas se engajaram e geraram ${totalLeads} leads reais no CRM. Eficiência de ${(clickToLeadRate).toFixed(1)}%, com custo de R$ ${avgCpl.toFixed(2)} por lead.`
+        : "Aguardando sincronização de dados reais do Meta e Google para iniciar análise estratégica completa.";
 
-    // Gerar recomendações dinâmicas puramente baseadas em dados
-    const dynamicRecommendations = dailyReport?.recommendations || [
+    const recommendations = dailyReport?.recommendations || [
         {
-            title: ctr < 1 ? "⚠️ Criativo Saturado" : "✅ Atração Saudável",
-            action: ctr < 1 ? "Trocar Imagens/Vídeos" : "Manter Estratégia",
+            title: ctr < 1 ? "⚠️ CRIATIVO SATURADO" : "✅ ATRAÇÃO SAUDÁVEL",
+            action: ctr < 1 ? "TROCAR IMAGENS/VÍDEOS" : "MANTER ESTRATÉGIA",
             reason: ctr < 1
-                ? `O CTR está em ${ctr.toFixed(1)}%. Poucas pessoas que veem o anúncio estão clicando. Sugerimos novos criativos.`
-                : `Sua taxa de clique (${ctr.toFixed(1)}%) indica que o público se identifica com o anúncio.`
+                ? `O CTR de ${ctr.toFixed(1)}% está baixo. O público não está clicando nos anúncios atuais.`
+                : `Taxa de clique de ${ctr.toFixed(1)}% indica que o público se identifica com os criativos.`
         },
         {
-            title: avgCpl > 40 ? "💸 Alerta de Custo" : "🚀 Oportunidade de Escala",
-            action: avgCpl > 40 ? "Refinar Segmentação" : "Aumentar Verba",
-            reason: avgCpl > 40
-                ? "O custo por lead está acima da média sugerida. Tente restringir o público alvo."
-                : "Custo por contato excelente. Verba pode ser escalada para gerar mais volume."
+            title: avgCpl < 35 ? "🚀 OPORTUNIDADE DE ESCALA" : "💸 ALERTA DE CUSTO",
+            action: avgCpl < 35 ? "AUMENTAR VERBA" : "REFINAR SEGMENTAÇÃO",
+            reason: avgCpl < 35
+                ? "Custo por lead excelente. Recomendamos aumentar o investimento gradualmente."
+                : "O custo por lead está acima da média sugerida. Tente restringir o público alvo."
         }
     ];
 
     if (loading) {
         return (
-            <div className="flex h-[80vh] items-center justify-center">
+            <div className="flex h-[80vh] items-center justify-center bg-[#060606]">
                 <div className="h-12 w-12 border-4 border-red-500 border-t-transparent rounded-full animate-spin" />
             </div>
         );
     }
 
     return (
-        <div className="space-y-10 pb-20">
-            {/* Header */}
-            <header className="flex flex-col md:flex-row md:items-end justify-between gap-6">
-                <div className="space-y-2">
-                    <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 text-blue-400 w-fit text-[10px] font-bold uppercase tracking-wider border border-blue-500/10">
-                        <Sparkles size={12} className="animate-pulse" />
-                        Relatório de Inteligência Diária
-                    </div>
-                    <h1 className="text-5xl font-black tracking-tighter text-white font-outfit">
-                        Campaigns <span className="gradient-text">& Analytics</span>
-                    </h1>
-                    <p className="text-white/40 font-medium italic">
-                        {filteredCampaigns.length} campanhas ativas em análise estratégica.
-                        Última sincronização realizada.
-                    </p>
-                </div>
+        <div className="min-h-screen bg-[#010409] text-[#e6edf3] p-4 lg:p-8 space-y-8 pb-32 font-sans">
+            {/* Header Performance */}
+            <header className="flex flex-col md:flex-row md:items-end justify-between gap-8">
+                <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="flex items-center gap-2 mb-2"
+                >
+                    <div className="h-1.5 w-1.5 rounded-full bg-blue-500 animate-pulse" />
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-blue-400/80">Monitoramento em Tempo Real</span>
+                </motion.div>
 
-                <div className="flex items-center gap-3">
-                    <button
-                        onClick={handleSync}
-                        disabled={isSyncing}
-                        className={`px-6 py-3.5 rounded-2xl flex items-center gap-3 text-xs font-black uppercase tracking-widest transition-all ${isSyncing
-                            ? 'bg-white/5 text-white/20 cursor-not-allowed'
-                            : 'bg-red-600 text-white hover:bg-red-700 shadow-[0_8px_20px_rgba(220,38,38,0.3)] hover:scale-105 active:scale-95'
-                            }`}
-                    >
-                        <RefreshCcw size={16} className={isSyncing ? 'animate-spin' : ''} />
-                        {isSyncing ? 'Sincronizando...' : 'Sincronizar Dados Reais'}
-                    </button>
-                    <div className="relative group flex-1 md:flex-none">
-                        <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20 group-focus-within:text-blue-500 transition-colors" size={18} />
+                <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.1 }}
+                >
+                    <h1 className="text-2xl font-semibold tracking-tight text-[#f0f6fc]">
+                        Performance de Marketing
+                    </h1>
+                    <p className="text-[#8b949e] mt-1 text-sm">
+                        Dashboard consolidado de campanhas e análise preditiva.
+                    </p>
+                </motion.div>
+
+                <motion.div
+                    initial={{ opacity: 0, scale: 0.98 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ delay: 0.2 }}
+                    className="flex flex-wrap items-center gap-3"
+                >
+                    <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8b949e]" size={14} />
                         <input
                             type="text"
                             placeholder="Buscar campanha..."
-                            className="bg-white/5 border border-white/10 rounded-2xl pl-12 pr-6 py-3.5 text-sm w-full md:w-80 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-all font-medium text-white"
+                            className="bg-[#0d1117] border border-[#30363d] rounded-lg pl-9 pr-4 py-2 text-sm w-full md:w-64 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all text-[#c9d1d9] placeholder:text-[#484f58]"
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                         />
                     </div>
-                </div>
+
+                    <button
+                        onClick={handleSync}
+                        disabled={isSyncing}
+                        className={`px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-medium transition-all ${isSyncing
+                            ? 'bg-[#21262d] text-[#484f58] border border-[#30363d]'
+                            : 'bg-[#238636] hover:bg-[#2ea043] text-white'
+                            }`}
+                    >
+                        <RefreshCcw size={14} className={isSyncing ? 'animate-spin' : ''} />
+                        <span>{isSyncing ? 'Sincronizando' : 'Sincronizar'}</span>
+                    </button>
+                </motion.div>
             </header>
 
-            {/* Metrics Overview Grid */}
+            {/* KPI Cards Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                <div className="glass-card p-8 rounded-[2.5rem] bg-white/[0.02] border border-white/5 group hover:bg-white/[0.04] transition-all">
-                    <div className="flex items-center justify-between mb-4">
-                        <div className="h-12 w-12 rounded-2xl bg-blue-500/10 flex items-center justify-center text-blue-400 group-hover:scale-110 transition-transform">
-                            <TrendingUp size={24} />
+                {[
+                    { label: "Visualização Total (Meta)", value: totalImpressions.toLocaleString(), unit: "VISTAS", icon: <TrendingUp size={28} className="text-blue-400" />, status: "ATIVO", color: "blue" },
+                    { label: "Leads no CRM (Manos)", value: totalLeads.toString(), unit: "LEADS", icon: <Users size={28} className="text-purple-400" />, color: "purple" },
+                    { label: "Custo por Lead Médio", value: `R$ ${avgCpl.toFixed(2)}`, unit: "MÉDIA", icon: <Target size={28} className="text-red-400" />, color: "red" },
+                    { label: "Total Investido (Meta)", value: `R$ ${totalSpend.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, unit: "REAL", icon: <ArrowUpRight size={28} className="text-emerald-400" />, color: "emerald" }
+                ].map((kpi, idx) => (
+                    <motion.div
+                        key={kpi.label}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.3 + (idx * 0.1) }}
+                        className="relative p-5 rounded-xl bg-[#0d1117] border border-[#30363d] hover:border-[#8b949e]/30 transition-all shadow-sm"
+                    >
+                        <div className="flex items-center justify-between mb-4">
+                            <div className="text-[#8b949e]">
+                                {kpi.icon}
+                            </div>
+                            {kpi.status && (
+                                <span className="text-[10px] font-medium text-[#3fb950] bg-[#3fb950]/10 px-2 py-0.5 rounded-full border border-[#3fb950]/20">
+                                    {kpi.status}
+                                </span>
+                            )}
                         </div>
-                        <span className="text-[10px] font-black text-emerald-500 bg-emerald-500/10 px-3 py-1 rounded-lg uppercase tracking-wider">Ativo</span>
-                    </div>
-                    <p className="text-[10px] font-black uppercase text-white/30 tracking-[0.2em] mb-1">Visualização Total (Meta)</p>
-                    <div className="flex items-baseline gap-2">
-                        <h4 className="text-3xl lg:text-4xl font-black text-white font-outfit tracking-tighter">
-                            {totalImpressions.toLocaleString()}
-                        </h4>
-                        <span className="text-[10px] font-bold text-white/20 uppercase">Vistas</span>
-                    </div>
-                </div>
-
-                <div className="glass-card p-8 rounded-[2.5rem] bg-white/[0.02] border border-white/5 group hover:bg-white/[0.04] transition-all">
-                    <div className="flex items-center justify-between mb-4">
-                        <div className="h-12 w-12 rounded-2xl bg-purple-500/10 flex items-center justify-center text-purple-400 group-hover:scale-110 transition-transform">
-                            <Users size={24} />
+                        <p className="text-xs font-medium text-[#8b949e] mb-1">{kpi.label}</p>
+                        <div className="flex items-baseline gap-2">
+                            <h4 className="text-2xl font-semibold text-[#f0f6fc] tracking-tight">
+                                {kpi.value}
+                            </h4>
+                            <span className="text-[10px] font-medium text-[#484f58] uppercase tracking-wider">{kpi.unit}</span>
                         </div>
-                    </div>
-                    <p className="text-[10px] font-black uppercase text-white/30 tracking-[0.2em] mb-1">Leads no CRM (Manos)</p>
-                    <div className="flex items-baseline gap-2">
-                        <h4 className="text-4xl font-black text-white font-outfit tracking-tighter">
-                            {totalLeads}
-                        </h4>
-                        <span className="text-xs font-bold text-white/20 uppercase">Leads</span>
-                    </div>
-                </div>
-
-                <div className="glass-card p-8 rounded-[2.5rem] bg-white/[0.02] border border-white/5 group hover:bg-white/[0.04] transition-all">
-                    <div className="flex items-center justify-between mb-4">
-                        <div className="h-12 w-12 rounded-2xl bg-red-500/10 flex items-center justify-center text-red-500 group-hover:scale-110 transition-transform">
-                            <Target size={24} />
-                        </div>
-                    </div>
-                    <p className="text-[10px] font-black uppercase text-white/30 tracking-[0.2em] mb-1">Custo por Lead Médio</p>
-                    <div className="flex items-baseline gap-2">
-                        <h4 className="text-4xl font-black text-white font-outfit tracking-tighter">
-                            R$ {avgCpl.toFixed(2)}
-                        </h4>
-                    </div>
-                </div>
-
-                <div className="glass-card p-8 rounded-[2.5rem] bg-white/[0.02] border border-white/5 group hover:bg-white/[0.04] transition-all">
-                    <div className="flex items-center justify-between mb-4">
-                        <div className="h-12 w-12 rounded-2xl bg-emerald-500/10 flex items-center justify-center text-emerald-500 group-hover:scale-110 transition-transform">
-                            <ArrowUpRight size={24} />
-                        </div>
-                    </div>
-                    <p className="text-[10px] font-black uppercase text-white/30 tracking-[0.2em] mb-1">Total Investido (Meta)</p>
-                    <div className="flex items-baseline gap-2">
-                        <h4 className="text-4xl font-black text-white font-outfit tracking-tighter text-emerald-400">
-                            R$ {totalSpend.toLocaleString()}
-                        </h4>
-                    </div>
-                </div>
+                    </motion.div>
+                ))}
             </div>
 
-            {/* IA Daily Insight Section */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-                <div className="lg:col-span-8 glass-card p-10 bg-gradient-to-br from-blue-600/5 to-transparent border-blue-500/10 rounded-[3rem] relative overflow-hidden group border border-white/5">
-                    <div className="relative z-10 space-y-6">
-                        <div className="flex items-center gap-4">
-                            <div className="h-12 w-12 rounded-2xl bg-blue-600 flex items-center justify-center shadow-lg shadow-blue-500/50">
-                                <Sparkles size={24} className="text-white" />
+            {/* AI Strategic Analysis Section */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-stretch">
+                <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.7 }}
+                    className="lg:col-span-8 p-6 rounded-xl bg-[#0d1117] border border-[#30363d] flex flex-col justify-between"
+                >
+                    <div className="relative z-10">
+                        <div className="flex items-center gap-3 mb-6">
+                            <div className="h-10 w-10 rounded-lg bg-blue-500/10 flex items-center justify-center border border-blue-500/20">
+                                <Sparkles size={18} className="text-blue-400" />
                             </div>
                             <div>
-                                <h2 className="text-2xl font-black text-white font-outfit tracking-tight">Análise Estratégica da IA</h2>
-                                <p className="text-xs font-bold text-white/30 uppercase tracking-[0.2em] mt-0.5">Relatório das últimas 24h</p>
+                                <h2 className="text-lg font-semibold text-[#f0f6fc]">Análise de IA</h2>
+                                <p className="text-[10px] text-[#8b949e] uppercase tracking-wider">Metadados Processados • 24h</p>
                             </div>
                         </div>
 
-                        <p className="text-lg font-medium text-white/70 leading-relaxed italic border-l-2 border-blue-500 pl-6">
+                        <blockquote className="text-lg font-medium text-[#c9d1d9] leading-relaxed border-l-2 border-blue-500 pl-4 mb-8">
                             &quot;{dailyReport?.summary || dynamicAiSummary}&quot;
-                        </p>
+                        </blockquote>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4">
-                            {dynamicRecommendations.map((rec: Recommendation, i: number) => (
-                                <div key={i} className="p-5 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/[0.08] transition-all cursor-pointer group/item">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {recommendations.map((rec, i) => (
+                                <div key={i} className="p-4 rounded-lg bg-[#161b22] border border-[#30363d] hover:border-blue-500/50 transition-all group/item">
                                     <div className="flex justify-between items-start mb-2">
-                                        <h4 className="font-bold text-white group-hover/item:text-blue-400 transition-colors uppercase text-[10px] tracking-widest">{rec.title}</h4>
-                                        <ArrowUpRight size={16} className="text-white/20 group-hover/item:text-blue-500 transition-colors" />
+                                        <h4 className="text-[10px] font-bold text-[#8b949e] uppercase tracking-wider">{rec.title}</h4>
+                                        <ArrowUpRight size={14} className="text-[#484f58] group-hover/item:text-blue-500 transition-colors" />
                                     </div>
-                                    <p className="text-xs font-black text-blue-500 uppercase tracking-widest mb-2">{rec.action}</p>
-                                    <p className="text-[11px] text-white/40 leading-relaxed">{rec.reason}</p>
+                                    <p className="text-sm font-semibold text-blue-400 mb-1">{rec.action}</p>
+                                    <p className="text-[12px] text-[#8b949e] leading-normal">{rec.reason}</p>
                                 </div>
                             ))}
                         </div>
                     </div>
-                </div>
+                </motion.div>
 
-                <div className="lg:col-span-4 space-y-6">
-                    <div className="glass-card p-8 rounded-[2rem] lg:rounded-[2.5rem] bg-emerald-500/5 border border-emerald-500/10 h-full flex flex-col justify-center">
-                        <p className="text-[10px] font-black uppercase text-emerald-500 tracking-[0.3em] mb-4">Saúde do Funil</p>
-                        <div className="flex items-baseline gap-2">
-                            <span className="text-5xl lg:text-6xl font-black text-white font-outfit tracking-tighter">
+                <motion.div
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.8 }}
+                    className="lg:col-span-4 p-6 rounded-xl bg-[#0d1117] border border-[#30363d] flex flex-col justify-between"
+                >
+                    <div>
+                        <p className="text-[10px] font-bold text-[#8b949e] uppercase tracking-wider mb-6">Eficiência Global</p>
+                        <div className="flex items-baseline gap-2 mb-2">
+                            <span className="text-5xl font-bold text-[#f0f6fc] tracking-tight">
                                 {funnelHealthScore.toFixed(1)}
                             </span>
-                            <span className="text-xl lg:text-2xl font-black text-emerald-500 tracking-tighter italic">/10</span>
+                            <span className="text-lg font-semibold text-[#3fb950]">/10</span>
                         </div>
-                        <p className="text-xs font-bold text-white/40 mt-4 leading-relaxed">
-                            Pontuação baseada na taxa de conversão real entre visualizações e leads.
+                        <p className="text-[12px] text-[#484f58] leading-tight">
+                            Score de conversão processado via IA.
                         </p>
-                        <div className="mt-6 h-2 w-full bg-white/5 rounded-full overflow-hidden">
-                            <div
-                                className="h-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)] transition-all duration-1000"
-                                style={{ width: `${healthPercentage}%` }}
+                    </div>
+
+                    <div className="space-y-4 mt-8">
+                        <div className="h-2 w-full bg-[#161b22] rounded-full overflow-hidden border border-[#30363d]">
+                            <motion.div
+                                initial={{ width: 0 }}
+                                animate={{ width: `${healthPercentage}%` }}
+                                transition={{ duration: 1.5, ease: "easeOut" }}
+                                className="h-full bg-blue-500 rounded-full shadow-[0_0_10px_rgba(59,130,246,0.3)]"
                             />
                         </div>
+                        <div className="flex justify-between text-[10px] font-bold text-[#484f58] tracking-widest uppercase">
+                            <span>Otimizar</span>
+                            <span>Escalar</span>
+                        </div>
                     </div>
-                </div>
+                </motion.div>
             </div>
 
-            {/* Campaign Table */}
-            <div className="glass-card rounded-[2.5rem] overflow-hidden border border-white/5 shadow-2xl">
-                <div className="p-10 border-b border-white/5 bg-white/[0.01]">
-                    <h3 className="text-xl font-black text-white uppercase tracking-wider flex items-center gap-3 font-outfit">
-                        <Target size={22} className="text-red-500 shadow-[0_0_15px_rgba(239,68,68,0.4)]" />
-                        Performance Real por Campanha
+            {/* Campaigns Table / List */}
+            <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.9 }}
+                className="flex flex-wrap gap-2 mb-6"
+            >
+                {['Todas', 'Meta Ads', 'Google Ads', 'TikTok', 'Youtube', 'Whatsapp'].map((plat) => (
+                    <button
+                        key={plat}
+                        onClick={() => setSelectedCategory(plat)}
+                        className={`px-4 py-2 rounded-lg text-xs font-medium transition-all border ${selectedCategory === plat
+                            ? 'bg-[#21262d] border-[#8b949e] text-[#f0f6fc]'
+                            : 'bg-transparent border-[#30363d] text-[#8b949e] hover:bg-[#161b22] hover:border-[#484f58]'
+                            }`}
+                    >
+                        {plat}
+                    </button>
+                ))}
+            </motion.div>
+
+            <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 1 }}
+                className="bg-[#0d1117] border border-[#30363d] rounded-xl overflow-hidden shadow-sm"
+            >
+                <div className="px-6 py-4 border-b border-[#30363d] bg-[#161b22]/50 flex items-center justify-between">
+                    <h3 className="text-sm font-semibold text-[#f0f6fc] flex items-center gap-2">
+                        <BarChart3 size={16} className="text-[#8b949e]" />
+                        Inventário de Campanhas
                     </h3>
                 </div>
+
                 <div className="overflow-x-auto">
                     <table className="w-full text-left border-collapse">
                         <thead>
-                            <tr className="border-b border-white/5 text-[10px] uppercase tracking-[0.25em] text-white/30 font-black">
-                                <th className="px-10 py-6">Campanha</th>
-                                <th className="px-6 py-6 font-outfit text-blue-400">Visualização do Anúncio</th>
-                                <th className="px-6 py-6 font-outfit text-emerald-500">Sucesso (Leads CRM)</th>
-                                <th className="px-6 py-6">Investimento</th>
-                                <th className="px-10 py-6 text-right">Análise Avançada</th>
+                            <tr className="border-b border-[#30363d] text-[10px] uppercase tracking-wider text-[#8b949e] font-semibold bg-[#161b22]/30">
+                                <th className="px-6 py-3">Campanha</th>
+                                <th className="px-4 py-3">Impacto</th>
+                                <th className="px-4 py-3">Engajamento</th>
+                                <th className="px-4 py-3">Conversão</th>
+                                <th className="px-4 py-3">Investimento</th>
+                                <th className="px-6 py-3 text-right">Ações</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-white/5">
                             {filteredCampaigns.length === 0 ? (
                                 <tr>
-                                    <td colSpan={5} className="px-10 py-24 text-center text-white/10 italic font-medium">
-                                        Nenhuma campanha ativa encontrada. Sincronize com o Meta Ads no botão acima.
+                                    <td colSpan={6} className="px-12 py-32 text-center">
+                                        <div className="flex flex-col items-center gap-4 text-white/10 italic">
+                                            <Zap size={48} />
+                                            <p className="text-xl font-medium">Nenhuma campanha ativa detectada no momento.</p>
+                                        </div>
                                     </td>
                                 </tr>
                             ) : filteredCampaigns.map((camp, index) => {
                                 const leadCount = camp.leads_manos_crm?.[0]?.count || 0;
-                                const isGoogle = camp.platform?.toLowerCase().includes('google');
+                                const plat = (camp.platform || '').toLowerCase();
+                                const isGoogle = plat.includes('google');
+                                const isWhatsApp = plat.includes('whatsapp');
+                                const status = camp.status === 'active' ? 'active' : 'paused';
+
+                                const showSeparator = index === 0 || filteredCampaigns[index - 1].status !== camp.status;
 
                                 return (
-                                    <motion.tr
-                                        key={camp.id}
-                                        initial={{ opacity: 0, y: 15 }}
-                                        animate={{ opacity: 1, y: 0 }}
-                                        transition={{ delay: index * 0.05 }}
-                                        className="group hover:bg-white/[0.04] transition-all cursor-pointer"
-                                        onClick={() => setSelectedCampaign(camp)}
-                                    >
-                                        <td className="px-10 py-8">
-                                            <div className="flex items-center gap-5">
-                                                <div className={`h-14 w-14 rounded-2xl flex items-center justify-center border shadow-xl ${isGoogle ? 'bg-blue-500/10 border-blue-500/20 text-blue-400' : 'bg-blue-600/10 border-blue-600/20 text-white'}`}>
-                                                    {isGoogle ? <Chrome size={24} /> : <Facebook size={24} />}
-                                                </div>
-                                                <div>
-                                                    <p className="font-bold text-lg text-white group-hover:text-blue-400 transition-colors uppercase tracking-tight">{camp.name}</p>
-                                                    <div className="flex items-center gap-2 mt-1">
-                                                        <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                                                        <p className="text-[10px] font-black text-white/20 uppercase tracking-[0.2em]">Monitoramento Ativo</p>
+                                    <React.Fragment key={camp.id}>
+                                        {showSeparator && (
+                                            <tr>
+                                                <td colSpan={6} className="px-6 py-2 bg-[#161b22]/20 border-b border-[#30363d]">
+                                                    <div className="flex items-center gap-2">
+                                                        <div className={`h-1.5 w-1.5 rounded-full ${status === 'active' ? 'bg-[#3fb950]' : 'bg-[#484f58]'}`} />
+                                                        <span className="text-[10px] font-bold uppercase tracking-wider text-[#8b949e]">
+                                                            {status === 'active' ? 'Ativas' : 'Pausadas'}
+                                                        </span>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        )}
+                                        <motion.tr
+                                            key={camp.id}
+                                            initial={{ opacity: 0 }}
+                                            animate={{ opacity: 1 }}
+                                            transition={{ delay: 1 + (index * 0.05) }}
+                                            className="group hover:bg-[#161b22]/50 transition-all cursor-pointer border-b border-[#30363d]/50"
+                                            onClick={() => setSelectedCampaign(camp)}
+                                        >
+                                            <td className="px-6 py-4">
+                                                <div className="flex items-center gap-3">
+                                                    <div className={`h-8 w-8 rounded-lg flex items-center justify-center border ${isGoogle ? 'bg-blue-500/10 border-blue-500/20 text-blue-400' :
+                                                        isWhatsApp ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500' :
+                                                            plat.includes('tiktok') ? 'bg-[#161b22] border-[#30363d] text-[#f0f6fc]' :
+                                                                plat.includes('youtube') ? 'bg-red-500/10 border-red-500/20 text-red-500' :
+                                                                    'bg-blue-600/10 border-blue-600/20 text-blue-600'
+                                                        }`}>
+                                                        {isGoogle ? <Globe size={14} /> :
+                                                            isWhatsApp ? <MessageCircle size={14} /> :
+                                                                plat.includes('tiktok') ? <Play size={14} /> :
+                                                                    plat.includes('youtube') ? <Youtube size={14} /> :
+                                                                        <Facebook size={14} />}
+                                                    </div>
+                                                    <div>
+                                                        <p className="font-semibold text-sm text-[#c9d1d9] group-hover:text-blue-400 transition-colors tracking-tight">{camp.name}</p>
+                                                        <p className="text-[10px] text-[#8b949e] uppercase tracking-wider">{camp.platform}</p>
                                                     </div>
                                                 </div>
-                                            </div>
-                                        </td>
-                                        <td className="px-6 py-8">
-                                            <div className="flex flex-col">
-                                                <span className="text-xl font-black text-blue-400 font-outfit tracking-tight">{Number(camp.impressions || 0).toLocaleString()}</span>
-                                                <span className="text-[9px] font-bold text-white/20 uppercase tracking-widest mt-1">Impresões Totais</span>
-                                            </div>
-                                        </td>
-                                        <td className="px-6 py-8">
-                                            <div className="flex flex-col">
-                                                <span className="text-2xl font-black text-white font-outfit tracking-tight">{leadCount}</span>
-                                                <span className="text-[9px] font-bold text-emerald-500/50 uppercase tracking-widest mt-1">Leads Manos CRM</span>
-                                            </div>
-                                        </td>
-                                        <td className="px-6 py-8 font-medium">
-                                            <p className="text-sm font-black text-white/60">R$ {Number(camp.total_spend || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
-                                        </td>
-                                        <td className="px-10 py-8 text-right">
-                                            <button className="px-6 py-2.5 rounded-xl bg-white/5 border border-white/10 text-[10px] font-black uppercase tracking-widest text-white/40 group-hover:text-blue-400 group-hover:border-blue-500/40 group-hover:bg-blue-500/5 transition-all">
-                                                Dicas da IA
-                                            </button>
-                                        </td>
-                                    </motion.tr>
+                                            </td>
+                                            <td className="px-4 py-4">
+                                                <div className="flex flex-col">
+                                                    <span className="text-sm font-semibold text-[#f0f6fc]">{Number(camp.impressions || 0).toLocaleString()}</span>
+                                                    <span className="text-[10px] text-[#8b949e] uppercase tracking-wider">VISITAS</span>
+                                                </div>
+                                            </td>
+                                            <td className="px-4 py-4">
+                                                <div className="flex flex-col">
+                                                    <span className="text-sm font-semibold text-[#f0f6fc]">{Number(camp.link_clicks || 0).toLocaleString()}</span>
+                                                    <span className="text-[10px] text-[#8b949e] uppercase tracking-wider">CLIQUES</span>
+                                                </div>
+                                            </td>
+                                            <td className="px-4 py-4">
+                                                <div className="flex flex-col">
+                                                    <span className="text-sm font-bold text-[#3fb950]">{leadCount}</span>
+                                                    <span className="text-[10px] text-[#8b949e] uppercase tracking-wider">LEADS</span>
+                                                </div>
+                                            </td>
+                                            <td className="px-4 py-4">
+                                                <div className="flex flex-col">
+                                                    <span className="text-sm font-semibold text-[#f0f6fc]">R$ {Number(camp.total_spend || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                                </div>
+                                            </td>
+                                            <td className="px-6 py-4 text-right">
+                                                <button className="px-3 py-1.5 rounded-lg bg-[#21262d] border border-[#30363d] text-[10px] font-bold uppercase tracking-wider text-[#8b949e] hover:border-blue-500 hover:text-blue-500 transition-all">
+                                                    ANALISAR
+                                                </button>
+                                            </td>
+                                        </motion.tr>
+                                    </React.Fragment>
                                 );
                             })}
                         </tbody>
                     </table>
                 </div>
-            </div>
+            </motion.div>
 
-            {/* Selected Campaign Analysis Modal */}
-            {selectedCampaign && (() => {
-                const sLeads = selectedCampaign.leads_manos_crm?.[0]?.count || 0;
-                const sClicks = Number(selectedCampaign.link_clicks) || 0;
-                const sSpend = Number(selectedCampaign.total_spend) || 0;
-                const sCpl = sLeads > 0 ? sSpend / sLeads : sSpend;
-                const sConv = sClicks > 0 ? (sLeads / sClicks) * 100 : 0;
-                const sHealth = Math.min((sConv / 3) * 10, 10);
+            {/* Full Analysis Modal */}
+            <AnimatePresence>
+                {selectedCampaign && (() => {
+                    const sLeads = selectedCampaign.leads_manos_crm?.[0]?.count || 0;
+                    const sClicks = Number(selectedCampaign.link_clicks) || 0;
+                    const sSpend = Number(selectedCampaign.total_spend) || 0;
+                    const sCpl = sLeads > 0 ? sSpend / sLeads : sSpend;
+                    const sConv = sClicks > 0 ? (sLeads / sClicks) * 100 : 0;
+                    const sHealth = Math.min((sConv / 3) * 10, 10);
+                    const isGoogle = selectedCampaign.platform?.toLowerCase().includes('google');
+                    const isWhatsApp = selectedCampaign.platform?.toLowerCase().includes('whatsapp');
 
-                return (
-                    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 lg:p-10 pointer-events-none">
-                        <motion.div
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            className="absolute inset-0 bg-black/95 backdrop-blur-xl pointer-events-auto"
-                            onClick={() => setSelectedCampaign(null)}
-                        />
-                        <motion.div
-                            initial={{ scale: 0.9, opacity: 0, y: 30 }}
-                            animate={{ scale: 1, opacity: 1, y: 0 }}
-                            className="relative w-full max-w-5xl glass-card bg-zinc-950 border border-white/10 rounded-[2rem] lg:rounded-[4rem] overflow-hidden shadow-[0_60px_120px_rgba(0,0,0,0.8)] pointer-events-auto max-h-[90vh] overflow-y-auto"
-                        >
-                            <div className="p-6 lg:p-10 border-b border-white/5 flex items-center justify-between bg-white/[0.01]">
-                                <div className="flex items-center gap-4 lg:gap-6">
-                                    <div className="h-10 w-10 lg:h-14 lg:w-14 rounded-2xl bg-blue-600/20 flex items-center justify-center text-blue-400 border border-blue-500/20 shadow-lg shrink-0">
-                                        <Facebook size={24} />
-                                    </div>
-                                    <div className="min-w-0">
-                                        <h3 className="text-xl lg:text-3xl font-black text-white tracking-tighter uppercase font-outfit truncate">
-                                            {selectedCampaign.name}
-                                        </h3>
-                                        <p className="text-[8px] lg:text-[10px] font-black text-blue-500 uppercase tracking-[0.3em]">Insights Reais baseados em dados</p>
-                                    </div>
-                                </div>
-                                <button
-                                    onClick={() => setSelectedCampaign(null)}
-                                    className="h-10 w-10 lg:h-12 lg:w-12 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-white/40 hover:text-white hover:bg-red-500 transition-all group/close shrink-0"
-                                >
-                                    <RefreshCcw size={18} className="rotate-45 group-hover/close:rotate-0 transition-transform" />
-                                </button>
-                            </div>
+                    const aiInsights = selectedCampaign.ai_analysis_result ? [
+                        { label: 'Saúde', value: selectedCampaign.ai_analysis_result.saude_campanha, type: 'positive' },
+                        { label: 'Gargalo', value: selectedCampaign.ai_analysis_result.gargalo_identificado, type: 'neutral' },
+                        { label: 'Ação', value: selectedCampaign.ai_analysis_result.analise_critica.substring(0, 100) + '...', type: 'neutral' }
+                    ] : [
+                        { label: 'Status', value: 'Aguardando processamento de dados do CRM...', type: 'neutral' }
+                    ];
 
-                            <div className="p-6 lg:p-12 grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-10">
-                                <div className="space-y-6 lg:space-y-8">
-                                    <div className="p-6 lg:p-8 rounded-[2rem] bg-white/[0.03] border border-white/5 relative group hover:bg-white/[0.05] transition-all">
-                                        <div className="absolute top-6 right-6 lg:right-8 text-blue-500/20 group-hover:text-blue-500/40 transition-colors">
-                                            <Facebook size={24} />
+                    return (
+                        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 lg:p-20">
+                            <motion.div
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                exit={{ opacity: 0 }}
+                                className="absolute inset-0 bg-black/98 backdrop-blur-3xl"
+                                onClick={() => setSelectedCampaign(null)}
+                            />
+                            <motion.div
+                                initial={{ scale: 0.98, opacity: 0, y: 10 }}
+                                animate={{ scale: 1, opacity: 1, y: 0 }}
+                                exit={{ scale: 0.98, opacity: 0, y: 10 }}
+                                className="relative w-full max-w-6xl h-full max-h-[90vh] bg-[#010409] border border-[#30363d] rounded-xl overflow-hidden shadow-2xl flex flex-col font-sans"
+                            >
+                                <div className="px-8 py-4 border-b border-[#30363d] flex items-center justify-between bg-[#0d1117]">
+                                    <div className="flex items-center gap-4">
+                                        <div className={`h-10 w-10 rounded-lg flex items-center justify-center border ${isGoogle ? 'bg-blue-500/10 border-blue-500/20 text-blue-400' :
+                                            isWhatsApp ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500' :
+                                                'bg-[#161b22] border-[#30363d] text-[#f0f6fc]'
+                                            }`}>
+                                            {isGoogle ? <Globe size={18} /> :
+                                                isWhatsApp ? <MessageCircle size={18} /> :
+                                                    <Facebook size={18} />}
                                         </div>
-                                        <p className="text-[11px] font-black text-white/30 uppercase tracking-[0.25em] mb-4">Vistas do Anúncio</p>
-                                        <div className="flex items-baseline gap-2">
-                                            <span className="text-4xl lg:text-5xl font-black text-blue-400 font-outfit tracking-tighter">{Number(selectedCampaign.impressions || 0).toLocaleString()}</span>
-                                        </div>
-                                        <p className="text-[10px] text-white/40 mt-6 leading-relaxed font-bold italic border-l border-white/10 pl-3">
-                                            Frequência: Quantas vezes seu anúncio apareceu para as pessoas.
-                                        </p>
-                                    </div>
-
-                                    <div className="p-6 lg:p-8 rounded-[2rem] bg-white/[0.03] border border-white/5 flex flex-col justify-center min-h-[120px]">
-                                        <p className="text-[11px] font-black text-white/30 uppercase tracking-[0.25em] mb-2">Engajamento (Cliques)</p>
-                                        <div className="text-3xl lg:text-4xl font-black text-white font-outfit tracking-tighter">
-                                            {Number(selectedCampaign.link_clicks || 0).toLocaleString()}
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className="space-y-6 lg:space-y-8">
-                                    <div className="p-6 lg:p-8 rounded-[2rem] bg-emerald-500/5 border border-emerald-500/10 relative group hover:bg-emerald-500/[0.08] transition-all">
-                                        <div className="absolute top-6 right-6 lg:right-8 text-emerald-500/20 group-hover:text-emerald-500/40 transition-colors">
-                                            <TrendingUp size={24} />
-                                        </div>
-                                        <p className="text-[11px] font-black text-emerald-500 uppercase tracking-[0.25em] mb-4">Sucesso (Leads CRM)</p>
-                                        <div className="flex items-baseline gap-2">
-                                            <span className="text-4xl lg:text-5xl font-black text-white font-outfit tracking-tighter">{sLeads}</span>
-                                        </div>
-                                        <p className="text-[10px] text-white/40 mt-6 leading-relaxed font-bold italic border-l border-emerald-500/30 pl-3">
-                                            Conversão: Clientes reais que entraram no seu CRM para atendimento.
-                                        </p>
-                                    </div>
-
-                                    <div className="p-6 lg:p-8 rounded-[2rem] bg-white/[0.03] border border-white/5 flex flex-col justify-center min-h-[120px]">
-                                        <p className="text-[11px] font-black text-purple-400 uppercase tracking-[0.25em] mb-2">Custo por Lead (CPL)</p>
-                                        <div className="text-3xl lg:text-4xl font-black text-white font-outfit tracking-tighter">
-                                            R$ {sCpl.toFixed(2)}
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className="p-6 lg:p-10 rounded-[2rem] lg:rounded-[3rem] bg-blue-600/5 border border-blue-500/15 flex flex-col justify-between shadow-inner relative overflow-hidden group">
-                                    <div className="absolute -bottom-10 -right-10 text-white/[0.02] group-hover:text-blue-500/[0.05] transition-all">
-                                        <Sparkles size={150} />
-                                    </div>
-                                    <div className="relative z-10">
-                                        <h4 className="text-base font-black text-white uppercase tracking-widest flex items-center gap-3 mb-6">
-                                            <Sparkles size={20} className="text-blue-500 shrink-0" />
-                                            Análise dos Dados (IA)
-                                        </h4>
-                                        <div className="space-y-4 lg:space-y-6">
-                                            <p className="text-sm font-medium text-white/70 leading-relaxed italic border-l-2 border-blue-500 pl-4 bg-blue-500/5 py-4 rounded-r-xl">
-                                                {sLeads === 0
-                                                    ? `Esta campanha teve ${Number(selectedCampaign.impressions).toLocaleString()} visualizações. A ausência de leads no CRM sugere uma falha técnica no link ou falta de atratividade na oferta.`
-                                                    : `Com ${sLeads} leads gerados a um custo de R$ ${sCpl.toFixed(2)}, seu desempenho está ${sCpl < 30 ? 'excelente' : 'estável'}.`
-                                                }
-                                            </p>
-
-                                            <div className="space-y-3 pt-2">
-                                                <p className="text-[10px] font-black text-white uppercase tracking-wider opacity-30">Ação Recomendada:</p>
-                                                <p className="text-[10px] font-bold text-white/60 bg-white/5 p-4 rounded-xl border border-white/5 leading-relaxed">
-                                                    {sCpl < 35
-                                                        ? "Otimizar orçamento para escala imediata. O custo está abaixo do teto operacional."
-                                                        : "Aguardar mais 24h de dados para validar se o custo estabiliza abaixo da meta."}
-                                                </p>
+                                        <div>
+                                            <h3 className="text-lg font-semibold text-[#f0f6fc] tracking-tight">
+                                                {selectedCampaign.name}
+                                            </h3>
+                                            <div className="flex items-center gap-2">
+                                                <div className="h-1.5 w-1.5 rounded-full bg-blue-500 animate-pulse" />
+                                                <p className="text-[10px] font-bold text-[#8b949e] uppercase tracking-wider">Monitoramento Enterprise</p>
                                             </div>
                                         </div>
                                     </div>
+                                    <button
+                                        onClick={() => setSelectedCampaign(null)}
+                                        className="h-8 w-8 rounded-lg bg-[#21262d] border border-[#30363d] flex items-center justify-center text-[#8b949e] hover:text-[#f0f6fc] hover:bg-[#30363d] transition-all"
+                                    >
+                                        <RefreshCcw size={14} className="rotate-45" />
+                                    </button>
+                                </div>
 
-                                    <div className="relative z-10 pt-8 mt-6 lg:mt-10 border-t border-white/5">
-                                        <div className="flex items-center justify-between text-[10px] font-black uppercase text-white/30 tracking-widest mb-3">
-                                            <span>Performance Real</span>
-                                            <span className="text-blue-400">{sHealth.toFixed(1)}/10</span>
+                                <div className="flex-1 overflow-y-auto p-8 grid grid-cols-1 lg:grid-cols-3 gap-8 bg-[#0d1117]/30">
+                                    <div className="space-y-6">
+                                        <div className="p-6 rounded-lg bg-[#0d1117] border border-[#30363d] relative overflow-hidden">
+                                            <p className="text-[10px] font-bold text-[#8b949e] uppercase tracking-wider mb-6">Volume de Alcance</p>
+                                            <h4 className="text-4xl font-bold text-[#f0f6fc] tracking-tight">
+                                                {Number(selectedCampaign.impressions || 0).toLocaleString()}
+                                            </h4>
+                                            <p className="text-[11px] text-[#484f58] mt-4 border-t border-[#30363d] pt-4">
+                                                Impressões totais processadas via API.
+                                            </p>
                                         </div>
-                                        <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
-                                            <div
-                                                className="h-full bg-gradient-to-r from-blue-600 to-blue-400 shadow-[0_0_15px_rgba(59,130,246,0.5)] transition-all duration-1000"
-                                                style={{ width: `${sHealth * 10}%` }}
-                                            />
+                                        <div className="p-6 rounded-lg bg-[#0d1117] border border-[#30363d]">
+                                            <p className="text-[10px] font-bold text-[#8b949e] uppercase tracking-wider mb-4">CLIQUES TOTAIS</p>
+                                            <h4 className="text-3xl font-bold text-[#f0f6fc] tracking-tight">
+                                                {Number(selectedCampaign.link_clicks || 0).toLocaleString()}
+                                            </h4>
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-6">
+                                        <div className="p-6 rounded-lg bg-[#0d1117] border border-[#3fb950]/20 relative overflow-hidden">
+                                            <div className="absolute top-4 right-4 text-[#3fb950]/10">
+                                                <TrendingUp size={24} />
+                                            </div>
+                                            <p className="text-[10px] font-bold text-[#3fb950] uppercase tracking-wider mb-6">Conversões CRM</p>
+                                            <h4 className="text-4xl font-bold text-[#f0f6fc] tracking-tight">
+                                                {sLeads}
+                                            </h4>
+                                            <p className="text-[11px] text-[#484f58] mt-4 border-t border-[#30363d] pt-4">
+                                                Contatos qualificados identificados.
+                                            </p>
+                                        </div>
+                                        <div className="p-6 rounded-lg bg-[#0d1117] border border-[#30363d]">
+                                            <p className="text-[10px] font-bold text-[#d29922] uppercase tracking-wider mb-4">CPL Médio</p>
+                                            <h4 className="text-3xl font-bold text-[#f0f6fc] tracking-tight text-emerald-400">
+                                                R$ {sCpl.toFixed(2)}
+                                            </h4>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex flex-col h-full rounded-lg bg-[#0d1117] border border-[#30363d] p-6 overflow-hidden relative">
+                                        <div className="relative z-10 flex flex-col h-full">
+                                            <div className="flex items-center gap-3 mb-8">
+                                                <Sparkles size={16} className="text-blue-400" />
+                                                <h4 className="text-[10px] font-bold text-[#f0f6fc] uppercase tracking-wider">Otimização AI</h4>
+                                            </div>
+                                            <div className="flex-1 space-y-4 text-left">
+                                                {aiInsights.map((insight: any, i: number) => (
+                                                    <div key={i} className="group/insight">
+                                                        <div className="flex items-center gap-3 mb-1">
+                                                            <div className={`h-1.5 w-1.5 rounded-full ${insight.type === 'positive' ? 'bg-[#3fb950]' :
+                                                                insight.type === 'neutral' ? 'bg-[#d29922]' : 'bg-[#f85149]'
+                                                                }`} />
+                                                            <span className="text-[11px] font-semibold text-[#f0f6fc]">{insight.label}</span>
+                                                        </div>
+                                                        <p className="text-[12px] text-[#8b949e] leading-normal pl-4 border-l border-[#30363d] ml-0.5 group-hover/insight:border-blue-500 transition-colors">
+                                                            {insight.value}
+                                                        </p>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    handleAnalyze(selectedCampaign);
+                                                }}
+                                                disabled={analyzingId === selectedCampaign.id}
+                                                className="mt-8 w-full py-2.5 rounded-lg bg-[#238636] hover:bg-[#2ea043] text-white text-[11px] font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-all disabled:bg-[#21262d] disabled:text-[#484f58]"
+                                            >
+                                                {analyzingId === selectedCampaign.id ? (
+                                                    <>
+                                                        <RefreshCcw size={14} className="animate-spin" />
+                                                        Processando...
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <Zap size={14} />
+                                                        Gerar Nova Análise
+                                                    </>
+                                                )}
+                                            </button>
                                         </div>
                                     </div>
                                 </div>
-                            </div>
-                        </motion.div>
-                    </div>
-                );
-            })()}
+                            </motion.div>
+                        </div>
+                    );
+                })()}
+            </AnimatePresence>
         </div>
     );
 }

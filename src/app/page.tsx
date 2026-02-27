@@ -152,7 +152,6 @@ export default function Dashboard() {
         <StatsCard
           title="Leads Capturados"
           value={metrics?.leadCount || 0}
-          trend={12.5}
           icon={Users}
           color="blue"
           href="/leads?view=list"
@@ -160,7 +159,6 @@ export default function Dashboard() {
         <StatsCard
           title="Custo por Lead"
           value={`R$ ${metrics?.cpl?.toFixed(2) || '0,00'}`}
-          trend={-4.2}
           icon={DollarSign}
           color="emerald"
           href="/marketing"
@@ -168,7 +166,6 @@ export default function Dashboard() {
         <StatsCard
           title="Leads Pagos (Vendas)"
           value={metrics?.salesCount || 0}
-          trend={2.1}
           icon={Target}
           color="amber"
           href="/leads?view=kanban"
@@ -176,7 +173,6 @@ export default function Dashboard() {
         <StatsCard
           title="ROI Estimado"
           value={`${metrics?.roi?.toFixed(1) || '0.0'}x`}
-          trend={15.8}
           icon={TrendingUp}
           color="indigo"
           href="/marketing"
