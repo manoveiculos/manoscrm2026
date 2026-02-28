@@ -66,7 +66,7 @@ function LeadsContent() {
         carro_troca: ''
     });
     const [newNoteText, setNewNoteText] = useState('');
-    const [modalTab, setModalTab] = useState<'details' | 'karbam' | 'analysis'>('details');
+    const [modalTab, setModalTab] = useState<'details' | 'karbam' | 'analysis' | 'next_steps'>('details');
     const fileInputRef = useRef<HTMLInputElement>(null);
     const whatsappFolderInputRef = useRef<HTMLInputElement>(null);
     const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -722,6 +722,12 @@ function LeadsContent() {
                         closing_probability: aiResult.probabilidade_fechamento
                     },
                     next_step: aiResult.proxima_acao || aiResult.next_step,
+                    // New fields for persistence in CRM26 table
+                    nivel_interesse: aiResult.classificacao || 'WARM',
+                    momento_compra: aiResult.estagio_funil || 'Qualificação',
+                    resumo_consultor: aiResult.resumo_estrategico || aiResult.ai_reason,
+                    proxima_acao: aiResult.proxima_acao || aiResult.next_step,
+
                     // Auto-fill extracted info if not already present
                     vehicle_interest: leadToAnalyze.vehicle_interest || aiResult.vehicle_interest,
                     valor_investimento: leadToAnalyze.valor_investimento || aiResult.valor_investimento,
@@ -795,9 +801,61 @@ function LeadsContent() {
                 </div>
             </header>
 
+            {/* Team Performance Summary (Admin Only) */}
+            {userRole === 'admin' && consultants.length > 0 && (
+                <div className="flex flex-wrap gap-4 pt-10 border-t border-white/5 animate-in fade-in slide-in-from-top-4 duration-1000">
+                    <div className="w-full flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-3">
+                            <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                            <h3 className="text-[10px] font-black text-white/40 uppercase tracking-[0.3em]">Performance em Tempo Real</h3>
+                        </div>
+                        <span className="text-[9px] font-bold text-white/20 italic">Dados sincronizados com CRM Main e WhatsApp</span>
+                    </div>
+                    {/* Unassigned Leads Card */}
+                    {leads.filter(l => !l.assigned_consultant_id && l.status !== 'closed' && l.status !== 'lost').length > 0 && (
+                        <div className="glass-card px-6 py-4 rounded-[1.8rem] border border-red-500/30 bg-red-600/5 flex items-center gap-4 hover:bg-red-600/10 transition-all group cursor-pointer shadow-xl shadow-red-600/5">
+                            <div className="w-10 h-10 rounded-2xl bg-red-600/20 flex items-center justify-center text-red-500 font-black text-sm uppercase shadow-lg group-hover:scale-110 transition-transform">
+                                <Users size={18} />
+                            </div>
+                            <div className="flex flex-col">
+                                <p className="text-[9px] font-black text-red-500 uppercase tracking-[0.2em] leading-none mb-1.5">AGUARDANDO</p>
+                                <div className="flex items-center gap-2">
+                                    <span className="text-sm font-black tracking-tighter text-white">
+                                        {leads.filter(l => !l.assigned_consultant_id && l.status !== 'closed' && l.status !== 'lost').length} Novos
+                                    </span>
+                                    <div className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                    {consultants.map(c => {
+                        const count = leads.filter(l =>
+                            l.assigned_consultant_id === c.id ||
+                            (l.consultants_manos_crm?.name === c.name)
+                        ).length;
+                        return (
+                            <div key={c.id} className="glass-card px-5 py-4 rounded-[1.8rem] border border-white/5 bg-white/[0.02] flex items-center gap-4 hover:border-red-500/30 hover:bg-red-500/[0.02] transition-all group group cursor-pointer shadow-2xl">
+                                <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-white/10 to-transparent border border-white/10 flex items-center justify-center text-white font-black text-sm uppercase group-hover:from-red-600 group-hover:to-red-900 group-hover:border-red-500 transition-all shadow-lg">
+                                    {c.name[0]}
+                                </div>
+                                <div className="flex flex-col">
+                                    <p className="text-[9px] font-black text-white/30 uppercase tracking-[0.2em] leading-none mb-1.5">{c.name.split(' ')[0]}</p>
+                                    <div className="flex items-center gap-2">
+                                        <span className={`text-sm font-black tracking-tighter ${count > 0 ? 'text-white' : 'text-white/10'}`}>
+                                            {count} {count === 1 ? 'Lead' : 'Leads'}
+                                        </span>
+                                        {count > 0 && <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]" />}
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+
             {/* View Mode Switcher and Actions */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pt-4 border-t border-white/5">
-                <div className="flex items-center gap-3 bg-white/5 p-1.5 rounded-2xl border border-white/10">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pt-10 mt-10 border-t border-white/5">
+                <div className="flex items-center gap-3 bg-white/5 p-1.5 rounded-2xl border border-white/10 shadow-inner">
                     <button
                         onClick={() => setViewMode('list')}
                         className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'list'
@@ -818,51 +876,6 @@ function LeadsContent() {
                     </button>
                 </div>
 
-                {/* Team Performance Summary (Admin Only) */}
-                {userRole === 'admin' && (
-                    <div className="flex flex-wrap gap-4 animate-in fade-in slide-in-from-top-4 duration-700">
-                        {/* Card for Unassigned Leads */}
-                        {leads.filter(l => !l.assigned_consultant_id && l.status !== 'closed' && l.status !== 'lost').length > 0 && (
-                            <div className="glass-card px-5 py-4 rounded-[1.5rem] border border-red-500/30 bg-red-600/5 flex items-center gap-4 hover:bg-red-600/10 transition-all group">
-                                <div className="w-10 h-10 rounded-xl bg-red-600/20 flex items-center justify-center text-red-500 font-black text-sm uppercase shadow-lg shadow-red-600/5 group-hover:scale-110 transition-transform">
-                                    <Users size={18} />
-                                </div>
-                                <div className="flex flex-col">
-                                    <p className="text-[9px] font-black text-red-500 uppercase tracking-[0.2em] leading-none mb-1.5">Aguardando</p>
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-sm font-black tracking-tighter text-white">
-                                            {leads.filter(l => !l.assigned_consultant_id && l.status !== 'closed' && l.status !== 'lost').length} Novos
-                                        </span>
-                                        <div className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
-                        {consultants.map(c => {
-                            const count = leads.filter(l =>
-                                l.assigned_consultant_id === c.id ||
-                                (l.consultants_manos_crm?.name === c.name)
-                            ).length;
-                            return (
-                                <div key={c.id} className="glass-card px-5 py-4 rounded-[1.5rem] border border-white/5 bg-white/[0.02] flex items-center gap-4 hover:bg-white/[0.05] transition-all group">
-                                    <div className="w-10 h-10 rounded-xl bg-red-600/10 flex items-center justify-center text-red-500 font-black text-sm uppercase shadow-lg shadow-red-600/5 group-hover:scale-110 transition-transform">
-                                        {c.name[0]}
-                                    </div>
-                                    <div className="flex flex-col">
-                                        <p className="text-[9px] font-black text-white/20 uppercase tracking-[0.2em] leading-none mb-1.5">{c.name.split(' ')[0]}</p>
-                                        <div className="flex items-center gap-2">
-                                            <span className={`text-sm font-black tracking-tighter ${count > 0 ? 'text-white' : 'text-white/20'}`}>
-                                                {count} {count === 1 ? 'Lead' : 'Leads'}
-                                            </span>
-                                            {count > 0 && <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />}
-                                        </div>
-                                    </div>
-                                </div>
-                            );
-                        })}
-                    </div>
-                )}
 
                 <div className="flex items-center gap-4">
                     <button
@@ -1378,7 +1391,7 @@ function LeadsContent() {
                                 initial={{ scale: 0.9, opacity: 0, y: 20 }}
                                 animate={{ scale: 1, opacity: 1, y: 0 }}
                                 exit={{ scale: 0.9, opacity: 0, y: 20 }}
-                                className="w-full max-w-5xl max-h-[92vh] overflow-y-auto bg-[#0a0f1d] border border-white/10 rounded-[3.5rem] shadow-[0_50px_150px_rgba(0,0,0,0.9)] flex flex-col p-8 md:p-14 custom-scrollbar relative pointer-events-auto z-[110]"
+                                className="w-full max-w-5xl h-[95vh] md:h-auto md:max-h-[92vh] overflow-y-auto bg-[#0a0f1d] border border-white/10 rounded-[2rem] md:rounded-[3.5rem] shadow-[0_50px_150px_rgba(0,0,0,0.9)] flex flex-col p-6 sm:p-8 md:p-14 custom-scrollbar relative pointer-events-auto z-[110]"
                             >
                                 <AnimatePresence>
                                     {isFinishing && (
@@ -1507,8 +1520,16 @@ function LeadsContent() {
                                                 <Zap size={20} className="text-white" />
                                             </div>
                                             <div>
-                                                <h2 className="text-3xl font-black tracking-tighter text-white font-outfit uppercase">Centro de Gestão</h2>
-                                                <p className="text-[10px] font-black text-white/30 uppercase tracking-[0.2em]">Operação Direta: {actionLead.name}</p>
+                                                <div className="flex items-center gap-4">
+                                                    <h2 className="text-3xl font-black tracking-tighter text-white font-outfit uppercase">Centro de Gestão</h2>
+                                                    {actionLead && (actionLead.ai_score || 0) > 0 && (
+                                                        <div className="px-3 py-1.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-[10px] font-black flex items-center gap-2 shadow-lg shadow-emerald-500/5 animate-in zoom-in duration-500">
+                                                            <Sparkles size={12} className="animate-pulse" />
+                                                            SCORE IA: {actionLead.ai_score}%
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                <p className="text-[10px] font-black text-white/30 uppercase tracking-[0.2em]">Operação Direta: {actionLead?.name}</p>
                                             </div>
                                         </div>
                                         <div className="flex items-center gap-4">
@@ -1532,24 +1553,30 @@ function LeadsContent() {
                                     </div>
 
                                     {/* Tab Switcher */}
-                                    <div className="flex items-center gap-1 bg-white/5 p-1 rounded-2xl border border-white/10 w-fit">
+                                    <div className="flex flex-wrap items-center gap-1 bg-white/5 p-1 rounded-2xl border border-white/10 w-fit">
                                         <button
                                             onClick={() => setModalTab('details')}
-                                            className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${modalTab === 'details' ? 'bg-red-600 text-white shadow-lg shadow-red-600/20' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
+                                            className={`px-4 md:px-6 py-2.5 rounded-xl text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all ${modalTab === 'details' ? 'bg-red-600 text-white shadow-lg shadow-red-600/20' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
                                         >
                                             Atendimento
                                         </button>
                                         <button
                                             onClick={() => setModalTab('karbam')}
-                                            className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${modalTab === 'karbam' ? 'bg-amber-600 text-white shadow-lg shadow-amber-600/20' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
+                                            className={`px-4 md:px-6 py-2.5 rounded-xl text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all ${modalTab === 'karbam' ? 'bg-amber-600 text-white shadow-lg shadow-amber-600/20' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
                                         >
                                             Karbam
                                         </button>
                                         <button
                                             onClick={() => setModalTab('analysis')}
-                                            className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${modalTab === 'analysis' ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/20' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
+                                            className={`px-4 md:px-6 py-2.5 rounded-xl text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all ${modalTab === 'analysis' ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/20' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
                                         >
                                             Análise IA
+                                        </button>
+                                        <button
+                                            onClick={() => setModalTab('next_steps')}
+                                            className={`px-4 md:px-6 py-2.5 rounded-xl text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all ${modalTab === 'next_steps' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/20' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
+                                        >
+                                            Próximos Passos
                                         </button>
                                     </div>
                                 </header>
@@ -1610,115 +1637,115 @@ function LeadsContent() {
                                             </div>
                                         </div>
 
-                                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                                            {/* Análise Estratégica */}
-                                            <div className="lg:col-span-2 space-y-6">
-                                                <div className="glass-card rounded-[2.5rem] p-10 bg-gradient-to-br from-purple-500/10 via-red-600/5 to-transparent border-white/5 space-y-8 relative overflow-hidden group">
-                                                    <div className="absolute top-0 right-0 w-64 h-64 bg-purple-600/5 rounded-full blur-[80px] -mr-32 -mt-32" />
-                                                    <div className="relative z-10 flex items-start gap-6">
-                                                        <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-red-600 to-rose-700 flex items-center justify-center text-white shadow-2xl shadow-red-600/20 group-hover:rotate-6 transition-transform">
-                                                            <Sparkles size={28} />
+                                        {/* Painel Behavioral (agora na aba de Análise IA) */}
+                                        <div className="max-w-3xl w-full mx-auto space-y-6">
+                                            <div className="glass-card rounded-[2.5rem] p-8 md:p-10 border-white/5 space-y-8 h-full bg-white/[0.01]">
+                                                <div className="space-y-1 text-center md:text-left">
+                                                    <h4 className="text-[10px] font-black uppercase tracking-widest text-white/20">Perfil Comportamental</h4>
+                                                    <p className="text-sm font-black text-white uppercase tracking-tighter">Mapeamento de Personalidade</p>
+                                                </div>
+
+                                                <div className="space-y-6 max-w-2xl mx-auto md:ml-0">
+                                                    <div className="space-y-2">
+                                                        <div className="flex justify-between text-[10px] font-black uppercase tracking-widest px-1">
+                                                            <span className="text-white/40">Urgência</span>
+                                                            <span className={actionLead.behavioral_profile?.urgency === 'high' ? 'text-red-500' : 'text-amber-500'}>
+                                                                {actionLead.behavioral_profile?.urgency === 'high' ? 'Alta' : 'Média'}
+                                                            </span>
                                                         </div>
-                                                        <div className="flex-1 space-y-2">
-                                                            <h4 className="text-[10px] font-black uppercase tracking-[0.3em] text-red-500">Diagnóstico Estratégico IA</h4>
-                                                            <p className="text-lg font-bold text-white leading-relaxed italic pr-10">
-                                                                "{actionLead.resumo_consultor || actionLead.ai_summary || 'Realize o contato inicial ou cole uma conversa no Laboratório de IA para que o sistema gere um diagnóstico estratégico completo para este lead.'}"
+                                                        <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden">
+                                                            <motion.div
+                                                                initial={{ width: 0 }}
+                                                                animate={{ width: actionLead.behavioral_profile?.urgency === 'high' ? '90%' : '60%' }}
+                                                                className={`h-full ${actionLead.behavioral_profile?.urgency === 'high' ? 'bg-red-600 shadow-[0_0_10px_rgba(220,38,38,0.5)]' : 'bg-amber-600'}`}
+                                                            />
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="space-y-2">
+                                                        <div className="flex justify-between text-[10px] font-black uppercase tracking-widest px-1">
+                                                            <span className="text-white/40">Fidelidade</span>
+                                                            <span className="text-emerald-500">Alta</span>
+                                                        </div>
+                                                        <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden">
+                                                            <motion.div
+                                                                initial={{ width: 0 }}
+                                                                animate={{ width: '85%' }}
+                                                                className="h-full bg-emerald-600 shadow-[0_0_10px_rgba(16,185,129,0.5)]"
+                                                            />
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="space-y-2">
+                                                        <div className="flex justify-between text-[10px] font-black uppercase tracking-widest px-1">
+                                                            <span className="text-white/40">Nível Decisor</span>
+                                                            <span className="text-blue-500">Direto</span>
+                                                        </div>
+                                                        <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden">
+                                                            <motion.div
+                                                                initial={{ width: 0 }}
+                                                                animate={{ width: '100%' }}
+                                                                className="h-full bg-blue-600 shadow-[0_0_10px_rgba(37,99,235,0.5)]"
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div className="pt-6 border-t border-white/5">
+                                                    <div className="flex flex-wrap items-center justify-center md:justify-start gap-2">
+                                                        {actionLead.behavioral_profile?.intentions?.map((tag, idx) => (
+                                                            <span key={idx} className="px-3 md:px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-[9px] font-black text-white/40 uppercase tracking-widest hover:bg-white/10 transition-colors">
+                                                                {tag}
+                                                            </span>
+                                                        )) || (
+                                                                <>
+                                                                    <span className="px-3 md:px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-[9px] font-black text-white/40 uppercase tracking-widest">Troca Avaliada</span>
+                                                                    <span className="px-3 md:px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-[9px] font-black text-white/40 uppercase tracking-widest">Aprovação Direta</span>
+                                                                </>
+                                                            )}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ) : modalTab === 'next_steps' ? (
+                                    <div className="flex-1 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 overflow-y-auto custom-scrollbar pr-4 pb-10">
+                                        {/* Análise Estratégica e Próximos Passos */}
+                                        <div className="max-w-4xl mx-auto w-full space-y-6">
+                                            <div className="glass-card rounded-[2.5rem] md:rounded-[3rem] p-8 md:p-12 bg-gradient-to-br from-purple-500/10 via-red-600/5 to-transparent border-white/5 space-y-10 relative overflow-hidden group">
+                                                <div className="absolute top-0 right-0 w-64 h-64 md:w-96 md:h-96 bg-purple-600/5 rounded-full blur-[80px] -mr-32 -mt-32" />
+                                                <div className="relative z-10 flex flex-col md:flex-row items-center md:items-start gap-6 text-center md:text-left">
+                                                    <div className="h-16 w-16 md:h-20 md:w-20 rounded-2xl md:rounded-3xl bg-gradient-to-br from-red-600 to-rose-700 flex items-center justify-center text-white shadow-2xl shadow-red-600/20 group-hover:rotate-6 group-hover:scale-110 transition-all shrink-0">
+                                                        <Sparkles size={32} />
+                                                    </div>
+                                                    <div className="flex-1 space-y-4 pt-2">
+                                                        <h4 className="text-[10px] md:text-xs font-black uppercase tracking-[0.3em] text-red-500">Diagnóstico Estratégico IA</h4>
+                                                        <p className="text-xl md:text-2xl font-bold text-white leading-relaxed italic md:pr-10">
+                                                            "{actionLead.resumo_consultor || actionLead.ai_summary || 'Realize o contato inicial ou cole uma conversa no Laboratório de IA para que o sistema gere um diagnóstico estratégico completo para este lead.'}"
+                                                        </p>
+                                                    </div>
+                                                </div>
+
+                                                {(actionLead.ai_reason || actionLead.next_step) && (
+                                                    <div className="pt-10 border-t border-white/10 grid md:grid-cols-2 gap-8 relative z-10">
+                                                        <div className="space-y-4 bg-white/[0.02] p-6 rounded-3xl border border-white/5 hover:bg-white/[0.04] transition-colors">
+                                                            <p className="text-[9px] md:text-[10px] font-black text-white/40 uppercase tracking-widest flex items-center justify-center md:justify-start gap-2 mb-2">
+                                                                <Target size={14} className="text-red-500" /> Gatilhos de Fechamento
+                                                            </p>
+                                                            <p className="text-sm text-white/80 leading-relaxed font-medium text-center md:text-left">
+                                                                {actionLead.ai_reason || 'Aguardando interação para identificar gatilhos comportamentais.'}
+                                                            </p>
+                                                        </div>
+                                                        <div className="space-y-4 bg-emerald-500/5 p-6 rounded-3xl border border-emerald-500/10 hover:bg-emerald-500/10 transition-colors">
+                                                            <p className="text-[9px] md:text-[10px] font-black text-white/40 uppercase tracking-widest flex items-center justify-center md:justify-start gap-2 mb-2">
+                                                                <Zap size={14} className="text-emerald-500" /> Próxima Ação Decisiva
+                                                            </p>
+                                                            <p className="text-sm text-emerald-500 font-black uppercase tracking-widest flex items-center justify-center md:justify-start gap-3 mt-2">
+                                                                <ArrowUpRight size={20} /> {actionLead.proxima_acao || actionLead.next_step || 'Iniciar Abordagem Consultiva'}
                                                             </p>
                                                         </div>
                                                     </div>
-
-                                                    {(actionLead.ai_reason || actionLead.next_step) && (
-                                                        <div className="pt-8 border-t border-white/10 grid md:grid-cols-2 gap-8 relative z-10">
-                                                            <div className="space-y-4">
-                                                                <p className="text-[9px] font-black text-white/20 uppercase tracking-widest flex items-center gap-2">
-                                                                    <Target size={12} className="text-red-500" /> Gatilhos de Fechamento
-                                                                </p>
-                                                                <p className="text-xs text-white/80 leading-relaxed font-medium bg-white/5 p-4 rounded-2xl border border-white/5">
-                                                                    {actionLead.ai_reason || 'Aguardando interação para identificar gatilhos comportamentais.'}
-                                                                </p>
-                                                            </div>
-                                                            <div className="space-y-4">
-                                                                <p className="text-[9px] font-black text-white/20 uppercase tracking-widest flex items-center gap-2">
-                                                                    <Zap size={12} className="text-emerald-500" /> Próxima Ação Decisiva
-                                                                </p>
-                                                                <p className="text-xs text-emerald-500 font-black uppercase tracking-widest bg-emerald-500/10 p-4 rounded-2xl border border-emerald-500/10 flex items-center gap-3">
-                                                                    <ArrowUpRight size={18} /> {actionLead.proxima_acao || actionLead.next_step || 'Iniciar Abordagem Consultiva'}
-                                                                </p>
-                                                            </div>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </div>
-
-                                            {/* Painel Behavioral */}
-                                            <div className="space-y-6">
-                                                <div className="glass-card rounded-[2.5rem] p-8 border-white/5 space-y-8 h-full bg-white/[0.01]">
-                                                    <div className="space-y-1">
-                                                        <h4 className="text-[10px] font-black uppercase tracking-widest text-white/20">Perfil Comportamental</h4>
-                                                        <p className="text-sm font-black text-white uppercase tracking-tighter">Mapeamento de Personalidade</p>
-                                                    </div>
-
-                                                    <div className="space-y-6">
-                                                        <div className="space-y-2">
-                                                            <div className="flex justify-between text-[10px] font-black uppercase tracking-widest">
-                                                                <span className="text-white/40">Urgência</span>
-                                                                <span className={actionLead.behavioral_profile?.urgency === 'high' ? 'text-red-500' : 'text-amber-500'}>
-                                                                    {actionLead.behavioral_profile?.urgency === 'high' ? 'Alta' : 'Média'}
-                                                                </span>
-                                                            </div>
-                                                            <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
-                                                                <motion.div
-                                                                    initial={{ width: 0 }}
-                                                                    animate={{ width: actionLead.behavioral_profile?.urgency === 'high' ? '90%' : '60%' }}
-                                                                    className={`h-full ${actionLead.behavioral_profile?.urgency === 'high' ? 'bg-red-600 shadow-[0_0_10px_rgba(220,38,38,0.5)]' : 'bg-amber-600'}`}
-                                                                />
-                                                            </div>
-                                                        </div>
-
-                                                        <div className="space-y-2">
-                                                            <div className="flex justify-between text-[10px] font-black uppercase tracking-widest">
-                                                                <span className="text-white/40">Fidelidade</span>
-                                                                <span className="text-emerald-500">Alta</span>
-                                                            </div>
-                                                            <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
-                                                                <motion.div
-                                                                    initial={{ width: 0 }}
-                                                                    animate={{ width: '85%' }}
-                                                                    className="h-full bg-emerald-600 shadow-[0_0_10px_rgba(16,185,129,0.5)]"
-                                                                />
-                                                            </div>
-                                                        </div>
-
-                                                        <div className="space-y-2">
-                                                            <div className="flex justify-between text-[10px] font-black uppercase tracking-widest">
-                                                                <span className="text-white/40">Nível Decisor</span>
-                                                                <span className="text-blue-500">Direto</span>
-                                                            </div>
-                                                            <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
-                                                                <motion.div
-                                                                    initial={{ width: 0 }}
-                                                                    animate={{ width: '100%' }}
-                                                                    className="h-full bg-blue-600 shadow-[0_0_10px_rgba(37,99,235,0.5)]"
-                                                                />
-                                                            </div>
-                                                        </div>
-                                                    </div>
-
-                                                    <div className="pt-6 border-t border-white/5">
-                                                        <div className="flex flex-wrap gap-2">
-                                                            {actionLead.behavioral_profile?.intentions?.map((tag, idx) => (
-                                                                <span key={idx} className="px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 text-[9px] font-black text-white/40 uppercase tracking-widest">
-                                                                    {tag}
-                                                                </span>
-                                                            )) || (
-                                                                    <>
-                                                                        <span className="px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 text-[9px] font-black text-white/40 uppercase tracking-widest">Troca Avaliada</span>
-                                                                        <span className="px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 text-[9px] font-black text-white/40 uppercase tracking-widest">Aprovação Direta</span>
-                                                                    </>
-                                                                )}
-                                                        </div>
-                                                    </div>
-                                                </div>
+                                                )}
                                             </div>
                                         </div>
                                     </div>
@@ -1729,35 +1756,35 @@ function LeadsContent() {
                                                 <BadgeCheck size={18} className="text-amber-500" />
                                                 <h4 className="text-xs font-black uppercase tracking-widest text-white/60">Avaliação Karbam</h4>
                                             </div>
-                                            <div className="glass-card rounded-[2.5rem] p-10 bg-amber-500/[0.02] border-amber-500/10 flex flex-col items-center text-center space-y-6">
-                                                <div className="h-20 w-20 rounded-3xl bg-amber-500/10 flex items-center justify-center border border-amber-500/20">
+                                            <div className="glass-card rounded-[2.5rem] p-6 md:p-10 bg-amber-500/[0.02] border-amber-500/10 flex flex-col items-center text-center space-y-6">
+                                                <div className="h-16 w-16 md:h-20 md:w-20 rounded-3xl bg-amber-500/10 flex items-center justify-center border border-amber-500/20 shrink-0">
                                                     <Search size={32} className="text-amber-500" />
                                                 </div>
                                                 <div className="space-y-2">
-                                                    <h3 className="text-2xl font-black text-white tracking-tighter uppercase">Análise Karbam</h3>
-                                                    <p className="text-sm text-white/40 max-w-sm mx-auto leading-relaxed">
+                                                    <h3 className="text-xl md:text-2xl font-black text-white tracking-tighter uppercase">Análise Karbam</h3>
+                                                    <p className="text-xs md:text-sm text-white/40 max-w-sm mx-auto leading-relaxed">
                                                         Avaliação técnica e simulação de margem para o veículo {actionLead.carro_troca || 'da troca'}.
                                                     </p>
                                                 </div>
 
                                                 {actionLead.status === 'scheduled' && (
-                                                    <div className="w-full p-6 rounded-3xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-between animate-pulse">
-                                                        <div className="flex items-center gap-4">
-                                                            <div className="h-12 w-12 rounded-2xl bg-amber-500/20 flex items-center justify-center border border-amber-500/30">
-                                                                <Calendar size={24} className="text-amber-500" />
+                                                    <div className="w-full p-4 md:p-6 rounded-3xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-between animate-pulse">
+                                                        <div className="flex items-center gap-3 md:gap-4">
+                                                            <div className="h-10 w-10 md:h-12 md:w-12 rounded-xl md:rounded-2xl bg-amber-500/20 flex items-center justify-center border border-amber-500/30">
+                                                                <Calendar size={20} className="text-amber-500" />
                                                             </div>
                                                             <div className="text-left">
-                                                                <p className="text-[10px] font-bold text-amber-500 uppercase tracking-widest">Vistoria Agendada</p>
-                                                                <p className="text-sm font-black text-white">Próxima Visita</p>
+                                                                <p className="text-[9px] md:text-[10px] font-bold text-amber-500 uppercase tracking-widest">Vistoria Agendada</p>
+                                                                <p className="text-xs md:text-sm font-black text-white">Próxima Visita</p>
                                                             </div>
                                                         </div>
-                                                        <BadgeCheck size={24} className="text-amber-500" />
+                                                        <BadgeCheck size={20} className="text-amber-500" />
                                                     </div>
                                                 )}
 
-                                                <div className="w-full grid grid-cols-2 gap-4 pt-4">
-                                                    <div className="p-6 rounded-3xl bg-white/5 border border-white/5 text-left group hover:bg-amber-500/5 transition-all relative">
-                                                        <p className="text-[10px] font-black text-white/20 uppercase tracking-widest mb-1">Veículo Selecionado</p>
+                                                <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-4 pt-4">
+                                                    <div className="p-4 md:p-6 rounded-3xl bg-white/5 border border-white/5 text-left group hover:bg-amber-500/5 transition-all relative">
+                                                        <p className="text-[9px] md:text-[10px] font-black text-white/20 uppercase tracking-widest mb-1">Veículo Selecionado</p>
                                                         <div className="relative">
                                                             <input
                                                                 type="text"

@@ -1,27 +1,16 @@
 import { supabase } from './supabase';
 import { Lead, Campaign, Sale, InventoryItem, LeadStatus, AIClassification } from './types';
 
+// LOCKS CONCORRENCIAIS: Previnem falhas por StrictMode do React ou duplo clique, evitando sobrecarga no Banco
+let isSyncingLeads = false;
+let isDistributingLeads = false;
+
 export const dataService = {
     // Leads
     async getLeads(consultantId?: string) {
-        // Trigger background sync of assigned leads from external sources
-        this.syncAssignedLeadsToMain().catch(err => console.error("Sync Error:", err));
+        // Trigger background auto-distribution
+        this.autoDistributePendingCRM26().catch(err => console.error("Distribute Error:", err));
 
-        // 1. Fetch from main table
-        let query = supabase
-            .from('leads_manos_crm')
-            .select('*, consultants_manos_crm(name)')
-            .order('created_at', { ascending: false });
-
-        if (consultantId) {
-            // Liberar acesso: Consultor vê seus leads ativos OU QUALQUER lead encerrado (antigo)
-            query = query.or(`assigned_consultant_id.eq.${consultantId},status.in.("closed","lost")`);
-        }
-
-        const { data: mainLeads, error: mainError } = await query;
-        if (mainError) throw mainError;
-
-        // 2. Fetch from CRM 26 table (only NOT yet synced/sent)
         let consultantName = undefined;
         if (consultantId) {
             const { data: consultant } = await supabase
@@ -33,60 +22,60 @@ export const dataService = {
         }
 
         try {
-            const crm26Leads = await this.getLeadsCRM26(consultantName);
-            // Filter out those that already exist in mainLeads (by phone)
-            const mainPhones = new Set(mainLeads?.map(l => l.phone) || []);
-            const freshCrm26 = crm26Leads.filter(l => !mainPhones.has(l.phone));
-
-            // Merge and sort
-            const merged = [...(mainLeads || []), ...freshCrm26].sort((a, b) =>
-                new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-            );
-            return merged;
+            // Ler estritamente e exclusivamente da nova tabela única unificada
+            const crm26Leads = await this.getLeadsCRM26(consultantName, true); // true param to override 'enviado' filter
+            return crm26Leads;
         } catch (err) {
-            console.warn("Error fetching leads from CRM 26 source:", err);
-            return mainLeads || [];
+            console.error("Error fetching leads from Unified CRM 26 source:", err);
+            return [];
         }
     },
 
     async syncAssignedLeadsToMain() {
-        console.log("🔄 Starting assigned leads sync...");
+        if (isSyncingLeads) return;
+        isSyncingLeads = true;
 
-        // 1. Fetch un-sent leads from CRM 26 that HAVE a vendedor
-        const { data: leadsToSync } = await supabase
-            .from('leads_distribuicao_crm_26')
-            .select('*')
-            .not('vendedor', 'is', null)
-            .eq('enviado', false)
-            .limit(10);
+        try {
+            console.log("🔄 Starting assigned leads sync...");
 
-        if (leadsToSync && leadsToSync.length > 0) {
-            const { data: consultants } = await supabase.from('consultants_manos_crm').select('id, name');
+            // 1. Fetch un-sent leads from CRM 26 that HAVE a vendedor
+            const { data: leadsToSync } = await supabase
+                .from('leads_distribuicao_crm_26')
+                .select('*')
+                .not('vendedor', 'is', null)
+                .eq('enviado', false)
+                .limit(10);
 
-            for (const lead of leadsToSync) {
-                const consultant = consultants?.find(c => c.name.toLowerCase() === lead.vendedor.toLowerCase());
-                if (consultant) {
-                    await this.promoteLeadToMain(lead, 'crm26', consultant.id);
+            if (leadsToSync && leadsToSync.length > 0) {
+                const { data: consultants } = await supabase.from('consultants_manos_crm').select('id, name');
+
+                for (const lead of leadsToSync) {
+                    const consultant = consultants?.find(c => c.name.toLowerCase() === lead.vendedor.toLowerCase());
+                    if (consultant) {
+                        await this.promoteLeadToMain(lead, 'crm26', consultant.id);
+                    }
                 }
             }
-        }
 
-        // 2. Fetch from legacy leads_distribuicao too
-        const { data: legacyToSync } = await supabase
-            .from('leads_distribuicao')
-            .select('*')
-            .not('vendedor', 'is', null)
-            .eq('enviado', false)
-            .limit(10);
+            // 2. Fetch from legacy leads_distribuicao too
+            const { data: legacyToSync } = await supabase
+                .from('leads_distribuicao')
+                .select('*')
+                .not('vendedor', 'is', null)
+                .eq('enviado', false)
+                .limit(10);
 
-        if (legacyToSync && legacyToSync.length > 0) {
-            const { data: consultants } = await supabase.from('consultants_manos_crm').select('id, name');
-            for (const lead of legacyToSync) {
-                const consultant = consultants?.find(c => c.name.toLowerCase() === lead.vendedor.toLowerCase());
-                if (consultant) {
-                    await this.promoteLeadToMain(lead, 'legacy', consultant.id);
+            if (legacyToSync && legacyToSync.length > 0) {
+                const { data: consultants } = await supabase.from('consultants_manos_crm').select('id, name');
+                for (const lead of legacyToSync) {
+                    const consultant = consultants?.find(c => c.name.toLowerCase() === lead.vendedor.toLowerCase());
+                    if (consultant) {
+                        await this.promoteLeadToMain(lead, 'legacy', consultant.id);
+                    }
                 }
             }
+        } finally {
+            isSyncingLeads = false;
         }
     },
 
@@ -145,15 +134,19 @@ export const dataService = {
             .eq('id', id);
     },
 
-    async getLeadsCRM26(consultantName?: string) {
+    async getLeadsCRM26(consultantName?: string, includeSent: boolean = false) {
         // Trigger auto-distribution for any unassigned leads in the background
         this.autoDistributePendingCRM26().catch(console.error);
 
         let query = supabase
             .from('leads_distribuicao_crm_26')
             .select('*')
-            .eq('enviado', false)
             .order('criado_em', { ascending: false });
+
+        // Se quisermos apenas os pendentes de sync, setamos false. Mas agora a tabela É a principal.
+        // if (!includeSent) {
+        //   query = query.eq('enviado', false);
+        // }
 
         if (consultantName) {
             query = query.ilike('vendedor', `%${consultantName}%`);
@@ -220,30 +213,37 @@ export const dataService = {
     },
 
     async autoDistributePendingCRM26() {
-        // Find leads without a vendedor
-        const { data: unassigned } = await supabase
-            .from('leads_distribuicao_crm_26')
-            .select('id, nome')
-            .is('vendedor', null)
-            .limit(10);
+        if (isDistributingLeads) return;
+        isDistributingLeads = true;
 
-        if (!unassigned || unassigned.length === 0) return;
+        try {
+            // Find leads without a vendedor
+            const { data: unassigned } = await supabase
+                .from('leads_distribuicao_crm_26')
+                .select('id, nome')
+                .is('vendedor', null)
+                .limit(10);
 
-        for (const lead of unassigned) {
-            const nextConsultant = await this.pickNextConsultant(lead.nome);
-            if (nextConsultant) {
-                // Update distribution table
-                await supabase
-                    .from('leads_distribuicao_crm_26')
-                    .update({ vendedor: nextConsultant.name })
-                    .eq('id', lead.id);
+            if (!unassigned || unassigned.length === 0) return;
 
-                // Update consultant assignment timestamp
-                await supabase
-                    .from('consultants_manos_crm')
-                    .update({ last_lead_assigned_at: new Date().toISOString() })
-                    .eq('id', nextConsultant.id);
+            for (const lead of unassigned) {
+                const nextConsultant = await this.pickNextConsultant(lead.nome);
+                if (nextConsultant) {
+                    // Update distribution table
+                    await supabase
+                        .from('leads_distribuicao_crm_26')
+                        .update({ vendedor: nextConsultant.name })
+                        .eq('id', lead.id);
+
+                    // Update consultant assignment timestamp
+                    await supabase
+                        .from('consultants_manos_crm')
+                        .update({ last_lead_assigned_at: new Date().toISOString() })
+                        .eq('id', nextConsultant.id);
+                }
             }
+        } finally {
+            isDistributingLeads = false;
         }
     },
 
@@ -573,6 +573,13 @@ export const dataService = {
             if (details.vehicle_interest) updateObj.interesse = details.vehicle_interest;
             if (details.carro_troca) updateObj.troca = details.carro_troca;
             if (details.region) updateObj.cidade = details.region;
+
+            // New AI fields mapping for CRM26
+            if (details.nivel_interesse) updateObj.nivel_interesse = details.nivel_interesse;
+            if (details.momento_compra) updateObj.momento_compra = details.momento_compra;
+            if (details.resumo_consultor) updateObj.resumo_consultor = details.resumo_consultor;
+            if (details.proxima_acao) updateObj.proxima_acao = details.proxima_acao;
+
             if (details.status) {
                 // We use the same 'resumo' tag logic for status consistency
                 const { data: current } = await supabase.from('leads_distribuicao_crm_26').select('resumo').eq('id', realId).single();
@@ -591,21 +598,13 @@ export const dataService = {
             return data;
         }
 
-        const { data, error } = await supabase
-            .from('leads_manos_crm')
-            .update({
-                ...details,
-                updated_at: new Date().toISOString()
-            })
-            .eq('id', leadId);
-
-        if (error) throw error;
-        return data;
+        // Removida atualização de details da tabela antiga
+        return null;
     },
 
     async logHistory(leadId: string, newStatus: LeadStatus, oldStatus?: LeadStatus, notes?: string) {
         if (leadId.startsWith('crm26_')) {
-            // Skip history logging for CRM26 leads as it requires a UUID lead_id
+            // Histórico nativo no resumo ou tabela dedicada no futuro
             return;
         }
 
@@ -704,15 +703,12 @@ export const dataService = {
         const { data: salesAll } = await supabase.from('sales_manos_crm').select('*');
         // 3. Get sales (this month)
         const { data: salesMonth } = await supabase.from('sales_manos_crm').select('*').gte('created_at', startOfMonth);
-        // 4. Get total lead count (Main table)
-        const { count: leadCountMain } = await supabase.from('leads_manos_crm').select('*', { count: 'exact', head: true });
 
-        // 5. Get total lead count (CRM 26 / WhatsApp)
-        const { count: leadCount26 } = await supabase.from('leads_distribuicao_crm_26').select('*', { count: 'exact', head: true });
+        // 4. Get total lead count EXCLUSIVAMENTE (CRM 26 / WhatsApp)
+        const { count: totalLeads } = await supabase.from('leads_distribuicao_crm_26').select('*', { count: 'exact', head: true });
 
-        // 6. Get leads (this month)
-        const { count: leadCountMonthMain } = await supabase.from('leads_manos_crm').select('*', { count: 'exact', head: true }).gte('created_at', startOfMonth);
-        const { count: leadCountMonth26 } = await supabase.from('leads_distribuicao_crm_26').select('*', { count: 'exact', head: true }).gte('criado_em', startOfMonth);
+        // 5. Get leads (this month) EXCLUSIVAMENTE (CRM 26 / WhatsApp)
+        const { count: totalLeadsMonth } = await supabase.from('leads_distribuicao_crm_26').select('*', { count: 'exact', head: true }).gte('criado_em', startOfMonth);
 
         const totalSpend = campaigns?.reduce((acc: number, c: Campaign) => acc + (Number(c.total_spend) || 0), 0) || 0;
         const totalRevenue = salesAll?.reduce((acc: number, s: Sale) => acc + (Number(s.sale_value) || 0), 0) || 0;
@@ -724,11 +720,8 @@ export const dataService = {
         const salesCount = salesAll?.length || 0;
         const salesCountMonth = salesMonth?.length || 0;
 
-        const totalLeads = (leadCountMain || 0) + (leadCount26 || 0);
-        const totalLeadsMonth = (leadCountMonthMain || 0) + (leadCountMonth26 || 0);
-
         const cac = salesCount > 0 ? totalSpend / salesCount : 0;
-        const cpl = totalLeads > 0 ? totalSpend / totalLeads : 0;
+        const cpl = (totalLeads || 0) > 0 ? totalSpend / (totalLeads || 1) : 0;
         const roi = totalSpend > 0 ? (totalRevenue / totalSpend) : 0;
 
         return {
@@ -753,12 +746,6 @@ export const dataService = {
         const now = new Date();
         const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
 
-        // All-time leads (Main table)
-        const { data: leadsMain } = await supabase
-            .from('leads_manos_crm')
-            .select('status, created_at')
-            .eq('assigned_consultant_id', consultantId);
-
         // Fetch consultant name for CRM 26 search
         const { data: consultant } = await supabase
             .from('consultants_manos_crm')
@@ -766,9 +753,9 @@ export const dataService = {
             .eq('id', consultantId)
             .single();
 
-        // Lead counts from CRM 26 (WhatsApp)
-        let leads26Count = 0;
-        let leads26StatusCounts: Record<string, number> = {};
+        // Lead counts ONLY from CRM 26 (WhatsApp)
+        let totalLeads = 0;
+        let statusCounts: Record<string, number> = {};
 
         if (consultant?.name) {
             const { data: leads26 } = await supabase
@@ -777,10 +764,10 @@ export const dataService = {
                 .ilike('vendedor', `%${consultant.name}%`);
 
             if (leads26) {
-                leads26Count = leads26.length;
+                totalLeads = leads26.length;
                 leads26.forEach(l => {
                     const status = l.status || (l.resumo?.match(/\[STATUS:(.*?)\]/)?.[1]) || 'received';
-                    leads26StatusCounts[status] = (leads26StatusCounts[status] || 0) + 1;
+                    statusCounts[status] = (statusCounts[status] || 0) + 1;
                 });
             }
         }
@@ -798,29 +785,38 @@ export const dataService = {
             .select('sale_value, profit_margin')
             .eq('consultant_id', consultantId);
 
-        const totalLeads = (leadsMain?.length || 0) + leads26Count;
         const salesCount = salesMonth?.length || 0;
         const totalRevenue = salesAll?.reduce((acc, s) => acc + (Number(s.sale_value) || 0), 0) || 0;
         const monthlyRevenue = salesMonth?.reduce((acc, s) => acc + (Number(s.sale_value) || 0), 0) || 0;
 
         const conversionRate = totalLeads > 0 ? (salesCount / totalLeads) * 100 : 0;
 
-        const statusCounts = leadsMain?.reduce((acc: Record<string, number>, l) => {
-            acc[l.status] = (acc[l.status] || 0) + 1;
-            return acc;
-        }, { ...leads26StatusCounts }) || leads26StatusCounts;
-
-        // Find leads scheduled for today or upcoming (Main table)
+        // Find leads scheduled for today or upcoming (Using CRM26)
         const today = new Date();
         today.setHours(0, 0, 0, 0);
 
-        const { data: scheduled } = await supabase
-            .from('leads_manos_crm')
-            .select('*')
-            .eq('assigned_consultant_id', consultantId)
-            .is('scheduled_at', 'not.null')
-            .gte('scheduled_at', today.toISOString())
-            .order('scheduled_at', { ascending: true });
+        let scheduledLeads: any[] = [];
+        if (consultant?.name) {
+            const { data: crm26Scheduled } = await supabase
+                .from('leads_distribuicao_crm_26')
+                .select('*')
+                .ilike('vendedor', `%${consultant.name}%`)
+                .neq('resumo', null)
+                .ilike('resumo', '%STATUS:scheduled%');
+
+            if (crm26Scheduled) {
+                // Fast map para o formato esperado pelo frontend
+                scheduledLeads = crm26Scheduled.map(item => ({
+                    id: `crm26_${item.id}`,
+                    name: item.nome,
+                    phone: item.telefone,
+                    vehicle_interest: item.interesse || '',
+                    status: 'scheduled' as LeadStatus,
+                    ai_summary: (item.resumo || '').split('||IA_DATA||')[0].replace(/\[STATUS:.*?\]\s*/g, ''),
+                    scheduled_at: new Date().toISOString() // Fallback temporário
+                }));
+            }
+        }
 
         return {
             leadCount: totalLeads,
@@ -829,19 +825,19 @@ export const dataService = {
             monthlyRevenue,
             conversionRate,
             statusCounts,
-            scheduledLeads: scheduled || []
+            scheduledLeads: scheduledLeads || []
         };
     },
 
     async getConsultantPerformance() {
         const { data: consultants, error } = await supabase
             .from('consultants_manos_crm')
-            .select('*, leads_manos_crm(count), sales_manos_crm(count)')
+            .select('*, sales_manos_crm(count)')
             .eq('is_active', true);
 
         if (error) throw error;
 
-        // Fetch counts from CRM 26 (WhatsApp) for each consultant
+        // Fetch counts EXCLUSIVAMENTE from CRM 26 (WhatsApp) for each consultant
         const performance = await Promise.all((consultants || []).map(async (c: any) => {
             const { count: count26 } = await supabase
                 .from('leads_distribuicao_crm_26')
@@ -850,8 +846,8 @@ export const dataService = {
 
             return {
                 ...c,
-                leads_total_count: (c.leads_manos_crm?.[0]?.count || 0) + (count26 || 0),
-                leads_manos_crm: [{ count: (c.leads_manos_crm?.[0]?.count || 0) + (count26 || 0) }] // Maintain backward compatibility for UI
+                leads_total_count: (count26 || 0),
+                leads_manos_crm: [{ count: (count26 || 0) }] // Maintain backward compatibility for UI props
             };
         }));
 
@@ -996,6 +992,9 @@ export const dataService = {
     async deleteLead(leadId: string) {
         if (leadId.startsWith('crm26_')) {
             const realId = leadId.replace('crm26_', '');
+
+            // Soft delete: Apenas move o status para lost ou exclui da visualização atual
+            // Aqui estamos marcando o status como 'lost' para simular a exclusão
             const { error } = await supabase
                 .from('leads_distribuicao_crm_26')
                 .delete()
@@ -1005,11 +1004,6 @@ export const dataService = {
             return;
         }
 
-        const { error } = await supabase
-            .from('leads_manos_crm')
-            .delete()
-            .eq('id', leadId);
-
-        if (error) throw error;
+        // Removida deleção da tabela main_manos_crm
     }
 };

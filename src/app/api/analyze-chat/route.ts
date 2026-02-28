@@ -1,5 +1,8 @@
 import { OpenAI } from 'openai';
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { createServerClient } from '@supabase/ssr';
+
+export const maxDuration = 60; // Permite que a Edge Function rode por até 60 segundos (Vercel)
 
 // OpenAI initialization will happen inside the handler to ensure env vars are loaded
 let openaiInstance: OpenAI | null = null;
@@ -13,8 +16,29 @@ function getOpenAI() {
     return openaiInstance;
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
     try {
+        const supabase = createServerClient(
+            process.env.NEXT_PUBLIC_SUPABASE_URL!,
+            process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+            {
+                cookies: {
+                    get(name: string) {
+                        return req.cookies.get(name)?.value
+                    },
+                },
+            }
+        );
+
+        const { data: { user } } = await supabase.auth.getUser();
+
+        if (!user) {
+            return NextResponse.json(
+                { success: false, error: 'Acesso Negado: Usuário não autenticado.' },
+                { status: 401 }
+            );
+        }
+
         const { chatText, leadName } = await req.json();
 
         // 1. Verificação de Chave de API
@@ -96,7 +120,7 @@ export async function POST(req: Request) {
                 }
             ],
             response_format: { type: "json_object" }
-        });
+        }, { timeout: 45000 }); // Previne congelamentos severos ao cortar chamadas longas demais
 
         // 4. Acesso seguro ao conteúdo
         const output_text = response.choices[0]?.message?.content;
