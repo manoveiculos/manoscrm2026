@@ -735,8 +735,8 @@ export const dataService = {
             cac,
             cpl,
             roi,
-            leadCount: totalLeads,
-            leadCountMonth: totalLeadsMonth
+            leadCount: totalLeads || 0,
+            leadCountMonth: totalLeadsMonth || 0
         };
     },
 
@@ -760,13 +760,13 @@ export const dataService = {
         if (consultant?.name) {
             const { data: leads26 } = await supabase
                 .from('leads_distribuicao_crm_26')
-                .select('status, resumo')
+                .select('resumo')
                 .ilike('vendedor', `%${consultant.name}%`);
 
             if (leads26) {
                 totalLeads = leads26.length;
                 leads26.forEach(l => {
-                    const status = l.status || (l.resumo?.match(/\[STATUS:(.*?)\]/)?.[1]) || 'received';
+                    const status = (l.resumo?.match(/\[STATUS:(.*?)\]/)?.[1]) || 'received';
                     statusCounts[status] = (statusCounts[status] || 0) + 1;
                 });
             }
