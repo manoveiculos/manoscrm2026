@@ -1,22 +1,16 @@
-
 import { createClient } from '@supabase/supabase-js';
+import dotenv from 'dotenv';
+dotenv.config({ path: '.env.local' });
 
-const supabaseUrl = 'https://jkblxdxnbmciicakusnl.supabase.co';
-const supabaseKey = 'sb_publishable_a_LZCcUT50c9-2JspQf1aQ_-khIilRb';
-
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-async function checkConsultants() {
-    const { data, error } = await supabase
-        .from('consultants_manos_crm')
-        .select('name, is_active')
-        .eq('is_active', true);
+async function run() {
+    const { data: consultants } = await supabase.from('consultants_manos_crm').select('id, name');
+    console.log('Consultants:', consultants);
 
-    if (error) {
-        console.error('Error:', error);
-    } else {
-        console.log('Consultants:', data.map(c => c.name));
-    }
+    const { data: leads } = await supabase.from('leads_distribuicao_crm_26').select('id, nome, vendedor').limit(10);
+    console.log('Some leads:', leads);
 }
-
-checkConsultants();
+run();

@@ -14,6 +14,8 @@ export interface Campaign {
   impressions?: number;
   cpc?: number;
   ctr?: number;
+  cpm?: number;
+  frequency?: number;
   updated_at?: string;
   leads_manos_crm?: { count: number }[];
   ai_analysis_result?: {

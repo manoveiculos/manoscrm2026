@@ -31,38 +31,38 @@ export async function POST(req: Request) {
             messages: [
                 {
                     role: 'system',
-                    content: 'Você é um Especialista em Gestão de Tráfego e Marketing Digital para Concessionárias de Veículos.'
+                    content: 'Você é um Especialista em Gestão de Tráfego de Alta Performance focado em Concessionárias de Veículos. Suas ordens são exatas, táticas e sem enrolação.'
                 },
                 {
                     role: 'user',
-                    content: `Realize uma análise técnica profunda desta campanha de marketing e forneça o PRÓXIMOS PASSOS para melhoria.
+                    content: `Analise esta campanha de forma fria e estratégica. Seja direto.
             
             DADOS DA CAMPANHA:
             - Nome: ${campaign.name}
             - Plataforma: ${campaign.platform}
+            - Status Atual: ${campaign.status === 'active' ? 'ATIVA' : 'PAUSADA'}
             - Investimento: R$ ${campaign.total_spend}
             - Visualizações (Impressões): ${campaign.impressions}
             - Cliques: ${campaign.link_clicks}
             - CTR: ${campaign.ctr}%
             - CPC: R$ ${campaign.cpc}
+            - CPL (Custo Por Lead Estimado): R$ ${leadsSummary.total > 0 ? (campaign.total_spend / leadsSummary.total).toFixed(2) : campaign.total_spend}
             
             RESULTADO NO CRM:
-            - Leads Totais Capturados: ${leadsSummary.total}
-            - Leads Qualificados (HOT/WARM): ${leadsSummary.qualified}
-            - Status dos Leads: ${JSON.stringify(leadsSummary.statusCounts)}
+            - Leads Totais: ${leadsSummary.total}
             
-            DIRETRIZES DA ANÁLISE:
-            1. Avalie a eficiência do criativo (CTR vs Cliques).
-            2. Analise a qualidade dos leads (Leads vs Qualificação).
-            3. Identifique gargalos (ex: muitos cliques mas poucos leads, ou muitos leads mas baixa qualidade).
-            4. Forneça 3 passos práticos e "diretos ao ponto" para o gestor melhorar o ROI.
+            DIRETRIZES TÁTICAS:
+            1. Seja "preto no branco". Se a campanha for ruim, mande PAUSAR. Se for ótima, mande ESCALAR e aumentar a verba.
+            2. "gargalo_identificado" deve expor o problema exato em UMA FRASE (ex: "Criativo não gera clique" ou "Lead muito caro para fechar negócio").
+            3. "proximos_passos" devem ser EXATAMENTE 3 passos. Comece cada passo com verbos de ação imperativos (ex: "Pausar anúncio X", "Aumentar orçamento em 20%", "Alterar público para segmentação aberta"). Sem explicações longas, seja clínico.
+            4. "saude_campanha" deve ser APENAS UM DOS SEGUINTES: EXCELENTE | BOA | REGULAR | CRÍTICA.
             
-            RESPONDA EM JSON:
+            RESPONDA APENAS NESTE FORMATO JSON EXATO:
             {
-              "analise_critica": "string (resumo técnico)",
+              "analise_critica": "Um parágrafo de 3 linhas com o veredito técnico (ROI e viabilidade).",
               "saude_campanha": "EXCELENTE | BOA | REGULAR | CRÍTICA",
-              "gargalo_identificado": "string",
-              "proximos_passos": ["string", "string", "string"],
+              "gargalo_identificado": "Onde está vazando dinheiro/oportunidade?",
+              "proximos_passos": ["Ação Tática 1", "Ação Tática 2", "Ação Tática 3"],
               "score_potencial": number (0-100)
             }`
                 }

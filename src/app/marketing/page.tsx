@@ -27,6 +27,7 @@ export default function MarketingPage() {
     const [dailyReport, setDailyReport] = useState<MarketingReport | null>(null);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
+    const [dateFilter, setDateFilter] = useState('maximum');
     const [isSyncing, setIsSyncing] = useState(false);
     const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
     const [analyzingId, setAnalyzingId] = useState<string | null>(null);
@@ -59,13 +60,47 @@ export default function MarketingPage() {
         }
     };
 
-    const loadData = async () => {
+    const loadData = async (currentFilter: string = dateFilter) => {
+        setLoading(true);
         try {
             const [campaignData, reportData] = await Promise.all([
                 dataService.getCampaigns(),
                 dataService.getDailyMarketingReport()
             ]);
-            setCampaigns(campaignData || []);
+
+            let finalCampaigns = campaignData || [];
+
+            // Fetch live insights if date filter is active
+            if (currentFilter !== 'maximum') {
+                const res = await fetch('/api/marketing/insights', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ date_preset: currentFilter })
+                });
+                const liveData = await res.json();
+
+                if (liveData.success && liveData.data) {
+                    finalCampaigns = finalCampaigns.map((c: any) => {
+                        const liveC = liveData.data.find((lc: any) => lc.name === c.name);
+                        if (liveC) {
+                            return {
+                                ...c,
+                                total_spend: liveC.total_spend,
+                                link_clicks: liveC.link_clicks,
+                                reach: liveC.reach,
+                                impressions: liveC.impressions,
+                                cpc: liveC.cpc,
+                                ctr: liveC.ctr,
+                                cpm: liveC.cpm,
+                                frequency: liveC.frequency,
+                            };
+                        }
+                        return c;
+                    });
+                }
+            }
+
+            setCampaigns(finalCampaigns);
             setDailyReport(reportData);
         } catch (err: unknown) {
             const error = err as Error;
@@ -76,11 +111,8 @@ export default function MarketingPage() {
     };
 
     useEffect(() => {
-        loadData().then(() => {
-            // Sincronização automática inicial via servirdor
-            handleSync();
-        });
-    }, []);
+        loadData(dateFilter);
+    }, [dateFilter]);
 
     const handleSync = async () => {
         setIsSyncing(true);
@@ -118,11 +150,19 @@ export default function MarketingPage() {
         })
         .sort((a, b) => {
             if (!a || !b) return 0;
-            // Sempre mostrar as ativas primeiro
+            // First sort by status (Active first)
             if (a.status === 'active' && b.status !== 'active') return -1;
             if (a.status !== 'active' && b.status === 'active') return 1;
 
-            // Dentro do mesmo status, mostrar as mais recentes primeiro
+            // Then sort by spend (Highest first) within the same status
+            const spendA = Number(a.total_spend) || 0;
+            const spendB = Number(b.total_spend) || 0;
+
+            if (spendA !== spendB) {
+                return spendB - spendA;
+            }
+
+            // Finally fallback to date
             const dateA = new Date(a.updated_at || a.created_at || 0).getTime();
             const dateB = new Date(b.updated_at || b.created_at || 0).getTime();
             return dateB - dateA;
@@ -212,6 +252,19 @@ export default function MarketingPage() {
                             onChange={(e) => setSearchTerm(e.target.value)}
                         />
                     </div>
+
+                    <select
+                        value={dateFilter}
+                        onChange={(e) => setDateFilter(e.target.value)}
+                        className="bg-[#0d1117] border border-[#30363d] rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all text-[#c9d1d9] cursor-pointer"
+                    >
+                        <option value="today">Hoje</option>
+                        <option value="yesterday">Ontem</option>
+                        <option value="this_week">Esta Semana</option>
+                        <option value="last_7d">Últimos 7 Dias</option>
+                        <option value="this_month">Este Mês</option>
+                        <option value="maximum">Máximo (Tudo)</option>
+                    </select>
 
                     <button
                         onClick={handleSync}
@@ -376,10 +429,9 @@ export default function MarketingPage() {
                         <thead>
                             <tr className="border-b border-[#30363d] text-[10px] uppercase tracking-wider text-[#8b949e] font-semibold bg-[#161b22]/30">
                                 <th className="px-6 py-3">Campanha</th>
-                                <th className="px-4 py-3">Impacto</th>
-                                <th className="px-4 py-3">Engajamento</th>
-                                <th className="px-4 py-3">Conversão</th>
-                                <th className="px-4 py-3">Investimento</th>
+                                <th className="px-4 py-3">Custo / Orçamento</th>
+                                <th className="px-4 py-3">Performance (CTR/CPC)</th>
+                                <th className="px-4 py-3">Conversão CRM</th>
                                 <th className="px-6 py-3 text-right">Ações</th>
                             </tr>
                         </thead>
@@ -446,25 +498,20 @@ export default function MarketingPage() {
                                             </td>
                                             <td className="px-4 py-4">
                                                 <div className="flex flex-col">
-                                                    <span className="text-sm font-semibold text-[#f0f6fc]">{Number(camp.impressions || 0).toLocaleString()}</span>
-                                                    <span className="text-[10px] text-[#8b949e] uppercase tracking-wider">VISITAS</span>
+                                                    <span className="text-sm font-semibold text-[#f0f6fc]">R$ {Number(camp.total_spend || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                                    <span className="text-[10px] text-[#8b949e] uppercase tracking-wider">INVESTIDO</span>
                                                 </div>
                                             </td>
                                             <td className="px-4 py-4">
                                                 <div className="flex flex-col">
-                                                    <span className="text-sm font-semibold text-[#f0f6fc]">{Number(camp.link_clicks || 0).toLocaleString()}</span>
-                                                    <span className="text-[10px] text-[#8b949e] uppercase tracking-wider">CLIQUES</span>
+                                                    <span className="text-sm font-semibold text-[#f0f6fc]">{Number(camp.ctr || 0).toFixed(2)}%</span>
+                                                    <span className="text-[10px] text-[#8b949e] uppercase tracking-wider">CTR | R$ {Number(camp.cpc || 0).toFixed(2)} CPC</span>
                                                 </div>
                                             </td>
                                             <td className="px-4 py-4">
                                                 <div className="flex flex-col">
                                                     <span className="text-sm font-bold text-[#3fb950]">{leadCount}</span>
-                                                    <span className="text-[10px] text-[#8b949e] uppercase tracking-wider">LEADS</span>
-                                                </div>
-                                            </td>
-                                            <td className="px-4 py-4">
-                                                <div className="flex flex-col">
-                                                    <span className="text-sm font-semibold text-[#f0f6fc]">R$ {Number(camp.total_spend || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                                    <span className="text-[10px] text-[#8b949e] uppercase tracking-wider">LEADS GERADOS</span>
                                                 </div>
                                             </td>
                                             <td className="px-6 py-4 text-right">
@@ -494,10 +541,13 @@ export default function MarketingPage() {
                     const isWhatsApp = selectedCampaign.platform?.toLowerCase().includes('whatsapp');
 
                     const aiInsights = selectedCampaign.ai_analysis_result ? [
-                        { label: 'Saúde', value: selectedCampaign.ai_analysis_result.saude_campanha, type: 'positive' },
-                        { label: 'Gargalo', value: selectedCampaign.ai_analysis_result.gargalo_identificado, type: 'neutral' },
-                        { label: 'Ação', value: selectedCampaign.ai_analysis_result.analise_critica.substring(0, 100) + '...', type: 'neutral' }
-                    ] : [
+                        { label: 'Saúde', value: selectedCampaign.ai_analysis_result.saude_campanha, type: selectedCampaign.ai_analysis_result.saude_campanha === 'CRÍTICA' ? 'negative' : selectedCampaign.ai_analysis_result.saude_campanha === 'EXCELENTE' ? 'positive' : 'neutral' },
+                        { label: 'Gargalo', value: selectedCampaign.ai_analysis_result.gargalo_identificado, type: 'negative' },
+                        { label: 'Ação Recomendada 1', value: selectedCampaign.ai_analysis_result.proximos_passos[0], type: 'neutral' },
+                        { label: 'Ação Recomendada 2', value: selectedCampaign.ai_analysis_result.proximos_passos[1], type: 'neutral' },
+                        { label: 'Ação Recomendada 3', value: selectedCampaign.ai_analysis_result.proximos_passos[2], type: 'neutral' },
+                        { label: 'Resumo Técnico', value: selectedCampaign.ai_analysis_result.analise_critica, type: 'neutral' }
+                    ].filter(i => i.value) : [
                         { label: 'Status', value: 'Aguardando processamento de dados do CRM...', type: 'neutral' }
                     ];
 
@@ -544,7 +594,7 @@ export default function MarketingPage() {
                                     </button>
                                 </div>
 
-                                <div className="flex-1 overflow-y-auto p-8 grid grid-cols-1 lg:grid-cols-3 gap-8 bg-[#0d1117]/30">
+                                <div className="flex-1 overflow-y-auto p-8 grid grid-cols-1 lg:grid-cols-4 gap-8 bg-[#0d1117]/30">
                                     <div className="space-y-6">
                                         <div className="p-6 rounded-lg bg-[#0d1117] border border-[#30363d] relative overflow-hidden">
                                             <p className="text-[10px] font-bold text-[#8b949e] uppercase tracking-wider mb-6">Volume de Alcance</p>
@@ -556,10 +606,36 @@ export default function MarketingPage() {
                                             </p>
                                         </div>
                                         <div className="p-6 rounded-lg bg-[#0d1117] border border-[#30363d]">
-                                            <p className="text-[10px] font-bold text-[#8b949e] uppercase tracking-wider mb-4">CLIQUES TOTAIS</p>
+                                            <p className="text-[10px] font-bold text-[#8b949e] uppercase tracking-wider mb-4">Pessoas Únicas (Reach)</p>
                                             <h4 className="text-3xl font-bold text-[#f0f6fc] tracking-tight">
+                                                {Number(selectedCampaign.reach || 0).toLocaleString()}
+                                            </h4>
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-6">
+                                        <div className="p-6 rounded-lg bg-[#0d1117] border border-[#30363d] relative overflow-hidden">
+                                            <p className="text-[10px] font-bold text-[#8b949e] uppercase tracking-wider mb-6">CLIQUES TOTAIS</p>
+                                            <h4 className="text-4xl font-bold text-[#f0f6fc] tracking-tight">
                                                 {Number(selectedCampaign.link_clicks || 0).toLocaleString()}
                                             </h4>
+                                            <p className="text-[11px] text-[#484f58] mt-4 border-t border-[#30363d] pt-4">
+                                                Cliques no link da campanha.
+                                            </p>
+                                        </div>
+                                        <div className="p-6 rounded-lg bg-[#0d1117] border border-[#30363d] flex justify-between items-center gap-4">
+                                            <div>
+                                                <p className="text-[10px] font-bold text-[#8b949e] uppercase tracking-wider mb-2">CPM</p>
+                                                <h4 className="text-xl font-bold text-[#f0f6fc] tracking-tight">
+                                                    R$ {Number(selectedCampaign.cpm || 0).toFixed(2)}
+                                                </h4>
+                                            </div>
+                                            <div>
+                                                <p className="text-[10px] font-bold text-[#8b949e] uppercase tracking-wider mb-2">Frequência</p>
+                                                <h4 className="text-xl font-bold text-[#f0f6fc] tracking-tight">
+                                                    {Number(selectedCampaign.frequency || 0).toFixed(2)}x
+                                                </h4>
+                                            </div>
                                         </div>
                                     </div>
 
@@ -573,7 +649,7 @@ export default function MarketingPage() {
                                                 {sLeads}
                                             </h4>
                                             <p className="text-[11px] text-[#484f58] mt-4 border-t border-[#30363d] pt-4">
-                                                Contatos qualificados identificados.
+                                                Contatos qualificados confirmados.
                                             </p>
                                         </div>
                                         <div className="p-6 rounded-lg bg-[#0d1117] border border-[#30363d]">
@@ -584,22 +660,26 @@ export default function MarketingPage() {
                                         </div>
                                     </div>
 
-                                    <div className="flex flex-col h-full rounded-lg bg-[#0d1117] border border-[#30363d] p-6 overflow-hidden relative">
+                                    <div className="flex flex-col h-full rounded-lg bg-[#0d1117] border border-[#30363d] p-6 overflow-hidden relative max-h-[80vh]">
                                         <div className="relative z-10 flex flex-col h-full">
-                                            <div className="flex items-center gap-3 mb-8">
+                                            <div className="flex items-center gap-3 mb-8 shrink-0">
                                                 <Sparkles size={16} className="text-blue-400" />
                                                 <h4 className="text-[10px] font-bold text-[#f0f6fc] uppercase tracking-wider">Otimização AI</h4>
                                             </div>
-                                            <div className="flex-1 space-y-4 text-left">
+                                            <div className="flex-1 space-y-4 text-left overflow-y-auto pr-2 pb-4">
                                                 {aiInsights.map((insight: any, i: number) => (
-                                                    <div key={i} className="group/insight">
-                                                        <div className="flex items-center gap-3 mb-1">
+                                                    <div key={i} className={`group/insight p-3 rounded-lg border ${insight.type === 'positive' ? 'bg-[#3fb950]/5 border-[#3fb950]/20' :
+                                                        insight.type === 'neutral' ? 'bg-[#d29922]/5 border-[#d29922]/20' : 'bg-[#f85149]/5 border-[#f85149]/20'
+                                                        }`}>
+                                                        <div className="flex items-center gap-2 mb-2">
                                                             <div className={`h-1.5 w-1.5 rounded-full ${insight.type === 'positive' ? 'bg-[#3fb950]' :
                                                                 insight.type === 'neutral' ? 'bg-[#d29922]' : 'bg-[#f85149]'
                                                                 }`} />
-                                                            <span className="text-[11px] font-semibold text-[#f0f6fc]">{insight.label}</span>
+                                                            <span className="text-[11px] font-bold uppercase tracking-wider text-[#f0f6fc]">{insight.label}</span>
                                                         </div>
-                                                        <p className="text-[12px] text-[#8b949e] leading-normal pl-4 border-l border-[#30363d] ml-0.5 group-hover/insight:border-blue-500 transition-colors">
+                                                        <p className={`text-[13px] leading-relaxed ${insight.type === 'positive' ? 'text-[#3fb950]' :
+                                                            insight.type === 'neutral' ? 'text-[#d29922]' : 'text-[#f85149]'
+                                                            }`}>
                                                             {insight.value}
                                                         </p>
                                                     </div>

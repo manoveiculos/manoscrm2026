@@ -50,7 +50,11 @@ export const dataService = {
                 const { data: consultants } = await supabase.from('consultants_manos_crm').select('id, name');
 
                 for (const lead of leadsToSync) {
-                    const consultant = consultants?.find(c => c.name.toLowerCase() === lead.vendedor.toLowerCase());
+                    const consultant = consultants?.find(c => {
+                        if (!c.name || !lead.vendedor) return false;
+                        const firstName = c.name.trim().split(' ')[0].toLowerCase();
+                        return lead.vendedor.toLowerCase().includes(firstName);
+                    });
                     if (consultant) {
                         await this.promoteLeadToMain(lead, 'crm26', consultant.id);
                     }
@@ -68,7 +72,11 @@ export const dataService = {
             if (legacyToSync && legacyToSync.length > 0) {
                 const { data: consultants } = await supabase.from('consultants_manos_crm').select('id, name');
                 for (const lead of legacyToSync) {
-                    const consultant = consultants?.find(c => c.name.toLowerCase() === lead.vendedor.toLowerCase());
+                    const consultant = consultants?.find(c => {
+                        if (!c.name || !lead.vendedor) return false;
+                        const firstName = c.name.trim().split(' ')[0].toLowerCase();
+                        return lead.vendedor.toLowerCase().includes(firstName);
+                    });
                     if (consultant) {
                         await this.promoteLeadToMain(lead, 'legacy', consultant.id);
                     }
@@ -149,7 +157,8 @@ export const dataService = {
         // }
 
         if (consultantName) {
-            query = query.ilike('vendedor', `%${consultantName}%`);
+            const firstName = consultantName.trim().split(' ')[0];
+            query = query.ilike('vendedor', `%${firstName}%`);
         }
 
         const { data, error } = await query;
@@ -157,6 +166,8 @@ export const dataService = {
             console.error("Error on leads_distribuicao_crm_26:", error);
             return [];
         }
+
+        const { data: allConsultants } = await supabase.from('consultants_manos_crm').select('id, name');
 
         // Filter: name and phone are mandatory
         return (data || [])
@@ -187,6 +198,13 @@ export const dataService = {
                     aiClass = 'warm';
                 }
 
+                let assignedConsultantId = undefined;
+                if (item.vendedor && allConsultants) {
+                    const firstName = item.vendedor.trim().split(' ')[0].toLowerCase();
+                    const found = allConsultants.find(c => c.name && c.name.toLowerCase().includes(firstName));
+                    if (found) assignedConsultantId = found.id;
+                }
+
                 return {
                     id: `crm26_${item.id}`,
                     name: item.nome,
@@ -200,6 +218,7 @@ export const dataService = {
                     updated_at: item.atualizado_em || item.criado_em,
                     source: 'WhatsApp',
                     consultants_manos_crm: { name: item.vendedor || 'Pendente' },
+                    assigned_consultant_id: assignedConsultantId,
                     ai_summary: item.resumo_consultor || (item.resumo || '').split('||IA_DATA||')[0].replace(/\[STATUS:.*?\]\s*/g, ''),
                     carro_troca: item.troca || '',
                     nivel_interesse: item.nivel_interesse,
@@ -758,10 +777,11 @@ export const dataService = {
         let statusCounts: Record<string, number> = {};
 
         if (consultant?.name) {
+            const firstName = consultant.name.trim().split(' ')[0];
             const { data: leads26 } = await supabase
                 .from('leads_distribuicao_crm_26')
                 .select('resumo')
-                .ilike('vendedor', `%${consultant.name}%`);
+                .ilike('vendedor', `%${firstName}%`);
 
             if (leads26) {
                 totalLeads = leads26.length;
@@ -797,10 +817,11 @@ export const dataService = {
 
         let scheduledLeads: any[] = [];
         if (consultant?.name) {
+            const firstName = consultant.name.trim().split(' ')[0];
             const { data: crm26Scheduled } = await supabase
                 .from('leads_distribuicao_crm_26')
                 .select('*')
-                .ilike('vendedor', `%${consultant.name}%`)
+                .ilike('vendedor', `%${firstName}%`)
                 .neq('resumo', null)
                 .ilike('resumo', '%STATUS:scheduled%');
 
@@ -839,10 +860,11 @@ export const dataService = {
 
         // Fetch counts EXCLUSIVAMENTE from CRM 26 (WhatsApp) for each consultant
         const performance = await Promise.all((consultants || []).map(async (c: any) => {
+            const firstName = c.name ? c.name.trim().split(' ')[0] : '';
             const { count: count26 } = await supabase
                 .from('leads_distribuicao_crm_26')
                 .select('*', { count: 'exact', head: true })
-                .ilike('vendedor', `%${c.name}%`);
+                .ilike('vendedor', `%${firstName}%`);
 
             return {
                 ...c,
@@ -904,8 +926,8 @@ export const dataService = {
         console.log("🚀 Iniciando sincronização avançada para conta:", adAccountId);
 
         try {
-            // Usando effective_status para capturar campanhas que estão ativas mas podem ter adsets pausados
-            const response = await fetch(`https://graph.facebook.com/v19.0/act_${adAccountId}/campaigns?fields=name,status,effective_status,objective,insights{spend,inline_link_clicks,reach,impressions,cpc,ctr}&access_token=${token}`);
+            // Usando status da campanha mestre para evitar campanhas ocultas por adsets pausados, com limite de 150
+            const response = await fetch(`https://graph.facebook.com/v19.0/act_${adAccountId}/campaigns?limit=150&fields=name,status,effective_status,objective,insights{spend,inline_link_clicks,reach,impressions,cpc,ctr,cpm,frequency}&access_token=${token}`);
 
             if (!response.ok) {
                 const errorText = await response.text();
@@ -922,7 +944,9 @@ export const dataService = {
 
             const upsertData = metaCampaigns.map((c: { name?: string; status?: string; effective_status?: string; insights?: { data?: Record<string, unknown>[] } }) => {
                 const insights = c.insights?.data?.[0] || {};
-                const status = (c.effective_status || c.status || '').toLowerCase();
+
+                // Prioriza o status mestre da campanha, pois se um adset pausar, o effective_status pausa a campanha inteira na API
+                const status = (c.status || c.effective_status || '').toLowerCase();
 
                 console.log(`- Campanha: ${c.name} | Status FB: ${c.status} | Effective: ${c.effective_status}`);
 
@@ -936,6 +960,8 @@ export const dataService = {
                     impressions: Number(insights.impressions || 0),
                     cpc: Number(insights.cpc || 0),
                     ctr: Number(insights.ctr || 0),
+                    cpm: Number(insights.cpm || 0),
+                    frequency: Number(insights.frequency || 0),
                     updated_at: new Date().toISOString()
                 };
             });

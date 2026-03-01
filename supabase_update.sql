@@ -59,6 +59,30 @@ BEGIN
 
 END $$;
 
+-- PARTE 1.5: ADICIONANDO COLUNAS AVANÇADAS DE ADS PARA A TABELA DE CAMPANHAS
+DO $$ 
+BEGIN 
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'campaigns_manos_crm' AND column_name = 'reach') THEN
+        ALTER TABLE public.campaigns_manos_crm ADD COLUMN reach INTEGER DEFAULT 0;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'campaigns_manos_crm' AND column_name = 'cpm') THEN
+        ALTER TABLE public.campaigns_manos_crm ADD COLUMN cpm NUMERIC DEFAULT 0;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'campaigns_manos_crm' AND column_name = 'frequency') THEN
+        ALTER TABLE public.campaigns_manos_crm ADD COLUMN frequency NUMERIC DEFAULT 0;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'campaigns_manos_crm' AND column_name = 'roas') THEN
+        ALTER TABLE public.campaigns_manos_crm ADD COLUMN roas NUMERIC DEFAULT 0;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'campaigns_manos_crm' AND column_name = 'conversion_rate') THEN
+        ALTER TABLE public.campaigns_manos_crm ADD COLUMN conversion_rate NUMERIC DEFAULT 0;
+    END IF;
+END $$;
+
 -- =========================================================================================
 -- PARTE 2: CORREÇÃO DAS POLÍTICAS DE SEGURANÇA (ROW LEVEL SECURITY - RLS)
 -- Isso resolve os erros 500 ao tentar sincronizar dados e salvar no banco
@@ -74,12 +98,13 @@ DROP POLICY IF EXISTS "Enable read access for all" ON public.campaigns_manos_crm
 DROP POLICY IF EXISTS "Enable insert access for all" ON public.campaigns_manos_crm;
 DROP POLICY IF EXISTS "Enable update access for all" ON public.campaigns_manos_crm;
 
--- 3. Aplicação de Políticas Corretas na Tabela de Campanhas (Resolvendo erro do painel Meta/Facebook)
 -- Permite leitura anônima ou autenticada das métricas (Já que o painel consome isso sem login na build local)
+DROP POLICY IF EXISTS "Enable Select Access Campaigns" ON public.campaigns_manos_crm;
 CREATE POLICY "Enable Select Access Campaigns" ON public.campaigns_manos_crm
     FOR SELECT USING (true);
 
 -- Permite INSERT E UPDATE para lidar com a Rota de API /api/sync-meta sem travar com violação
+DROP POLICY IF EXISTS "Enable Upsert Access Campaigns" ON public.campaigns_manos_crm;
 CREATE POLICY "Enable Upsert Access Campaigns" ON public.campaigns_manos_crm
     FOR ALL USING (true) WITH CHECK (true);
 
