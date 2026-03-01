@@ -319,11 +319,17 @@ export const dataService = {
         return data;
     },
 
-    async getDistributedLeads() {
-        const { data, error } = await supabase
+    async getDistributedLeads(consultantId?: string) {
+        let query = supabase
             .from('leads_distribuicao')
             .select('*')
             .order('criado_em', { ascending: false });
+
+        if (consultantId) {
+            query = query.eq('assigned_consultant_id', consultantId);
+        }
+
+        const { data, error } = await query;
 
         if (error) throw error;
 

@@ -64,15 +64,22 @@ export default function OldLeadsPage() {
                 }
 
                 // Load Leads
-                const data = await dataService.getDistributedLeads();
-
-                // If consultant, filter to show only their distributed leads
+                let data: DistributedLead[] = [];
                 if (session?.user && session.user.email !== 'alexandre_gorges@hotmail.com') {
-                    const filtered = (data || []).filter(l => l.enviado && l.vendedor === (userName || session.user.user_metadata?.name));
-                    setLeads(filtered);
+                    const { data: consultant } = await supabase
+                        .from('consultants_manos_crm')
+                        .select('id')
+                        .eq('auth_id', session.user.id)
+                        .single();
+
+                    if (consultant) {
+                        data = await dataService.getDistributedLeads(consultant.id) as unknown as DistributedLead[];
+                    }
                 } else {
-                    setLeads(data || []);
+                    data = await dataService.getDistributedLeads() as unknown as DistributedLead[];
                 }
+
+                setLeads(data || []);
             } catch (err) {
                 console.error("Error initializing page:", err);
             } finally {
@@ -219,44 +226,8 @@ export default function OldLeadsPage() {
         );
     }
 
-    // Bloqueia acesso para não-admins APENAS se não houver leads distribuídos para eles
-    if (role !== 'admin' && leads.length === 0) {
-        return (
-            <div className="flex flex-col items-center justify-center h-[70vh] text-center space-y-8 animate-in fade-in zoom-in duration-700">
-                <div className="relative group">
-                    <div className="absolute inset-0 bg-red-600/20 blur-[80px] rounded-full group-hover:bg-red-600/30 transition-all duration-500" />
-                    <div className="relative bg-[#0a0f18] p-8 rounded-[3rem] border border-white/5 shadow-2xl">
-                        <History size={100} className="text-red-500 animate-pulse" strokeWidth={1} />
-                    </div>
-                    <div className="absolute -bottom-4 -right-4 bg-red-600 p-4 rounded-2xl shadow-xl shadow-red-900/40 rotate-12">
-                        <User size={24} className="text-white" />
-                    </div>
-                </div>
-
-                <div className="space-y-4 max-w-xl relative z-10">
-                    <h1 className="text-6xl font-black text-white tracking-tighter uppercase font-outfit">
-                        Aguardando <span className="text-red-600 italic">Leads</span>
-                    </h1>
-                    <p className="text-white/40 font-medium text-lg leading-relaxed">
-                        Olá {userName || 'Consultor'}! No momento você não possui leads do arquivo distribuídos para você.
-                    </p>
-                    <div className="flex items-center justify-center gap-4">
-                        <p className="text-red-500/80 font-black text-[11px] uppercase tracking-[0.3em] bg-red-500/5 py-2 px-4 rounded-full border border-red-500/10 w-fit">
-                            Fique atento às notificações
-                        </p>
-                    </div>
-                </div>
-
-                <div className="flex flex-col items-center gap-2 pt-8">
-                    <div className="flex items-center gap-3 px-6 py-4 bg-white/5 border border-white/10 rounded-2xl backdrop-blur-md">
-                        <ClockIcon size={20} className="text-red-500" />
-                        <span className="text-[12px] font-black text-white/80 uppercase tracking-widest leading-none">Acesso Restrito a Gerentes</span>
-                    </div>
-                    <p className="text-[10px] text-white/20 font-medium italic">Seu perfil: Consultor Manos Veículos</p>
-                </div>
-            </div>
-        );
-    }
+    // Não bloquear mais a tela inicial para consultores sem leads, apenas deixaremos 
+    // a tabela vazia dizendo "Nenhum lead...". O usuário enxerga as abas limpas.
 
     return (
         <div className="space-y-10 pb-20 max-w-[1600px] mx-auto px-4">
