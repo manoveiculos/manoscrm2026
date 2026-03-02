@@ -129,10 +129,10 @@ export default function Dashboard() {
             <Sparkles size={12} className={aiStatus === 'ok' ? 'animate-pulse' : ''} />
             {aiStatus === 'ok' ? 'IA: Conectada' : aiStatus === 'error' ? 'IA: Chave Inválida' : 'IA: Verificando...'}
           </div>
-          <h1 className="text-5xl font-black tracking-tighter text-white font-outfit">
+          <h1 className="text-3xl md:text-5xl font-black tracking-tighter text-white font-outfit">
             Visão <span className="bg-clip-text text-transparent bg-gradient-to-r from-red-500 via-white to-red-600">Geral</span>
           </h1>
-          <p className="text-white/40 font-medium">Performance de leads e ROI em tempo real para Manos Veículos.</p>
+          <p className="text-sm md:text-base text-white/40 font-medium">Performance de leads e ROI em tempo real para Manos Veículos.</p>
         </div>
 
         <div className="flex items-center gap-4 bg-white/5 p-1.5 rounded-2xl border border-white/10">

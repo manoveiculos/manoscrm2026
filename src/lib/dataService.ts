@@ -112,7 +112,7 @@ export const dataService = {
             vehicle_interest: sourceLead.interesse || sourceLead.vehicle_interest || '',
             region: sourceLead.cidade || sourceLead.region || '',
             assigned_consultant_id: consultantId,
-            status: 'new', // New active lead for the consultant
+            status: 'received', // New active lead for the consultant, maps to 'Aguardando' stage
             source: 'WhatsApp',
             ai_score: sourceLead.ai_score || 0,
             ai_classification: sourceLead.ai_classification || 'warm',
@@ -706,7 +706,7 @@ export const dataService = {
             .from('leads_manos_crm')
             .insert([{
                 ...leadData,
-                status: 'new', // Match 'leads_manos_crm' default status
+                status: 'received', // Match 'leads_distribuicao_crm_26' default status for consistency
                 created_at: new Date().toISOString(),
                 updated_at: new Date().toISOString()
             }])
@@ -820,13 +820,15 @@ export const dataService = {
             const firstName = consultant.name.trim().split(' ')[0];
             const { data: leads26 } = await supabase
                 .from('leads_distribuicao_crm_26')
-                .select('resumo')
+                .select('status, resumo, nome, telefone')
                 .ilike('vendedor', `%${firstName}%`);
 
             if (leads26) {
-                totalLeads = leads26.length;
-                leads26.forEach(l => {
-                    const status = (l.resumo?.match(/\[STATUS:(.*?)\]/)?.[1]) || 'received';
+                // Filter invalid records to match the Central de Leads logic
+                const validLeads = leads26.filter(l => l.nome && l.nome.trim() !== '' && l.telefone && l.telefone.trim() !== '');
+                totalLeads = validLeads.length;
+                validLeads.forEach(l => {
+                    let status = l.status || (l.resumo?.match(/\[STATUS:(.*?)\]/)?.[1]) || 'received';
                     statusCounts[status] = (statusCounts[status] || 0) + 1;
                 });
             }

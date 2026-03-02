@@ -86,7 +86,7 @@ export function ConsultantDashboard({ consultantId, consultantName }: { consulta
         );
     }
 
-    const uncontactedCount = metrics?.statusCounts['new'] || metrics?.statusCounts['received'] || 0;
+    const uncontactedCount = (metrics?.statusCounts['new'] || 0) + (metrics?.statusCounts['received'] || 0);
     const inProgressCount = (metrics?.statusCounts['attempt'] || 0) + (metrics?.statusCounts['contacted'] || 0);
     const allScheduledLeads = metrics?.scheduledLeads || [];
     const scheduledToday = allScheduledLeads.filter(l => {
@@ -244,7 +244,7 @@ export function ConsultantDashboard({ consultantId, consultantName }: { consulta
                     {/* Action Cards */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <Link
-                            href="/leads?view=list"
+                            href="/leads?view=kanban&stage=new"
                             className="glass-card p-6 flex items-center justify-between border-blue-500/20 bg-blue-500/5 group hover:bg-blue-500/10 transition-all cursor-pointer"
                         >
                             <div className="flex items-center gap-4">
@@ -252,8 +252,10 @@ export function ConsultantDashboard({ consultantId, consultantName }: { consulta
                                     <Clock size={24} />
                                 </div>
                                 <div>
-                                    <h4 className="font-bold text-white leading-none">{uncontactedCount} Novos Leads</h4>
-                                    <p className="text-[10px] text-white/40 mt-1 uppercase font-black tracking-widest">Aguardando Primeiro Contato</p>
+                                    <h4 className="font-bold text-white leading-none">{uncontactedCount > 0 ? `${uncontactedCount} Novos Leads` : 'Nenhum Lead Novo'}</h4>
+                                    <p className="text-[10px] text-white/40 mt-1 uppercase font-black tracking-widest">
+                                        {uncontactedCount > 0 ? 'Aguardando Primeiro Contato' : 'Aguardando novos leads chegar'}
+                                    </p>
                                 </div>
                             </div>
                             <div className="h-8 w-8 rounded-full bg-white/5 flex items-center justify-center text-white/40 group-hover:text-white transition-all">
@@ -293,8 +295,8 @@ export function ConsultantDashboard({ consultantId, consultantName }: { consulta
                         </div>
 
                         <div className="space-y-3">
-                            {recentLeads.filter(l => l.ai_classification === 'hot').length > 0 ? (
-                                recentLeads.filter(l => l.ai_classification === 'hot').map((lead) => (
+                            {recentLeads.filter(l => l.ai_score >= 60).length > 0 ? (
+                                recentLeads.filter(l => l.ai_score >= 60).map((lead) => (
                                     <Link
                                         key={lead.id}
                                         href={`/leads?id=${lead.id}`}

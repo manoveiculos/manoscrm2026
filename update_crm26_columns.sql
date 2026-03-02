@@ -1,5 +1,6 @@
--- Adds new columns to natively persist AI analysis and finalization reasons in the CRM26 table
+-- Adds new columns to natively persist AI analysis, status, and finalization reasons in the CRM26 table
 ALTER TABLE leads_distribuicao_crm_26 
+ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'received',
 ADD COLUMN IF NOT EXISTS ai_score INTEGER DEFAULT 0,
 ADD COLUMN IF NOT EXISTS ai_classification VARCHAR(50),
 ADD COLUMN IF NOT EXISTS ai_reason TEXT,

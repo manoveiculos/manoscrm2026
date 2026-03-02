@@ -134,7 +134,7 @@ export default function LoginPage() {
                         transition={{ delay: 0.2 }}
                         className="space-y-6 max-w-lg"
                     >
-                        <h1 className="text-7xl font-black text-white tracking-tighter leading-[0.9]">
+                        <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-black text-white tracking-tighter leading-[0.9]">
                             Venda <span className="text-red-600">Mais.</span><br />
                             Gerencie <span className="bg-clip-text text-transparent bg-gradient-to-r from-white to-white/40">Melhor.</span>
                         </h1>
@@ -181,7 +181,7 @@ export default function LoginPage() {
                         <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 w-fit text-[10px] font-black uppercase tracking-widest text-white/30">
                             Acesso Restrito
                         </div>
-                        <h2 className="text-4xl font-black text-white tracking-tight">
+                        <h2 className="text-2xl sm:text-3xl md:text-4xl font-black text-white tracking-tight leading-tight">
                             {mode === 'login' ? 'Bem-vindo de volta' : mode === 'register' ? 'Solicitar Acreditação' : 'Recuperar Acesso'}
                         </h2>
                         <p className="text-white/40 font-medium italic">

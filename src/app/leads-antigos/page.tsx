@@ -233,15 +233,15 @@ export default function OldLeadsPage() {
         <div className="space-y-10 pb-20 max-w-[1600px] mx-auto px-4">
             <header className="flex flex-col md:flex-row md:items-end justify-between gap-6">
                 <div className="space-y-2">
-                    <div className="flex items-center gap-3">
-                        <h1 className="text-5xl font-black tracking-tighter text-white font-outfit">
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+                        <h1 className="text-3xl md:text-5xl font-black tracking-tighter text-white font-outfit leading-none">
                             Leads <span className="text-red-600">Antigos</span>
                         </h1>
-                        <div className="bg-red-500/10 border border-red-500/20 px-3 py-1 rounded-full">
-                            <span className="text-[10px] font-black text-red-500 uppercase tracking-widest leading-none">Arquivo</span>
+                        <div className="bg-red-500/10 border border-red-500/20 px-3 py-1 rounded-full w-fit">
+                            <span className="text-[9px] md:text-[10px] font-black text-red-500 uppercase tracking-widest leading-none">Arquivo</span>
                         </div>
                     </div>
-                    <p className="text-white/40 font-medium italic">Base de dados histórica do sistema de distribuição.</p>
+                    <p className="text-sm md:text-base text-white/40 font-medium italic">Base de dados histórica do sistema de distribuição.</p>
                 </div>
 
                 <div className="flex flex-col md:flex-row items-center gap-4">
@@ -341,24 +341,24 @@ export default function OldLeadsPage() {
                         >
                             {/* Status and Interest Level Badge */}
                             {(lead.ai_classification || lead.nivel_interesse) && (
-                                <div className="absolute top-6 right-8 z-20 flex items-center gap-3">
+                                <div className="absolute top-4 right-4 md:top-6 md:right-8 z-20 flex flex-col sm:flex-row items-end sm:items-center gap-2 md:gap-3">
                                     {lead.nivel_interesse && (
-                                        <div className="flex items-center gap-2 bg-purple-500/10 backdrop-blur-md px-4 py-2 rounded-2xl border border-purple-500/20">
-                                            <Sparkles size={12} className="text-purple-400" />
-                                            <span className="text-[10px] font-black uppercase tracking-widest text-purple-400">
+                                        <div className="flex items-center gap-2 bg-purple-500/10 backdrop-blur-md px-3 md:px-4 py-1.5 md:py-2 rounded-xl md:rounded-2xl border border-purple-500/20">
+                                            <Sparkles size={10} className="text-purple-400" />
+                                            <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-purple-400">
                                                 {lead.nivel_interesse}
                                             </span>
                                         </div>
                                     )}
                                     {lead.ai_classification && (
-                                        <div className={`flex items-center gap-2 backdrop-blur-md px-4 py-2 rounded-2xl border ${lead.ai_classification === 'hot' ? 'bg-red-500/10 border-red-500/20' :
+                                        <div className={`flex items-center gap-2 backdrop-blur-md px-3 md:px-4 py-1.5 md:py-2 rounded-xl md:rounded-2xl border ${lead.ai_classification === 'hot' ? 'bg-red-500/10 border-red-500/20' :
                                             lead.ai_classification === 'warm' ? 'bg-amber-500/10 border-amber-500/20' :
                                                 'bg-blue-500/10 border-blue-500/20'
                                             }`}>
-                                            {lead.ai_classification === 'hot' && <Flame size={12} className="text-red-500" />}
-                                            {lead.ai_classification === 'warm' && <Thermometer size={12} className="text-amber-500" />}
-                                            {lead.ai_classification === 'cold' && <Snowflake size={12} className="text-blue-400" />}
-                                            <span className={`text-[10px] font-black uppercase tracking-widest ${lead.ai_classification === 'hot' ? 'text-red-500' :
+                                            {lead.ai_classification === 'hot' && <Flame size={10} className="text-red-500" />}
+                                            {lead.ai_classification === 'warm' && <Thermometer size={10} className="text-amber-500" />}
+                                            {lead.ai_classification === 'cold' && <Snowflake size={10} className="text-blue-400" />}
+                                            <span className={`text-[9px] md:text-[10px] font-black uppercase tracking-widest ${lead.ai_classification === 'hot' ? 'text-red-500' :
                                                 lead.ai_classification === 'warm' ? 'text-amber-500' :
                                                     'text-blue-400'
                                                 }`}>
@@ -373,22 +373,22 @@ export default function OldLeadsPage() {
                             <div className="absolute inset-0 bg-gradient-to-r from-red-600/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
 
                             {/* Column 1: Identity & Action */}
-                            <div className="w-full md:w-[300px] p-8 border-r border-white/5 flex flex-col justify-between relative z-10">
+                            <div className="w-full md:w-[300px] p-6 md:p-8 border-b md:border-b-0 md:border-r border-white/5 flex flex-col justify-between relative z-10">
                                 <div className="space-y-2">
-                                    <h3 className="text-2xl font-black text-white tracking-tight truncate group-hover:text-red-500 transition-colors">
+                                    <h3 className="text-xl md:text-2xl font-black text-white tracking-tight truncate group-hover:text-red-500 transition-colors">
                                         {lead.nome}
                                     </h3>
                                     <div className="flex items-center gap-3 text-white/40">
                                         <div className="bg-white/5 p-1.5 rounded-lg border border-white/5">
                                             <MessageSquare size={14} className="text-red-500" />
                                         </div>
-                                        <span className="text-sm font-bold tracking-wider">{lead.telefone}</span>
+                                        <span className="text-xs md:text-sm font-bold tracking-wider">{lead.telefone}</span>
                                     </div>
                                 </div>
 
                                 <button
                                     onClick={() => handleWhatsApp(lead.telefone)}
-                                    className="mt-6 w-full bg-red-600 hover:bg-red-500 text-white py-4 rounded-2xl flex items-center justify-center gap-3 transition-all font-black text-[10px] uppercase tracking-[0.2em] shadow-lg shadow-red-600/20 active:scale-95"
+                                    className="mt-6 w-full bg-red-600 hover:bg-red-500 text-white py-3.5 md:py-4 rounded-2xl flex items-center justify-center gap-3 transition-all font-black text-[9px] md:text-[10px] uppercase tracking-[0.2em] shadow-lg shadow-red-600/20 active:scale-95"
                                 >
                                     <MessageSquare size={16} fill="white" />
                                     CONTATO WHATSAPP
@@ -396,14 +396,14 @@ export default function OldLeadsPage() {
                             </div>
 
                             {/* Column 2: Details */}
-                            <div className="flex-1 p-8 border-r border-white/5 grid grid-cols-1 gap-6 relative z-10">
-                                <div className="space-y-6">
+                            <div className="w-full md:flex-1 p-6 md:p-8 border-b md:border-b-0 md:border-r border-white/5 grid grid-cols-1 gap-6 relative z-10">
+                                <div className="grid grid-cols-2 md:grid-cols-1 md:space-y-6 gap-4">
                                     <div>
                                         <div className="flex items-center gap-2 mb-2">
                                             <MapPin size={14} className="text-white/20" />
-                                            <span className="text-[10px] font-black text-white/20 uppercase tracking-[0.2em]">LOCALIDADE</span>
+                                            <span className="text-[9px] md:text-[10px] font-black text-white/20 uppercase tracking-[0.2em]">LOCALIDADE</span>
                                         </div>
-                                        <p className="text-sm font-bold text-white/80">
+                                        <p className="text-xs md:text-sm font-bold text-white/80 truncate">
                                             {lead.cidade || 'Não informada'}
                                         </p>
                                     </div>
@@ -411,20 +411,20 @@ export default function OldLeadsPage() {
                                     <div>
                                         <div className="flex items-center gap-2 mb-2">
                                             <Car size={14} className="text-white/20" />
-                                            <span className="text-[10px] font-black text-white/20 uppercase tracking-[0.2em]">INTERESSE</span>
+                                            <span className="text-[9px] md:text-[10px] font-black text-white/20 uppercase tracking-[0.2em]">INTERESSE</span>
                                         </div>
-                                        <p className="text-sm font-bold text-white/80 line-clamp-2">
+                                        <p className="text-xs md:text-sm font-bold text-white/80 line-clamp-1 md:line-clamp-2">
                                             {lead.interesse || 'N/A'}
                                         </p>
                                     </div>
 
                                     {lead.troca && (
-                                        <div className="pt-2">
+                                        <div className="col-span-2 md:col-span-1 pt-2">
                                             <div className="flex items-center gap-2 mb-2">
                                                 <RefreshCw size={14} className="text-emerald-500/50" />
-                                                <span className="text-[10px] font-black text-emerald-500/50 uppercase tracking-[0.2em]">CARRO NA TROCA</span>
+                                                <span className="text-[9px] md:text-[10px] font-black text-emerald-500/50 uppercase tracking-[0.2em]">CARRO NA TROCA</span>
                                             </div>
-                                            <p className="text-sm font-bold text-emerald-500 line-clamp-1">
+                                            <p className="text-xs md:text-sm font-bold text-emerald-500 line-clamp-1">
                                                 {lead.troca}
                                             </p>
                                         </div>
@@ -433,40 +433,40 @@ export default function OldLeadsPage() {
                             </div>
 
                             {/* Column 3: AI Analysis (Unified Panel) */}
-                            <div className="flex-[2] p-8 border-r border-white/5 flex flex-col relative z-10 bg-white/[0.01]">
+                            <div className="w-full md:flex-[2] p-6 md:p-8 border-b md:border-b-0 md:border-r border-white/5 flex flex-col relative z-10 bg-white/[0.01]">
                                 <div className="flex items-center gap-2 mb-6">
                                     <Sparkles size={16} className="text-red-500/50" />
-                                    <span className="text-[10px] font-black text-white/20 uppercase tracking-[0.2em]">ANÁLISE ESTRATÉGICA IA</span>
+                                    <span className="text-[9px] md:text-[10px] font-black text-white/20 uppercase tracking-[0.2em]">ANÁLISE ESTRATÉGICA IA</span>
                                 </div>
                                 <div className="space-y-6 flex-1">
                                     {/* Executive Summary */}
-                                    <div className="p-5 rounded-3xl bg-red-600/10 border border-red-500/20">
-                                        <p className="text-[9px] font-black text-red-500 uppercase tracking-widest mb-1 italic">Resumo do Consultor</p>
-                                        <p className="text-[11px] font-bold text-white/80 leading-relaxed">
+                                    <div className="p-4 md:p-5 rounded-2xl md:rounded-3xl bg-red-600/10 border border-red-500/20">
+                                        <p className="text-[8px] md:text-[9px] font-black text-red-500 uppercase tracking-widest mb-1 italic">Resumo do Consultor</p>
+                                        <p className="text-[10px] md:text-[11px] font-bold text-white/80 leading-relaxed">
                                             {lead.resumo_consultor || lead.resumo || 'Nenhuma observação automática registrada para este lead.'}
                                         </p>
                                     </div>
 
                                     <div className="grid grid-cols-2 gap-4">
-                                        <div className="bg-blue-500/5 p-4 rounded-2xl border border-blue-500/10">
-                                            <span className="text-[9px] font-black uppercase text-blue-500/40 tracking-wider block mb-1">Momento</span>
-                                            <span className="text-xs font-black text-white uppercase">{lead.momento_compra || 'Pesquisa'}</span>
+                                        <div className="bg-blue-500/5 p-3 md:p-4 rounded-xl md:rounded-2xl border border-blue-500/10">
+                                            <span className="text-[8px] md:text-[9px] font-black uppercase text-blue-500/40 tracking-wider block mb-1">Momento</span>
+                                            <span className="text-[10px] md:text-xs font-black text-white uppercase">{lead.momento_compra || 'Pesquisa'}</span>
                                         </div>
                                         {lead.ai_reason && (
-                                            <div className="bg-white/5 p-4 rounded-2xl border border-white/5">
-                                                <span className="text-[9px] font-black uppercase text-white/20 tracking-wider block mb-1">Score IA</span>
-                                                <span className="text-xs font-black text-white uppercase">Analisado</span>
+                                            <div className="bg-white/5 p-3 md:p-4 rounded-xl md:rounded-2xl border border-white/5">
+                                                <span className="text-[8px] md:text-[9px] font-black uppercase text-white/20 tracking-wider block mb-1">Score IA</span>
+                                                <span className="text-[10px] md:text-xs font-black text-white uppercase">Analisado</span>
                                             </div>
                                         )}
                                     </div>
 
                                     {/* Next Action */}
-                                    <div className="bg-emerald-500/5 p-5 rounded-3xl border border-emerald-500/10 space-y-2">
+                                    <div className="bg-emerald-500/5 p-4 md:p-5 rounded-2xl md:rounded-3xl border border-emerald-500/10 space-y-2">
                                         <div className="flex items-center gap-2">
                                             <Zap size={12} className="text-emerald-500" />
-                                            <span className="text-[9px] font-black uppercase text-emerald-500/40 tracking-wider italic">Próxima Ação Sugerida</span>
+                                            <span className="text-[8px] md:text-[9px] font-black uppercase text-emerald-500/40 tracking-wider italic">Próxima Ação Sugerida</span>
                                         </div>
-                                        <p className="text-[11px] font-black text-white leading-relaxed">
+                                        <p className="text-[10px] md:text-[11px] font-black text-white leading-relaxed">
                                             {lead.proxima_acao || 'Retomar contato para entender interesse atual.'}
                                         </p>
                                     </div>
@@ -474,29 +474,30 @@ export default function OldLeadsPage() {
                             </div>
 
                             {/* Column 4: Seller & Date */}
-                            <div className="w-full md:w-[240px] p-8 bg-white/[0.02] flex flex-col justify-between relative z-10">
-                                <div>
-                                    <span className="text-[10px] font-black text-white/20 uppercase tracking-[0.2em] block mb-5">CONSULTOR RESP.</span>
+                            <div className="w-full md:w-[240px] p-6 md:p-8 bg-white/[0.02] flex flex-col justify-between relative z-10">
+                                <div className="flex flex-row md:flex-col items-center md:items-start justify-between md:justify-start gap-4">
                                     <div className="flex items-center gap-4">
-                                        <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-red-600 to-red-900 flex items-center justify-center text-white font-black text-sm shadow-xl shadow-red-900/40">
+                                        <div className="w-10 h-10 md:w-12 md:h-12 rounded-xl md:rounded-2xl bg-gradient-to-br from-red-600 to-red-900 flex items-center justify-center text-white font-black text-xs md:text-sm shadow-xl shadow-red-900/40 flex-shrink-0">
                                             {lead.vendedor?.[0] || 'U'}
                                         </div>
                                         <div className="overflow-hidden">
-                                            <p className="text-sm font-black text-white truncate">{lead.vendedor || 'Padrão'}</p>
-                                            <p className="text-[9px] font-bold text-red-500 uppercase tracking-tighter">Manos Veículos</p>
+                                            <p className="text-xs md:text-sm font-black text-white truncate">{lead.vendedor || 'Padrão'}</p>
+                                            <p className="text-[8px] md:text-[9px] font-bold text-red-500 uppercase tracking-tighter">Manos Veículos</p>
                                         </div>
                                     </div>
                                 </div>
 
-                                <div className="pt-6 mt-6 border-t border-white/5">
-                                    <div className="flex items-center gap-2 mb-2">
-                                        <Clock size={12} className="text-white/20" />
-                                        <span className="text-[10px] font-black text-white/20 uppercase tracking-[0.2em]">DATA DE REGISTRO</span>
+                                <div className="pt-4 md:pt-6 mt-4 md:mt-6 border-t border-white/5 flex flex-row md:flex-col justify-between items-end md:items-start">
+                                    <div className="text-right md:text-left">
+                                        <div className="flex items-center justify-end md:justify-start gap-2 mb-1 md:mb-2">
+                                            <Clock size={12} className="text-white/20" />
+                                            <span className="text-[9px] md:text-[10px] font-black text-white/20 uppercase tracking-[0.2em]">REGISTRO</span>
+                                        </div>
+                                        <p className="text-[10px] md:text-xs font-bold text-white/60">
+                                            {formatDistanceToNow(new Date(lead.criado_em), { locale: ptBR, addSuffix: true })}
+                                        </p>
                                     </div>
-                                    <p className="text-xs font-bold text-white/60">
-                                        {formatDistanceToNow(new Date(lead.criado_em), { locale: ptBR, addSuffix: true })}
-                                    </p>
-                                    <p className="text-[9px] text-white/20 font-medium mt-1 uppercase tracking-widest">
+                                    <p className="hidden md:block text-[9px] text-white/20 font-medium mt-1 uppercase tracking-widest text-right md:text-left">
                                         {new Date(lead.criado_em).toLocaleDateString('pt-BR')}
                                     </p>
                                 </div>

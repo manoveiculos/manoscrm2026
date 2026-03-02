@@ -483,11 +483,11 @@ export default function MarketingPage() {
                     <table className="w-full text-left border-collapse">
                         <thead>
                             <tr className="border-b border-[#30363d] text-[10px] uppercase tracking-wider text-[#8b949e] font-semibold bg-[#161b22]/30">
-                                <th className="px-6 py-3">Campanha</th>
-                                <th className="px-4 py-3">Custo / Orçamento</th>
-                                <th className="px-4 py-3">Performance (CTR/CPC)</th>
-                                <th className="px-4 py-3">Conversão CRM</th>
-                                <th className="px-6 py-3 text-right">Ações</th>
+                                <th className="px-4 md:px-6 py-3">Campanha</th>
+                                <th className="px-3 md:px-4 py-3">Custo</th>
+                                <th className="hidden md:table-cell px-4 py-3">Performance (CTR/CPC)</th>
+                                <th className="hidden lg:table-cell px-4 py-3">Conversão CRM</th>
+                                <th className="px-4 md:px-6 py-3 text-right">Ações</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-white/5">
@@ -531,9 +531,9 @@ export default function MarketingPage() {
                                             className="group hover:bg-[#161b22]/50 transition-all cursor-pointer border-b border-[#30363d]/50"
                                             onClick={() => setSelectedCampaign(camp)}
                                         >
-                                            <td className="px-6 py-4">
+                                            <td className="px-4 md:px-6 py-4">
                                                 <div className="flex items-center gap-3">
-                                                    <div className={`h-8 w-8 rounded-lg flex items-center justify-center border ${isGoogle ? 'bg-blue-500/10 border-blue-500/20 text-blue-400' :
+                                                    <div className={`h-8 w-8 rounded-lg flex-shrink-0 flex items-center justify-center border ${isGoogle ? 'bg-blue-500/10 border-blue-500/20 text-blue-400' :
                                                         isWhatsApp ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500' :
                                                             plat.includes('tiktok') ? 'bg-[#161b22] border-[#30363d] text-[#f0f6fc]' :
                                                                 plat.includes('youtube') ? 'bg-red-500/10 border-red-500/20 text-red-500' :
@@ -545,33 +545,33 @@ export default function MarketingPage() {
                                                                     plat.includes('youtube') ? <Youtube size={14} /> :
                                                                         <Facebook size={14} />}
                                                     </div>
-                                                    <div>
-                                                        <p className="font-semibold text-sm text-[#c9d1d9] group-hover:text-blue-400 transition-colors tracking-tight">{camp.name}</p>
-                                                        <p className="text-[10px] text-[#8b949e] uppercase tracking-wider">{camp.platform}</p>
+                                                    <div className="min-w-0">
+                                                        <p className="font-semibold text-xs md:text-sm text-[#c9d1d9] group-hover:text-blue-400 transition-colors tracking-tight truncate">{camp.name}</p>
+                                                        <p className="text-[9px] text-[#8b949e] uppercase tracking-wider">{camp.platform}</p>
                                                     </div>
                                                 </div>
                                             </td>
-                                            <td className="px-4 py-4">
+                                            <td className="px-3 md:px-4 py-4">
                                                 <div className="flex flex-col">
-                                                    <span className="text-sm font-semibold text-[#f0f6fc]">R$ {Number(camp.total_spend || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-                                                    <span className="text-[10px] text-[#8b949e] uppercase tracking-wider">INVESTIDO</span>
+                                                    <span className="text-xs md:text-sm font-semibold text-[#f0f6fc]">R$ {Number(camp.total_spend || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                                    <span className="text-[9px] text-[#8b949e] uppercase tracking-wider">INVESTIDO</span>
                                                 </div>
                                             </td>
-                                            <td className="px-4 py-4">
+                                            <td className="hidden md:table-cell px-4 py-4">
                                                 <div className="flex flex-col">
                                                     <span className="text-sm font-semibold text-[#f0f6fc]">{Number(camp.ctr || 0).toFixed(2)}%</span>
                                                     <span className="text-[10px] text-[#8b949e] uppercase tracking-wider">CTR | R$ {Number(camp.cpc || 0).toFixed(2)} CPC</span>
                                                 </div>
                                             </td>
-                                            <td className="px-4 py-4">
+                                            <td className="hidden lg:table-cell px-4 py-4">
                                                 <div className="flex flex-col">
                                                     <span className="text-sm font-bold text-[#3fb950]">{leadCount}</span>
                                                     <span className="text-[10px] text-[#8b949e] uppercase tracking-wider">LEADS GERADOS</span>
                                                 </div>
                                             </td>
-                                            <td className="px-6 py-4 text-right">
-                                                <button className="px-3 py-1.5 rounded-lg bg-[#21262d] border border-[#30363d] text-[10px] font-bold uppercase tracking-wider text-[#8b949e] hover:border-blue-500 hover:text-blue-500 transition-all">
-                                                    ANALISAR
+                                            <td className="px-4 md:px-6 py-4 text-right">
+                                                <button className="px-2 md:px-3 py-1.5 rounded-lg bg-[#21262d] border border-[#30363d] text-[9px] md:text-[10px] font-bold uppercase tracking-wider text-[#8b949e] hover:border-blue-500 hover:text-blue-500 transition-all">
+                                                    VER
                                                 </button>
                                             </td>
                                         </motion.tr>

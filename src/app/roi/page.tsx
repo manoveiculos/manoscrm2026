@@ -56,14 +56,14 @@ export default function ROIPage() {
                         <DollarSign size={12} />
                         Gestão Atômica de Capital
                     </div>
-                    <h1 className="text-5xl font-black tracking-tighter text-white font-outfit">
+                    <h1 className="text-3xl md:text-5xl font-black tracking-tighter text-white font-outfit">
                         ROI <span className="gradient-text">& Financeiro</span>
                     </h1>
-                    <p className="text-white/40 font-medium">Análise granular de investimento e lucratividade por venda.</p>
+                    <p className="text-sm md:text-base text-white/40 font-medium whitespace-normal">Análise granular de investimento e lucratividade por venda.</p>
                 </div>
 
-                <button className="h-14 px-8 rounded-2xl glass-card flex items-center gap-3 text-sm font-black text-white hover:bg-white/5 transition-all">
-                    <Download size={18} className="text-red-500" /> Baixar DRE Gerencial
+                <button className="h-12 md:h-14 px-6 md:px-8 rounded-2xl glass-card flex items-center justify-center md:justify-start gap-3 text-xs md:text-sm font-black text-white hover:bg-white/5 transition-all">
+                    <Download size={18} className="text-red-500" /> <span className="hidden sm:inline">Baixar DRE Gerencial</span><span className="sm:hidden">BAIXAR DRE</span>
                 </button>
             </header>
 
@@ -107,9 +107,9 @@ export default function ROIPage() {
                             <thead>
                                 <tr className="border-b border-white/5 text-[10px] uppercase font-black tracking-widest text-white/20">
                                     <th className="pb-4">Consultor</th>
-                                    <th className="pb-4">Total Leads</th>
-                                    <th className="pb-4">Vendas</th>
-                                    <th className="pb-4">Taxa de Conversão</th>
+                                    <th className="hidden sm:table-cell pb-4">Total Leads</th>
+                                    <th className="pb-4 text-center">Vendas</th>
+                                    <th className="pb-4 text-right">Taxa</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-white/5">
@@ -131,21 +131,21 @@ export default function ROIPage() {
                                                     </div>
                                                 </div>
                                             </td>
-                                            <td className="py-6">
+                                            <td className="hidden sm:table-cell py-6">
                                                 <div className="flex flex-col">
                                                     <span className="text-sm font-black text-white">{leads}</span>
-                                                    <span className="text-[9px] text-white/20 font-bold uppercase">Leads Unificados</span>
+                                                    <span className="text-[9px] text-white/20 font-bold uppercase">Leads</span>
                                                 </div>
                                             </td>
-                                            <td className="py-6">
+                                            <td className="py-6 text-center">
                                                 <div className="flex flex-col">
                                                     <span className="text-sm font-black text-emerald-500">{sales}</span>
-                                                    <span className="text-[9px] text-white/20 font-bold uppercase">Vendas Mês</span>
+                                                    <span className="text-[9px] text-white/20 font-bold uppercase">Mês</span>
                                                 </div>
                                             </td>
-                                            <td className="py-6">
-                                                <div className="space-y-2 max-w-[120px]">
-                                                    <div className="flex justify-between text-[10px] font-bold">
+                                            <td className="py-6 text-right">
+                                                <div className="inline-block space-y-2 min-w-[80px]">
+                                                    <div className="flex justify-end text-[10px] font-bold">
                                                         <span className="text-white/40">{rate.toFixed(1)}%</span>
                                                     </div>
                                                     <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">

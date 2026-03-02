@@ -32,6 +32,7 @@ function LeadsContent() {
     const searchParams = useSearchParams();
     const leadIdFromUrl = searchParams.get('id');
     const viewFromUrl = searchParams.get('view');
+    const stageFromUrl = searchParams.get('stage');
 
     const [searchTerm, setSearchTerm] = useState('');
     const [leads, setLeads] = useState<Lead[]>([]);
@@ -45,7 +46,7 @@ function LeadsContent() {
     const [customStartDate, setCustomStartDate] = useState<string>('');
     const [customEndDate, setCustomEndDate] = useState<string>('');
     const [filterConsultant, setFilterConsultant] = useState<string>('all');
-    const [filterStage, setFilterStage] = useState<string>('all');
+    const [filterStage, setFilterStage] = useState<string>(stageFromUrl || 'all');
     const [filterInterest, setFilterInterest] = useState<string>('all');
     const [filterScore, setFilterScore] = useState<string>('all');
 
@@ -338,8 +339,12 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
     };
 
     const formatPhoneBR = (val: string) => {
-        const digits = val.replace(/\D/g, '');
-        if (!digits) return '';
+        if (!val) return '';
+        let digits = val.replace(/\D/g, '');
+        // Strip country code 55 if present
+        if (digits.startsWith('55') && digits.length >= 12) {
+            digits = digits.substring(2);
+        }
         if (digits.length <= 2) return `(${digits}`;
         if (digits.length <= 6) return `(${digits.substring(0, 2)}) ${digits.substring(2)}`;
         if (digits.length <= 10) return `(${digits.substring(0, 2)}) ${digits.substring(2, 6)}-${digits.substring(6)}`;
@@ -350,7 +355,9 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
     useEffect(() => {
         if (viewFromUrl === 'kanban') setViewMode('kanban');
         else if (viewFromUrl === 'list') setViewMode('list');
-    }, [viewFromUrl]);
+
+        if (stageFromUrl) setFilterStage(stageFromUrl);
+    }, [viewFromUrl, stageFromUrl]);
 
     const getStatusLabel = (status: string) => {
         const labels: { [key: string]: string } = {
@@ -852,10 +859,10 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
             {/* Header with Search and Stats */}
             <header className="flex flex-col md:flex-row md:items-end justify-between gap-6">
                 <div className="space-y-2">
-                    <h1 className="text-5xl font-black tracking-tighter text-white font-outfit">
+                    <h1 className="text-3xl md:text-5xl font-black tracking-tighter text-white font-outfit">
                         Central de <span className="text-red-600">Leads</span>
                     </h1>
-                    <p className="text-white/40 font-medium italic">Gestão de funil comercial e integração direta com Meta Ads.</p>
+                    <p className="text-sm md:text-base text-white/40 font-medium italic">Gestão de funil comercial e integração direta com Meta Ads.</p>
                 </div>
 
                 <div className="flex items-center gap-4">
@@ -873,7 +880,7 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
             </header>
 
             {/* Leads Filter Bar */}
-            <div className="flex flex-wrap items-center gap-3 animate-in fade-in slide-in-from-top-4 duration-700">
+            <div className="flex flex-wrap items-center gap-2 md:gap-3 animate-in fade-in slide-in-from-top-4 duration-700">
                 <div className={`flex items-center gap-2 transition-all ${filterDate === 'custom' ? 'bg-white/5 border border-white/10 rounded-xl px-2 h-[38px] hover:bg-white/10 focus-within:ring-1 focus-within:ring-red-500/50' : ''}`}>
                     <select
                         value={filterDate}
@@ -884,7 +891,7 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                 setCustomEndDate('');
                             }
                         }}
-                        className={`bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white/70 focus:outline-none focus:ring-1 focus:ring-red-500/50 hover:bg-white/10 transition-colors cursor-pointer appearance-none pr-8 relative bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20width%3D%2224%22%20height%3D%2224%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20fill%3D%22none%22%20stroke%3D%22%23ffffff40%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%2F%3E%3C%2Fsvg%3E')] bg-[length:14px] bg-[right_10px_center] bg-no-repeat ${filterDate === 'custom' ? 'border-none h-full bg-transparent pr-6 px-2 py-0 hover:bg-transparent rounded-none focus:ring-0' : ''}`}
+                        className={`bg-white/5 border border-white/10 rounded-xl px-3 md:px-4 py-2.5 text-[10px] md:text-xs text-white/70 focus:outline-none focus:ring-1 focus:ring-red-500/50 hover:bg-white/10 transition-colors cursor-pointer appearance-none pr-7 md:pr-8 relative bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20width%3D%2224%22%20height%3D%2224%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20fill%3D%22none%22%20stroke%3D%22%23ffffff40%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%2F%3E%3C%2Fsvg%3E')] bg-[length:14px] bg-[right_10px_center] bg-no-repeat w-full sm:w-auto ${filterDate === 'custom' ? 'border-none h-full bg-transparent pr-6 px-2 py-0 hover:bg-transparent rounded-none focus:ring-0' : ''}`}
                     >
                         <option value="all" className="bg-[#0a0a0a]">Todas as Datas</option>
                         <option value="today" className="bg-[#0a0a0a]">Hoje</option>
@@ -894,19 +901,19 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                     </select>
 
                     {filterDate === 'custom' && (
-                        <div className="flex items-center gap-2 pl-2 border-l border-white/10 h-full">
+                        <div className="flex items-center gap-1 md:gap-2 pl-2 border-l border-white/10 h-full">
                             <input
                                 type="date"
                                 value={customStartDate}
                                 onChange={e => setCustomStartDate(e.target.value)}
-                                className="bg-transparent text-xs text-white/70 focus:outline-none cursor-pointer w-[110px]"
+                                className="bg-transparent text-[10px] md:text-xs text-white/70 focus:outline-none cursor-pointer w-[90px] md:w-[110px]"
                             />
-                            <span className="text-white/20 text-xs">até</span>
+                            <span className="text-white/20 text-[10px]">/</span>
                             <input
                                 type="date"
                                 value={customEndDate}
                                 onChange={e => setCustomEndDate(e.target.value)}
-                                className="bg-transparent text-xs text-white/70 focus:outline-none cursor-pointer w-[110px]"
+                                className="bg-transparent text-[10px] md:text-xs text-white/70 focus:outline-none cursor-pointer w-[90px] md:w-[110px]"
                             />
                         </div>
                     )}
@@ -916,10 +923,10 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                     <select
                         value={filterConsultant}
                         onChange={e => setFilterConsultant(e.target.value)}
-                        className="bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white/70 focus:outline-none focus:ring-1 focus:ring-red-500/50 hover:bg-white/10 transition-colors cursor-pointer appearance-none pr-8 relative bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20width%3D%2224%22%20height%3D%2224%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20fill%3D%22none%22%20stroke%3D%22%23ffffff40%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%2F%3E%3C%2Fsvg%3E')] bg-[length:14px] bg-[right_10px_center] bg-no-repeat"
+                        className="bg-white/5 border border-white/10 rounded-xl px-3 md:px-4 py-2.5 text-[10px] md:text-xs text-white/70 focus:outline-none focus:ring-1 focus:ring-red-500/50 hover:bg-white/10 transition-colors cursor-pointer appearance-none pr-7 md:pr-8 relative bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20width%3D%2224%22%20height%3D%2224%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20fill%3D%22none%22%20stroke%3D%22%23ffffff40%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%2F%3E%3C%2Fsvg%3E')] bg-[length:14px] bg-[right_10px_center] bg-no-repeat w-[calc(50%-0.5rem)] sm:w-auto"
                     >
-                        <option value="all" className="bg-[#0a0a0a]">Todos os Vendedores</option>
-                        <option value="unassigned" className="bg-[#0a0a0a] text-red-400">Sem Vendedor (Aguardando)</option>
+                        <option value="all" className="bg-[#0a0a0a]">Vendedores</option>
+                        <option value="unassigned" className="bg-[#0a0a0a] text-red-400">Sem Vendedor</option>
                         {consultants.map(c => (
                             <option key={c.id} value={c.id} className="bg-[#0a0a0a]">{c.name}</option>
                         ))}
@@ -929,9 +936,9 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                 <select
                     value={filterStage}
                     onChange={e => setFilterStage(e.target.value)}
-                    className="bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white/70 focus:outline-none focus:ring-1 focus:ring-red-500/50 hover:bg-white/10 transition-colors cursor-pointer appearance-none pr-8 relative bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20width%3D%2224%22%20height%3D%2224%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20fill%3D%22none%22%20stroke%3D%22%23ffffff40%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%2F%3E%3C%2Fsvg%3E')] bg-[length:14px] bg-[right_10px_center] bg-no-repeat"
+                    className="bg-white/5 border border-white/10 rounded-xl px-3 md:px-4 py-2.5 text-[10px] md:text-xs text-white/70 focus:outline-none focus:ring-1 focus:ring-red-500/50 hover:bg-white/10 transition-colors cursor-pointer appearance-none pr-7 md:pr-8 relative bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20width%3D%2224%22%20height%3D%2224%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20fill%3D%22none%22%20stroke%3D%22%23ffffff40%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%2F%3E%3C%2Fsvg%3E')] bg-[length:14px] bg-[right_10px_center] bg-no-repeat w-[calc(50%-0.5rem)] sm:w-auto"
                 >
-                    <option value="all" className="bg-[#0a0a0a]">Qualquer Estágio</option>
+                    <option value="all" className="bg-[#0a0a0a]">Estágio (Todos)</option>
                     <option value="new" className="bg-[#0a0a0a]">Aguardando</option>
                     <option value="attempt" className="bg-[#0a0a0a]">Em Atendimento</option>
                     <option value="scheduled" className="bg-[#0a0a0a]">Agendamento</option>
@@ -944,7 +951,7 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                 <select
                     value={filterInterest}
                     onChange={e => setFilterInterest(e.target.value)}
-                    className="bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white/70 focus:outline-none focus:ring-1 focus:ring-amber-500/50 hover:bg-white/10 transition-colors cursor-pointer appearance-none pr-8 relative bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20width%3D%2224%22%20height%3D%2224%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20fill%3D%22none%22%20stroke%3D%22%23ffffff40%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%2F%3E%3C%2Fsvg%3E')] bg-[length:14px] bg-[right_10px_center] bg-no-repeat"
+                    className="bg-white/5 border border-white/10 rounded-xl px-3 md:px-4 py-2.5 text-[10px] md:text-xs text-white/70 focus:outline-none focus:ring-1 focus:ring-amber-500/50 hover:bg-white/10 transition-colors cursor-pointer appearance-none pr-7 md:pr-8 relative bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20width%3D%2224%22%20height%3D%2224%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20fill%3D%22none%22%20stroke%3D%22%23ffffff40%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%2F%3E%3C%2Fsvg%3E')] bg-[length:14px] bg-[right_10px_center] bg-no-repeat w-[calc(50%-0.5rem)] sm:w-auto"
                 >
                     <option value="all" className="bg-[#0a0a0a]">Desejo (Qualquer)</option>
                     <option value="hot" className="bg-[#0a0a0a]">🔥 Altíssimo (Quente)</option>
@@ -955,12 +962,12 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                 <select
                     value={filterScore}
                     onChange={e => setFilterScore(e.target.value)}
-                    className="bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white/70 focus:outline-none focus:ring-1 focus:ring-purple-500/50 hover:bg-white/10 transition-colors cursor-pointer appearance-none pr-8 relative bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20width%3D%2224%22%20height%3D%2224%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20fill%3D%22none%22%20stroke%3D%22%23ffffff40%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%2F%3E%3C%2Fsvg%3E')] bg-[length:14px] bg-[right_10px_center] bg-no-repeat"
+                    className="bg-white/5 border border-white/10 rounded-xl px-3 md:px-4 py-2.5 text-[10px] md:text-xs text-white/70 focus:outline-none focus:ring-1 focus:ring-purple-500/50 hover:bg-white/10 transition-colors cursor-pointer appearance-none pr-7 md:pr-8 relative bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20width%3D%2224%22%20height%3D%2224%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20fill%3D%22none%22%20stroke%3D%22%23ffffff40%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%2F%3E%3C%2Fsvg%3E')] bg-[length:14px] bg-[right_10px_center] bg-no-repeat w-[calc(50%-0.5rem)] sm:w-auto"
                 >
-                    <option value="all" className="bg-[#0a0a0a]">Qualquer Score (IA)</option>
-                    <option value="high" className="bg-[#0a0a0a]">⭐ Acima de 80</option>
-                    <option value="medium" className="bg-[#0a0a0a]">⭐ 50 até 79</option>
-                    <option value="low" className="bg-[#0a0a0a]"> Abaixo de 50</option>
+                    <option value="all" className="bg-[#0a0a0a]">Score (IA)</option>
+                    <option value="high" className="bg-[#0a0a0a]">⭐ {'>'} 80</option>
+                    <option value="medium" className="bg-[#0a0a0a]">⭐ 50-79</option>
+                    <option value="low" className="bg-[#0a0a0a]"> {'<'} 50</option>
                 </select>
 
                 {/* Clear Filters Button */}
@@ -1062,11 +1069,11 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                 <div className="flex items-center gap-4">
                     <button
                         onClick={() => setIsAddingLead(true)}
-                        className="px-6 py-3 rounded-2xl bg-white/5 border border-white/10 text-[10px] font-black uppercase tracking-widest text-white hover:bg-red-600 hover:border-red-600 hover:shadow-[0_0_20px_rgba(227,30,36,0.3)] transition-all flex items-center gap-2 group relative overflow-hidden"
+                        className="px-4 md:px-6 py-2.5 md:py-3 rounded-2xl bg-white/5 border border-white/10 text-[10px] font-black uppercase tracking-widest text-white hover:bg-red-600 hover:border-red-600 hover:shadow-[0_0_20px_rgba(227,30,36,0.3)] transition-all flex items-center gap-2 group relative overflow-hidden"
                     >
                         <div className="absolute inset-x-0 bottom-0 h-0.5 bg-red-600 scale-x-0 group-hover:scale-x-100 transition-transform origin-left" />
                         <Plus size={16} className="text-red-500 group-hover:text-white transition-colors animate-pulse" />
-                        NOVO LEAD MANUAL
+                        <span className="hidden sm:inline">NOVO LEAD MANUAL</span><span className="sm:hidden">NOVO</span>
                     </button>
                     <div className="hidden lg:flex flex-col text-right">
                         <span className="text-[10px] font-black text-white/20 uppercase tracking-widest">Acesso Rápido</span>
@@ -1326,12 +1333,12 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                             <table className="w-full text-left border-collapse">
                                 <thead>
                                     <tr className="border-b border-white/5 text-[10px] uppercase tracking-[0.2em] text-white/30 font-black">
-                                        <th className="px-10 py-6">Lead e Perfil Comercial</th>
-                                        <th className="px-6 py-6">Interesse e Canal</th>
-                                        <th className="px-6 py-6 font-outfit text-white">Consultor</th>
-                                        <th className="px-6 py-6">Status Comercial</th>
-                                        <th className="px-6 py-6 text-center">Score IA</th>
-                                        <th className="px-10 py-6 text-right">Ações</th>
+                                        <th className="px-4 md:px-10 py-4 md:py-6">Lead</th>
+                                        <th className="hidden md:table-cell px-6 py-6">Interesse e Canal</th>
+                                        <th className="hidden lg:table-cell px-6 py-6 font-outfit text-white">Consultor</th>
+                                        <th className="px-3 md:px-6 py-4 md:py-6">Status</th>
+                                        <th className="px-3 md:px-6 py-4 md:py-6 text-center">Score</th>
+                                        <th className="px-3 md:px-10 py-4 md:py-6 text-right">Ações</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-white/5">
@@ -1344,54 +1351,54 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                             onClick={() => handleLeadSmartClick(lead)}
                                             className="group border-b border-white/5 hover:bg-white/[0.02] transition-all cursor-pointer select-none"
                                         >
-                                            <td className="px-10 py-8">
-                                                <div className="flex items-center gap-5">
-                                                    <div className={`relative h-14 w-14 rounded-2xl flex items-center justify-center font-bold text-xl border ${lead.ai_classification === 'hot' ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' :
+                                            <td className="px-4 md:px-10 py-4 md:py-6">
+                                                <div className="flex items-center gap-3 md:gap-4">
+                                                    <div className={`relative h-9 w-9 md:h-10 md:w-10 rounded-xl flex items-center justify-center font-bold text-xs md:text-sm border shrink-0 ${lead.ai_classification === 'hot' ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' :
                                                         lead.ai_classification === 'warm' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
                                                             'bg-white/5 text-white/40 border-white/10'
                                                         }`}>
                                                         {lead.name[0]}
                                                     </div>
-                                                    <div>
-                                                        <p className="font-bold text-lg text-white group-hover:text-red-400 transition-colors tracking-tight">{lead.name}</p>
-                                                        <p className="text-xs font-semibold text-white/30 mt-1 uppercase tracking-widest">{lead.phone}</p>
+                                                    <div className="min-w-0">
+                                                        <p className="font-bold text-sm md:text-[15px] text-white group-hover:text-red-400 transition-colors tracking-tight leading-tight truncate">{lead.name}</p>
+                                                        <p className="text-xs md:text-sm font-semibold text-white/40 mt-0.5 tracking-wide whitespace-nowrap">{formatPhoneBR(lead.phone)}</p>
                                                     </div>
                                                 </div>
                                             </td>
-                                            <td className="px-6 py-8">
+                                            <td className="hidden md:table-cell px-6 py-6">
                                                 <p className="text-sm font-bold text-white/80">{lead.vehicle_interest || 'Interesse em Compra'}</p>
                                                 <p className="text-[10px] font-black text-red-500 uppercase tracking-widest mt-1">
                                                     {lead.origem || 'WhatsApp/Facebook'}
                                                 </p>
                                             </td>
-                                            <td className="px-6 py-8">
+                                            <td className="hidden lg:table-cell px-6 py-6">
                                                 <div className="flex flex-col">
                                                     <span className="text-sm font-bold text-white/70">{lead.consultants_manos_crm?.name || 'Não Atribuído'}</span>
                                                     <span className="text-[10px] text-white/20 uppercase font-black tracking-widest mt-1">Designado</span>
                                                 </div>
                                             </td>
-                                            <td className="px-6 py-8">
-                                                <div className="flex items-center gap-3">
-                                                    <div className={`h-2 w-2 rounded-full ${getStatusColor(lead.status)}`} />
-                                                    <span className="text-xs font-black uppercase text-white/50 tracking-wider">
+                                            <td className="px-3 md:px-6 py-4 md:py-6">
+                                                <div className="flex items-center gap-2">
+                                                    <div className={`h-2 w-2 rounded-full shrink-0 ${getStatusColor(lead.status)}`} />
+                                                    <span className="text-[10px] md:text-xs font-black uppercase text-white/50 tracking-wider truncate">
                                                         {getStatusLabel(lead.status)}
                                                     </span>
                                                 </div>
                                             </td>
-                                            <td className="px-6 py-8 text-center">
-                                                <div className="text-2xl font-black text-white">
+                                            <td className="px-3 md:px-6 py-4 md:py-6 text-center">
+                                                <div className="text-lg md:text-2xl font-black text-white">
                                                     {lead.ai_score || 0}<span className="text-[10px] text-white/20 ml-0.5">%</span>
                                                 </div>
                                             </td>
-                                            <td className="px-10 py-8 text-right">
+                                            <td className="px-3 md:px-10 py-4 md:py-6 text-right">
                                                 <button
                                                     onClick={(e) => {
                                                         e.stopPropagation();
                                                         setActionLead(lead);
                                                     }}
-                                                    className="h-10 px-4 glass-card rounded-xl inline-flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest text-white/40 hover:text-red-400 hover:border-red-500/30 transition-all group/btn"
+                                                    className="h-9 md:h-10 px-3 md:px-4 glass-card rounded-xl inline-flex items-center justify-center gap-1.5 md:gap-2 text-[10px] font-black uppercase tracking-widest text-white/40 hover:text-red-400 hover:border-red-500/30 transition-all group/btn"
                                                 >
-                                                    <Zap size={14} className="group-hover/btn:text-red-500 transition-colors" /> Ações
+                                                    <Zap size={14} className="group-hover/btn:text-red-500 transition-colors" /> <span className="hidden sm:inline">Ações</span>
                                                 </button>
                                             </td>
                                         </motion.tr>
@@ -1464,7 +1471,7 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                             <div className="flex items-center gap-3">
                                                 <div className="flex items-center gap-2 px-2.5 py-1 rounded-lg bg-white/5 border border-white/5">
                                                     <Phone size={12} className="text-red-500" />
-                                                    <span className="text-[11px] font-bold text-white/60">{selectedLead.phone}</span>
+                                                    <span className="text-sm font-bold text-white/70 tracking-wide">{formatPhoneBR(selectedLead.phone)}</span>
                                                 </div>
                                             </div>
                                         </div>
@@ -1934,7 +1941,7 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                                                 </div>
                                                                 <div>
                                                                     <p className="text-sm font-black text-white uppercase tracking-tight">{actionLead.name}</p>
-                                                                    <p className="text-[10px] text-white/30 font-bold tracking-widest leading-none mt-1">{actionLead.phone}</p>
+                                                                    <p className="text-xs text-white/50 font-bold tracking-wide leading-none mt-1">{formatPhoneBR(actionLead.phone)}</p>
                                                                 </div>
                                                             </div>
                                                             <div className={`px-4 py-2 rounded-2xl border flex flex-col items-center justify-center ${actionLead.ai_score >= 70 ? 'bg-emerald-500/10 border-emerald-500/20' : actionLead.ai_score >= 40 ? 'bg-amber-500/10 border-amber-500/20' : 'bg-red-500/10 border-red-500/20'}`}>
