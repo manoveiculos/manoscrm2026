@@ -60,6 +60,7 @@ function LeadsContent() {
     const [editDetails, setEditDetails] = useState<Partial<Lead>>({});
     const [isFinishing, setIsFinishing] = useState(false);
     const [lossReason, setLossReason] = useState('');
+    const [lossSummary, setLossSummary] = useState('');
     const [isAddingLead, setIsAddingLead] = useState(false);
     const [isRecordingSale, setIsRecordingSale] = useState(false);
     const [saleData, setSaleData] = useState({
@@ -251,20 +252,22 @@ function LeadsContent() {
                 'lost': 'PERDIDO / DESCARTE',
                 'closed': 'VENDA REALIZADA'
             };
-
-            const logNote = `🏁 ATENDIMENTO FINALIZADO: ${desfechoLabels[desfecho] || desfecho.toUpperCase()}${lossReason ? `\nMotivo: ${lossReason}` : ''}`;
+            const logNote = `🏁 ATENDIMENTO FINALIZADO: ${desfechoLabels[desfecho] || desfecho.toUpperCase()}
+${lossReason ? `Motivo: ${lossReason}` : ''}
+${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
 
             const updatedSummary = actionLead.ai_summary
                 ? `${logNote}\n\n${actionLead.ai_summary}`
                 : logNote;
 
-            await dataService.updateLeadStatus(actionLead.id, desfecho, actionLead.status, logNote);
+            await dataService.updateLeadStatus(actionLead.id, desfecho, actionLead.status, logNote, lossReason, lossSummary);
             await dataService.updateLeadDetails(actionLead.id, { ai_summary: updatedSummary });
 
             setLeads(prev => prev.map(l => l.id === actionLead.id ? { ...l, status: desfecho, ai_summary: updatedSummary } : l));
             setActionLead(null);
             setIsFinishing(false);
             setLossReason('');
+            setLossSummary('');
 
             alert(`Atendimento finalizado com sucesso!`);
         } catch (err: any) {
@@ -2265,12 +2268,26 @@ function LeadsContent() {
                                                         <option value="Desistiu da compra" className="bg-[#080c18]">Desistiu da compra</option>
                                                         <option value="Sem crédito" className="bg-[#080c18]">Sem crédito aprovado</option>
                                                         <option value="Veículo vendido" className="bg-[#080c18]">Veículo de interesse vendido</option>
+                                                        <option value="Sem contato/Frio" className="bg-[#080c18]">Sem resposta / Muito Frio</option>
                                                     </select>
 
+                                                    {lossReason && (
+                                                        <div className="space-y-2 mt-4 animate-in fade-in slide-in-from-top-4">
+                                                            <p className="text-[10px] font-black text-red-400 uppercase tracking-[0.2em] text-center mb-2">Descreva exatamente por que a venda não aconteceu</p>
+                                                            <textarea
+                                                                value={lossSummary}
+                                                                onChange={(e) => setLossSummary(e.target.value)}
+                                                                placeholder="Cole aqui a exportação do WhatsApp ou digite o resumo claro do desfecho..."
+                                                                className="w-full h-32 bg-white/5 border border-red-500/20 rounded-2xl p-4 text-sm text-white focus:outline-none focus:ring-1 focus:ring-red-500/50 transition-all resize-none custom-scrollbar"
+                                                            />
+                                                            <p className="text-[9px] text-white/30 text-center">*Obrigatório para registrar a perda.</p>
+                                                        </div>
+                                                    )}
+
                                                     <button
-                                                        disabled={!lossReason}
+                                                        disabled={!lossReason || !lossSummary.trim()}
                                                         onClick={() => handleCloseLead('lost')}
-                                                        className={`w-full py-5 rounded-3xl border text-xs font-black uppercase tracking-[0.2em] transition-all ${lossReason ? 'border-red-500/40 text-red-500 hover:bg-red-600 hover:text-white' : 'border-white/5 text-white/10 cursor-not-allowed'}`}
+                                                        className={`w-full py-5 mt-4 rounded-3xl border text-xs font-black uppercase tracking-[0.2em] transition-all ${lossReason && lossSummary.trim() ? 'border-red-500/40 text-red-500 hover:bg-red-600 hover:text-white shadow-xl shadow-red-600/20' : 'border-white/5 text-white/10 cursor-not-allowed'}`}
                                                     >
                                                         CONFIRMAR PERDA
                                                     </button>

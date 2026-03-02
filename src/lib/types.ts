@@ -62,6 +62,8 @@ export interface Lead {
   region: string;
   estimated_ticket: number;
   ai_score: number;
+  motivo_perda?: string;
+  resumo_fechamento?: string;
   ai_classification: AIClassification;
   status: LeadStatus;
   assigned_consultant_id?: string;

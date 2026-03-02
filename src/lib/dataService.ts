@@ -509,14 +509,18 @@ export const dataService = {
         await this.logHistory(leadId, 'contacted', undefined, 'Lead atribuído manualmente para um consultor.');
     },
 
-    async updateLeadStatus(leadId: string, status: LeadStatus, oldStatus?: LeadStatus, notes?: string) {
+    async updateLeadStatus(leadId: string, status: LeadStatus, oldStatus?: LeadStatus, notes?: string, motivo_perda?: string, resumo_fechamento?: string) {
         if (leadId.startsWith('crm26_')) {
             const realId = leadId.replace('crm26_', '');
+
+            const updatePayload: any = { status };
+            if (motivo_perda) updatePayload.motivo_perda = motivo_perda;
+            if (resumo_fechamento) updatePayload.resumo_fechamento = resumo_fechamento;
 
             // Try updating status directly first
             const { error: directError } = await supabase
                 .from('leads_distribuicao_crm_26')
-                .update({ status })
+                .update(updatePayload)
                 .eq('id', realId);
 
             if (directError && (
@@ -533,11 +537,16 @@ export const dataService = {
 
                 const currentResumo = data?.resumo || '';
                 const cleanResumo = currentResumo.replace(/\[STATUS:.*?\]\s*/g, '');
-                const newResumo = `[STATUS:${status}] ${cleanResumo}`.trim();
+
+                let extraData = '';
+                if (motivo_perda) extraData += `Motivo: ${motivo_perda} - `;
+                if (resumo_fechamento) extraData += `${resumo_fechamento} - `;
+
+                const newResumo = `[STATUS:${status}] ${extraData}${cleanResumo}`.trim();
 
                 await supabase
                     .from('leads_distribuicao_crm_26')
-                    .update({ resumo: newResumo })
+                    .update({ ...updatePayload, resumo: newResumo })
                     .eq('id', realId);
             } else if (directError) {
                 throw directError;
@@ -545,9 +554,13 @@ export const dataService = {
             return null;
         }
 
+        const updatePayloadManos: any = { status, updated_at: new Date().toISOString() };
+        if (motivo_perda) updatePayloadManos.motivo_perda = motivo_perda;
+        if (resumo_fechamento) updatePayloadManos.resumo_fechamento = resumo_fechamento;
+
         const { data, error } = await supabase
             .from('leads_manos_crm')
-            .update({ status, updated_at: new Date().toISOString() })
+            .update(updatePayloadManos)
             .eq('id', leadId);
 
         if (error) throw error;
@@ -564,7 +577,10 @@ export const dataService = {
             const { data, error } = await supabase
                 .from('leads_distribuicao_crm_26')
                 .update({
-                    // Merge classification into summary as column is missing in CRM26 schema
+                    ai_score: aiData.ai_score,
+                    ai_classification: aiData.ai_classification,
+                    ai_reason: aiData.ai_reason,
+                    // Keep old behavior just in case someone relies on this format before schema rebuild cache
                     resumo: `[${aiData.ai_classification.toUpperCase()}] ${aiData.ai_reason}`
                 })
                 .eq('id', realId);
@@ -591,10 +607,14 @@ export const dataService = {
 
             // Map common fields to CRM26 table fields
             const updateObj: any = {};
-            if (details.ai_summary || details.ai_classification) {
-                const cls = details.ai_classification || '';
-                const sum = details.ai_summary || '';
-                updateObj.resumo = cls ? `[${cls.toUpperCase()}] ${sum}` : sum;
+
+            // Native AI data mapping
+            if (details.ai_score !== undefined) updateObj.ai_score = details.ai_score;
+            if (details.ai_classification) updateObj.ai_classification = details.ai_classification;
+            if (details.ai_reason) updateObj.ai_reason = details.ai_reason;
+
+            if (details.ai_summary) {
+                updateObj.resumo = details.ai_summary;
             }
             if (details.vehicle_interest) updateObj.interesse = details.vehicle_interest;
             if (details.carro_troca) updateObj.troca = details.carro_troca;
