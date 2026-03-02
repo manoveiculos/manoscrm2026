@@ -9,16 +9,18 @@ import {
     ArrowUpRight,
     Sparkles,
     Facebook,
-    Chrome,
     RefreshCcw,
     BarChart3,
     Zap,
     MessageCircle,
     Globe,
     Play,
-    Youtube
+    Youtube,
+    Maximize2,
+    X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { dataService } from '@/lib/dataService';
 import { Campaign, MarketingReport, Recommendation } from '@/lib/types';
 
@@ -27,10 +29,13 @@ export default function MarketingPage() {
     const [dailyReport, setDailyReport] = useState<MarketingReport | null>(null);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
-    const [dateFilter, setDateFilter] = useState('maximum');
+    const [dateFilter, setDateFilter] = useState('today');
     const [isSyncing, setIsSyncing] = useState(false);
     const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
+    const [selectedCampaignHistory, setSelectedCampaignHistory] = useState<any[]>([]);
+    const [historyLoading, setHistoryLoading] = useState(false);
     const [analyzingId, setAnalyzingId] = useState<string | null>(null);
+    const [showFullAnalysis, setShowFullAnalysis] = useState(false);
 
     const handleAnalyze = async (campaign: Campaign) => {
         setAnalyzingId(campaign.id);
@@ -72,16 +77,22 @@ export default function MarketingPage() {
 
             // Fetch live insights if date filter is active
             if (currentFilter !== 'maximum') {
-                const res = await fetch('/api/marketing/insights', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ date_preset: currentFilter })
-                });
+                const [res, crmLeadsByCampaign] = await Promise.all([
+                    fetch('/api/marketing/insights', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ date_preset: currentFilter })
+                    }),
+                    dataService.getLeadsCountByDateForCampaigns(currentFilter)
+                ]);
+
                 const liveData = await res.json();
 
                 if (liveData.success && liveData.data) {
                     finalCampaigns = finalCampaigns.map((c: any) => {
-                        const liveC = liveData.data.find((lc: any) => lc.name === c.name);
+                        const liveC = liveData.data.find((lc: any) => lc.name === c.name || lc.id === c.id);
+                        const crmCountForDate = crmLeadsByCampaign[c.id] || 0;
+
                         if (liveC) {
                             return {
                                 ...c,
@@ -93,10 +104,20 @@ export default function MarketingPage() {
                                 ctr: liveC.ctr,
                                 cpm: liveC.cpm,
                                 frequency: liveC.frequency,
+                                leads_manos_crm: [{ count: crmCountForDate }]
                             };
                         }
-                        return c;
+                        return {
+                            ...c,
+                            leads_manos_crm: [{ count: crmCountForDate }]
+                        };
                     });
+                } else {
+                    // Fallback to update just the leads count if meta fetch fails
+                    finalCampaigns = finalCampaigns.map((c: any) => ({
+                        ...c,
+                        leads_manos_crm: [{ count: crmLeadsByCampaign[c.id] || 0 }]
+                    }));
                 }
             }
 
@@ -113,6 +134,37 @@ export default function MarketingPage() {
     useEffect(() => {
         loadData(dateFilter);
     }, [dateFilter]);
+
+    useEffect(() => {
+        if (selectedCampaign && selectedCampaign.id) {
+            setHistoryLoading(true);
+            fetch('/api/marketing/campaign-history', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    campaign_id: selectedCampaign.id,
+                    date_preset: dateFilter
+                })
+            })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success && data.data) {
+                        setSelectedCampaignHistory(data.data);
+                    } else {
+                        setSelectedCampaignHistory([]);
+                    }
+                })
+                .catch(err => {
+                    console.error("History fetch error:", err);
+                    setSelectedCampaignHistory([]);
+                })
+                .finally(() => {
+                    setHistoryLoading(false);
+                });
+        } else {
+            setSelectedCampaignHistory([]);
+        }
+    }, [selectedCampaign?.id, dateFilter]);
 
     const handleSync = async () => {
         setIsSyncing(true);
@@ -260,9 +312,12 @@ export default function MarketingPage() {
                     >
                         <option value="today">Hoje</option>
                         <option value="yesterday">Ontem</option>
+                        <option value="last_3d">Últimos 3 dias</option>
                         <option value="this_week">Esta Semana</option>
-                        <option value="last_7d">Últimos 7 Dias</option>
+                        <option value="last_7d">Últimos 7 dias</option>
+                        <option value="last_14d">Últimos 14 dias</option>
                         <option value="this_month">Este Mês</option>
+                        <option value="last_30d">Últimos 30 dias</option>
                         <option value="maximum">Máximo (Tudo)</option>
                     </select>
 
@@ -540,13 +595,15 @@ export default function MarketingPage() {
                     const isGoogle = selectedCampaign.platform?.toLowerCase().includes('google');
                     const isWhatsApp = selectedCampaign.platform?.toLowerCase().includes('whatsapp');
 
-                    const aiInsights = selectedCampaign.ai_analysis_result ? [
-                        { label: 'Saúde', value: selectedCampaign.ai_analysis_result.saude_campanha, type: selectedCampaign.ai_analysis_result.saude_campanha === 'CRÍTICA' ? 'negative' : selectedCampaign.ai_analysis_result.saude_campanha === 'EXCELENTE' ? 'positive' : 'neutral' },
-                        { label: 'Gargalo', value: selectedCampaign.ai_analysis_result.gargalo_identificado, type: 'negative' },
-                        { label: 'Ação Recomendada 1', value: selectedCampaign.ai_analysis_result.proximos_passos[0], type: 'neutral' },
-                        { label: 'Ação Recomendada 2', value: selectedCampaign.ai_analysis_result.proximos_passos[1], type: 'neutral' },
-                        { label: 'Ação Recomendada 3', value: selectedCampaign.ai_analysis_result.proximos_passos[2], type: 'neutral' },
-                        { label: 'Resumo Técnico', value: selectedCampaign.ai_analysis_result.analise_critica, type: 'neutral' }
+                    const aiResult = selectedCampaign.ai_analysis_result?.current_analysis || selectedCampaign.ai_analysis_result;
+
+                    const aiInsights = aiResult ? [
+                        { label: 'Saúde', value: aiResult.saude_campanha, type: aiResult.saude_campanha === 'CRÍTICA' ? 'negative' : aiResult.saude_campanha === 'EXCELENTE' ? 'positive' : 'neutral' },
+                        { label: 'Gargalo', value: aiResult.gargalo_identificado, type: 'negative' },
+                        { label: 'Ação Recomendada 1', value: aiResult.proximos_passos?.[0], type: 'neutral' },
+                        { label: 'Ação Recomendada 2', value: aiResult.proximos_passos?.[1], type: 'neutral' },
+                        { label: 'Ação Recomendada 3', value: aiResult.proximos_passos?.[2], type: 'neutral' },
+                        { label: 'Resumo Técnico', value: aiResult.analise_critica, type: 'neutral' }
                     ].filter(i => i.value) : [
                         { label: 'Status', value: 'Aguardando processamento de dados do CRM...', type: 'neutral' }
                     ];
@@ -587,7 +644,7 @@ export default function MarketingPage() {
                                         </div>
                                     </div>
                                     <button
-                                        onClick={() => setSelectedCampaign(null)}
+                                        onClick={() => { setSelectedCampaign(null); setShowFullAnalysis(false); }}
                                         className="h-8 w-8 rounded-lg bg-[#21262d] border border-[#30363d] flex items-center justify-center text-[#8b949e] hover:text-[#f0f6fc] hover:bg-[#30363d] transition-all"
                                     >
                                         <RefreshCcw size={14} className="rotate-45" />
@@ -639,6 +696,46 @@ export default function MarketingPage() {
                                         </div>
                                     </div>
 
+                                    {/* Line Chart spanning two columns */}
+                                    <div className="lg:col-span-2 space-y-6">
+                                        <div className="p-6 rounded-lg bg-[#0d1117] border border-[#30363d] h-full relative overflow-hidden flex flex-col">
+                                            <div className="flex items-center gap-2 mb-6 shrink-0">
+                                                <BarChart3 size={16} className="text-blue-400" />
+                                                <p className="text-[10px] font-bold text-[#8b949e] uppercase tracking-wider">Histórico de Performance</p>
+                                            </div>
+
+                                            <div className="flex-1 w-full min-h-[200px]">
+                                                {historyLoading ? (
+                                                    <div className="w-full h-full flex flex-col items-center justify-center gap-4">
+                                                        <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                                                        <p className="text-xs text-[#8b949e]">Carregando métricas diárias...</p>
+                                                    </div>
+                                                ) : selectedCampaignHistory.length > 0 ? (
+                                                    <ResponsiveContainer width="100%" height="100%">
+                                                        <LineChart data={selectedCampaignHistory} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                                                            <CartesianGrid strokeDasharray="3 3" stroke="#30363d" vertical={false} />
+                                                            <XAxis dataKey="date" stroke="#8b949e" fontSize={10} tickLine={false} axisLine={false} />
+                                                            <YAxis yAxisId="left" stroke="#8b949e" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(val) => `R$${val}`} />
+                                                            <YAxis yAxisId="right" orientation="right" stroke="#8b949e" fontSize={10} tickLine={false} axisLine={false} />
+                                                            <Tooltip
+                                                                contentStyle={{ backgroundColor: '#161b22', borderColor: '#30363d', borderRadius: '8px', fontSize: '12px', color: '#c9d1d9' }}
+                                                                itemStyle={{ color: '#c9d1d9' }}
+                                                                cursor={{ stroke: '#484f58', strokeWidth: 1, strokeDasharray: '3 3' }}
+                                                            />
+                                                            <Line yAxisId="left" type="monotone" dataKey="spend" name="Investimento (R$)" stroke="#f85149" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
+                                                            <Line yAxisId="right" type="monotone" dataKey="clicks" name="Cliques" stroke="#3fb950" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
+                                                        </LineChart>
+                                                    </ResponsiveContainer>
+                                                ) : (
+                                                    <div className="w-full h-full flex flex-col items-center justify-center gap-4 text-[#8b949e]">
+                                                        <TrendingUp size={32} className="opacity-20" />
+                                                        <p className="text-xs text-center px-4">Sem dados diários no período (Time Increment=1).</p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+
                                     <div className="space-y-6">
                                         <div className="p-6 rounded-lg bg-[#0d1117] border border-[#3fb950]/20 relative overflow-hidden">
                                             <div className="absolute top-4 right-4 text-[#3fb950]/10">
@@ -677,7 +774,7 @@ export default function MarketingPage() {
                                                                 }`} />
                                                             <span className="text-[11px] font-bold uppercase tracking-wider text-[#f0f6fc]">{insight.label}</span>
                                                         </div>
-                                                        <p className={`text-[13px] leading-relaxed ${insight.type === 'positive' ? 'text-[#3fb950]' :
+                                                        <p className={`text-[13px] leading-relaxed line-clamp-2 ${insight.type === 'positive' ? 'text-[#3fb950]' :
                                                             insight.type === 'neutral' ? 'text-[#d29922]' : 'text-[#f85149]'
                                                             }`}>
                                                             {insight.value}
@@ -685,29 +782,108 @@ export default function MarketingPage() {
                                                     </div>
                                                 ))}
                                             </div>
-                                            <button
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    handleAnalyze(selectedCampaign);
-                                                }}
-                                                disabled={analyzingId === selectedCampaign.id}
-                                                className="mt-8 w-full py-2.5 rounded-lg bg-[#238636] hover:bg-[#2ea043] text-white text-[11px] font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-all disabled:bg-[#21262d] disabled:text-[#484f58]"
-                                            >
-                                                {analyzingId === selectedCampaign.id ? (
-                                                    <>
-                                                        <RefreshCcw size={14} className="animate-spin" />
-                                                        Processando...
-                                                    </>
-                                                ) : (
-                                                    <>
-                                                        <Zap size={14} />
-                                                        Gerar Nova Análise
-                                                    </>
+                                            <div className="mt-8 flex gap-2">
+                                                {aiResult && (
+                                                    <button
+                                                        onClick={() => setShowFullAnalysis(true)}
+                                                        className="flex-1 py-2.5 rounded-lg bg-[#21262d] hover:bg-[#30363d] border border-[#30363d] text-white text-[11px] font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-all"
+                                                    >
+                                                        <Maximize2 size={14} />
+                                                        Expandir
+                                                    </button>
                                                 )}
-                                            </button>
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        handleAnalyze(selectedCampaign);
+                                                    }}
+                                                    disabled={analyzingId === selectedCampaign.id}
+                                                    className="flex-1 py-2.5 rounded-lg bg-[#238636] hover:bg-[#2ea043] text-white text-[11px] font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-all disabled:bg-[#21262d] disabled:text-[#484f58]"
+                                                >
+                                                    {analyzingId === selectedCampaign.id ? (
+                                                        <RefreshCcw size={14} className="animate-spin" />
+                                                    ) : (
+                                                        <>
+                                                            <Zap size={14} />
+                                                            Nova Análise
+                                                        </>
+                                                    )}
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
+
+                                {/* Fullscreen AI Analysis View Sub-Modal */}
+                                <AnimatePresence>
+                                    {showFullAnalysis && aiResult && (
+                                        <motion.div
+                                            initial={{ opacity: 0, scale: 0.95 }}
+                                            animate={{ opacity: 1, scale: 1 }}
+                                            exit={{ opacity: 0, scale: 0.95 }}
+                                            className="absolute inset-0 z-50 bg-[#0d1117]/95 backdrop-blur-md flex flex-col items-center justify-center p-8 overflow-y-auto"
+                                        >
+                                            <div className="w-full max-w-4xl bg-[#010409] border border-[#30363d] rounded-2xl shadow-2xl p-10 relative">
+                                                <button
+                                                    onClick={() => setShowFullAnalysis(false)}
+                                                    className="absolute top-6 right-6 h-8 w-8 rounded-lg bg-[#21262d] border border-[#30363d] flex items-center justify-center text-[#8b949e] hover:text-[#f0f6fc] hover:bg-[#30363d] transition-all"
+                                                >
+                                                    <X size={16} />
+                                                </button>
+
+                                                <div className="flex items-center gap-3 mb-8">
+                                                    <Sparkles size={24} className="text-blue-400" />
+                                                    <h2 className="text-2xl font-bold text-[#f0f6fc] tracking-tight">Análise Estratégica Completa</h2>
+                                                </div>
+
+                                                <div className="space-y-8">
+                                                    <div>
+                                                        <h4 className="text-xs font-bold text-[#8b949e] uppercase tracking-wider mb-2">Saúde da Campanha</h4>
+                                                        <div className={`inline-block px-4 py-2 rounded-lg border text-sm font-bold ${aiResult.saude_campanha === 'CRÍTICA' ? 'bg-[#f85149]/10 border-[#f85149]/30 text-[#f85149]' : aiResult.saude_campanha === 'EXCELENTE' ? 'bg-[#3fb950]/10 border-[#3fb950]/30 text-[#3fb950]' : 'bg-[#d29922]/10 border-[#d29922]/30 text-[#d29922]'}`}>
+                                                            {aiResult.saude_campanha}
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="bg-[#161b22] border border-[#30363d] p-6 rounded-xl">
+                                                        <h4 className="text-xs font-bold text-[#8b949e] uppercase tracking-wider mb-3 flex items-center gap-2">
+                                                            <Target size={14} className="text-red-400" />
+                                                            Gargalo Identificado
+                                                        </h4>
+                                                        <p className="text-[#f0f6fc] text-lg font-medium leading-relaxed">{aiResult.gargalo_identificado}</p>
+                                                    </div>
+
+                                                    <div>
+                                                        <h4 className="text-xs font-bold text-[#8b949e] uppercase tracking-wider mb-3">Resumo Técnico & Histórico</h4>
+                                                        <p className="text-[#c9d1d9] text-base leading-relaxed whitespace-pre-line">{aiResult.analise_critica}</p>
+                                                    </div>
+
+                                                    <div>
+                                                        <h4 className="text-xs font-bold text-[#8b949e] uppercase tracking-wider mb-4 border-b border-[#30363d] pb-2">Plano de Ação Imediato (Passo a Passo)</h4>
+                                                        <div className="space-y-4">
+                                                            {aiResult.proximos_passos?.map((passo: string, idx: number) => (
+                                                                <div key={idx} className="flex items-start gap-4 bg-[#0d1117] p-5 rounded-xl border border-[#30363d]">
+                                                                    <div className="h-8 w-8 shrink-0 rounded-full bg-[#3fb950]/10 border border-[#3fb950]/30 text-[#3fb950] font-bold flex items-center justify-center text-sm">
+                                                                        {idx + 1}
+                                                                    </div>
+                                                                    <p className="text-[#f0f6fc] pt-1">{passo}</p>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div className="mt-10 pt-6 border-t border-[#30363d] flex justify-between items-center">
+                                                    <p className="text-xs text-[#8b949e]">Análise gerada via IA treinada especificamente para conversões de veículos no Meta Ads e Google Ads. Lembre-se que o uso da IA não substitui o julgamento humano.</p>
+                                                    {selectedCampaign.ai_analysis_result?.history && (
+                                                        <span className="text-xs px-2 py-1 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 font-medium">
+                                                            Histórico Analisado: {selectedCampaign.ai_analysis_result.history.length} versão(ões)
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </motion.div>
+                                    )}
+                                </AnimatePresence>
                             </motion.div>
                         </div>
                     );

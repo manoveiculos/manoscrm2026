@@ -225,12 +225,14 @@ export default function InventoryPage() {
                                     }}
                                 >
                                     <img
-                                        src={car.imagem_url || getDriveImageUrl(car.drive_id) || `https://api.placeholder.com/800/600/141414/ef4444?text=${car.modelo}`}
+                                        src={car.imagem_url || getDriveImageUrl(car.drive_id) || `https://placehold.co/800x600/141414/ef4444.png?text=${encodeURIComponent(car.modelo)}`}
                                         alt={`${car.marca} ${car.modelo}`}
                                         className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110 opacity-80 group-hover:opacity-100"
                                         referrerPolicy="no-referrer"
                                         onError={(e) => {
-                                            (e.target as HTMLImageElement).src = `https://api.placeholder.com/800/600/141414/ef4444?text=${car.modelo}`;
+                                            const target = e.target as HTMLImageElement;
+                                            target.onerror = null;
+                                            target.src = `https://placehold.co/800x600/141414/ef4444.png?text=${encodeURIComponent(car.modelo)}`;
                                         }}
                                     />
                                     <div className="absolute inset-0 bg-gradient-to-t from-[#141414] via-transparent to-transparent opacity-60" />

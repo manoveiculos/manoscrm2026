@@ -39,6 +39,16 @@ function LeadsContent() {
     const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
     const [actionLead, setActionLead] = useState<Lead | null>(null);
     const [viewMode, setViewMode] = useState<'list' | 'kanban'>(viewFromUrl === 'kanban' ? 'kanban' : 'list');
+
+    // Filters State
+    const [filterDate, setFilterDate] = useState<string>('all');
+    const [customStartDate, setCustomStartDate] = useState<string>('');
+    const [customEndDate, setCustomEndDate] = useState<string>('');
+    const [filterConsultant, setFilterConsultant] = useState<string>('all');
+    const [filterStage, setFilterStage] = useState<string>('all');
+    const [filterInterest, setFilterInterest] = useState<string>('all');
+    const [filterScore, setFilterScore] = useState<string>('all');
+
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [chatText, setChatText] = useState('');
     const [activeMoveMenu, setActiveMoveMenu] = useState<string | null>(null);
@@ -762,11 +772,69 @@ function LeadsContent() {
         }
     };
 
-    const filteredLeads = leads.filter(lead =>
-        lead.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        lead.vehicle_interest?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        lead.source?.toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    const filteredLeads = leads.filter(lead => {
+        // 1. Text Search Filter
+        const matchesSearch = lead.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            lead.vehicle_interest?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            lead.source?.toLowerCase().includes(searchTerm.toLowerCase());
+
+        if (!matchesSearch) return false;
+
+        // 2. Date Filter
+        if (filterDate !== 'all') {
+            const leadDate = new Date(lead.created_at);
+
+            if (filterDate === 'custom') {
+                if (customStartDate) {
+                    const start = new Date(customStartDate);
+                    start.setHours(0, 0, 0, 0);
+                    if (leadDate < start) return false;
+                }
+                if (customEndDate) {
+                    const end = new Date(customEndDate);
+                    end.setHours(23, 59, 59, 999);
+                    if (leadDate > end) return false;
+                }
+            } else {
+                const now = new Date();
+                const diffTime = Math.abs(now.getTime() - leadDate.getTime());
+                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+                if (filterDate === 'today' && diffDays > 1) return false;
+                if (filterDate === '7d' && diffDays > 7) return false;
+                if (filterDate === '30d' && diffDays > 30) return false;
+            }
+        }
+
+        // 3. Consultant Filter
+        if (filterConsultant !== 'all') {
+            if (filterConsultant === 'unassigned') {
+                if (lead.assigned_consultant_id) return false;
+            } else if (lead.assigned_consultant_id !== filterConsultant) {
+                return false;
+            }
+        }
+
+        // 4. Kanban Stage Filter
+        if (filterStage !== 'all') {
+            if (lead.status !== filterStage) return false;
+        }
+
+        // 5. Interest Filter (AI Classification)
+        if (filterInterest !== 'all') {
+            if (lead.ai_classification !== filterInterest) return false;
+        }
+
+        // 6. Score Filter
+        if (filterScore !== 'all') {
+            const score = lead.ai_score || 0;
+            if (filterScore === 'high' && score < 80) return false;
+            if (filterScore === 'medium' && (score < 50 || score >= 80)) return false;
+            if (filterScore === 'low' && score >= 50) return false;
+        }
+
+        return true;
+    });
 
     if (loading) {
         return (
@@ -800,6 +868,117 @@ function LeadsContent() {
                     </div>
                 </div>
             </header>
+
+            {/* Leads Filter Bar */}
+            <div className="flex flex-wrap items-center gap-3 animate-in fade-in slide-in-from-top-4 duration-700">
+                <div className={`flex items-center gap-2 transition-all ${filterDate === 'custom' ? 'bg-white/5 border border-white/10 rounded-xl px-2 h-[38px] hover:bg-white/10 focus-within:ring-1 focus-within:ring-red-500/50' : ''}`}>
+                    <select
+                        value={filterDate}
+                        onChange={e => {
+                            setFilterDate(e.target.value);
+                            if (e.target.value !== 'custom') {
+                                setCustomStartDate('');
+                                setCustomEndDate('');
+                            }
+                        }}
+                        className={`bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white/70 focus:outline-none focus:ring-1 focus:ring-red-500/50 hover:bg-white/10 transition-colors cursor-pointer appearance-none pr-8 relative bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20width%3D%2224%22%20height%3D%2224%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20fill%3D%22none%22%20stroke%3D%22%23ffffff40%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%2F%3E%3C%2Fsvg%3E')] bg-[length:14px] bg-[right_10px_center] bg-no-repeat ${filterDate === 'custom' ? 'border-none h-full bg-transparent pr-6 px-2 py-0 hover:bg-transparent rounded-none focus:ring-0' : ''}`}
+                    >
+                        <option value="all" className="bg-[#0a0a0a]">Todas as Datas</option>
+                        <option value="today" className="bg-[#0a0a0a]">Hoje</option>
+                        <option value="7d" className="bg-[#0a0a0a]">Últimos 7 dias</option>
+                        <option value="30d" className="bg-[#0a0a0a]">Últimos 30 dias</option>
+                        <option value="custom" className="bg-[#0a0a0a]">Personalizado...</option>
+                    </select>
+
+                    {filterDate === 'custom' && (
+                        <div className="flex items-center gap-2 pl-2 border-l border-white/10 h-full">
+                            <input
+                                type="date"
+                                value={customStartDate}
+                                onChange={e => setCustomStartDate(e.target.value)}
+                                className="bg-transparent text-xs text-white/70 focus:outline-none cursor-pointer w-[110px]"
+                            />
+                            <span className="text-white/20 text-xs">até</span>
+                            <input
+                                type="date"
+                                value={customEndDate}
+                                onChange={e => setCustomEndDate(e.target.value)}
+                                className="bg-transparent text-xs text-white/70 focus:outline-none cursor-pointer w-[110px]"
+                            />
+                        </div>
+                    )}
+                </div>
+
+                {userRole === 'admin' && (
+                    <select
+                        value={filterConsultant}
+                        onChange={e => setFilterConsultant(e.target.value)}
+                        className="bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white/70 focus:outline-none focus:ring-1 focus:ring-red-500/50 hover:bg-white/10 transition-colors cursor-pointer appearance-none pr-8 relative bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20width%3D%2224%22%20height%3D%2224%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20fill%3D%22none%22%20stroke%3D%22%23ffffff40%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%2F%3E%3C%2Fsvg%3E')] bg-[length:14px] bg-[right_10px_center] bg-no-repeat"
+                    >
+                        <option value="all" className="bg-[#0a0a0a]">Todos os Vendedores</option>
+                        <option value="unassigned" className="bg-[#0a0a0a] text-red-400">Sem Vendedor (Aguardando)</option>
+                        {consultants.map(c => (
+                            <option key={c.id} value={c.id} className="bg-[#0a0a0a]">{c.name}</option>
+                        ))}
+                    </select>
+                )}
+
+                <select
+                    value={filterStage}
+                    onChange={e => setFilterStage(e.target.value)}
+                    className="bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white/70 focus:outline-none focus:ring-1 focus:ring-red-500/50 hover:bg-white/10 transition-colors cursor-pointer appearance-none pr-8 relative bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20width%3D%2224%22%20height%3D%2224%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20fill%3D%22none%22%20stroke%3D%22%23ffffff40%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%2F%3E%3C%2Fsvg%3E')] bg-[length:14px] bg-[right_10px_center] bg-no-repeat"
+                >
+                    <option value="all" className="bg-[#0a0a0a]">Qualquer Estágio</option>
+                    <option value="new" className="bg-[#0a0a0a]">Aguardando</option>
+                    <option value="attempt" className="bg-[#0a0a0a]">Em Atendimento</option>
+                    <option value="scheduled" className="bg-[#0a0a0a]">Agendamento</option>
+                    <option value="visited" className="bg-[#0a0a0a]">Visita / Test Drive</option>
+                    <option value="negotiation" className="bg-[#0a0a0a]">Em Negociação</option>
+                    <option value="closed" className="bg-[#0a0a0a]">Vendido</option>
+                    <option value="lost" className="bg-[#0a0a0a]">Perdido</option>
+                </select>
+
+                <select
+                    value={filterInterest}
+                    onChange={e => setFilterInterest(e.target.value)}
+                    className="bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white/70 focus:outline-none focus:ring-1 focus:ring-amber-500/50 hover:bg-white/10 transition-colors cursor-pointer appearance-none pr-8 relative bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20width%3D%2224%22%20height%3D%2224%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20fill%3D%22none%22%20stroke%3D%22%23ffffff40%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%2F%3E%3C%2Fsvg%3E')] bg-[length:14px] bg-[right_10px_center] bg-no-repeat"
+                >
+                    <option value="all" className="bg-[#0a0a0a]">Desejo (Qualquer)</option>
+                    <option value="hot" className="bg-[#0a0a0a]">🔥 Altíssimo (Quente)</option>
+                    <option value="warm" className="bg-[#0a0a0a]">⚡ Médio (Morno)</option>
+                    <option value="cold" className="bg-[#0a0a0a]">❄️ Baixo (Frio)</option>
+                </select>
+
+                <select
+                    value={filterScore}
+                    onChange={e => setFilterScore(e.target.value)}
+                    className="bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white/70 focus:outline-none focus:ring-1 focus:ring-purple-500/50 hover:bg-white/10 transition-colors cursor-pointer appearance-none pr-8 relative bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20width%3D%2224%22%20height%3D%2224%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20fill%3D%22none%22%20stroke%3D%22%23ffffff40%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%2F%3E%3C%2Fsvg%3E')] bg-[length:14px] bg-[right_10px_center] bg-no-repeat"
+                >
+                    <option value="all" className="bg-[#0a0a0a]">Qualquer Score (IA)</option>
+                    <option value="high" className="bg-[#0a0a0a]">⭐ Acima de 80</option>
+                    <option value="medium" className="bg-[#0a0a0a]">⭐ 50 até 79</option>
+                    <option value="low" className="bg-[#0a0a0a]"> Abaixo de 50</option>
+                </select>
+
+                {/* Clear Filters Button */}
+                {(filterDate !== 'all' || filterConsultant !== 'all' || filterStage !== 'all' || filterInterest !== 'all' || filterScore !== 'all' || searchTerm !== '') && (
+                    <button
+                        onClick={() => {
+                            setFilterDate('all');
+                            setCustomStartDate('');
+                            setCustomEndDate('');
+                            setFilterConsultant('all');
+                            setFilterStage('all');
+                            setFilterInterest('all');
+                            setFilterScore('all');
+                            setSearchTerm('');
+                        }}
+                        className="text-xs font-bold text-red-500 hover:text-red-400 transition-colors px-2 ml-2 tracking-wide uppercase flex items-center gap-1"
+                    >
+                        Limpar<span className="hidden sm:inline"> Filtros</span>
+                    </button>
+                )}
+            </div>
 
             {/* Team Performance Summary (Admin Only) */}
             {userRole === 'admin' && consultants.length > 0 && (
@@ -1099,14 +1278,14 @@ function LeadsContent() {
                                                     </div>
                                                 </div>
 
-                                                <h4 className="text-sm font-black text-white tracking-tight mb-1 truncate">{lead.name}</h4>
+                                                <h4 className="text-sm font-black text-white tracking-tight leading-tight truncate">{lead.name}</h4>
                                                 <p className="text-[10px] font-bold text-white/40 mb-3 truncate italic">
                                                     {lead.vehicle_interest || 'Interesse em Compra'}
                                                 </p>
 
                                                 <div className="flex items-center justify-between pt-3 border-t border-white/5 relative z-10">
-                                                    <span className="px-2 py-0.5 rounded-lg bg-red-600/10 text-[9px] font-black text-red-500 border border-red-500/10">
-                                                        {lead.source === 'Facebook Leads' ? 'Meta Ads' : lead.source}
+                                                    <span className="px-2 py-0.5 rounded-lg bg-red-600/10 text-[9px] font-black text-red-500 border border-red-500/10 max-w-[120px] truncate">
+                                                        {lead.origem || 'WhatsApp/Facebook'}
                                                     </span>
 
                                                     <button
@@ -1179,7 +1358,7 @@ function LeadsContent() {
                                             <td className="px-6 py-8">
                                                 <p className="text-sm font-bold text-white/80">{lead.vehicle_interest || 'Interesse em Compra'}</p>
                                                 <p className="text-[10px] font-black text-red-500 uppercase tracking-widest mt-1">
-                                                    {lead.source === 'Facebook Leads' ? 'Meta Ads' : lead.source}
+                                                    {lead.origem || 'WhatsApp/Facebook'}
                                                 </p>
                                             </td>
                                             <td className="px-6 py-8">
@@ -1393,126 +1572,6 @@ function LeadsContent() {
                                 exit={{ scale: 0.9, opacity: 0, y: 20 }}
                                 className="w-full max-w-5xl h-[95vh] md:h-auto md:max-h-[92vh] overflow-y-auto bg-[#0a0f1d] border border-white/10 rounded-[2rem] md:rounded-[3.5rem] shadow-[0_50px_150px_rgba(0,0,0,0.9)] flex flex-col p-6 sm:p-8 md:p-14 custom-scrollbar relative pointer-events-auto z-[110]"
                             >
-                                <AnimatePresence>
-                                    {isFinishing && (
-                                        <motion.div
-                                            initial={{ opacity: 0, backdropFilter: 'blur(0px)' }}
-                                            animate={{ opacity: 1, backdropFilter: 'blur(10px)' }}
-                                            exit={{ opacity: 0, backdropFilter: 'blur(0px)' }}
-                                            className="absolute inset-0 z-[100] bg-black/60 flex items-center justify-center p-10 rounded-[3rem]"
-                                        >
-                                            <div className="glass-card w-full max-w-md p-10 space-y-8 bg-[#0a0f1d] border-red-500/20 relative shadow-2xl">
-                                                <button
-                                                    onClick={() => setIsFinishing(false)}
-                                                    className="absolute top-6 right-6 text-white/20 hover:text-white transition-colors"
-                                                >
-                                                    <Plus size={24} className="rotate-45" />
-                                                </button>
-
-                                                <div className="text-center space-y-2">
-                                                    <div className="h-16 w-16 rounded-3xl bg-red-600/20 border border-red-500/20 flex items-center justify-center mx-auto mb-6">
-                                                        <Zap size={32} className="text-red-500" />
-                                                    </div>
-                                                    <h3 className="text-2xl font-black text-white uppercase tracking-tighter">Finalizar Atendimento</h3>
-                                                    <p className="text-xs text-white/40 uppercase font-bold tracking-widest">Qual foi o desfecho para {actionLead.name}?</p>
-                                                </div>
-
-                                                <div className="grid gap-4">
-                                                    <button
-                                                        onClick={() => {
-                                                            setIsRecordingSale(true);
-                                                            setIsFinishing(false);
-                                                        }}
-                                                        className="w-full py-6 rounded-3xl bg-emerald-600 text-white font-black uppercase tracking-[0.2em] shadow-xl shadow-emerald-500/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-3"
-                                                    >
-                                                        <BadgeCheck size={20} /> VENDA REALIZADA
-                                                    </button>
-
-                                                    <div className="space-y-4 pt-4 border-t border-white/5">
-                                                        <p className="text-[10px] font-black text-white/20 uppercase tracking-[0.2em] text-center">Ou motivo da perda</p>
-                                                        <select
-                                                            value={lossReason}
-                                                            onChange={(e) => setLossReason(e.target.value)}
-                                                            className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-sm text-white focus:outline-none focus:ring-1 focus:ring-red-500/50 transition-all font-medium [color-scheme:dark]"
-                                                        >
-                                                            <option value="" className="bg-[#080c18]">Selecione um motivo...</option>
-                                                            <option value="Preço alto" className="bg-[#080c18]">Preço alto / Sem margem</option>
-                                                            <option value="Comprou em outro lugar" className="bg-[#080c18]">Comprou em outro lugar</option>
-                                                            <option value="Desistiu da compra" className="bg-[#080c18]">Desistiu da compra</option>
-                                                            <option value="Sem crédito" className="bg-[#080c18]">Sem crédito aprovado</option>
-                                                            <option value="Veículo vendido" className="bg-[#080c18]">Veículo de interesse vendido</option>
-                                                        </select>
-
-                                                        <button
-                                                            disabled={!lossReason}
-                                                            onClick={() => handleCloseLead('lost')}
-                                                            className={`w-full py-5 rounded-3xl border text-xs font-black uppercase tracking-[0.2em] transition-all ${lossReason ? 'border-red-500/40 text-red-500 hover:bg-red-600 hover:text-white' : 'border-white/5 text-white/10 cursor-not-allowed'}`}
-                                                        >
-                                                            CONFIRMAR PERDA
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </motion.div>
-                                    )}
-
-                                    {isRecordingSale && (
-                                        <motion.div
-                                            initial={{ opacity: 0, backdropFilter: 'blur(0px)' }}
-                                            animate={{ opacity: 1, backdropFilter: 'blur(10px)' }}
-                                            exit={{ opacity: 0, backdropFilter: 'blur(0px)' }}
-                                            className="absolute inset-0 z-[110] bg-black/60 flex items-center justify-center p-10 rounded-[3rem]"
-                                        >
-                                            <div className="glass-card w-full max-w-md p-10 space-y-8 bg-[#0a0f1d] border-emerald-500/20 relative shadow-2xl">
-                                                <button
-                                                    onClick={() => setIsRecordingSale(false)}
-                                                    className="absolute top-6 right-6 text-white/20 hover:text-white transition-colors"
-                                                >
-                                                    <Plus size={24} className="rotate-45" />
-                                                </button>
-
-                                                <div className="text-center space-y-2">
-                                                    <div className="h-16 w-16 rounded-3xl bg-emerald-600/20 border border-emerald-500/20 flex items-center justify-center mx-auto mb-6">
-                                                        <CreditCard size={32} className="text-emerald-500" />
-                                                    </div>
-                                                    <h3 className="text-2xl font-black text-white uppercase tracking-tighter">Registrar Venda</h3>
-                                                    <p className="text-xs text-white/40 uppercase font-bold tracking-widest">Parabéns pela venda para {actionLead.name}!</p>
-                                                </div>
-
-                                                <div className="space-y-4">
-                                                    <div className="space-y-2">
-                                                        <label className="text-[10px] font-black text-white/30 uppercase tracking-[0.2em] ml-1">Valor Total da Venda</label>
-                                                        <input
-                                                            type="text"
-                                                            placeholder="R$ 0,00"
-                                                            value={saleData.sale_value}
-                                                            onChange={(e) => setSaleData({ ...saleData, sale_value: formatCurrencyInput(e.target.value) })}
-                                                            className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-sm text-white focus:outline-none focus:ring-1 focus:ring-emerald-500/50"
-                                                        />
-                                                    </div>
-                                                    <div className="space-y-2">
-                                                        <label className="text-[10px] font-black text-white/30 uppercase tracking-[0.2em] ml-1">Margem de Lucro Bruta</label>
-                                                        <input
-                                                            type="text"
-                                                            placeholder="R$ 0,00"
-                                                            value={saleData.profit_margin}
-                                                            onChange={(e) => setSaleData({ ...saleData, profit_margin: formatCurrencyInput(e.target.value) })}
-                                                            className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-sm text-white focus:outline-none focus:ring-1 focus:ring-emerald-500/50"
-                                                        />
-                                                    </div>
-
-                                                    <button
-                                                        onClick={handleRecordSale}
-                                                        className="w-full py-6 mt-4 rounded-3xl bg-emerald-600 text-white font-black uppercase tracking-[0.2em] shadow-xl shadow-emerald-500/20 hover:scale-[1.02] active:scale-95 transition-all"
-                                                    >
-                                                        CONFIRMAR E FINALIZAR
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        </motion.div>
-                                    )}
-                                </AnimatePresence>
-
                                 <header className="flex flex-col gap-6 mb-10">
                                     <div className="flex items-center justify-between">
                                         <div className="flex items-center gap-3">
@@ -2156,6 +2215,127 @@ function LeadsContent() {
                                     )}
                                 </footer>
                             </motion.div>
+
+                            {/* Render the Finshing Modals OUTSIDE the sliding scrollable div to avoid overflow clipping and trapped z-index */}
+                            <AnimatePresence>
+                                {isFinishing && (
+                                    <motion.div
+                                        initial={{ opacity: 0, backdropFilter: 'blur(0px)' }}
+                                        animate={{ opacity: 1, backdropFilter: 'blur(10px)' }}
+                                        exit={{ opacity: 0, backdropFilter: 'blur(0px)' }}
+                                        className="fixed inset-0 z-[200] bg-black/80 flex items-center justify-center p-4 pointer-events-auto"
+                                    >
+                                        <div className="glass-card w-full max-w-md p-10 space-y-8 bg-[#0a0f1d] border-red-500/20 relative shadow-2xl rounded-[3rem]">
+                                            <button
+                                                onClick={() => setIsFinishing(false)}
+                                                className="absolute top-6 right-6 text-white/20 hover:text-white transition-colors"
+                                            >
+                                                <Plus size={24} className="rotate-45" />
+                                            </button>
+
+                                            <div className="text-center space-y-2">
+                                                <div className="h-16 w-16 rounded-3xl bg-red-600/20 border border-red-500/20 flex items-center justify-center mx-auto mb-6">
+                                                    <Zap size={32} className="text-red-500" />
+                                                </div>
+                                                <h3 className="text-2xl font-black text-white uppercase tracking-tighter">Finalizar Atendimento</h3>
+                                                <p className="text-xs text-white/40 uppercase font-bold tracking-widest">Qual foi o desfecho para {actionLead.name}?</p>
+                                            </div>
+
+                                            <div className="grid gap-4">
+                                                <button
+                                                    onClick={() => {
+                                                        setIsRecordingSale(true);
+                                                        setIsFinishing(false);
+                                                    }}
+                                                    className="w-full py-6 rounded-3xl bg-emerald-600 text-white font-black uppercase tracking-[0.2em] shadow-xl shadow-emerald-500/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-3"
+                                                >
+                                                    <BadgeCheck size={20} /> VENDA REALIZADA
+                                                </button>
+
+                                                <div className="space-y-4 pt-4 border-t border-white/5">
+                                                    <p className="text-[10px] font-black text-white/20 uppercase tracking-[0.2em] text-center">Ou motivo da perda</p>
+                                                    <select
+                                                        value={lossReason}
+                                                        onChange={(e) => setLossReason(e.target.value)}
+                                                        className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-sm text-white focus:outline-none focus:ring-1 focus:ring-red-500/50 transition-all font-medium [color-scheme:dark]"
+                                                    >
+                                                        <option value="" className="bg-[#080c18]">Selecione um motivo...</option>
+                                                        <option value="Preço alto" className="bg-[#080c18]">Preço alto / Sem margem</option>
+                                                        <option value="Comprou em outro lugar" className="bg-[#080c18]">Comprou em outro lugar</option>
+                                                        <option value="Desistiu da compra" className="bg-[#080c18]">Desistiu da compra</option>
+                                                        <option value="Sem crédito" className="bg-[#080c18]">Sem crédito aprovado</option>
+                                                        <option value="Veículo vendido" className="bg-[#080c18]">Veículo de interesse vendido</option>
+                                                    </select>
+
+                                                    <button
+                                                        disabled={!lossReason}
+                                                        onClick={() => handleCloseLead('lost')}
+                                                        className={`w-full py-5 rounded-3xl border text-xs font-black uppercase tracking-[0.2em] transition-all ${lossReason ? 'border-red-500/40 text-red-500 hover:bg-red-600 hover:text-white' : 'border-white/5 text-white/10 cursor-not-allowed'}`}
+                                                    >
+                                                        CONFIRMAR PERDA
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </motion.div>
+                                )}
+
+                                {isRecordingSale && (
+                                    <motion.div
+                                        initial={{ opacity: 0, backdropFilter: 'blur(0px)' }}
+                                        animate={{ opacity: 1, backdropFilter: 'blur(10px)' }}
+                                        exit={{ opacity: 0, backdropFilter: 'blur(0px)' }}
+                                        className="fixed inset-0 z-[200] bg-black/80 flex items-center justify-center p-4 pointer-events-auto"
+                                    >
+                                        <div className="glass-card w-full max-w-md p-10 space-y-8 bg-[#0a0f1d] border-emerald-500/20 relative shadow-2xl rounded-[3rem]">
+                                            <button
+                                                onClick={() => setIsRecordingSale(false)}
+                                                className="absolute top-6 right-6 text-white/20 hover:text-white transition-colors"
+                                            >
+                                                <Plus size={24} className="rotate-45" />
+                                            </button>
+
+                                            <div className="text-center space-y-2">
+                                                <div className="h-16 w-16 rounded-3xl bg-emerald-600/20 border border-emerald-500/20 flex items-center justify-center mx-auto mb-6">
+                                                    <CreditCard size={32} className="text-emerald-500" />
+                                                </div>
+                                                <h3 className="text-2xl font-black text-white uppercase tracking-tighter">Registrar Venda</h3>
+                                                <p className="text-xs text-white/40 uppercase font-bold tracking-widest">Parabéns pela venda para {actionLead.name}!</p>
+                                            </div>
+
+                                            <div className="space-y-4">
+                                                <div className="space-y-2">
+                                                    <label className="text-[10px] font-black text-white/30 uppercase tracking-[0.2em] ml-1">Valor Total da Venda</label>
+                                                    <input
+                                                        type="text"
+                                                        placeholder="R$ 0,00"
+                                                        value={saleData.sale_value}
+                                                        onChange={(e) => setSaleData({ ...saleData, sale_value: formatCurrencyInput(e.target.value) })}
+                                                        className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-sm text-white focus:outline-none focus:ring-1 focus:ring-emerald-500/50"
+                                                    />
+                                                </div>
+                                                <div className="space-y-2">
+                                                    <label className="text-[10px] font-black text-white/30 uppercase tracking-[0.2em] ml-1">Margem de Lucro Bruta</label>
+                                                    <input
+                                                        type="text"
+                                                        placeholder="R$ 0,00"
+                                                        value={saleData.profit_margin}
+                                                        onChange={(e) => setSaleData({ ...saleData, profit_margin: formatCurrencyInput(e.target.value) })}
+                                                        className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-sm text-white focus:outline-none focus:ring-1 focus:ring-emerald-500/50"
+                                                    />
+                                                </div>
+
+                                                <button
+                                                    onClick={handleRecordSale}
+                                                    className="w-full py-6 mt-4 rounded-3xl bg-emerald-600 text-white font-black uppercase tracking-[0.2em] shadow-xl shadow-emerald-500/20 hover:scale-[1.02] active:scale-95 transition-all"
+                                                >
+                                                    CONFIRMAR E FINALIZAR
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>
                         </div>
                     )
                 }
@@ -2290,6 +2470,7 @@ function LeadsContent() {
                                                     const newLead = await dataService.createLead({
                                                         ...newLeadData,
                                                         source: userName ? `Registro ${userName}` : 'Registro Manual',
+                                                        origem: userName ? `Adicionado por ${userName}` : 'Adicionado Manualmente',
                                                         ai_classification: 'warm',
                                                         ai_score: 0,
                                                         status: 'attempt',

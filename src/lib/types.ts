@@ -19,11 +19,21 @@ export interface Campaign {
   updated_at?: string;
   leads_manos_crm?: { count: number }[];
   ai_analysis_result?: {
-    analise_critica: string;
-    saude_campanha: string;
-    gargalo_identificado: string;
-    proximos_passos: string[];
-    score_potencial: number;
+    current_analysis?: {
+      analise_critica: string;
+      saude_campanha: string;
+      gargalo_identificado: string;
+      proximos_passos: string[];
+      score_potencial: number;
+      analyzed_at?: string;
+    };
+    history?: any[];
+    // Fallbacks for older records
+    analise_critica?: string;
+    saude_campanha?: string;
+    gargalo_identificado?: string;
+    proximos_passos?: string[];
+    score_potencial?: number;
   };
 }
 
@@ -45,6 +55,7 @@ export interface Lead {
   phone: string;
   email: string;
   source: string;
+  origem?: string;
   campaign_id?: string;
   creative_id?: string;
   vehicle_interest: string;

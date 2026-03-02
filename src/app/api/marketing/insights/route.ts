@@ -19,7 +19,8 @@ export async function POST(req: Request) {
             ? `&date_preset=${date_preset}`
             : '&date_preset=maximum';
 
-        const apiUrl = `https://graph.facebook.com/v19.0/act_${adAccountId}/campaigns?limit=150&fields=name,status,effective_status,objective,insights{spend,inline_link_clicks,reach,impressions,cpc,ctr,cpm,frequency}&access_token=${token}${presetQuery}`;
+        // Get insights at the campaign level with the specific date preset
+        const apiUrl = `https://graph.facebook.com/v19.0/act_${adAccountId}/insights?level=campaign&fields=campaign_id,campaign_name,spend,inline_link_clicks,reach,impressions,cpc,ctr,cpm,frequency&limit=150&access_token=${token}${presetQuery}`;
 
         const response = await fetch(apiUrl);
 
@@ -35,23 +36,19 @@ export async function POST(req: Request) {
 
         // Format the data to match our DB schema for the frontend
         const campaignsData = metaCampaigns.map((c: any) => {
-            const insights = c.insights?.data?.[0] || {};
-            // Prioriza o status master para nao esconder campanhas pausasadas indiretamente
-            const status = (c.status || c.effective_status || '').toLowerCase();
-
             return {
-                id: c.id,
-                name: c.name || 'Sem Nome',
+                id: c.campaign_id,
+                name: c.campaign_name || 'Sem Nome',
                 platform: 'Meta Ads',
-                status: status === 'active' ? 'active' : 'paused',
-                total_spend: Number(insights.spend || 0),
-                link_clicks: Number(insights.inline_link_clicks || 0),
-                reach: Number(insights.reach || 0),
-                impressions: Number(insights.impressions || 0),
-                cpc: Number(insights.cpc || 0),
-                ctr: Number(insights.ctr || 0),
-                cpm: Number(insights.cpm || 0),
-                frequency: Number(insights.frequency || 0),
+                status: 'active', // Insights edge doesn't reliably return status, assume active if active in DB or ignore for metrics patching
+                total_spend: Number(c.spend || 0),
+                link_clicks: Number(c.inline_link_clicks || 0),
+                reach: Number(c.reach || 0),
+                impressions: Number(c.impressions || 0),
+                cpc: Number(c.cpc || 0),
+                ctr: Number(c.ctr || 0),
+                cpm: Number(c.cpm || 0),
+                frequency: Number(c.frequency || 0),
             };
         });
 

@@ -226,6 +226,7 @@ export const dataService = {
                     resumo_consultor: item.resumo_consultor,
                     proxima_acao: item.proxima_acao,
                     email: '',
+                    origem: item.origem || '',
                     estimated_ticket: 0
                 };
             }) as unknown as Lead[];
@@ -904,6 +905,70 @@ export const dataService = {
 
         if (error) throw error;
         return data;
+    },
+
+    async getLeadsCountByDateForCampaigns(datePreset: string) {
+        let startDate = new Date();
+        let endDate = new Date();
+        startDate.setHours(0, 0, 0, 0);
+        endDate.setHours(23, 59, 59, 999);
+
+        const today = new Date();
+
+        switch (datePreset) {
+            case 'today':
+                // already set
+                break;
+            case 'yesterday':
+                startDate.setDate(today.getDate() - 1);
+                endDate.setDate(today.getDate() - 1);
+                break;
+            case 'last_3d':
+                startDate.setDate(today.getDate() - 3);
+                break;
+            case 'last_7d':
+                startDate.setDate(today.getDate() - 7);
+                break;
+            case 'last_14d':
+                startDate.setDate(today.getDate() - 14);
+                break;
+            case 'last_30d':
+                startDate.setDate(today.getDate() - 30);
+                break;
+            case 'this_week':
+                const day = today.getDay(); // 0 is Sunday
+                const diff = today.getDate() - day + (day == 0 ? -6 : 1); // Adjust to Monday
+                startDate.setDate(diff);
+                break;
+            case 'this_month':
+                startDate = new Date(today.getFullYear(), today.getMonth(), 1);
+                break;
+            case 'maximum':
+            default:
+                startDate = new Date(2000, 0, 1); // Arbitrary old date for lifetime
+                break;
+        }
+
+        const { data, error } = await supabase
+            .from('leads_manos_crm')
+            .select('campaign_id, id')
+            .gte('created_at', startDate.toISOString())
+            .lte('created_at', endDate.toISOString());
+
+        if (error) {
+            console.error("Error fetching filtered leads:", error);
+            return {};
+        }
+
+        // Group by campaign_id
+        const countsByCampaign: Record<string, number> = {};
+        data?.forEach(lead => {
+            if (lead.campaign_id) {
+                countsByCampaign[lead.campaign_id] = (countsByCampaign[lead.campaign_id] || 0) + 1;
+            }
+        });
+
+        return countsByCampaign;
     },
 
     // AI Daily Marketing Report
