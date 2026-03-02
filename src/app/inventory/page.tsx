@@ -42,7 +42,33 @@ const getDriveImageUrl = (driveId: string | undefined) => {
     }
 
     if (!id || id.length < 10) return null;
-    return `https://lh3.googleusercontent.com/d/${id}`;
+    return `https://drive.google.com/thumbnail?id=${id}&sz=w800`;
+};
+
+const CarImage = ({ car, className = "w-full h-full object-cover transition-transform duration-700 group-hover:scale-110 opacity-80 group-hover:opacity-100" }: { car: InventoryItem, className?: string }) => {
+    const [error, setError] = useState(false);
+    const imgSrc = car.imagem_url || getDriveImageUrl(car.drive_id);
+
+    if (!imgSrc || error) {
+        return (
+            <div className={`w-full h-full bg-[#1a1a1a] flex flex-col items-center justify-center ${className.includes('transition') ? 'transition-transform duration-700 group-hover:scale-110' : ''}`}>
+                <Car className="text-white/10 mb-3" size={64} />
+                <span className="text-white/30 text-xs font-black uppercase tracking-widest text-center px-6 line-clamp-2">
+                    {car.marca} <br /><span className="text-white/50 text-base">{car.modelo}</span>
+                </span>
+            </div>
+        );
+    }
+
+    return (
+        <img
+            src={imgSrc}
+            alt={`${car.marca} ${car.modelo}`}
+            className={className}
+            referrerPolicy="no-referrer"
+            onError={() => setError(true)}
+        />
+    );
 };
 
 
@@ -224,17 +250,7 @@ export default function InventoryPage() {
                                         setDownPayment(cleanPriceForStats(car.preco) * 0.3); // Sugestão de 30% de entrada
                                     }}
                                 >
-                                    <img
-                                        src={car.imagem_url || getDriveImageUrl(car.drive_id) || `https://placehold.co/800x600/141414/ef4444.png?text=${encodeURIComponent(car.modelo)}`}
-                                        alt={`${car.marca} ${car.modelo}`}
-                                        className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110 opacity-80 group-hover:opacity-100"
-                                        referrerPolicy="no-referrer"
-                                        onError={(e) => {
-                                            const target = e.target as HTMLImageElement;
-                                            target.onerror = null;
-                                            target.src = `https://placehold.co/800x600/141414/ef4444.png?text=${encodeURIComponent(car.modelo)}`;
-                                        }}
-                                    />
+                                    <CarImage car={car} />
                                     <div className="absolute inset-0 bg-gradient-to-t from-[#141414] via-transparent to-transparent opacity-60" />
 
                                     <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/20">
@@ -333,11 +349,7 @@ export default function InventoryPage() {
                         >
                             {/* Left Side: Car Info */}
                             <div className="w-full md:w-5/12 bg-black relative">
-                                <img
-                                    src={selectedCarForFinancing.imagem_url || getDriveImageUrl(selectedCarForFinancing.drive_id) || ''}
-                                    className="w-full h-full object-cover"
-                                    alt={selectedCarForFinancing.modelo}
-                                />
+                                <CarImage car={selectedCarForFinancing} className="w-full h-full object-cover" />
                                 <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent" />
                                 <div className="absolute bottom-6 left-6 right-6">
                                     <p className="text-red-500 text-[10px] font-black uppercase tracking-[0.2em]">{selectedCarForFinancing.marca}</p>
