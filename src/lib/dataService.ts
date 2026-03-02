@@ -205,6 +205,19 @@ export const dataService = {
                     if (found) assignedConsultantId = found.id;
                 }
 
+                // Build ai_summary from best available source
+                const rawResumo = (item.resumo || '').split('||IA_DATA||')[0].replace(/\[STATUS:.*?\]\s*/g, '').trim();
+                const bestSummary = rawResumo || item.resumo_consultor || '';
+
+                // Determine status: native column > tag in resumo > fallback
+                let leadStatus: LeadStatus = 'received';
+                if (item.status && item.status !== '') {
+                    leadStatus = item.status as LeadStatus;
+                } else if (item.resumo) {
+                    const statusMatch = item.resumo.match(/\[STATUS:(.*?)\]/);
+                    if (statusMatch) leadStatus = statusMatch[1] as LeadStatus;
+                }
+
                 return {
                     id: `crm26_${item.id}`,
                     name: item.nome,
@@ -213,18 +226,21 @@ export const dataService = {
                     region: item.cidade || '',
                     ai_classification: (aiClass?.toLowerCase() || 'warm') as AIClassification,
                     ai_score: aiScore,
-                    status: (item.status as LeadStatus) || (item.resumo?.match(/\[STATUS:(.*?)\]/)?.[1] as LeadStatus) || 'received',
+                    ai_reason: item.ai_reason || '',
+                    status: leadStatus,
                     created_at: item.criado_em,
                     updated_at: item.atualizado_em || item.criado_em,
                     source: 'WhatsApp',
                     consultants_manos_crm: { name: item.vendedor || 'Pendente' },
                     assigned_consultant_id: assignedConsultantId,
-                    ai_summary: item.resumo_consultor || (item.resumo || '').split('||IA_DATA||')[0].replace(/\[STATUS:.*?\]\s*/g, ''),
+                    ai_summary: bestSummary,
                     carro_troca: item.troca || '',
                     nivel_interesse: item.nivel_interesse,
                     momento_compra: item.momento_compra,
                     resumo_consultor: item.resumo_consultor,
                     proxima_acao: item.proxima_acao,
+                    motivo_perda: item.motivo_perda || '',
+                    resumo_fechamento: item.resumo_fechamento || '',
                     email: '',
                     origem: item.origem || '',
                     estimated_ticket: 0
@@ -627,10 +643,7 @@ export const dataService = {
             if (details.proxima_acao) updateObj.proxima_acao = details.proxima_acao;
 
             if (details.status) {
-                // We use the same 'resumo' tag logic for status consistency
-                const { data: current } = await supabase.from('leads_distribuicao_crm_26').select('resumo').eq('id', realId).single();
-                const clean = (current?.resumo || '').replace(/\[STATUS:.*?\]\s*/g, '');
-                updateObj.resumo = `[STATUS:${details.status}] ${updateObj.resumo || clean}`.trim();
+                updateObj.status = details.status;
             }
 
             if (Object.keys(updateObj).length === 0) return null;
