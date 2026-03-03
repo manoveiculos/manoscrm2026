@@ -49,11 +49,14 @@ function LeadsContent() {
     const [filterStage, setFilterStage] = useState<string>(stageFromUrl || 'all');
     const [filterInterest, setFilterInterest] = useState<string>('all');
     const [filterScore, setFilterScore] = useState<string>('all');
+    const [filterOrigin, setFilterOrigin] = useState<string>('all');
 
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [chatText, setChatText] = useState('');
     const [activeMoveMenu, setActiveMoveMenu] = useState<string | null>(null);
     const [scrollProgress, setScrollProgress] = useState(0);
+    const [dragOverColId, setDragOverColId] = useState<string | null>(null);
+    const [draggingLeadId, setDraggingLeadId] = useState<string | null>(null);
     const [consultants, setConsultants] = useState<Consultant[]>([]);
     const [userRole, setUserRole] = useState<string>('consultant');
     const [userName, setUserName] = useState<string>('');
@@ -78,7 +81,10 @@ function LeadsContent() {
         carro_troca: ''
     });
     const [newNoteText, setNewNoteText] = useState('');
-    const [modalTab, setModalTab] = useState<'details' | 'karbam' | 'analysis' | 'next_steps'>('details');
+    const [modalTab, setModalTab] = useState<'details' | 'karbam' | 'analysis' | 'timeline' | 'next_steps' | 'flow-up' | 'forms'>('details');
+    const [followupContext, setFollowupContext] = useState('');
+    const [isGeneratingFollowup, setIsGeneratingFollowup] = useState(false);
+    const [generatedFollowup, setGeneratedFollowup] = useState('');
     const fileInputRef = useRef<HTMLInputElement>(null);
     const whatsappFolderInputRef = useRef<HTMLInputElement>(null);
     const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -103,18 +109,17 @@ function LeadsContent() {
         if (clickTimerRef.current) {
             clearTimeout(clickTimerRef.current);
             clickTimerRef.current = null;
-
-            // Double click: Open action modal
+            // Double Click: Action Center (Centro de Gestão)
             setActionLead(lead);
             setSelectedLead(null);
             setIsFinishing(false);
         } else {
-            // First click: Start detection timer
             clickTimerRef.current = setTimeout(() => {
-                // Single click: Open side panel
+                // Single Click: Simple Info (Painel de Atendimento)
                 setSelectedLead(lead);
+                setActionLead(null);
                 clickTimerRef.current = null;
-            }, 300); // 300ms window is more comfortable
+            }, 300);
         }
     };
 
@@ -223,6 +228,63 @@ function LeadsContent() {
         } catch (err) {
             console.error("Error saving call summary:", err);
             showToast("Erro ao salvar resumo da ligação.", "error");
+        }
+    };
+
+    const handleGenerateFollowup = async () => {
+        if (!actionLead || !followupContext) return;
+
+        setIsGeneratingFollowup(true);
+        try {
+            const response = await fetch('/api/generate-followup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    leadName: actionLead.name,
+                    context: followupContext,
+                    lastInteractions: actionLead.ai_summary,
+                    vehicle: actionLead.vehicle_interest
+                })
+            });
+
+            const data = await response.json();
+            if (data.success) {
+                setGeneratedFollowup(data.message);
+                showToast("Sugestão de reativação gerada pela IA!", "success");
+            } else {
+                throw new Error(data.error);
+            }
+        } catch (err: any) {
+            console.error("Error generating followup:", err);
+            showToast("Erro ao gerar reativação.", "error");
+        } finally {
+            setIsGeneratingFollowup(false);
+        }
+    };
+
+    const getWhatsAppMessage = (lead: Lead, type: 'initial' | 'stage' | 'flowup' = 'stage') => {
+        if (type === 'flowup' && generatedFollowup) return generatedFollowup;
+
+        const firstName = lead.name.split(' ')[0];
+        const vehicle = lead.vehicle_interest || 'um veículo do nosso estoque';
+
+        if (type === 'initial') {
+            return `Olá ${firstName}! Tudo bem? Vimos seu interesse no ${vehicle}. Sou consultor da Manos Veículos e gostaria de saber: como posso te ajudar hoje?`;
+        }
+
+        switch (lead.status) {
+            case 'new':
+            case 'received':
+                return `Olá ${firstName}! Tudo bem? Vimos seu interesse no ${vehicle}. Sou consultor da Manos Veículos e gostaria de saber: como posso te ajudar hoje?`;
+            case 'scheduled':
+                const dateStr = lead.scheduled_at ? new Date(lead.scheduled_at).toLocaleDateString('pt-BR') : '';
+                const hourStr = lead.scheduled_at ? new Date(lead.scheduled_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
+                return `Olá ${firstName}! Confirmando nosso agendamento para ver o ${vehicle} no dia ${dateStr} às ${hourStr}. Esperamos você!`;
+            case 'negotiation':
+            case 'proposed':
+                return `Olá ${firstName}! Estava revendo nossa negociação sobre o ${vehicle} e consegui uma condição melhor para fecharmos hoje. O que você acha?`;
+            default:
+                return `Olá ${firstName}! Tudo bem? Gostaria de dar continuidade ao nosso atendimento sobre o ${vehicle}.`;
         }
     };
 
@@ -843,6 +905,11 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
             if (filterScore === 'low' && score >= 50) return false;
         }
 
+        // 7. Origin Filter
+        if (filterOrigin !== 'all') {
+            if (lead.origem !== filterOrigin) return false;
+        }
+
         return true;
     });
 
@@ -960,6 +1027,17 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                 </select>
 
                 <select
+                    value={filterOrigin}
+                    onChange={e => setFilterOrigin(e.target.value)}
+                    className="bg-white/5 border border-white/10 rounded-xl px-3 md:px-4 py-2.5 text-[10px] md:text-xs text-white/70 focus:outline-none focus:ring-1 focus:ring-blue-500/50 hover:bg-white/10 transition-colors cursor-pointer appearance-none pr-7 md:pr-8 relative bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20width%3D%2224%22%20height%3D%2224%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20fill%3D%22none%22%20stroke%3D%22%23ffffff40%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%2F%3E%3C%2Fsvg%3E')] bg-[length:14px] bg-[right_10px_center] bg-no-repeat w-[calc(50%-0.5rem)] sm:w-auto"
+                >
+                    <option value="all" className="bg-[#0a0a0a]">Origem (Todas)</option>
+                    {Array.from(new Set(leads.map(l => l.origem).filter(Boolean))).sort().map(origin => (
+                        <option key={origin} value={origin} className="bg-[#0a0a0a]">{origin}</option>
+                    ))}
+                </select>
+
+                <select
                     value={filterScore}
                     onChange={e => setFilterScore(e.target.value)}
                     className="bg-white/5 border border-white/10 rounded-xl px-3 md:px-4 py-2.5 text-[10px] md:text-xs text-white/70 focus:outline-none focus:ring-1 focus:ring-purple-500/50 hover:bg-white/10 transition-colors cursor-pointer appearance-none pr-7 md:pr-8 relative bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20width%3D%2224%22%20height%3D%2224%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20fill%3D%22none%22%20stroke%3D%22%23ffffff40%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%2F%3E%3C%2Fsvg%3E')] bg-[length:14px] bg-[right_10px_center] bg-no-repeat w-[calc(50%-0.5rem)] sm:w-auto"
@@ -971,7 +1049,7 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                 </select>
 
                 {/* Clear Filters Button */}
-                {(filterDate !== 'all' || filterConsultant !== 'all' || filterStage !== 'all' || filterInterest !== 'all' || filterScore !== 'all' || searchTerm !== '') && (
+                {(filterDate !== 'all' || filterConsultant !== 'all' || filterStage !== 'all' || filterInterest !== 'all' || filterScore !== 'all' || filterOrigin !== 'all' || searchTerm !== '') && (
                     <button
                         onClick={() => {
                             setFilterDate('all');
@@ -981,6 +1059,7 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                             setFilterStage('all');
                             setFilterInterest('all');
                             setFilterScore('all');
+                            setFilterOrigin('all');
                             setSearchTerm('');
                         }}
                         className="text-xs font-bold text-red-500 hover:text-red-400 transition-colors px-2 ml-2 tracking-wide uppercase flex items-center gap-1"
@@ -1145,181 +1224,240 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                 {viewMode === 'kanban' ? (
                     <motion.div
                         key="kanban"
-                        ref={scrollContainerRef}
-                        onScroll={handleScroll}
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
-                        className="flex gap-6 overflow-x-auto pb-10 min-h-[70vh] px-2 hide-scrollbar"
+                        className="flex flex-col gap-4 w-full"
                     >
-                        {([
-                            { id: 'aguardando', title: 'Aguardando', statuses: ['new', 'received'], color: 'bg-blue-500' },
-                            { id: 'atendimento', title: 'Em Atendimento', statuses: ['attempt', 'contacted', 'confirmed'], color: 'bg-amber-500' },
-                            { id: 'agendamento', title: 'Agendamento', statuses: ['scheduled'], color: 'bg-red-500' },
-                            { id: 'visita', title: 'Visita e Test Drive', statuses: ['visited', 'test_drive'], color: 'bg-red-600' },
-                            { id: 'negociacao', title: 'Negociação', statuses: ['proposed', 'negotiation'], color: 'bg-red-700' },
-                            { id: 'venda', title: 'Vendido', statuses: ['closed'], color: 'bg-emerald-500' },
-                            { id: 'sem_contato', title: 'Sem Contato', statuses: ['post_sale'], color: 'bg-white/10' },
-                            { id: 'perda', title: 'Perda Total', statuses: ['lost'], color: 'bg-white/5' }
-                        ] as { id: string; title: string; statuses: LeadStatus[]; color: string }[]).map((col) => {
-                            const colLeads = filteredLeads.filter(l => col.statuses.includes(l.status));
-                            return (
-                                <div key={col.id} className="flex-shrink-0 w-80 flex flex-col gap-4">
-                                    <div className="flex items-center justify-between px-2 mb-2">
-                                        <div className="flex items-center gap-2">
-                                            <div className={`h-2.5 w-2.5 rounded-full ${col.color}`} />
-                                            <h3 className="text-xs font-black uppercase tracking-widest text-white/60">{col.title}</h3>
-                                            <span className="px-2 py-0.5 rounded-full bg-white/5 text-[10px] font-bold text-white/30">{colLeads.length}</span>
+                        {/* Quick AI Filters */}
+                        <div className="flex items-center gap-2 px-2 overflow-x-auto hide-scrollbar shrink-0">
+                            <Sparkles size={14} className="text-purple-500 mr-1" />
+                            <span className="text-[10px] font-black text-white/30 uppercase tracking-widest flex items-center mr-2">Filtro Rápido IA:</span>
+                            {[
+                                { id: 'all', label: 'Todos' },
+                                { id: 'high', label: 'Alta Prob. (>80)', activeClass: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30 shadow-[0_0_10px_rgba(16,185,129,0.3)]' },
+                                { id: 'medium', label: 'Média (50-79)', activeClass: 'bg-amber-500/20 text-amber-400 border-amber-500/30 shadow-[0_0_10px_rgba(245,158,11,0.3)]' },
+                                { id: 'low', label: 'Baixa (<50)', activeClass: 'bg-red-500/20 text-red-400 border-red-500/30 shadow-[0_0_10px_rgba(239,68,68,0.3)]' }
+                            ].map(f => (
+                                <button
+                                    key={f.id}
+                                    onClick={() => setFilterScore(f.id)}
+                                    className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap border ${filterScore === f.id ? (f.activeClass || 'bg-white/20 text-white border-white/20') : 'bg-white/5 text-white/40 border-white/5 hover:bg-white/10'}`}
+                                >
+                                    {f.label}
+                                </button>
+                            ))}
+                        </div>
+
+                        <div
+                            ref={scrollContainerRef}
+                            onScroll={handleScroll}
+                            className="flex gap-6 overflow-x-auto pb-10 min-h-[70vh] px-2 hide-scrollbar w-full"
+                        >
+                            {([
+                                { id: 'aguardando', title: 'Aguardando', statuses: ['new', 'received'], color: 'bg-blue-500' },
+                                { id: 'atendimento', title: 'Em Atendimento', statuses: ['attempt', 'contacted', 'confirmed'], color: 'bg-amber-500' },
+                                { id: 'agendamento', title: 'Agendamento', statuses: ['scheduled'], color: 'bg-red-500' },
+                                { id: 'visita', title: 'Visita e Test Drive', statuses: ['visited', 'test_drive'], color: 'bg-red-600' },
+                                { id: 'negociacao', title: 'Negociação', statuses: ['proposed', 'negotiation'], color: 'bg-red-700' },
+                                { id: 'venda', title: 'Vendido', statuses: ['closed'], color: 'bg-emerald-500' },
+                                { id: 'sem_contato', title: 'Sem Contato', statuses: ['post_sale'], color: 'bg-white/10' },
+                                { id: 'perda', title: 'Perda Total', statuses: ['lost'], color: 'bg-white/5' }
+                            ] as { id: string; title: string; statuses: LeadStatus[]; color: string }[]).map((col) => {
+                                const colLeads = filteredLeads.filter(l => col.statuses.includes(l.status));
+                                return (
+                                    <div key={col.id} className="flex-shrink-0 w-80 flex flex-col gap-4">
+                                        <div className="flex items-center justify-between px-2 mb-2">
+                                            <div className="flex items-center gap-2">
+                                                <div className={`h-2.5 w-2.5 rounded-full ${col.color}`} />
+                                                <h3 className="text-xs font-black uppercase tracking-widest text-white/60">{col.title}</h3>
+                                                <span className="px-2 py-0.5 rounded-full bg-white/5 text-[10px] font-bold text-white/30">{colLeads.length}</span>
+                                            </div>
+                                        </div>
+
+                                        <div
+                                            className={`flex flex-col gap-3 min-h-[500px] p-2 -mx-2 rounded-[2rem] transition-all duration-300 ${dragOverColId === col.id ? 'bg-white/5 border-2 border-dashed border-red-500/50 shadow-[0_0_30px_rgba(220,38,38,0.1)]' : 'border-2 border-transparent'}`}
+                                            onDragOver={(e) => {
+                                                e.preventDefault();
+                                                if (dragOverColId !== col.id) setDragOverColId(col.id);
+                                            }}
+                                            onDragLeave={(e) => {
+                                                const relatedTarget = e.relatedTarget as Node | null;
+                                                if (relatedTarget && !e.currentTarget.contains(relatedTarget)) {
+                                                    setDragOverColId(null);
+                                                }
+                                            }}
+                                            onDrop={(e) => {
+                                                e.preventDefault();
+                                                setDragOverColId(null);
+                                                const leadId = e.dataTransfer.getData('leadId');
+                                                if (leadId && leadId !== draggingLeadId) {
+                                                    // Prevent redundant calls if not supported natively. 
+                                                }
+                                                if (leadId) {
+                                                    handleStatusChange(leadId, col.statuses[0] as LeadStatus);
+                                                }
+                                                setDraggingLeadId(null);
+                                            }}
+                                        >
+                                            {colLeads.map((lead) => (
+                                                <motion.div
+                                                    key={lead.id}
+                                                    layoutId={lead.id}
+                                                    draggable
+                                                    onDragStart={(e) => {
+                                                        const dragEvent = e as unknown as React.DragEvent;
+                                                        if (dragEvent.dataTransfer) {
+                                                            dragEvent.dataTransfer.setData('leadId', lead.id);
+                                                            dragEvent.dataTransfer.effectAllowed = 'move';
+                                                        }
+                                                        setDraggingLeadId(lead.id);
+                                                    }}
+                                                    onDragEnd={() => {
+                                                        setDraggingLeadId(null);
+                                                        setDragOverColId(null);
+                                                    }}
+                                                    onClick={() => handleLeadSmartClick(lead)}
+                                                    className={`glass-card rounded-2xl p-4 cursor-grab active:cursor-grabbing hover:border-red-500/30 transition-all group relative select-none border border-white/5 ${activeMoveMenu === lead.id ? 'z-[200] border-red-500/50 shadow-[0_0_50px_rgba(220,38,38,0.2)]' : 'z-10'} ${draggingLeadId === lead.id ? 'opacity-40 scale-[0.98] shadow-none !border-red-500/50 relative z-[200]' : 'opacity-100'}`}
+                                                >
+                                                    <div className="flex justify-between items-start mb-3 relative z-10">
+                                                        <div className="flex items-center gap-3">
+                                                            <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-red-600 to-red-900 flex items-center justify-center text-[10px] font-black text-white shadow-lg shrink-0">
+                                                                {lead.name[0]}
+                                                            </div>
+                                                            {(() => {
+                                                                const daysInStage = lead.created_at ? Math.floor((new Date().getTime() - new Date(lead.created_at).getTime()) / (1000 * 3600 * 24)) : 0;
+                                                                const badgeColor = daysInStage > 5 ? 'text-red-500 bg-red-500/10 border-red-500/20' : daysInStage > 2 ? 'text-amber-500 bg-amber-500/10 border-amber-500/20' : 'text-emerald-500 bg-emerald-500/10 border-emerald-500/20';
+                                                                return (
+                                                                    <div className={`px-2 py-1 rounded-lg border ${badgeColor} text-[9px] font-black uppercase tracking-widest flex items-center gap-1 shadow-sm shrink-0`} title={`Nesse estágio há ${daysInStage} dia(s)`}>
+                                                                        ⏳ {daysInStage}d
+                                                                    </div>
+                                                                );
+                                                            })()}
+                                                        </div>
+
+                                                        <div className="flex items-center gap-3">
+                                                            <div
+                                                                className="relative z-[100]"
+                                                            >
+                                                                <button
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        const rect = e.currentTarget.getBoundingClientRect();
+                                                                        const dropdownHeight = 350;
+                                                                        const spaceBelow = window.innerHeight - rect.bottom;
+                                                                        setMoveMenuDirection(spaceBelow < dropdownHeight ? 'up' : 'down');
+                                                                        setActiveMoveMenu(activeMoveMenu === lead.id ? null : lead.id);
+                                                                    }}
+                                                                    className={`h-8 w-8 rounded-lg flex items-center justify-center transition-all border shadow-lg ${activeMoveMenu === lead.id ? 'bg-red-600 border-red-500 text-white shadow-red-600/20' : 'bg-white/10 border-white/10 text-white/60 hover:text-red-500 hover:bg-white/20'}`}
+                                                                >
+                                                                    <ArrowRight size={18} className={activeMoveMenu === lead.id ? 'rotate-90 transition-transform' : 'transition-transform'} />
+                                                                </button>
+
+                                                                <AnimatePresence>
+                                                                    {activeMoveMenu === lead.id && (
+                                                                        <>
+                                                                            {/* Click Outside Backdrop */}
+                                                                            <div
+                                                                                className="fixed inset-0 z-[105]"
+                                                                                onClick={(e) => {
+                                                                                    e.stopPropagation();
+                                                                                    setActiveMoveMenu(null);
+                                                                                }}
+                                                                            />
+                                                                            <motion.div
+                                                                                initial={{ opacity: 0, scale: 0.95, y: moveMenuDirection === 'up' ? 10 : -10 }}
+                                                                                animate={{ opacity: 1, scale: 1, y: 0 }}
+                                                                                exit={{ opacity: 0, scale: 0.95, y: moveMenuDirection === 'up' ? 10 : -10 }}
+                                                                                style={{
+                                                                                    bottom: moveMenuDirection === 'up' ? 'calc(100% + 15px)' : 'auto',
+                                                                                    top: moveMenuDirection === 'down' ? 'calc(100% + 15px)' : 'auto',
+                                                                                }}
+                                                                                className={`absolute right-0 w-64 bg-[#0a0a0a] border border-white/20 rounded-2xl shadow-[0_40px_120px_rgba(0,0,0,1),0_0_20px_rgba(220,38,38,0.15)] z-[210] py-4 overflow-hidden backdrop-blur-3xl border-red-500/50 ${moveMenuDirection === 'up' ? 'origin-bottom-right' : 'origin-top-right'}`}
+                                                                            >
+                                                                                <div className="absolute inset-0 bg-gradient-to-br from-red-600/10 to-transparent pointer-events-none" />
+                                                                                <div className="relative z-10">
+                                                                                    <div className="px-6 pb-4 mb-2 border-b border-white/10">
+                                                                                        <p className="text-[10px] font-black uppercase tracking-[0.25em] text-red-500 flex items-center gap-2">
+                                                                                            <Zap size={10} fill="currentColor" /> Mover Lead para...
+                                                                                        </p>
+                                                                                    </div>
+                                                                                    <div className="max-h-[300px] overflow-y-auto px-2 space-y-1.5 custom-scrollbar">
+                                                                                        {[
+                                                                                            { id: 'received' as LeadStatus, label: 'Aguardando', icon: <Users size={14} /> },
+                                                                                            { id: 'attempt' as LeadStatus, label: 'Em Atendimento', icon: <Zap size={14} /> },
+                                                                                            { id: 'scheduled' as LeadStatus, label: 'Agendamento', icon: <Calendar size={14} /> },
+                                                                                            { id: 'visited' as LeadStatus, label: 'Visita e Test Drive', icon: <Car size={14} /> },
+                                                                                            { id: 'proposed' as LeadStatus, label: 'Negociação', icon: <CreditCard size={14} /> },
+                                                                                            { id: 'closed' as LeadStatus, label: 'Vendido', icon: <BadgeCheck size={14} className="text-emerald-500" /> },
+                                                                                            { id: 'post_sale' as LeadStatus, label: 'Sem Contato', icon: <BadgeCheck size={14} className="text-white/40" /> },
+                                                                                            { id: 'lost' as LeadStatus, label: 'Perda Total', icon: <AlertCircle size={14} className="text-white/20" /> }
+                                                                                        ].filter(st => st.id !== lead.status).map((st) => (
+                                                                                            <button
+                                                                                                key={st.id}
+                                                                                                onClick={(e) => {
+                                                                                                    e.stopPropagation();
+                                                                                                    handleStatusChange(lead.id, st.id);
+                                                                                                    setActiveMoveMenu(null);
+                                                                                                }}
+                                                                                                className="w-full flex items-center gap-4 px-4 py-3 rounded-xl text-[12px] font-bold text-white/50 hover:text-white hover:bg-white/5 transition-all group/item text-left"
+                                                                                            >
+                                                                                                <div className="p-2 rounded-lg bg-white/5 group-hover/item:bg-red-600/30 group-hover/item:text-red-500 transition-all">
+                                                                                                    {st.icon}
+                                                                                                </div>
+                                                                                                <span className="flex-1">{st.label}</span>
+                                                                                            </button>
+                                                                                        ))}
+                                                                                    </div>
+                                                                                </div>
+                                                                            </motion.div>
+                                                                        </>
+                                                                    )}
+                                                                </AnimatePresence>
+                                                            </div>
+
+                                                            <div className="text-right">
+                                                                <div className="text-xl font-black text-white leading-none">
+                                                                    {lead.ai_score || 0}<span className="text-[10px] text-red-500 ml-0.5">%</span>
+                                                                </div>
+                                                                <p className="text-[8px] font-black text-white/20 uppercase tracking-tighter">Score IA</p>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    <h4 className="text-sm font-black text-white tracking-tight leading-tight truncate">{lead.name}</h4>
+                                                    <p className="text-[10px] font-bold text-white/40 mb-3 truncate italic">
+                                                        {lead.vehicle_interest || 'Interesse em Compra'}
+                                                    </p>
+
+                                                    <div className="flex items-center justify-between pt-3 border-t border-white/5 relative z-10">
+                                                        <span className="px-2 py-0.5 rounded-lg bg-red-600/10 text-[9px] font-black text-red-500 border border-red-500/10 max-w-[120px] truncate">
+                                                            {lead.origem || 'Contato Direto WhatsApp'}
+                                                        </span>
+
+                                                        <button
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                setActionLead(lead);
+                                                            }}
+                                                            className="h-7 px-3 glass-card rounded-lg flex items-center justify-center gap-1.5 text-[8px] font-black uppercase tracking-widest text-white/40 hover:text-red-400 hover:border-red-500/30 transition-all group/btn"
+                                                        >
+                                                            <Zap size={10} className="group-hover/btn:text-red-500 transition-colors" /> Ações
+                                                        </button>
+                                                    </div>
+                                                </motion.div>
+                                            ))}
+
+                                            {colLeads.length === 0 && (
+                                                <div className="h-32 rounded-2xl border-2 border-dashed border-white/5 flex items-center justify-center">
+                                                    <p className="text-[10px] font-black text-white/10 uppercase tracking-widest">Vazio</p>
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
-
-                                    <div
-                                        className="flex flex-col gap-3 min-h-[500px]"
-                                        onDragOver={(e) => e.preventDefault()}
-                                        onDrop={(e) => {
-                                            e.preventDefault();
-                                            const leadId = e.dataTransfer.getData('leadId');
-                                            handleStatusChange(leadId, col.statuses[0] as LeadStatus);
-                                        }}
-                                    >
-                                        {colLeads.map((lead) => (
-                                            <motion.div
-                                                key={lead.id}
-                                                layoutId={lead.id}
-                                                draggable
-                                                onDragStart={(e) => {
-                                                    const dragEvent = e as unknown as React.DragEvent;
-                                                    if (dragEvent.dataTransfer) dragEvent.dataTransfer.setData('leadId', lead.id);
-                                                }}
-                                                onClick={() => handleLeadSmartClick(lead)}
-                                                className={`glass-card rounded-2xl p-4 cursor-grab active:cursor-grabbing hover:border-red-500/30 transition-all border border-white/5 group relative select-none ${activeMoveMenu === lead.id ? 'z-[200] border-red-500/50 shadow-[0_0_50px_rgba(220,38,38,0.2)]' : 'z-10'}`}
-                                            >
-                                                <div className="flex justify-between items-start mb-3 relative z-10">
-                                                    <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-red-600 to-red-900 flex items-center justify-center text-[10px] font-black text-white shadow-lg">
-                                                        {lead.name[0]}
-                                                    </div>
-
-                                                    <div className="flex items-center gap-3">
-                                                        <div
-                                                            className="relative z-[100]"
-                                                        >
-                                                            <button
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    const rect = e.currentTarget.getBoundingClientRect();
-                                                                    const dropdownHeight = 350;
-                                                                    const spaceBelow = window.innerHeight - rect.bottom;
-                                                                    setMoveMenuDirection(spaceBelow < dropdownHeight ? 'up' : 'down');
-                                                                    setActiveMoveMenu(activeMoveMenu === lead.id ? null : lead.id);
-                                                                }}
-                                                                className={`h-8 w-8 rounded-lg flex items-center justify-center transition-all border shadow-lg ${activeMoveMenu === lead.id ? 'bg-red-600 border-red-500 text-white shadow-red-600/20' : 'bg-white/10 border-white/10 text-white/60 hover:text-red-500 hover:bg-white/20'}`}
-                                                            >
-                                                                <ArrowRight size={18} className={activeMoveMenu === lead.id ? 'rotate-90 transition-transform' : 'transition-transform'} />
-                                                            </button>
-
-                                                            <AnimatePresence>
-                                                                {activeMoveMenu === lead.id && (
-                                                                    <>
-                                                                        {/* Click Outside Backdrop */}
-                                                                        <div
-                                                                            className="fixed inset-0 z-[105]"
-                                                                            onClick={(e) => {
-                                                                                e.stopPropagation();
-                                                                                setActiveMoveMenu(null);
-                                                                            }}
-                                                                        />
-                                                                        <motion.div
-                                                                            initial={{ opacity: 0, scale: 0.95, y: moveMenuDirection === 'up' ? 10 : -10 }}
-                                                                            animate={{ opacity: 1, scale: 1, y: 0 }}
-                                                                            exit={{ opacity: 0, scale: 0.95, y: moveMenuDirection === 'up' ? 10 : -10 }}
-                                                                            style={{
-                                                                                bottom: moveMenuDirection === 'up' ? 'calc(100% + 15px)' : 'auto',
-                                                                                top: moveMenuDirection === 'down' ? 'calc(100% + 15px)' : 'auto',
-                                                                            }}
-                                                                            className={`absolute right-0 w-64 bg-[#0a0a0a] border border-white/20 rounded-2xl shadow-[0_40px_120px_rgba(0,0,0,1),0_0_20px_rgba(220,38,38,0.15)] z-[210] py-4 overflow-hidden backdrop-blur-3xl border-red-500/50 ${moveMenuDirection === 'up' ? 'origin-bottom-right' : 'origin-top-right'}`}
-                                                                        >
-                                                                            <div className="absolute inset-0 bg-gradient-to-br from-red-600/10 to-transparent pointer-events-none" />
-                                                                            <div className="relative z-10">
-                                                                                <div className="px-6 pb-4 mb-2 border-b border-white/10">
-                                                                                    <p className="text-[10px] font-black uppercase tracking-[0.25em] text-red-500 flex items-center gap-2">
-                                                                                        <Zap size={10} fill="currentColor" /> Mover Lead para...
-                                                                                    </p>
-                                                                                </div>
-                                                                                <div className="max-h-[300px] overflow-y-auto px-2 space-y-1.5 custom-scrollbar">
-                                                                                    {[
-                                                                                        { id: 'received' as LeadStatus, label: 'Aguardando', icon: <Users size={14} /> },
-                                                                                        { id: 'attempt' as LeadStatus, label: 'Em Atendimento', icon: <Zap size={14} /> },
-                                                                                        { id: 'scheduled' as LeadStatus, label: 'Agendamento', icon: <Calendar size={14} /> },
-                                                                                        { id: 'visited' as LeadStatus, label: 'Visita e Test Drive', icon: <Car size={14} /> },
-                                                                                        { id: 'proposed' as LeadStatus, label: 'Negociação', icon: <CreditCard size={14} /> },
-                                                                                        { id: 'closed' as LeadStatus, label: 'Vendido', icon: <BadgeCheck size={14} className="text-emerald-500" /> },
-                                                                                        { id: 'post_sale' as LeadStatus, label: 'Sem Contato', icon: <BadgeCheck size={14} className="text-white/40" /> },
-                                                                                        { id: 'lost' as LeadStatus, label: 'Perda Total', icon: <AlertCircle size={14} className="text-white/20" /> }
-                                                                                    ].filter(st => st.id !== lead.status).map((st) => (
-                                                                                        <button
-                                                                                            key={st.id}
-                                                                                            onClick={(e) => {
-                                                                                                e.stopPropagation();
-                                                                                                handleStatusChange(lead.id, st.id);
-                                                                                                setActiveMoveMenu(null);
-                                                                                            }}
-                                                                                            className="w-full flex items-center gap-4 px-4 py-3 rounded-xl text-[12px] font-bold text-white/50 hover:text-white hover:bg-white/5 transition-all group/item text-left"
-                                                                                        >
-                                                                                            <div className="p-2 rounded-lg bg-white/5 group-hover/item:bg-red-600/30 group-hover/item:text-red-500 transition-all">
-                                                                                                {st.icon}
-                                                                                            </div>
-                                                                                            <span className="flex-1">{st.label}</span>
-                                                                                        </button>
-                                                                                    ))}
-                                                                                </div>
-                                                                            </div>
-                                                                        </motion.div>
-                                                                    </>
-                                                                )}
-                                                            </AnimatePresence>
-                                                        </div>
-
-                                                        <div className="text-right">
-                                                            <div className="text-xl font-black text-white leading-none">
-                                                                {lead.ai_score || 0}<span className="text-[10px] text-red-500 ml-0.5">%</span>
-                                                            </div>
-                                                            <p className="text-[8px] font-black text-white/20 uppercase tracking-tighter">Score IA</p>
-                                                        </div>
-                                                    </div>
-                                                </div>
-
-                                                <h4 className="text-sm font-black text-white tracking-tight leading-tight truncate">{lead.name}</h4>
-                                                <p className="text-[10px] font-bold text-white/40 mb-3 truncate italic">
-                                                    {lead.vehicle_interest || 'Interesse em Compra'}
-                                                </p>
-
-                                                <div className="flex items-center justify-between pt-3 border-t border-white/5 relative z-10">
-                                                    <span className="px-2 py-0.5 rounded-lg bg-red-600/10 text-[9px] font-black text-red-500 border border-red-500/10 max-w-[120px] truncate">
-                                                        {lead.origem || 'WhatsApp/Facebook'}
-                                                    </span>
-
-                                                    <button
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            setActionLead(lead);
-                                                        }}
-                                                        className="h-7 px-3 glass-card rounded-lg flex items-center justify-center gap-1.5 text-[8px] font-black uppercase tracking-widest text-white/40 hover:text-red-400 hover:border-red-500/30 transition-all group/btn"
-                                                    >
-                                                        <Zap size={10} className="group-hover/btn:text-red-500 transition-colors" /> Ações
-                                                    </button>
-                                                </div>
-                                            </motion.div>
-                                        ))}
-
-                                        {colLeads.length === 0 && (
-                                            <div className="h-32 rounded-2xl border-2 border-dashed border-white/5 flex items-center justify-center">
-                                                <p className="text-[10px] font-black text-white/10 uppercase tracking-widest">Vazio</p>
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-                            );
-                        })}
+                                );
+                            })}
+                        </div>
                     </motion.div>
                 ) : (
                     <motion.div
@@ -1368,7 +1506,7 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                             <td className="hidden md:table-cell px-6 py-6">
                                                 <p className="text-sm font-bold text-white/80">{lead.vehicle_interest || 'Interesse em Compra'}</p>
                                                 <p className="text-[10px] font-black text-red-500 uppercase tracking-widest mt-1">
-                                                    {lead.origem || 'WhatsApp/Facebook'}
+                                                    {lead.origem || 'Contato Direto WhatsApp'}
                                                 </p>
                                             </td>
                                             <td className="hidden lg:table-cell px-6 py-6">
@@ -1410,162 +1548,119 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                 )}
             </AnimatePresence>
 
-            {/* Slide-over Detail Panel (IA Analysis) */}
+            {/* Slide-over Detail Panel (Painel de Atendimento) - For Single Click */}
             <AnimatePresence>
                 {selectedLead && (
-                    <>
+                    <div className="fixed inset-0 z-[100] flex justify-end pointer-events-none">
                         <motion.div
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
                             exit={{ opacity: 0 }}
                             onClick={() => setSelectedLead(null)}
-                            className="fixed inset-0 bg-black/80 backdrop-blur-md z-[60]"
+                            className="absolute inset-0 bg-black/60 backdrop-blur-sm pointer-events-auto"
                         />
                         <motion.div
-                            initial={{ x: '100%' }}
-                            animate={{ x: 0 }}
-                            exit={{ x: '100%' }}
-                            transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-                            className="fixed right-0 top-0 h-screen w-full max-w-[480px] bg-[#080c18] border-l border-white/5 shadow-2xl z-[70] flex flex-col overflow-hidden"
+                            initial={{ x: '100%', opacity: 0 }}
+                            animate={{ x: 0, opacity: 1 }}
+                            exit={{ x: '100%', opacity: 0 }}
+                            transition={{ type: 'spring', damping: 30, stiffness: 200 }}
+                            className="w-full max-w-sm h-screen bg-[#03060b] border-l border-white/10 shadow-[0_0_100px_rgba(0,0,0,0.8)] flex flex-col p-8 custom-scrollbar relative pointer-events-auto z-[110] overflow-y-auto"
                         >
-                            <div className="p-6 md:p-8 flex flex-col h-full overflow-hidden">
-                                <header className="flex items-center justify-between mb-6 shrink-0">
-                                    <div className="flex items-center gap-3">
-                                        <div className="h-9 w-9 flex items-center justify-center rounded-xl bg-red-500/10 text-red-500 border border-red-500/20">
-                                            <Sparkles size={18} />
-                                        </div>
-                                        <h3 className="font-outfit font-black text-lg tracking-tighter uppercase">Painel de Atendimento</h3>
+                            <header className="flex items-center justify-between mb-10">
+                                <div className="flex items-center gap-3">
+                                    <div className="h-8 w-8 flex items-center justify-center rounded-lg bg-red-600/20 border border-red-500/20">
+                                        <Zap size={16} className="text-red-500" />
                                     </div>
-                                    <button onClick={() => setSelectedLead(null)} className="h-9 w-9 flex items-center justify-center rounded-full hover:bg-white/5 transition-colors">
-                                        <ArrowRight size={22} className="text-white/40" />
-                                    </button>
-                                </header>
+                                    <h2 className="text-sm font-black tracking-widest text-white uppercase font-outfit">Painel de Atendimento</h2>
+                                </div>
+                                <button onClick={() => setSelectedLead(null)} className="h-8 w-8 flex items-center justify-center rounded-full bg-white/5 hover:bg-white/10 transition-colors">
+                                    <ArrowRight size={18} className="text-white/40" />
+                                </button>
+                            </header>
 
-                                <div className="flex-1 flex flex-col justify-between overflow-hidden gap-6">
-                                    {/* Lead Info Card */}
-                                    <div className="flex items-center gap-5 p-6 glass-card rounded-[2rem] border-white/5 bg-white/[0.02] shrink-0">
-                                        <div className="h-20 w-20 rounded-[1.5rem] bg-gradient-to-br from-red-600 to-red-900 flex items-center justify-center text-4xl font-black text-white shadow-2xl relative overflow-hidden group shrink-0">
-                                            <div className="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity" />
-                                            {selectedLead.name[0]}
-                                        </div>
-                                        <div className="flex-1 min-w-0">
-                                            <div className="flex items-center gap-2 mb-1">
-                                                <div className={`h-2 w-2 rounded-full ${getStatusColor(selectedLead.status)} animate-pulse shadow-[0_0_10px_rgba(255,0,0,0.5)]`} />
-                                                <span className="text-[9px] font-black uppercase text-white/40 tracking-[0.2em]">
-                                                    {getStatusLabel(selectedLead.status)}
-                                                </span>
-                                            </div>
-                                            <div className="flex items-center gap-3 mb-2">
-                                                <h2 className="text-3xl font-black tracking-tighter text-white font-outfit leading-tight truncate">{selectedLead.name}</h2>
-                                                <button
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        setActionLead(selectedLead);
-                                                    }}
-                                                    className="p-1.5 rounded-lg bg-red-600/10 border border-red-500/20 text-red-500 hover:bg-red-600 hover:text-white transition-all shadow-lg active:scale-95 shrink-0"
-                                                    title="Ações Rápidas"
-                                                >
-                                                    <Zap size={16} />
-                                                </button>
-                                            </div>
-                                            <div className="flex items-center gap-3">
-                                                <div className="flex items-center gap-2 px-2.5 py-1 rounded-lg bg-white/5 border border-white/5">
-                                                    <Phone size={12} className="text-red-500" />
-                                                    <span className="text-sm font-bold text-white/70 tracking-wide">{formatPhoneBR(selectedLead.phone)}</span>
-                                                </div>
-                                            </div>
-                                        </div>
+                            <div className="flex-1 space-y-8">
+                                {/* Lead Main Info */}
+                                <div className="bg-white/[0.02] border border-white/5 rounded-3xl p-6 flex items-center gap-4 relative overflow-hidden group">
+                                    <div className="absolute top-0 right-0 w-24 h-24 bg-red-600/5 rounded-full blur-2xl -mr-12 -mt-12 group-hover:bg-red-600/10 transition-all" />
+                                    <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-red-600 to-rose-700 flex items-center justify-center text-white font-black text-2xl shadow-lg shadow-red-600/20 uppercase">
+                                        {selectedLead.name[0]}
                                     </div>
-
-                                    {/* Unified Service Panel */}
-                                    <div className="glass-card rounded-[2.5rem] p-8 space-y-6 bg-white/[0.01] border-white/5 flex-1 flex flex-col min-h-0 overflow-hidden shadow-2xl">
-                                        {/* Simple Summary Header */}
-                                        <div className="p-5 rounded-3xl bg-red-600/10 border border-red-500/20 shrink-0">
-                                            <p className="text-[9px] font-black text-red-500 uppercase tracking-widest mb-1 italic">Resumo Executivo</p>
-                                            <p className="text-[11px] font-bold text-white/80 leading-relaxed line-clamp-2">
-                                                {selectedLead.resumo_consultor || selectedLead.ai_summary || 'Inicie o contato para qualificar o interesse.'}
-                                            </p>
+                                    <div className="relative z-10">
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                            <span className="text-[8px] font-black text-white/40 uppercase tracking-widest">Em Atendimento</span>
                                         </div>
-
-                                        <div className="space-y-4 overflow-y-auto custom-scrollbar pr-2 flex-1 scroll-smooth">
-                                            {/* Lead Details Grid */}
-                                            <div className="grid grid-cols-2 gap-3">
-                                                <div className="bg-white/5 p-4 rounded-2xl border border-white/5 hover:bg-white/10 transition-colors group">
-                                                    <span className="text-[9px] font-black uppercase text-white/20 tracking-wider block mb-1">Interesse</span>
-                                                    <span className="text-xs font-black text-white group-hover:text-red-400 transition-colors uppercase tracking-tighter">
-                                                        {selectedLead.vehicle_interest || 'Geral'}
-                                                    </span>
-                                                </div>
-                                                <div className="bg-white/5 p-4 rounded-2xl border border-white/5 hover:bg-white/10 transition-colors group">
-                                                    <span className="text-[9px] font-black uppercase text-white/20 tracking-wider block mb-1">Possui Troca</span>
-                                                    <span className="text-xs font-black text-white group-hover:text-red-400 transition-colors uppercase tracking-tighter">
-                                                        {selectedLead.carro_troca || 'Não'}
-                                                    </span>
-                                                </div>
-                                            </div>
-
-                                            {/* IA Quick Analysis */}
-                                            <div className="space-y-3">
-                                                <div className="flex items-center gap-2 mb-1 px-1">
-                                                    <Sparkles size={12} className="text-purple-500" />
-                                                    <h4 className="text-[9px] font-black uppercase tracking-[0.2em] text-white/30 italic">Insights da Análise</h4>
-                                                </div>
-
-                                                <div className="flex justify-between items-center bg-purple-500/5 p-4 rounded-2xl border border-purple-500/10">
-                                                    <span className="text-[9px] font-black uppercase text-purple-500/40 tracking-wider">Interesse</span>
-                                                    <span className="text-xs font-black text-white uppercase">{selectedLead.nivel_interesse || 'Indefinido'}</span>
-                                                </div>
-
-                                                <div className="flex justify-between items-center bg-blue-500/5 p-4 rounded-2xl border border-blue-500/10">
-                                                    <span className="text-[9px] font-black uppercase text-blue-500/40 tracking-wider">Momento</span>
-                                                    <span className="text-xs font-black text-white uppercase">{selectedLead.momento_compra || 'Pesquisa'}</span>
-                                                </div>
-                                            </div>
-
-                                            {/* Recommended Action */}
-                                            <div className="bg-emerald-500/5 p-5 rounded-3xl border border-emerald-500/10 space-y-3">
-                                                <div className="flex items-center gap-2">
-                                                    <Zap size={12} className="text-emerald-500" />
-                                                    <span className="text-[9px] font-black uppercase text-emerald-500/40 tracking-wider italic">Próxima Ação IA</span>
-                                                </div>
-                                                <p className="text-[11px] font-black text-white leading-relaxed">
-                                                    {selectedLead.proxima_acao || 'Aguardar resposta.'}
-                                                </p>
-                                            </div>
-                                        </div>
+                                        <h3 className="text-xl font-black text-white uppercase tracking-tight leading-none mb-2">{selectedLead.name}</h3>
+                                        <p className="text-xs font-bold text-white/30 tracking-widest bg-white/5 w-fit px-2 py-1 rounded-lg border border-white/5">{formatPhoneBR(selectedLead.phone)}</p>
                                     </div>
                                 </div>
 
-                                {/* Action Buttons Footer */}
-                                <div className="mt-8 grid grid-cols-2 gap-4 shrink-0 border-t border-white/5 pt-6">
-                                    <a
-                                        href={`tel:${selectedLead.phone}`}
-                                        className="py-5 rounded-[2rem] bg-white/5 border border-white/10 text-[10px] font-black text-white hover:bg-white/10 transition-all flex items-center justify-center gap-2 group shadow-xl uppercase"
-                                    >
-                                        <Phone size={18} className="group-hover:text-amber-500 transition-colors" /> LIGAR
-                                    </a>
-                                    <a
-                                        href={`https://wa.me/${selectedLead.phone.replace(/\D/g, '')}?text=${encodeURIComponent(
-                                            `Olá ${selectedLead.name.split(' ')[0]}, tudo bem? Sou ${userName.toLowerCase().includes('camila') ? 'a consultora' : 'o consultor'} ${userName.split(' ')[0]} da Manos Veículos. Vi seu interesse no ${selectedLead.vehicle_interest || 'nosso estoque'} e gostaria de te ajudar!`
-                                        )}`}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="py-5 rounded-[2rem] bg-emerald-600 text-white text-[10px] font-black shadow-[0_15px_30px_rgba(16,185,129,0.2)] hover:bg-emerald-500 hover:scale-[1.02] transition-all flex items-center justify-center gap-2 group uppercase"
-                                    >
-                                        <MessageSquare size={18} className="group-hover:translate-x-1 transition-transform" /> WHATSAPP
-                                    </a>
+                                {/* Executive Summary */}
+                                <div className="space-y-3">
+                                    <p className="text-[10px] font-black uppercase text-red-500/60 tracking-widest pl-2">Resumo Executivo</p>
+                                    <div className="bg-white/[0.03] border border-white/5 rounded-3xl p-6">
+                                        <p className="text-sm text-white/60 leading-relaxed font-medium italic">
+                                            {selectedLead.resumo_consultor || selectedLead.ai_summary || 'Inicie o contato para qualificar o interesse.'}
+                                        </p>
+                                    </div>
+                                </div>
+
+                                {/* Interest & Swap Grid */}
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-4 space-y-2">
+                                        <p className="text-[8px] font-black uppercase text-white/20 tracking-widest">Interesse</p>
+                                        <p className="text-[10px] font-black text-white uppercase truncate">{selectedLead.vehicle_interest || 'Não Definido'}</p>
+                                    </div>
+                                    <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-4 space-y-2">
+                                        <p className="text-[8px] font-black uppercase text-white/20 tracking-widest">Possui Troca</p>
+                                        <p className="text-[10px] font-black text-white uppercase">{selectedLead.carro_troca || 'NÃO'}</p>
+                                    </div>
+                                </div>
+
+                                {/* Analysis Insights */}
+                                <div className="space-y-4 pt-4 border-t border-white/5">
+                                    <p className="text-[10px] font-black uppercase text-white/40 tracking-[0.2em] flex items-center gap-2">
+                                        <Sparkles size={12} className="text-purple-500" /> Insights da Análise
+                                    </p>
+                                    <div className="space-y-3">
+                                        <div className="flex items-center justify-between p-4 bg-white/[0.02] border border-white/5 rounded-2xl">
+                                            <span className="text-[9px] font-black text-white/20 uppercase tracking-widest">Interesse</span>
+                                            <span className="text-[10px] font-black text-white uppercase">{selectedLead.nivel_interesse?.toUpperCase() || 'INDEFINIDO'}</span>
+                                        </div>
+                                        <div className="flex items-center justify-between p-4 bg-white/[0.02] border border-white/5 rounded-2xl">
+                                            <span className="text-[9px] font-black text-white/20 uppercase tracking-widest">Momento</span>
+                                            <span className="text-[10px] font-black text-white uppercase">{selectedLead.momento_compra?.toUpperCase() || 'PESQUISA'}</span>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
+
+                            <footer className="mt-auto pt-8 border-t border-white/10 grid grid-cols-2 gap-4">
+                                <a
+                                    href={`tel:${selectedLead.phone}`}
+                                    className="py-4 rounded-[2rem] bg-white/5 border border-white/10 text-[10px] font-black text-white hover:bg-white/10 transition-all flex items-center justify-center gap-2"
+                                >
+                                    <Phone size={16} /> LIGAR
+                                </a>
+                                <a
+                                    href={`https://wa.me/${selectedLead.phone.replace(/\D/g, '')}?text=${encodeURIComponent(getWhatsAppMessage(selectedLead, 'initial'))}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="py-4 rounded-[2rem] bg-emerald-600 text-white text-[10px] font-black shadow-xl shadow-emerald-500/20 hover:bg-emerald-500 transition-all flex items-center justify-center gap-2"
+                                >
+                                    <MessageSquare size={16} /> WHATSAPP
+                                </a>
+                            </footer>
                         </motion.div>
-                    </>
+                    </div>
                 )}
             </AnimatePresence>
 
-            {/* Action Center Modal (Centro de Gestão) */}
+            {/* Slide-over Detail Panel (Centro de Gestão) - Restored Layout */}
             <AnimatePresence>
                 {
                     actionLead && (
-                        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-6 pointer-events-none">
+                        <div className="fixed inset-0 z-[100] flex justify-end pointer-events-none">
                             <motion.div
                                 initial={{ opacity: 0 }}
                                 animate={{ opacity: 1 }}
@@ -1574,13 +1669,14 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                     setActionLead(null);
                                     setIsFinishing(false);
                                 }}
-                                className="absolute inset-0 bg-black/80 backdrop-blur-md pointer-events-auto"
+                                className="absolute inset-0 bg-black/60 backdrop-blur-sm pointer-events-auto"
                             />
                             <motion.div
-                                initial={{ scale: 0.9, opacity: 0, y: 20 }}
-                                animate={{ scale: 1, opacity: 1, y: 0 }}
-                                exit={{ scale: 0.9, opacity: 0, y: 20 }}
-                                className="w-full max-w-5xl h-[95vh] md:h-auto md:max-h-[92vh] overflow-y-auto bg-[#0a0f1d] border border-white/10 rounded-[2rem] md:rounded-[3.5rem] shadow-[0_50px_150px_rgba(0,0,0,0.9)] flex flex-col p-6 sm:p-8 md:p-14 custom-scrollbar relative pointer-events-auto z-[110]"
+                                initial={{ x: '100%', opacity: 0 }}
+                                animate={{ x: 0, opacity: 1 }}
+                                exit={{ x: '100%', opacity: 0 }}
+                                transition={{ type: 'spring', damping: 30, stiffness: 200 }}
+                                className="w-[95vw] lg:w-[90vw] max-w-[1600px] h-screen bg-[#03060b] border-l border-white/10 shadow-[0_0_100px_rgba(0,0,0,0.8)] flex flex-col p-6 md:p-10 lg:p-16 custom-scrollbar relative pointer-events-auto z-[110] overflow-y-auto"
                             >
                                 <header className="flex flex-col gap-6 mb-10">
                                     <div className="flex items-center justify-between">
@@ -1627,7 +1723,13 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                             onClick={() => setModalTab('details')}
                                             className={`px-4 md:px-6 py-2.5 rounded-xl text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all ${modalTab === 'details' ? 'bg-red-600 text-white shadow-lg shadow-red-600/20' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
                                         >
-                                            Atendimento
+                                            Cockpit Geral
+                                        </button>
+                                        <button
+                                            onClick={() => setModalTab('timeline')}
+                                            className={`px-4 md:px-6 py-2.5 rounded-xl text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all ${modalTab === 'timeline' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
+                                        >
+                                            Linha do Tempo
                                         </button>
                                         <button
                                             onClick={() => setModalTab('karbam')}
@@ -1647,10 +1749,50 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                         >
                                             Próximos Passos
                                         </button>
+                                        <button
+                                            onClick={() => setModalTab('flow-up')}
+                                            className={`px-4 md:px-6 py-2.5 rounded-xl text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all ${modalTab === 'flow-up' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
+                                        >
+                                            Flow-up (IA)
+                                        </button>
+                                        <button
+                                            onClick={() => setModalTab('forms')}
+                                            className={`px-4 md:px-6 py-2.5 rounded-xl text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all ${modalTab === 'forms' ? 'bg-rose-600 text-white shadow-lg shadow-rose-600/20' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
+                                        >
+                                            <div className="flex items-center gap-2">
+                                                <FileText size={14} />
+                                                Formulários
+                                            </div>
+                                        </button>
                                     </div>
                                 </header>
 
-                                {modalTab === 'analysis' ? (
+                                {modalTab === 'timeline' ? (
+                                    <div className="flex-1 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 overflow-y-auto custom-scrollbar pr-4 pb-10">
+                                        <div className="max-w-4xl mx-auto w-full space-y-6">
+                                            <div className="flex items-center gap-2 mb-6">
+                                                <Calendar size={18} className="text-blue-500" />
+                                                <h4 className="text-xs font-black uppercase tracking-widest text-white/60">Histórico Completo de Interações</h4>
+                                            </div>
+                                            <div className="relative border-l-2 border-white/10 pl-8 space-y-10 py-4">
+                                                {actionLead.ai_summary ? (
+                                                    actionLead.ai_summary.split(/\n\n+/).filter(Boolean).map((eventData, idx) => (
+                                                        <div key={idx} className="relative group">
+                                                            <div className="absolute -left-[41px] top-1 h-5 w-5 rounded-full border-4 border-[#0a0f1d] bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)] group-hover:scale-125 transition-transform" />
+                                                            <div className="glass-card p-6 rounded-3xl bg-white/[0.02] border border-white/5 hover:bg-white/[0.04] transition-colors shadow-lg">
+                                                                <p className="text-sm font-medium leading-relaxed text-white/80 whitespace-pre-wrap">{eventData.trim()}</p>
+                                                            </div>
+                                                        </div>
+                                                    ))
+                                                ) : (
+                                                    <div className="p-10 text-center rounded-3xl border-2 border-dashed border-white/10 bg-white/[0.01]">
+                                                        <p className="text-xs font-bold text-white/30 uppercase tracking-widest">Nenhuma interação registrada na linha do tempo ainda.</p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ) : modalTab === 'analysis' ? (
                                     <div className="flex-1 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 overflow-y-auto custom-scrollbar pr-4 pb-10">
                                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                                             {/* Temperatura do Lead */}
@@ -1714,7 +1856,7 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                                     <p className="text-sm font-black text-white uppercase tracking-tighter">Mapeamento de Personalidade</p>
                                                 </div>
 
-                                                <div className="space-y-6 max-w-2xl mx-auto md:ml-0">
+                                                <div className="space-y-6 w-full lg:max-w-none">
                                                     <div className="space-y-2">
                                                         <div className="flex justify-between text-[10px] font-black uppercase tracking-widest px-1">
                                                             <span className="text-white/40">Urgência</span>
@@ -1780,7 +1922,7 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                 ) : modalTab === 'next_steps' ? (
                                     <div className="flex-1 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 overflow-y-auto custom-scrollbar pr-4 pb-10">
                                         {/* Análise Estratégica e Próximos Passos */}
-                                        <div className="max-w-4xl mx-auto w-full space-y-6">
+                                        <div className="w-full space-y-6">
                                             <div className="glass-card rounded-[2.5rem] md:rounded-[3rem] p-8 md:p-12 bg-gradient-to-br from-purple-500/10 via-red-600/5 to-transparent border-white/5 space-y-10 relative overflow-hidden group">
                                                 <div className="absolute top-0 right-0 w-64 h-64 md:w-96 md:h-96 bg-purple-600/5 rounded-full blur-[80px] -mr-32 -mt-32" />
                                                 <div className="relative z-10 flex flex-col md:flex-row items-center md:items-start gap-6 text-center md:text-left">
@@ -1816,6 +1958,102 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                                     </div>
                                                 )}
                                             </div>
+                                        </div>
+                                    </div>
+                                ) : modalTab === 'flow-up' ? (
+                                    <div className="flex-1 space-y-8 animate-in fade-in slide-in-from-right-4 duration-500 overflow-y-auto custom-scrollbar pr-4 pb-10">
+                                        <div className="w-full grid grid-cols-1 lg:grid-cols-2 gap-10">
+                                            <div className="glass-card rounded-[2.5rem] p-8 bg-indigo-500/5 border-indigo-500/10 space-y-6">
+                                                <div className="flex items-center gap-4">
+                                                    <div className="h-14 w-14 rounded-2xl bg-indigo-600 flex items-center justify-center text-white shadow-xl shadow-indigo-600/20">
+                                                        <Zap size={28} />
+                                                    </div>
+                                                    <div>
+                                                        <h4 className="text-xs font-black uppercase tracking-widest text-indigo-500 mb-1">Reativação com IA</h4>
+                                                        <p className="text-sm font-bold text-white tracking-tight">Recupere leads que pararam de responder</p>
+                                                    </div>
+                                                </div>
+
+                                                <div className="space-y-4">
+                                                    <div className="space-y-2">
+                                                        <label className="text-[10px] font-black uppercase text-white/30 tracking-widest pl-2">Onde a conversa parou?</label>
+                                                        <textarea
+                                                            placeholder="Ex: Mandei o preço e ele não visualizou mais..."
+                                                            value={followupContext}
+                                                            onChange={(e) => setFollowupContext(e.target.value)}
+                                                            className="w-full h-32 bg-white/5 border border-white/10 rounded-2xl p-4 text-xs text-white/80 focus:ring-1 focus:ring-indigo-500/50 resize-none italic"
+                                                        />
+                                                    </div>
+
+                                                    <div className="flex items-center justify-between px-2">
+                                                        <button
+                                                            onClick={() => document.getElementById('screenshot-upload')?.click()}
+                                                            className="text-[10px] font-black text-indigo-400 hover:text-indigo-300 transition-colors uppercase flex items-center gap-2"
+                                                        >
+                                                            <Upload size={14} /> Anexar Print da Conversa
+                                                        </button>
+                                                        <input
+                                                            id="screenshot-upload"
+                                                            type="file"
+                                                            accept="image/*"
+                                                            className="hidden"
+                                                            onChange={(e) => {
+                                                                if (e.target.files?.[0]) {
+                                                                    showToast("Print anexado com sucesso!", "success");
+                                                                }
+                                                            }}
+                                                        />
+                                                    </div>
+
+                                                    <button
+                                                        onClick={handleGenerateFollowup}
+                                                        disabled={isGeneratingFollowup || !followupContext}
+                                                        className={`w-full py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-all ${isGeneratingFollowup || !followupContext ? 'bg-white/5 text-white/20' : 'bg-indigo-600 text-white hover:bg-indigo-500 shadow-xl shadow-indigo-600/20'}`}
+                                                    >
+                                                        {isGeneratingFollowup ? <><RefreshCcw size={16} className="animate-spin" /> Gerando...</> : <><Sparkles size={16} /> Gerar Mensagem Estratégica</>}
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            {generatedFollowup && (
+                                                <motion.div
+                                                    initial={{ opacity: 0, y: 20 }}
+                                                    animate={{ opacity: 1, y: 0 }}
+                                                    className="glass-card rounded-[2.5rem] p-8 bg-emerald-500/5 border-emerald-500/10 space-y-6"
+                                                >
+                                                    <div className="flex items-center justify-between">
+                                                        <p className="text-[10px] font-black uppercase text-emerald-500 tracking-widest">Sugestão de Reativação</p>
+                                                        <div className="flex items-center gap-2">
+                                                            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                                                            <span className="text-[8px] font-black text-emerald-500 uppercase">IA Sênior</span>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="p-6 rounded-3xl bg-black/40 border border-white/5 text-sm text-white/80 leading-relaxed italic whitespace-pre-wrap">
+                                                        {generatedFollowup}
+                                                    </div>
+
+                                                    <div className="flex gap-4">
+                                                        <button
+                                                            onClick={() => {
+                                                                navigator.clipboard.writeText(generatedFollowup);
+                                                                showToast("Mensagem copiada!", "success");
+                                                            }}
+                                                            className="flex-1 py-3 rounded-2xl bg-white/5 border border-white/10 text-[9px] font-black text-white hover:bg-white/10 transition-all uppercase tracking-widest"
+                                                        >
+                                                            Copiar Texto
+                                                        </button>
+                                                        <a
+                                                            href={`https://wa.me/${actionLead.phone.replace(/\D/g, '')}?text=${encodeURIComponent(getWhatsAppMessage(actionLead, 'flowup'))}`}
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            className="flex-[2] py-3 rounded-2xl bg-emerald-600 text-white text-[9px] font-black hover:bg-emerald-500 transition-all uppercase tracking-widest flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20"
+                                                        >
+                                                            <MessageSquare size={14} /> Enviar WhatsApp
+                                                        </a>
+                                                    </div>
+                                                </motion.div>
+                                            )}
                                         </div>
                                     </div>
                                 ) : modalTab === 'karbam' ? (
@@ -1924,9 +2162,97 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                             </div>
                                         </section>
                                     </div>
+                                ) : modalTab === 'forms' ? (
+                                    <div className="flex-1 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 overflow-y-auto custom-scrollbar pr-4 pb-10">
+                                        <div className="max-w-5xl mx-auto w-full space-y-8">
+                                            <div className="flex items-center justify-between">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="p-2.5 rounded-2xl bg-rose-500/10 text-rose-500">
+                                                        <FileText size={20} />
+                                                    </div>
+                                                    <div>
+                                                        <h4 className="text-[10px] font-black uppercase tracking-widest text-white/30">Documentação e Processos</h4>
+                                                        <h3 className="text-lg font-black text-white uppercase tracking-tighter">Central de Formulários</h3>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                                {/* Form Item 1 */}
+                                                <div className="glass-card rounded-[2rem] p-6 bg-white/[0.02] border-white/5 hover:border-rose-500/30 hover:bg-white/[0.04] transition-all group">
+                                                    <div className="flex flex-col h-full justify-between gap-6">
+                                                        <div className="space-y-4">
+                                                            <div className="w-12 h-12 rounded-2xl bg-red-600/10 flex items-center justify-center text-red-500 group-hover:scale-110 transition-transform">
+                                                                <Car size={24} />
+                                                            </div>
+                                                            <div className="space-y-1">
+                                                                <h5 className="font-black text-white text-sm uppercase tracking-tight">Avaliação Técnica</h5>
+                                                                <p className="text-[10px] text-white/40 leading-relaxed uppercase font-bold tracking-widest">Veículo na Troca</p>
+                                                            </div>
+                                                        </div>
+                                                        <button className="w-full py-3.5 rounded-2xl bg-white/5 border border-white/10 text-[9px] font-black text-white uppercase hover:bg-red-600 hover:border-red-500 transition-all shadow-lg active:scale-95">
+                                                            Abrir Formulário
+                                                        </button>
+                                                    </div>
+                                                </div>
+
+                                                {/* Form Item 2 */}
+                                                <div className="glass-card rounded-[2rem] p-6 bg-white/[0.02] border-white/5 hover:border-emerald-500/30 hover:bg-white/[0.04] transition-all group">
+                                                    <div className="flex flex-col h-full justify-between gap-6">
+                                                        <div className="space-y-4">
+                                                            <div className="w-12 h-12 rounded-2xl bg-emerald-600/10 flex items-center justify-center text-emerald-500 group-hover:scale-110 transition-transform">
+                                                                <CreditCard size={24} />
+                                                            </div>
+                                                            <div className="space-y-1">
+                                                                <h5 className="font-black text-white text-sm uppercase tracking-tight">Ficha de Cadastro</h5>
+                                                                <p className="text-[10px] text-white/40 leading-relaxed uppercase font-bold tracking-widest">Financiamento Bancário</p>
+                                                            </div>
+                                                        </div>
+                                                        <button className="w-full py-3.5 rounded-2xl bg-white/5 border border-white/10 text-[9px] font-black text-white uppercase hover:bg-emerald-600 hover:border-emerald-500 transition-all shadow-lg active:scale-95">
+                                                            Abrir Formulário
+                                                        </button>
+                                                    </div>
+                                                </div>
+
+                                                {/* Form Item 3 */}
+                                                <div className="glass-card rounded-[2rem] p-6 bg-white/[0.02] border-white/5 hover:border-blue-500/30 hover:bg-white/[0.04] transition-all group">
+                                                    <div className="flex flex-col h-full justify-between gap-6">
+                                                        <div className="space-y-4">
+                                                            <div className="w-12 h-12 rounded-2xl bg-blue-600/10 flex items-center justify-center text-blue-500 group-hover:scale-110 transition-transform">
+                                                                <BadgeCheck size={24} />
+                                                            </div>
+                                                            <div className="space-y-1">
+                                                                <h5 className="font-black text-white text-sm uppercase tracking-tight">Checklist de Entrega</h5>
+                                                                <p className="text-[10px] text-white/40 leading-relaxed uppercase font-bold tracking-widest">Entrega Técnica</p>
+                                                            </div>
+                                                        </div>
+                                                        <button className="w-full py-3.5 rounded-2xl bg-white/5 border border-white/10 text-[9px] font-black text-white uppercase hover:bg-blue-600 hover:border-blue-500 transition-all shadow-lg active:scale-95">
+                                                            Abrir Formulário
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* Informação adicional */}
+                                            <div className="p-8 rounded-[2.5rem] bg-gradient-to-r from-red-600/10 to-transparent border border-white/5 relative overflow-hidden group">
+                                                <div className="absolute top-0 right-0 w-64 h-64 bg-red-600/5 rounded-full blur-3xl -mr-32 -mt-32" />
+                                                <div className="relative z-10 flex items-center gap-6">
+                                                    <div className="w-14 h-14 rounded-2xl bg-white/5 flex items-center justify-center text-red-500 border border-white/10">
+                                                        <Zap size={28} className="animate-pulse" />
+                                                    </div>
+                                                    <div className="space-y-1">
+                                                        <p className="text-[10px] font-black text-red-500 uppercase tracking-[0.2em]">Dica de Performance</p>
+                                                        <p className="text-white text-sm font-medium leading-relaxed max-w-2xl">
+                                                            Certifique-se de que todos os dados do lead foram preenchidos corretamente nos formulários para garantir a precisão no faturamento e na entrega do veículo.
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
                                 ) : (
-                                    <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-10">
-                                        <div className="space-y-8">
+                                    <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-16">
+                                        <div className="lg:col-span-4 space-y-8">
                                             <section className="space-y-4">
                                                 <div className="flex items-center gap-2">
                                                     <Users size={18} className="text-red-500" />
@@ -2059,7 +2385,7 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                             </section>
                                         </div>
 
-                                        <div className="space-y-6 flex-1 overflow-y-auto custom-scrollbar pr-2 pb-4">
+                                        <div className="lg:col-span-8 space-y-8">
                                             {/* AI Strategic Analysis - High Visibility */}
                                             <section className="space-y-4">
                                                 <div className="flex items-center gap-2">
@@ -2108,89 +2434,92 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                                     )}
                                                 </div>
                                             </section>
-                                        </div>
 
-                                        <section className="col-span-1 md:col-span-2 space-y-4">
-                                            <div className="flex items-center justify-between">
-                                                <div className="flex items-center gap-2">
-                                                    <Sparkles size={18} className="text-red-500" />
-                                                    <h4 className="text-[10px] font-black uppercase tracking-widest text-white/60">Laboratório de IA</h4>
+                                            <section className="space-y-4">
+                                                <div className="flex items-center justify-between">
+                                                    <div className="flex items-center gap-2">
+                                                        <Sparkles size={18} className="text-red-500" />
+                                                        <h4 className="text-[10px] font-black uppercase tracking-widest text-white/60">Laboratório de IA</h4>
+                                                    </div>
+                                                    <div className="flex items-center gap-4">
+                                                        <button
+                                                            onClick={() => fileInputRef.current?.click()}
+                                                            className="text-[9px] font-black text-white/30 hover:text-red-500 transition-colors uppercase flex items-center gap-2"
+                                                        >
+                                                            <Upload size={14} /> Subir Script
+                                                        </button>
+                                                        <input
+                                                            type="file"
+                                                            ref={fileInputRef}
+                                                            onChange={handleFileUpload}
+                                                            className="hidden"
+                                                            {...({ webkitdirectory: "", directory: "" } as any)}
+                                                            multiple
+                                                        />
+                                                    </div>
                                                 </div>
-                                                <button
-                                                    onClick={() => fileInputRef.current?.click()}
-                                                    className="text-[9px] font-black text-white/30 hover:text-red-500 transition-colors uppercase flex items-center gap-2"
-                                                >
-                                                    <Upload size={14} /> Subir Script
-                                                </button>
-                                                <input
-                                                    type="file"
-                                                    ref={fileInputRef}
-                                                    onChange={handleFileUpload}
-                                                    className="hidden"
-                                                    {...({ webkitdirectory: "", directory: "" } as any)}
-                                                    multiple
-                                                />
-                                            </div>
 
-                                            <div className="glass-card rounded-3xl p-6 space-y-4 bg-red-600/[0.02] border-red-500/10">
-                                                <textarea
-                                                    placeholder="Cole a conversa para analise estrategica..."
-                                                    value={chatText}
-                                                    onChange={(e) => setChatText(e.target.value)}
-                                                    className="w-full bg-black/20 border border-white/5 rounded-2xl p-4 text-xs text-white/60 min-h-[120px] focus:outline-none focus:ring-1 focus:ring-red-500/30 resize-none italic"
-                                                />
-                                                <button
-                                                    onClick={() => analyzeConversation()}
-                                                    disabled={isAnalyzing || chatText.length < 10}
-                                                    className={`w-full py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-all ${isAnalyzing || chatText.length < 10 ? 'bg-white/5 text-white/20 cursor-not-allowed' : 'bg-red-600 text-white shadow-xl shadow-red-600/20 hover:scale-[1.02]'}`}
-                                                >
-                                                    {isAnalyzing ? <><Plus size={16} className="animate-spin" /> Analisando...</> : <><Zap size={16} /> Analisar e Sugerir</>}
-                                                </button>
+                                                <div className="glass-card rounded-3xl p-6 space-y-4 bg-red-600/[0.02] border-white/5">
+                                                    <textarea
+                                                        placeholder="Cole a conversa para analise estrategica..."
+                                                        value={chatText}
+                                                        onChange={(e) => setChatText(e.target.value)}
+                                                        className="w-full bg-black/20 border border-white/5 rounded-2xl p-4 text-xs text-white/60 min-h-[120px] focus:outline-none focus:ring-1 focus:ring-red-500/30 resize-none italic"
+                                                    />
+                                                    <button
+                                                        onClick={() => analyzeConversation()}
+                                                        disabled={isAnalyzing || chatText.length < 10}
+                                                        className={`w-full py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-all ${isAnalyzing || chatText.length < 10 ? 'bg-white/5 text-white/20 cursor-not-allowed' : 'bg-red-600 text-white shadow-xl shadow-red-600/20 hover:scale-[1.02]'}`}
+                                                    >
+                                                        {isAnalyzing ? <><Plus size={16} className="animate-spin" /> Analisando...</> : <><Zap size={16} /> Analisar e Sugerir</>}
+                                                    </button>
 
-                                                {actionLead.ai_reason && (
-                                                    <div className="space-y-4">
-                                                        <div className="p-4 rounded-2xl bg-white/5 border border-white/5">
-                                                            <p className="text-[11px] text-white/50 leading-relaxed italic">{actionLead.ai_reason}</p>
-                                                        </div>
+                                                    {actionLead.ai_reason && (
+                                                        <div className="space-y-4">
+                                                            <div className="p-4 rounded-2xl bg-white/5 border border-white/5">
+                                                                <p className="text-[11px] text-white/50 leading-relaxed italic">{actionLead.ai_reason}</p>
+                                                            </div>
 
-                                                        {actionLead.behavioral_profile && (
-                                                            <div className="space-y-4">
-                                                                <div className="p-6 rounded-[2.5rem] bg-gradient-to-br from-white/5 to-transparent border border-white/10 flex items-center justify-between group overflow-hidden relative">
-                                                                    <div className="absolute top-0 right-0 w-32 h-32 bg-red-600/5 rounded-full blur-3xl -mr-16 -mt-16 transition-all group-hover:bg-red-600/10" />
-                                                                    <div className="flex items-center gap-5 relative z-10">
-                                                                        <div className={`w-16 h-16 rounded-[1.5rem] border-2 flex items-center justify-center shadow-2xl ${actionLead.ai_score >= 70 ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-500 shadow-emerald-500/10' : actionLead.ai_score >= 40 ? 'border-amber-500/30 bg-amber-500/5 text-amber-500 shadow-amber-500/10' : 'border-red-500/30 bg-red-500/5 text-red-500 shadow-red-500/10'}`}>
-                                                                            <span className="text-2xl font-black">{actionLead.ai_score || 0}</span>
-                                                                        </div>
-                                                                        <div>
-                                                                            <p className="text-[9px] font-black text-white/20 uppercase tracking-[0.2em] leading-none mb-1.5">Temperatura</p>
-                                                                            <div className="flex items-center gap-2">
-                                                                                <div className={`w-2 h-2 rounded-full animate-pulse ${actionLead.ai_classification === 'hot' ? 'bg-rose-500' : actionLead.ai_classification === 'warm' ? 'bg-amber-500' : 'bg-sky-500'}`} />
-                                                                                <p className={`text-sm font-black uppercase tracking-widest ${actionLead.ai_classification === 'hot' ? 'text-rose-500' : actionLead.ai_classification === 'warm' ? 'text-amber-500' : 'text-sky-500'}`}>
-                                                                                    {actionLead.ai_classification?.toUpperCase() || 'WARM'}
-                                                                                </p>
+                                                            {actionLead.behavioral_profile && (
+                                                                <div className="space-y-4">
+                                                                    <div className="p-6 rounded-[2.5rem] bg-gradient-to-br from-white/5 to-transparent border border-white/10 flex items-center justify-between group overflow-hidden relative">
+                                                                        <div className="absolute top-0 right-0 w-32 h-32 bg-red-600/5 rounded-full blur-3xl -mr-16 -mt-16 transition-all group-hover:bg-red-600/10" />
+                                                                        <div className="flex items-center gap-5 relative z-10">
+                                                                            <div className={`w-16 h-16 rounded-[1.5rem] border-2 flex items-center justify-center shadow-2xl ${actionLead.ai_score >= 70 ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-500 shadow-emerald-500/10' : actionLead.ai_score >= 40 ? 'border-amber-500/30 bg-amber-500/5 text-amber-500 shadow-amber-500/10' : 'border-red-500/30 bg-red-500/5 text-red-500 shadow-red-500/10'}`}>
+                                                                                <span className="text-2xl font-black">{actionLead.ai_score || 0}</span>
+                                                                            </div>
+                                                                            <div>
+                                                                                <p className="text-[9px] font-black text-white/20 uppercase tracking-[0.2em] leading-none mb-1.5">Temperatura</p>
+                                                                                <div className="flex items-center gap-2">
+                                                                                    <div className={`w-2 h-2 rounded-full animate-pulse ${actionLead.ai_classification === 'hot' ? 'bg-rose-500' : actionLead.ai_classification === 'warm' ? 'bg-amber-500' : 'bg-sky-500'}`} />
+                                                                                    <p className={`text-sm font-black uppercase tracking-widest ${actionLead.ai_classification === 'hot' ? 'text-rose-500' : actionLead.ai_classification === 'warm' ? 'text-amber-500' : 'text-sky-500'}`}>
+                                                                                        {actionLead.ai_classification?.toUpperCase() || 'WARM'}
+                                                                                    </p>
+                                                                                </div>
                                                                             </div>
                                                                         </div>
                                                                     </div>
-                                                                </div>
 
-                                                                <div className="grid grid-cols-2 gap-4">
-                                                                    <div className="p-5 rounded-[2rem] bg-white/5 border border-white/5">
-                                                                        <p className="text-[8px] font-black text-white/20 uppercase tracking-widest mb-1.5 pl-1">Probabilidade</p>
-                                                                        <p className="text-xs font-black text-emerald-500 uppercase pl-1">{actionLead.behavioral_profile.closing_probability || 0}%</p>
-                                                                    </div>
-                                                                    <div className="p-5 rounded-[2rem] bg-white/5 border border-white/5">
-                                                                        <p className="text-[8px] font-black text-white/20 uppercase tracking-widest mb-1.5 pl-1">Urgência</p>
-                                                                        <p className={`text-xs font-black uppercase pl-1 ${actionLead.behavioral_profile.urgency === 'high' ? 'text-rose-500' : 'text-amber-500'}`}>
-                                                                            {actionLead.behavioral_profile.urgency === 'high' ? 'Alta' : 'Média'}
-                                                                        </p>
+                                                                    <div className="grid grid-cols-2 gap-4">
+                                                                        <div className="p-5 rounded-[2rem] bg-white/5 border border-white/5">
+                                                                            <p className="text-[8px] font-black text-white/20 uppercase tracking-widest mb-1.5 pl-1">Probabilidade</p>
+                                                                            <p className="text-xs font-black text-emerald-500 uppercase pl-1">{actionLead.behavioral_profile.closing_probability || 0}%</p>
+                                                                        </div>
+                                                                        <div className="p-5 rounded-[2rem] bg-white/5 border border-white/5">
+                                                                            <p className="text-[8px] font-black text-white/20 uppercase tracking-widest mb-1.5 pl-1">Urgência</p>
+                                                                            <p className={`text-xs font-black uppercase pl-1 ${actionLead.behavioral_profile.urgency === 'high' ? 'text-rose-500' : 'text-amber-500'}`}>
+                                                                                {actionLead.behavioral_profile.urgency === 'high' ? 'Alta' : 'Média'}
+                                                                            </p>
+                                                                        </div>
                                                                     </div>
                                                                 </div>
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </section>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </section>
+                                        </div>
+
                                     </div>
                                 )}
 
@@ -2202,10 +2531,10 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                         <Phone size={16} /> LIGAR
                                     </a>
                                     <a
-                                        href={`https://wa.me/${actionLead.phone.replace(/\D/g, '')}`}
+                                        href={`https://wa.me/${actionLead.phone.replace(/\D/g, '')}?text=${encodeURIComponent(getWhatsAppMessage(actionLead, 'stage'))}`}
                                         target="_blank"
                                         rel="noopener noreferrer"
-                                        className="py-3.5 rounded-[2rem] bg-emerald-600 text-white text-[10px] font-black shadow-xl shadow-emerald-500/20 hover:bg-emerald-500 transition-all flex items-center justify-center gap-2"
+                                        className="py-3.5 rounded-[2rem] bg-emerald-600 text-white text-[10px] font-black shadow-xl shadow-emerald-500/20 hover:bg-emerald-500 transition-all flex items-center justify-center gap-2 transition-all active:scale-95"
                                     >
                                         <MessageSquare size={16} /> WHATSAPP
                                     </a>

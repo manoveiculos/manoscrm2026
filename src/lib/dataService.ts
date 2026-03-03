@@ -242,7 +242,7 @@ export const dataService = {
                     motivo_perda: item.motivo_perda || '',
                     resumo_fechamento: item.resumo_fechamento || '',
                     email: '',
-                    origem: item.origem || '',
+                    origem: (!item.origem || item.origem.toLowerCase() === 'não identificado' || item.origem === 'null') ? 'Contato Direto WhatsApp' : item.origem,
                     estimated_ticket: 0
                 };
             }) as unknown as Lead[];
@@ -584,7 +584,48 @@ export const dataService = {
         // Log history
         await this.logHistory(leadId, status, oldStatus, notes);
 
+        // 🚀 META CONVERSIONS API: Enviar evento de Lead em qualquer mudança de status
+        // Buscamos o lead atual para ter o telefone normalizado
+        try {
+            const { data: lead } = await supabase.from('leads_manos_crm').select('phone').eq('id', leadId).single();
+            if (lead && lead.phone) {
+                this.enviarEventoLeadMeta(lead).catch(err => console.error("Meta CAPI Error:", err));
+            }
+        } catch (metaErr) {
+            console.error("Error fetching lead for Meta CAPI:", metaErr);
+        }
+
         return data;
+    },
+
+    /**
+     * Envia evento de Lead para a Meta Conversions API via server-side route.
+     */
+    async enviarEventoLeadMeta(lead: { phone: string }) {
+        if (!lead.phone) return;
+
+        try {
+            // Importação dinâmica do utility para preparar o payload (roda no client mas a API é server-side)
+            const { prepareMetaLeadPayload } = await import('./meta-capi');
+            const payload = prepareMetaLeadPayload(lead.phone);
+
+            console.log("📤 Triggering Meta CAPI via /api/meta-capi...");
+            const response = await fetch('/api/meta-capi', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            const result = await response.json();
+            if (!response.ok) {
+                throw new Error(result.error || 'Erro desconhecido na Meta CAPI');
+            }
+            console.log("✅ Meta Lead Event synced:", result);
+            return result;
+        } catch (err) {
+            console.error("❌ Failed to send lead event to Meta:", err);
+            throw err;
+        }
     },
 
     async updateLeadAI(leadId: string, aiData: { ai_score: number, ai_classification: string, ai_reason: string }) {

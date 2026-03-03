@@ -98,9 +98,9 @@ export default function LoginPage() {
     };
 
     return (
-        <div className="min-h-screen flex bg-[#030406] overflow-hidden">
+        <div className="h-screen w-full flex bg-[#030406] overflow-hidden">
             {/* Left Side: Presentation/Branding */}
-            <div className="hidden lg:flex lg:w-1/2 relative flex-col justify-between p-20 overflow-hidden">
+            <div className="hidden lg:flex lg:w-1/2 relative flex-col justify-between p-10 2xl:p-20 h-full overflow-hidden">
                 {/* Visual elements */}
                 <div className="absolute inset-0 z-0">
                     <img
@@ -132,13 +132,13 @@ export default function LoginPage() {
                         initial={{ opacity: 0, y: 30 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: 0.2 }}
-                        className="space-y-6 max-w-lg"
+                        className="space-y-4 2xl:space-y-6 max-w-lg"
                     >
-                        <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-black text-white tracking-tighter leading-[0.9]">
+                        <h1 className="text-4xl 2xl:text-7xl font-black text-white tracking-tighter leading-[0.9]">
                             Venda <span className="text-red-600">Mais.</span><br />
                             Gerencie <span className="bg-clip-text text-transparent bg-gradient-to-r from-white to-white/40">Melhor.</span>
                         </h1>
-                        <p className="text-xl text-white/40 font-medium leading-relaxed">
+                        <p className="text-lg 2xl:text-xl text-white/40 font-medium leading-relaxed">
                             A plataforma definitiva para consultores de elite da Manos Veículos. Inteligência Artificial aplicada ao fechamento de negócios.
                         </p>
                     </motion.div>
@@ -148,27 +148,27 @@ export default function LoginPage() {
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     transition={{ delay: 0.4 }}
-                    className="relative z-10 flex items-center gap-10"
+                    className="relative z-10 flex items-center gap-6 2xl:gap-10"
                 >
                     <div className="space-y-1">
-                        <p className="text-2xl font-black text-white">+500</p>
+                        <p className="text-xl 2xl:text-2xl font-black text-white">+500</p>
                         <p className="text-[10px] font-black text-white/30 uppercase tracking-widest">Leads Mensais</p>
                     </div>
                     <div className="h-10 w-px bg-white/10" />
                     <div className="space-y-1">
-                        <p className="text-2xl font-black text-white">98%</p>
+                        <p className="text-xl 2xl:text-2xl font-black text-white">98%</p>
                         <p className="text-[10px] font-black text-white/30 uppercase tracking-widest">Satisfação</p>
                     </div>
                     <div className="h-10 w-px bg-white/10" />
                     <div className="space-y-1">
-                        <p className="text-2xl font-black text-white">AI</p>
+                        <p className="text-xl 2xl:text-2xl font-black text-white">AI</p>
                         <p className="text-[10px] font-black text-white/30 uppercase tracking-widest">Powered Sales</p>
                     </div>
                 </motion.div>
             </div>
 
             {/* Right Side: Login Form */}
-            <div className="w-full lg:w-1/2 flex items-center justify-center p-8 md:p-20 relative">
+            <div className="w-full lg:w-1/2 flex items-center justify-center p-6 2xl:p-20 relative h-full">
                 {/* Background glow for mobile */}
                 <div className="lg:hidden absolute inset-0 -z-10 bg-gradient-to-b from-red-600/5 to-transparent" />
 
@@ -181,8 +181,8 @@ export default function LoginPage() {
                         <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 w-fit text-[10px] font-black uppercase tracking-widest text-white/30">
                             Acesso Restrito
                         </div>
-                        <h2 className="text-2xl sm:text-3xl md:text-4xl font-black text-white tracking-tight leading-tight">
-                            {mode === 'login' ? 'Bem-vindo de volta' : mode === 'register' ? 'Solicitar Acreditação' : 'Recuperar Acesso'}
+                        <h2 className="text-2xl 2xl:text-4xl font-black text-white tracking-tight leading-tight">
+                            {mode === 'login' ? 'Bem-vindo' : mode === 'register' ? 'Solicitar Acreditação' : 'Recuperar Acesso'}
                         </h2>
                         <p className="text-white/40 font-medium italic">
                             {mode === 'forgot-password'
