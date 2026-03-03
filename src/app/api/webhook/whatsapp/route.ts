@@ -1,6 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 
+// Handler para Verificação do Webhook (GET)
+export async function GET(req: NextRequest) {
+    const { searchParams } = new URL(req.url);
+    const mode = searchParams.get('hub.mode');
+    const token = searchParams.get('hub.verify_token');
+    const challenge = searchParams.get('hub.challenge');
+
+    // Você pode definir este VERIFY_TOKEN no seu .env.local
+    const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN || 'manos_crm_token_2026';
+
+    if (mode && token) {
+        if (mode === 'subscribe' && token === VERIFY_TOKEN) {
+            console.log('✅ Webhook verificado com sucesso!');
+            return new NextResponse(challenge, { status: 200 });
+        } else {
+            return new NextResponse('Forbidden', { status: 403 });
+        }
+    }
+
+    return new NextResponse('Bad Request', { status: 400 });
+}
+
 export async function POST(req: NextRequest) {
     try {
         const payload = await req.json();
