@@ -90,7 +90,7 @@ export default function EquipePage() {
 
     return (
         <div className="space-y-10 animate-in fade-in duration-700">
-            <header className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+            <header className="flex-col md:flex-row md:items-center justify-between gap-6">
                 <div className="space-y-2">
                     <div className="flex items-center gap-3">
                         <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-red-600 to-red-900 flex items-center justify-center text-white shadow-lg shadow-red-900/20">
@@ -143,13 +143,13 @@ export default function EquipePage() {
                             layout
                             initial={{ opacity: 0, scale: 0.95 }}
                             animate={{ opacity: 1, scale: 1 }}
-                            className="glass-card rounded-[2.5rem] p-8 border border-white/5 flex flex-col gap-6 relative overflow-hidden group hover:border-red-500/30 transition-all shadow-2xl"
+                            className="glass-card rounded-[2.5rem] p-8 border border-white/5 flex-col gap-6 relative overflow-hidden group hover:border-red-500/30 transition-all shadow-2xl"
                         >
                             <div className="flex justify-between items-start">
                                 <div className="h-16 w-16 rounded-[1.5rem] bg-white/5 flex items-center justify-center text-2xl font-black text-red-500 border border-white/10 group-hover:bg-red-500/5 transition-all">
                                     {consultant.name?.[0] || consultant.email?.[0]?.toUpperCase()}
                                 </div>
-                                <div className="flex flex-col items-end gap-2">
+                                <div className="flex-col items-end gap-2">
                                     <div className={`px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest border ${consultant.status === 'active' ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' :
                                         consultant.status === 'pending' ? 'bg-amber-500/10 text-amber-500 border-amber-500/20' :
                                             'bg-red-500/10 text-red-500 border-red-500/20'
@@ -227,7 +227,7 @@ export default function EquipePage() {
             </div>
 
             {loading && (
-                <div className="flex flex-col items-center justify-center py-20 gap-4 opacity-50">
+                <div className="flex-col items-center justify-center py-20 gap-4 opacity-50">
                     <div className="h-10 w-10 border-4 border-red-500 border-t-transparent rounded-full animate-spin" />
                     <p className="text-[10px] font-black uppercase tracking-[0.3em] text-white">Sincronizando Equipe...</p>
                 </div>

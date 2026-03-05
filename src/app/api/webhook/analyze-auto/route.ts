@@ -65,11 +65,11 @@ export async function POST(req: NextRequest) {
             messages: [
                 {
                     role: 'system',
-                    content: 'Você é a IA de Vendas Sênior do Manos CRM. Analise a conversa de WhatsApp e preencha os dados estratégicos com foco total em conversão de veículos.'
+                    content: 'Você é a IA de Vendas Sênior do Manos CRM. Analise a conversa de WhatsApp de forma CRONOLÓGICA (Top-to-Bottom). O topo é o início (mais antigo), a base é o final (mais recente). Use as datas das mensagens para garantir que entendeu a sequência correta da negociação.'
                 },
                 {
                     role: 'user',
-                    content: `NOME DO LEAD: ${lead.nome}\nCONVERSA:\n${chatText}\n\n
+                    content: `NOME DO LEAD: ${lead.nome}\nCONVERSA (DO TOPO PARA BAIXO - CRONOLÓGICO):\n${chatText}\n\n
 RETORNE UM JSON EXATAMENTE COM ESTAS CHAVES:
 {
   "score": number (de 0 a 100 com chance de venda),

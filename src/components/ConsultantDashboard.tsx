@@ -119,7 +119,7 @@ export function ConsultantDashboard({ consultantId, consultantName }: { consulta
     return (
         <div className="space-y-10 pb-20">
             {/* Welcome Header */}
-            <header className="flex flex-col md:flex-row md:items-end justify-between gap-6">
+            <header className="flex-col md:flex-row md:items-end justify-between gap-6">
                 <div className="space-y-2">
                     <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/10 w-fit text-[10px] font-bold uppercase tracking-wider shadow-md shadow-emerald-500/5">
                         <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
@@ -136,12 +136,12 @@ export function ConsultantDashboard({ consultantId, consultantName }: { consulta
                         <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-500 group-hover:bg-emerald-500 group-hover:text-white transition-all">
                             <Sparkles size={12} className="animate-pulse" />
                         </div>
-                        <div className="flex flex-col">
+                        <div className="flex-col">
                             <span className="text-[8px] font-black text-white/30 uppercase tracking-[0.2em]">Segurança & IA</span>
                             <span className="text-[10px] font-black text-white uppercase tracking-tight">MONITORADO POR IA</span>
                         </div>
                     </div>
-                    <div className="flex flex-col px-4 text-left">
+                    <div className="flex-col px-4 text-left">
                         <span className="text-[8px] font-black text-red-500 uppercase tracking-[0.2em]">Otimização Ativa</span>
                         <span className="text-[10px] font-medium text-white/60 lowercase italic">Seu sistema está sendo monitorado por inteligência artificial</span>
                     </div>
@@ -318,7 +318,7 @@ export function ConsultantDashboard({ consultantId, consultantName }: { consulta
                                             </div>
                                         </div>
                                         <div className="flex items-center gap-6">
-                                            <div className="text-right flex flex-col items-end">
+                                            <div className="text-right flex-col items-end">
                                                 <div className="flex items-center gap-1.5 text-rose-500">
                                                     <span className="text-xl font-black">{lead.ai_score}</span>
                                                     <span className="text-[10px] font-bold mt-1">%</span>

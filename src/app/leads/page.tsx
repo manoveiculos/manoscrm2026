@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState, useRef, Suspense } from 'react';
+import JSZip from 'jszip';
 import {
     Search,
     MessageSquare,
@@ -33,6 +34,8 @@ function LeadsContent() {
     const leadIdFromUrl = searchParams.get('id');
     const viewFromUrl = searchParams.get('view');
     const stageFromUrl = searchParams.get('stage');
+    const tabFromUrl = searchParams.get('tab');
+
 
     const [searchTerm, setSearchTerm] = useState('');
     const [leads, setLeads] = useState<Lead[]>([]);
@@ -50,6 +53,7 @@ function LeadsContent() {
     const [filterInterest, setFilterInterest] = useState<string>('all');
     const [filterScore, setFilterScore] = useState<string>('all');
     const [filterOrigin, setFilterOrigin] = useState<string>('all');
+    const [urlFilter, setUrlFilter] = useState<string | null>(searchParams.get('filter'));
 
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [chatText, setChatText] = useState('');
@@ -71,6 +75,11 @@ function LeadsContent() {
         sale_value: '',
         profit_margin: ''
     });
+    const [isRecordingPurchase, setIsRecordingPurchase] = useState(false);
+    const [purchaseData, setPurchaseData] = useState({
+        vehicle_details: '',
+        purchase_value: ''
+    });
     const [isSubmittingCallSummary, setIsSubmittingCallSummary] = useState(false);
     const [callSummary, setCallSummary] = useState('');
     const [newLeadData, setNewLeadData] = useState({
@@ -85,6 +94,22 @@ function LeadsContent() {
     const [followupContext, setFollowupContext] = useState('');
     const [isGeneratingFollowup, setIsGeneratingFollowup] = useState(false);
     const [generatedFollowup, setGeneratedFollowup] = useState('');
+    const [pastedImage, setPastedImage] = useState<string | null>(null);
+    const [attachments, setAttachments] = useState<{ name: string; data: string; mimeType: string }[]>([]);
+    const [structuredAnalysis, setStructuredAnalysis] = useState<{
+        intencao_compra?: string;
+        estagio_negociacao?: string;
+        objecoes?: string;
+        recomendacao_abordagem?: string;
+    } | null>(null);
+
+    const [reactivationDiagnosis, setReactivationDiagnosis] = useState<{
+        resumo_estrategico?: string;
+        intencao_compra?: string;
+        motivo_perda?: string;
+        oportunidade?: string;
+    } | null>(null);
+
     const fileInputRef = useRef<HTMLInputElement>(null);
     const whatsappFolderInputRef = useRef<HTMLInputElement>(null);
     const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -99,6 +124,15 @@ function LeadsContent() {
     const [inventory, setInventory] = useState<InventoryItem[]>([]);
     const [vehicleSearch, setVehicleSearch] = useState('');
     const [showVehicleResults, setShowVehicleResults] = useState(false);
+    const [tick, setTick] = useState(0);
+
+    // Update 'tick' every minute to refresh time counters
+    useEffect(() => {
+        const interval = setInterval(() => {
+            setTick(t => t + 1);
+        }, 60000);
+        return () => clearInterval(interval);
+    }, []);
 
     const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
         setToast({ message, type, visible: true });
@@ -178,7 +212,7 @@ function LeadsContent() {
                     : `${consultantPrefix}${timestamp}: ${newNote}`;
             }
 
-            console.log("Saving lead details:", detailsToSave);
+            // Save lead details to database
             await dataService.updateLeadDetails(actionLead.id, detailsToSave);
 
             setLeads(prev => prev.map(l => l.id === actionLead.id ? { ...l, ...detailsToSave } : l));
@@ -232,7 +266,7 @@ function LeadsContent() {
     };
 
     const handleGenerateFollowup = async () => {
-        if (!actionLead || !followupContext) return;
+        if (!actionLead) return;
 
         setIsGeneratingFollowup(true);
         try {
@@ -243,22 +277,46 @@ function LeadsContent() {
                     leadName: actionLead.name,
                     context: followupContext,
                     lastInteractions: actionLead.ai_summary,
-                    vehicle: actionLead.vehicle_interest
+                    vehicle: actionLead.vehicle_interest,
+                    image: pastedImage
                 })
             });
 
             const data = await response.json();
             if (data.success) {
-                setGeneratedFollowup(data.message);
-                showToast("Sugestão de reativação gerada pela IA!", "success");
+                setGeneratedFollowup(data.mensagem || data.message);
+                setReactivationDiagnosis({
+                    resumo_estrategico: data.resumo_estrategico,
+                    intencao_compra: data.intencao_compra,
+                    motivo_perda: data.motivo_perda,
+                    oportunidade: data.oportunidade
+                });
+                showToast("Dossiê de reativação gerado com sucesso!", "success");
             } else {
                 throw new Error(data.error);
             }
         } catch (err: any) {
-            console.error("Error generating followup:", err);
-            showToast("Erro ao gerar reativação.", "error");
+            console.error("Follow-up error:", err);
+            showToast("Erro ao gerar reativação automática.", "error");
         } finally {
             setIsGeneratingFollowup(false);
+        }
+    };
+
+    const handlePaste = (e: React.ClipboardEvent) => {
+        const items = e.clipboardData.items;
+        for (let i = 0; i < items.length; i++) {
+            if (items[i].type.indexOf('image') !== -1) {
+                const blob = items[i].getAsFile();
+                if (!blob) continue;
+
+                const reader = new FileReader();
+                reader.onload = (event: any) => {
+                    setPastedImage(event.target.result);
+                    showToast("Print colado com sucesso!", "success");
+                };
+                reader.readAsDataURL(blob);
+            }
         }
     };
 
@@ -313,7 +371,8 @@ function LeadsContent() {
         try {
             const desfechoLabels: Record<string, string> = {
                 'lost': 'PERDIDO / DESCARTE',
-                'closed': 'VENDA REALIZADA'
+                'closed': 'VENDA REALIZADA',
+                'comprado': 'COMPRA REALIZADA'
             };
             const logNote = `🏁 ATENDIMENTO FINALIZADO: ${desfechoLabels[desfecho] || desfecho.toUpperCase()}
 ${lossReason ? `Motivo: ${lossReason}` : ''}
@@ -361,6 +420,31 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
         } catch (err: any) {
             console.error("Error recording sale:", err);
             alert(`Erro ao registrar venda: ${err.message}`);
+        }
+    };
+
+    const handleRecordPurchase = async () => {
+        if (!actionLead) return;
+        if (!purchaseData.purchase_value || !purchaseData.vehicle_details) {
+            alert("Por favor, preencha o veículo e o valor da compra.");
+            return;
+        }
+
+        try {
+            await dataService.recordPurchase({
+                lead_id: actionLead.id,
+                consultant_id: currentConsultantId || actionLead.assigned_consultant_id,
+                vehicle_details: purchaseData.vehicle_details,
+                purchase_value: parseFloat(purchaseData.purchase_value.replace(/\D/g, '')) / 100,
+                purchase_date: new Date().toISOString()
+            });
+
+            await handleCloseLead('comprado');
+            setIsRecordingPurchase(false);
+            setPurchaseData({ vehicle_details: '', purchase_value: '' });
+        } catch (err: any) {
+            console.error("Error recording purchase:", err);
+            alert(`Erro ao registrar compra: ${err.message}`);
         }
     };
 
@@ -423,39 +507,49 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
 
     const getStatusLabel = (status: string) => {
         const labels: { [key: string]: string } = {
-            'new': 'AGUARDANDO',
-            'received': 'AGUARDANDO',
-            'attempt': 'EM ATENDIMENTO',
-            'contacted': 'CONTATADO',
-            'confirmed': 'CONFIRMADO',
-            'scheduled': 'AGENDAMENTO',
-            'visited': 'VISITA REALIZADA',
-            'test_drive': 'TEST DRIVE',
-            'proposed': 'PROPOSTA',
-            'negotiation': 'NEGOCIAÇÃO',
-            'closed': 'VENDIDO',
-            'post_sale': 'SEM CONTATO',
-            'lost': 'PERDA TOTAL'
+            'new': 'Aguardando',
+            'received': 'Aguardando',
+            'attempt': 'Em Atendimento',
+            'contacted': 'Em Atendimento',
+            'confirmed': 'Em Atendimento',
+            'scheduled': 'Agendamento',
+            'visited': 'Visita e Test Drive',
+            'test_drive': 'Visita e Test Drive',
+            'proposed': 'Negociação',
+            'negotiation': 'Negociação',
+            'closed': 'Vendido',
+            'post_sale': 'Sem Contato',
+            'lost': 'Perda Total',
+            'comprado': 'Comprado'
         };
+        const s = status.toLowerCase();
+        if (s === 'novo') return 'Aguardando';
+        if (s === 'perdido') return 'Perda Total';
+        if (s === 'sem contato') return 'Sem Contato';
         return labels[status] || status.toUpperCase();
     };
 
     const getStatusColor = (status: string) => {
-        if (['received', 'new'].includes(status)) return 'bg-blue-500';
-        if (['attempt', 'contacted', 'confirmed'].includes(status)) return 'bg-amber-500';
-        if (['scheduled', 'visited', 'test_drive', 'proposed', 'negotiation'].includes(status)) return 'bg-red-500';
-        if (status === 'closed') return 'bg-emerald-500';
-        if (status === 'post_sale' || status === 'lost') return 'bg-white/20';
-        return 'bg-white/20';
+        const s = status.toLowerCase();
+        if (['received', 'new', 'novo'].includes(s)) return 'bg-blue-500';
+        if (['attempt', 'contacted', 'confirmed'].includes(s)) return 'bg-amber-500';
+        if (['scheduled'].includes(s)) return 'bg-red-500';
+        if (['visited', 'test_drive'].includes(s)) return 'bg-red-600';
+        if (['proposed', 'negotiation'].includes(s)) return 'bg-red-700';
+        if (s === 'closed') return 'bg-emerald-500';
+        if (s === 'post_sale' || s === 'sem contato') return 'bg-orange-500/80';
+        if (s === 'lost' || s === 'perda total') return 'bg-slate-500/80';
+        if (s === 'comprado') return 'bg-indigo-500';
+        return 'bg-white/10';
     };
 
     const getAIClassLabel = (classification: string) => {
         const labels: { [key: string]: string } = {
-            'hot': 'Qualificado',
-            'warm': 'Potencial',
-            'cold': 'Frio'
+            'hot': 'MUITO INTERESSADO',
+            'warm': 'POTENCIAL',
+            'cold': 'EM PESQUISA'
         };
-        return labels[classification] || classification;
+        return labels[classification] || classification.toUpperCase();
     };
 
     const formatValue = (val: string) => {
@@ -479,11 +573,13 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                     .single();
 
                 let consultantFilter = undefined;
+                const isAdmin = consultant?.role === 'admin' || session.user.email === 'alexandre_gorges@hotmail.com';
+
                 if (consultant) {
-                    setUserRole(consultant.role || 'consultant');
+                    setUserRole(isAdmin ? 'admin' : (consultant.role || 'consultant'));
                     setUserName(consultant.name || '');
                     setCurrentConsultantId(consultant.id);
-                    if (consultant.role === 'consultant') {
+                    if (!isAdmin && consultant.role === 'consultant') {
                         consultantFilter = consultant.id;
                     }
                 } else {
@@ -492,25 +588,34 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                     setCurrentConsultantId(null);
                 }
 
-                const data = await dataService.getLeads(consultantFilter);
+                // PERF: Fetch leads, consultants & inventory in PARALLEL
+                const [data, consultantsData, inventoryData] = await Promise.all([
+                    dataService.getLeads(consultantFilter, leadIdFromUrl || undefined),
+                    isAdmin ? dataService.getConsultants() : Promise.resolve(null),
+                    dataService.getInventory()
+                ]);
+
                 setLeads(data || []);
-
-                // Load all consultants for admin assignment
-                if (consultant?.role === 'admin' || session.user.email === 'alexandre_gorges@hotmail.com') {
-                    setUserRole('admin');
-                    const consultantsData = await dataService.getConsultants();
-                    setConsultants(consultantsData || []);
-                } else {
-                    setUserRole('consultant');
-                }
-
-                // Load inventory for vehicle selection
-                const inventoryData = await dataService.getInventory();
+                if (consultantsData) setConsultants(consultantsData);
                 setInventory(inventoryData || []);
 
                 if (leadIdFromUrl && data) {
                     const lead = data.find((l: Lead) => l.id === leadIdFromUrl);
-                    if (lead) setSelectedLead(lead);
+                    if (lead) {
+                        if (tabFromUrl) {
+                            // Ensure it's a valid tab
+                            const validTabs = ['details', 'karbam', 'analysis', 'timeline', 'next_steps', 'flow-up', 'forms'];
+                            if (validTabs.includes(tabFromUrl)) {
+                                setModalTab(tabFromUrl as any);
+                                setActionLead(lead);
+                                window.scrollTo({ top: 0, behavior: 'smooth' });
+                            } else {
+                                setSelectedLead(lead);
+                            }
+                        } else {
+                            setSelectedLead(lead);
+                        }
+                    }
                 }
             } catch (err) {
                 console.error("Error loading leads:", err);
@@ -519,7 +624,15 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
             }
         }
         loadLeads();
-    }, [leadIdFromUrl]);
+    }, [leadIdFromUrl, tabFromUrl]);
+
+    // Auto-trigger analysis for re-activation
+    useEffect(() => {
+        if (modalTab === 'flow-up' && actionLead && !generatedFollowup && !isGeneratingFollowup) {
+            handleGenerateFollowup();
+        }
+    }, [modalTab, actionLead]);
+
 
     // URL based actions
     useEffect(() => {
@@ -557,20 +670,27 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
         const lead = leads.find(l => l.id === leadId);
         if (!lead) return;
 
-        // If moving to closed or lost, trigger the finishing flow instead of silent update
+        // If moving to closed, comprado or lost, trigger the finishing flow
         if (newStatus === 'closed') {
             setActionLead(lead);
-            setIsFinishing(true);
             setIsRecordingSale(true);
             const defaultVal = lead.valor_investimento || '';
             setSaleData({ sale_value: defaultVal, profit_margin: '' });
             return;
         }
 
+        if (newStatus === 'comprado') {
+            setActionLead(lead);
+            setIsRecordingPurchase(true);
+            setPurchaseData({ vehicle_details: lead.vehicle_interest || '', purchase_value: lead.valor_investimento || '' });
+            return;
+        }
+
         if (newStatus === 'lost') {
             setActionLead(lead);
             setIsFinishing(true);
-            setLossReason('waiting');
+            setLossReason('');
+            setLossSummary('');
             return;
         }
 
@@ -592,36 +712,120 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
         }
     };
 
-    const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const files = e.target.files;
         if (!files || files.length === 0) return;
 
+        setIsAnalyzing(true);
         const filesArray = Array.from(files);
-        const chatFile = filesArray.find(f =>
-            f.name.toLowerCase().includes('_chat.txt') ||
-            f.name.toLowerCase().includes('chat.txt') ||
-            (files.length === 1 && f.type === 'text/plain')
-        );
+        const newAttachments: { name: string; data: string; mimeType: string }[] = [];
 
-        if (chatFile) {
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                const text = event.target?.result as string;
-                if (text && text.length > 10) {
-                    setChatText(text);
-                    const path = chatFile.webkitRelativePath || chatFile.name;
-                    const phoneMatch = path.match(/\+?\d{2}\s?\(?\d{2}\)?\s?\d{4,5}-?\d{4}/);
+        try {
+            let localChatText = '';
+            for (const file of filesArray) {
+                // Se for ZIP, extraímos os conteúdos
+                if (file.name.toLowerCase().endsWith('.zip')) {
+                    showToast("Extraindo arquivos do ZIP...", "info");
+                    const zip = new JSZip();
+                    const content = await zip.loadAsync(file);
 
-                    if (phoneMatch) {
-                        showToast(`Conversa carregada! Telefone detectado: ${phoneMatch[0]}`, 'success');
-                    } else {
-                        showToast("Conversa carregada com sucesso!", 'success');
+                    const sortedFiles = Object.entries(content.files).sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true, sensitivity: 'base' }));
+                    for (const [filename, zipEntry] of sortedFiles) {
+                        if (zipEntry.dir) continue;
+
+                        // Ignorar arquivos de sistema
+                        if (filename.startsWith('__MACOSX/') || filename.includes('.DS_Store')) continue;
+
+                        const blob = await zipEntry.async('blob');
+                        const base64 = await new Promise<string>((resolve) => {
+                            const reader = new FileReader();
+                            reader.onloadend = () => resolve(reader.result as string);
+                            reader.readAsDataURL(blob);
+                        });
+
+                        newAttachments.push({
+                            name: filename,
+                            data: base64,
+                            mimeType: blob.type || getMimeTypeFromFilename(filename)
+                        });
+
+                        // Tentar carregar como texto se não for um arquivo obviamente binário
+                        const binaryExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.pdf', '.zip', '.rar', '.exe', '.dll', '.bin'];
+                        const isBinary = binaryExtensions.some(ext => filename.toLowerCase().endsWith(ext));
+
+                        if (!isBinary) {
+                            try {
+                                const text = await zipEntry.async('text');
+                                if (text.trim().length > 2) {
+                                    setChatText(prev => prev ? prev + "\n\n--- ARQUIVO: " + filename + " ---\n" + text : text);
+                                    localChatText = localChatText ? localChatText + "\n\n--- ARQUIVO: " + filename + " ---\n" + text : text;
+                                }
+                            } catch (e) {
+                                console.log(`Skipping potential binary file ${filename}`);
+                            }
+                        }
+                    }
+                } else {
+                    // Arquivo individual
+                    const base64 = await new Promise<string>((resolve) => {
+                        const reader = new FileReader();
+                        reader.onloadend = () => resolve(reader.result as string);
+                        reader.readAsDataURL(file);
+                    });
+
+                    newAttachments.push({
+                        name: file.name,
+                        data: base64,
+                        mimeType: file.type || getMimeTypeFromFilename(file.name)
+                    });
+
+                    // Se for formato de texto (não binário)
+                    const binaryExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.pdf', '.zip', '.rar', '.exe', '.dll', '.bin'];
+                    const isBinary = binaryExtensions.some(ext => file.name.toLowerCase().endsWith(ext));
+                    const isTextFile = !isBinary || (file.size < 100000 && file.type.startsWith('text/'));
+
+                    if (isTextFile) {
+                        const text = await file.text();
+                        if (text.trim().length > 5) {
+                            setChatText(text);
+                            localChatText = text;
+                        }
                     }
                 }
-            };
-            reader.readAsText(chatFile);
-        } else {
-            showToast("Não foi possível encontrar um arquivo de chat (.txt) válido.", 'error');
+            }
+
+            setAttachments(prev => [...prev, ...newAttachments]);
+            showToast(`${newAttachments.length} arquivos carregados!`, "success");
+
+            // Automatizar análise se houver texto
+            if (localChatText || chatText) {
+                showToast("Iniciando análise automática...", "info");
+                setTimeout(() => {
+                    analyzeConversation(localChatText || chatText, newAttachments);
+                }, 500);
+            }
+
+        } catch (err: any) {
+            console.error("Upload Error:", err);
+            showToast(`Erro ao carregar arquivos: ${err.message || 'Erro desconhecido'}`, "error");
+        } finally {
+            setIsAnalyzing(false);
+            if (fileInputRef.current) fileInputRef.current.value = '';
+        }
+    };
+
+    const getMimeTypeFromFilename = (filename: string): string => {
+        const ext = filename.split('.').pop()?.toLowerCase();
+        switch (ext) {
+            case 'txt': return 'text/plain';
+            case 'jpg':
+            case 'jpeg': return 'image/jpeg';
+            case 'png': return 'image/png';
+            case 'mp3': return 'audio/mpeg';
+            case 'wav': return 'audio/wav';
+            case 'm4a': return 'audio/mp4';
+            case 'mp4': return 'video/mp4';
+            default: return 'application/octet-stream';
         }
     };
 
@@ -634,23 +838,99 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
 
         try {
             const filesArray = Array.from(files);
-            const chatFile = filesArray.find(f => f.name.toLowerCase().includes('chat.txt') || f.name.toLowerCase().includes('_chat.txt'));
+            let chatFile: File | Blob | undefined = filesArray.find(f => f.name.toLowerCase().includes('chat.txt') || f.name.toLowerCase().includes('_chat.txt'));
+            let virtualFolderName = "";
+            let zipAttachments: { name: string; data: string; mimeType: string }[] = [];
+            let extractedChatText = "";
 
-            if (!chatFile) {
-                showToast("Arquivo de chat não encontrado na pasta selecionada.", "error");
+            if (filesArray.some(f => f.name.toLowerCase().endsWith('.zip'))) {
+                const zipFile = filesArray.find(f => f.name.toLowerCase().endsWith('.zip'))!;
+                showToast("Extraindo ZIP...", "info");
+                const zip = new JSZip();
+                const content = await zip.loadAsync(zipFile);
+
+                const sortedFiles = Object.entries(content.files).sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true, sensitivity: 'base' }));
+                for (const [filename, zipEntry] of sortedFiles) {
+                    if (zipEntry.dir) continue;
+
+                    // Ignorar arquivos de sistema
+                    if (filename.startsWith('__MACOSX/') || filename.includes('.DS_Store')) continue;
+
+                    const blob = await zipEntry.async('blob');
+                    const base64 = await new Promise<string>((resolve) => {
+                        const reader = new FileReader();
+                        reader.onloadend = () => resolve(reader.result as string);
+                        reader.readAsDataURL(blob);
+                    });
+
+                    zipAttachments.push({
+                        name: filename,
+                        data: base64,
+                        mimeType: blob.type || getMimeTypeFromFilename(filename)
+                    });
+
+                    // Tentar carregar como texto se não for um arquivo obviamente binário
+                    const binaryExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.pdf', '.zip', '.rar', '.exe', '.dll', '.bin'];
+                    const isBinary = binaryExtensions.some(ext => filename.toLowerCase().endsWith(ext));
+
+                    if (!isBinary) {
+                        try {
+                            const text = await zipEntry.async('text');
+                            if (text.trim().length > 2) {
+                                extractedChatText = extractedChatText ? extractedChatText + "\n\n--- ARQUIVO: " + filename + " ---\n" + text : text;
+                            }
+                        } catch (e) {
+                            console.log(`Skipping potential binary file ${filename}`);
+                        }
+                    }
+                }
+                virtualFolderName = zipFile.name.replace('.zip', '');
+            } else {
+                // Se não for ZIP, extrair arquivos individuais da pasta selecionada
+                for (const file of filesArray) {
+                    const binaryExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.pdf', '.zip', '.rar', '.exe', '.dll', '.bin'];
+                    const isBinary = binaryExtensions.some(ext => file.name.toLowerCase().endsWith(ext));
+
+                    const base64 = await new Promise<string>((resolve) => {
+                        const reader = new FileReader();
+                        reader.onloadend = () => resolve(reader.result as string);
+                        reader.readAsDataURL(file);
+                    });
+
+                    zipAttachments.push({
+                        name: file.name,
+                        data: base64,
+                        mimeType: file.type || getMimeTypeFromFilename(file.name)
+                    });
+
+                    if (!isBinary || (file.size < 100000 && file.type.startsWith('text/'))) {
+                        try {
+                            const text = await file.text();
+                            if (text.trim().length > 5) {
+                                extractedChatText = extractedChatText ? extractedChatText + "\n\n--- ARQUIVO: " + file.name + " ---\n" + text : text;
+                            }
+                        } catch (e) {
+                            console.log(`Error reading file ${file.name} as text`);
+                        }
+                    }
+                }
+            }
+
+            if (!extractedChatText) {
+                showToast("Nenhum conteúdo de texto encontrado para análise.", "error");
                 setIsAnalyzing(false);
                 return;
             }
 
-            // Extract contact from folder name
-            const folderPath = chatFile.webkitRelativePath || '';
-            const folderName = folderPath.split('/')[0] || '';
+            // Extrair contato do nome da pasta
+            // filesArray[0] costuma ter o webkitRelativePath se for pasta
+            const folderPath = filesArray[0]?.webkitRelativePath || '';
+            const folderName = folderPath ? folderPath.split('/')[0] : virtualFolderName;
 
-            // Clean name and phone
+            // Limpar nome e telefone
             let contactName = "Lead WhatsApp";
             let contactPhone = "";
 
-            // Better regex for phone numbers in folder names (e.g. +55 47 9999-9999)
             const phoneMatch = folderName.match(/\+?(\d[\s\-\(\).]{0,2}){8,}\d/);
             if (phoneMatch) {
                 contactPhone = phoneMatch[0].replace(/[\s\-\(\).]/g, '');
@@ -659,16 +939,9 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                 contactName = folderName.replace(/[-_]/g, ' ').trim() || "Lead WhatsApp";
             }
 
-            console.log("WA Import Extraction:", { folderName, contactName, contactPhone });
+            const chatTextToUse = extractedChatText;
 
-            const chatText = await new Promise<string>((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = (ev) => resolve(ev.target?.result as string);
-                reader.onerror = (err) => reject(err);
-                reader.readAsText(chatFile);
-            });
-
-            if (!chatText) throw new Error("O arquivo de conversa está vazio ou não pôde ser lido.");
+            if (!chatTextToUse) throw new Error("O arquivo de conversa está vazio.");
 
             // Create lead with WA source
             const newLead = await dataService.createLead({
@@ -682,21 +955,22 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
 
             if (newLead) {
                 // Trigger AI Analysis for the new lead
-                let aiResult: any = { classificacao: 'WARM', score: 0 };
+                let aiResult: any = { classificacao: 'WARM', score: 0, success: false };
                 try {
                     const aiResponse = await fetch('/api/analyze-chat', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            leadId: (newLead as Lead).id,
-                            chatText: chatText,
-                            leadName: contactName
+                            leadId: newLead.id,
+                            chatText: chatTextToUse,
+                            leadName: contactName,
+                            attachments: zipAttachments
                         })
                     });
 
                     if (aiResponse.ok) {
                         const res = await aiResponse.json();
-                        if (res.success) aiResult = res;
+                        aiResult = res;
                     }
                 } catch (aiErr) {
                     console.warn("Auto-analysis failed during folder import:", aiErr);
@@ -763,8 +1037,11 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
         }
     };
 
-    const analyzeConversation = async () => {
-        if (!chatText || chatText.length < 10) return;
+    const analyzeConversation = async (overrideText?: string, overrideAttachments?: any[]) => {
+        const textToUse = overrideText || chatText;
+        const attachmentsToUse = overrideAttachments || attachments;
+
+        if (!textToUse || textToUse.length < 10) return;
 
         const leadToAnalyze = actionLead || selectedLead;
         if (!leadToAnalyze) {
@@ -779,8 +1056,9 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     leadId: leadToAnalyze.id,
-                    chatText: chatText,
-                    leadName: leadToAnalyze.name
+                    chatText: textToUse,
+                    leadName: leadToAnalyze.name,
+                    attachments: attachmentsToUse
                 })
             });
 
@@ -829,6 +1107,14 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                 setLeads(prev => prev.map(l => l.id === leadToAnalyze.id ? updatedLead : l));
                 if (actionLead?.id === leadToAnalyze.id) setActionLead(updatedLead);
                 if (selectedLead?.id === leadToAnalyze.id) setSelectedLead(updatedLead);
+
+                // Store structured analysis for UI display
+                setStructuredAnalysis({
+                    intencao_compra: aiResult.intencao_compra,
+                    estagio_negociacao: aiResult.estagio_negociacao,
+                    objecoes: aiResult.objecoes,
+                    recomendacao_abordagem: aiResult.recomendacao_abordagem
+                });
 
                 setChatText('');
                 alert("Análise concluída com sucesso! Comportamento e Próximo Passo atualizados.");
@@ -910,6 +1196,27 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
             if (lead.origem !== filterOrigin) return false;
         }
 
+        // 8. Brain URL Shortcuts
+        if (urlFilter) {
+            const diffHours = (new Date().getTime() - new Date(lead.updated_at || lead.created_at).getTime()) / (1000 * 60 * 60);
+
+            if (urlFilter === 'hot') {
+                if (!((lead.behavioral_profile?.closing_probability || 0) > 70 || (lead.ai_score || 0) > 80)) return false;
+            }
+            if (urlFilter === 'neglected') {
+                if (diffHours <= 48) return false;
+            }
+            if (urlFilter === 'trade-in') {
+                if (!lead.carro_troca || lead.carro_troca.toLowerCase() === 'não' || lead.carro_troca.toLowerCase() === 'não informado') return false;
+            }
+            if (urlFilter === 'financing') {
+                if (!((lead.ai_summary || '').toLowerCase().includes('financia') || (lead.resumo_consultor || '').toLowerCase().includes('financia'))) return false;
+            }
+            if (urlFilter === 'recent') {
+                if (diffHours > 24) return false;
+            }
+        }
+
         return true;
     });
 
@@ -922,9 +1229,9 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
     }
 
     return (
-        <div className="space-y-10 pb-20">
+        <div className="space-y-4 pb-20">
             {/* Header with Search and Stats */}
-            <header className="flex flex-col md:flex-row md:items-end justify-between gap-6">
+            <header className="flex flex-col md:flex-row md:items-end justify-between gap-4">
                 <div className="space-y-2">
                     <h1 className="text-3xl md:text-5xl font-black tracking-tighter text-white font-outfit">
                         Central de <span className="text-red-600">Leads</span>
@@ -1006,13 +1313,15 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                     className="bg-white/5 border border-white/10 rounded-xl px-3 md:px-4 py-2.5 text-[10px] md:text-xs text-white/70 focus:outline-none focus:ring-1 focus:ring-red-500/50 hover:bg-white/10 transition-colors cursor-pointer appearance-none pr-7 md:pr-8 relative bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20width%3D%2224%22%20height%3D%2224%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20fill%3D%22none%22%20stroke%3D%22%23ffffff40%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%2F%3E%3C%2Fsvg%3E')] bg-[length:14px] bg-[right_10px_center] bg-no-repeat w-[calc(50%-0.5rem)] sm:w-auto"
                 >
                     <option value="all" className="bg-[#0a0a0a]">Estágio (Todos)</option>
-                    <option value="new" className="bg-[#0a0a0a]">Aguardando</option>
+                    <option value="received" className="bg-[#0a0a0a]">Aguardando</option>
                     <option value="attempt" className="bg-[#0a0a0a]">Em Atendimento</option>
                     <option value="scheduled" className="bg-[#0a0a0a]">Agendamento</option>
                     <option value="visited" className="bg-[#0a0a0a]">Visita / Test Drive</option>
                     <option value="negotiation" className="bg-[#0a0a0a]">Em Negociação</option>
                     <option value="closed" className="bg-[#0a0a0a]">Vendido</option>
-                    <option value="lost" className="bg-[#0a0a0a]">Perdido</option>
+                    <option value="comprado" className="bg-[#0a0a0a]">Comprado</option>
+                    <option value="post_sale" className="bg-[#0a0a0a]">Sem Contato</option>
+                    <option value="lost" className="bg-[#0a0a0a]">Perda Total</option>
                 </select>
 
                 <select
@@ -1049,7 +1358,7 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                 </select>
 
                 {/* Clear Filters Button */}
-                {(filterDate !== 'all' || filterConsultant !== 'all' || filterStage !== 'all' || filterInterest !== 'all' || filterScore !== 'all' || filterOrigin !== 'all' || searchTerm !== '') && (
+                {(filterDate !== 'all' || filterConsultant !== 'all' || filterStage !== 'all' || filterInterest !== 'all' || filterScore !== 'all' || filterOrigin !== 'all' || searchTerm !== '' || urlFilter !== null) && (
                     <button
                         onClick={() => {
                             setFilterDate('all');
@@ -1061,6 +1370,9 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                             setFilterScore('all');
                             setFilterOrigin('all');
                             setSearchTerm('');
+                            setUrlFilter(null);
+                            // Clear URL params without reload
+                            window.history.replaceState({}, '', window.location.pathname);
                         }}
                         className="text-xs font-bold text-red-500 hover:text-red-400 transition-colors px-2 ml-2 tracking-wide uppercase flex items-center gap-1"
                     >
@@ -1086,10 +1398,10 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                 <Users size={18} />
                             </div>
                             <div className="flex flex-col">
-                                <p className="text-[9px] font-black text-red-500 uppercase tracking-[0.2em] leading-none mb-1.5">AGUARDANDO</p>
+                                <p className="text-[9px] font-black text-red-500 uppercase tracking-[0.2em] leading-none mb-1.5">RECEBIDOS</p>
                                 <div className="flex items-center gap-2">
                                     <span className="text-sm font-black tracking-tighter text-white">
-                                        {leads.filter(l => !l.assigned_consultant_id && l.status !== 'closed' && l.status !== 'lost').length} Novos
+                                        {leads.filter(l => !l.assigned_consultant_id && l.status !== 'closed' && l.status !== 'lost').length} Novos Leads
                                     </span>
                                     <div className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
                                 </div>
@@ -1121,102 +1433,81 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                 </div>
             )}
 
-            {/* View Mode Switcher and Actions */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pt-10 mt-10 border-t border-white/5">
-                <div className="flex items-center gap-3 bg-white/5 p-1.5 rounded-2xl border border-white/10 shadow-inner">
-                    <button
-                        onClick={() => setViewMode('list')}
-                        className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'list'
-                            ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
-                            : 'text-white/20 hover:text-white/40'
-                            }`}
-                    >
-                        Lista
-                    </button>
-                    <button
-                        onClick={() => setViewMode('kanban')}
-                        className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'kanban'
-                            ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
-                            : 'text-white/20 hover:text-white/40'
-                            }`}
-                    >
-                        Kanban
-                    </button>
-                </div>
+            {/* Unified Control Bar */}
+            <div className="flex flex-wrap items-center justify-between gap-4 py-3 bg-white/5 px-6 rounded-3xl border border-white/10 shadow-2xl animate-in fade-in slide-in-from-top-4 duration-700">
+                <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-1.5 bg-white/5 p-1 rounded-2xl border border-white/10 shadow-inner">
+                        <button
+                            onClick={() => setViewMode('list')}
+                            className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${viewMode === 'list'
+                                ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
+                                : 'text-white/20 hover:text-white/40'
+                                }`}
+                        >
+                            Lista
+                        </button>
+                        <button
+                            onClick={() => setViewMode('kanban')}
+                            className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${viewMode === 'kanban'
+                                ? 'bg-red-600 text-white shadow-lg shadow-red-600/20'
+                                : 'text-white/20 hover:text-white/40'
+                                }`}
+                        >
+                            Kanban
+                        </button>
+                    </div>
 
+                    <div className="h-6 w-px bg-white/10 mx-2" />
 
-                <div className="flex items-center gap-4">
                     <button
                         onClick={() => setIsAddingLead(true)}
-                        className="px-4 md:px-6 py-2.5 md:py-3 rounded-2xl bg-white/5 border border-white/10 text-[10px] font-black uppercase tracking-widest text-white hover:bg-red-600 hover:border-red-600 hover:shadow-[0_0_20px_rgba(227,30,36,0.3)] transition-all flex items-center gap-2 group relative overflow-hidden"
+                        className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-[9px] font-black uppercase tracking-widest text-white hover:bg-red-600 hover:border-red-600 hover:shadow-[0_0_20px_rgba(227,30,36,0.3)] transition-all flex items-center gap-2 group relative overflow-hidden"
                     >
-                        <div className="absolute inset-x-0 bottom-0 h-0.5 bg-red-600 scale-x-0 group-hover:scale-x-100 transition-transform origin-left" />
-                        <Plus size={16} className="text-red-500 group-hover:text-white transition-colors animate-pulse" />
-                        <span className="hidden sm:inline">NOVO LEAD MANUAL</span><span className="sm:hidden">NOVO</span>
+                        <Plus size={14} className="text-red-500 group-hover:text-white transition-colors" />
+                        <span>NOVO LEAD MANUAL</span>
                     </button>
-                    <div className="hidden lg:flex flex-col text-right">
-                        <span className="text-[10px] font-black text-white/20 uppercase tracking-widest">Acesso Rápido</span>
-                        <span className="text-[9px] font-bold text-red-500 uppercase tracking-tighter italic">Registro de Balcão</span>
-                    </div>
                 </div>
 
-                <div className="hidden md:flex items-center gap-4 text-[10px] font-black text-white/20 uppercase tracking-widest">
-                    <span>Total: {filteredLeads.length} Leads</span>
+                <div className="flex items-center gap-6">
+                    <div className="flex items-center gap-2 text-[9px] font-black text-white/20 uppercase tracking-widest">
+                        <span className="text-white/40">Total:</span>
+                        <span className="text-white">{filteredLeads.length} Leads</span>
+                    </div>
+
                     <div className="h-4 w-px bg-white/10" />
-                    <span className="text-emerald-500">IA Monitorando Ativamente</span>
+
+                    <div className="flex items-center gap-2">
+                        <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
+                        <span className="text-[9px] font-black text-emerald-500/80 uppercase tracking-widest">IA Monitorando Ativamente</span>
+                    </div>
                 </div>
             </div>
 
             {/* Scroll Progress Bar (Only for Kanban) */}
             {
-                viewMode === 'kanban' && (
-                    <div
-                        className="absolute -bottom-6 left-0 right-0 h-2 bg-white/5 rounded-full overflow-hidden cursor-pointer group/scroll"
-                        onPointerDown={(e) => {
-                            if (!scrollContainerRef.current) return;
-                            const bar = e.currentTarget;
-                            const rect = bar.getBoundingClientRect();
-
-                            const updateScroll = (clientX: number) => {
-                                const x = Math.max(0, Math.min(clientX - rect.left, rect.width));
-                                const percentage = x / rect.width;
-                                const container = scrollContainerRef.current!;
-                                container.scrollLeft = percentage * (container.scrollWidth - container.clientWidth);
-                            };
-
-                            updateScroll(e.clientX);
-
-                            const onPointerMove = (moveEvent: PointerEvent) => {
-                                updateScroll(moveEvent.clientX);
-                            };
-
-                            const onPointerUp = () => {
-                                window.removeEventListener('pointermove', onPointerMove);
-                                window.removeEventListener('pointerup', onPointerUp);
-                            };
-
-                            window.addEventListener('pointermove', onPointerMove);
-                            window.addEventListener('pointerup', onPointerUp);
-                        }}
-                    >
-                        <motion.div
-                            className="h-full bg-red-600 shadow-[0_0_15px_rgba(227,30,36,0.6)] group-hover/scroll:bg-red-500 transition-colors"
-                            initial={{ width: 0 }}
-                            animate={{ width: `${scrollProgress}%` }}
-                            transition={{ type: 'spring', stiffness: 400, damping: 40 }}
-                        />
-                    </div>
-                )
             }
 
 
             <style jsx global>{`
                 .hide-scrollbar {
                     -ms-overflow-style: none;
-                    scrollbar-width: none;
+                    scrollbar-width: thin;
+                    scrollbar-color: rgba(220, 38, 38, 0.3) rgba(255, 255, 255, 0.05);
                 }
                 .hide-scrollbar::-webkit-scrollbar {
-                    display: none;
+                    height: 8px;
+                }
+                .hide-scrollbar::-webkit-scrollbar-track {
+                    background: rgba(255, 255, 255, 0.05);
+                    border-radius: 10px;
+                }
+                .hide-scrollbar::-webkit-scrollbar-thumb {
+                    background: rgba(220, 38, 38, 0.3);
+                    border-radius: 10px;
+                    border: 2px solid rgba(255, 255, 255, 0.05);
+                }
+                .hide-scrollbar::-webkit-scrollbar-thumb:hover {
+                    background: rgba(220, 38, 38, 0.5);
                 }
             `}</style>
 
@@ -1229,234 +1520,305 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                         exit={{ opacity: 0 }}
                         className="flex flex-col gap-4 w-full"
                     >
-                        {/* Quick AI Filters */}
-                        <div className="flex items-center gap-2 px-2 overflow-x-auto hide-scrollbar shrink-0">
-                            <Sparkles size={14} className="text-purple-500 mr-1" />
-                            <span className="text-[10px] font-black text-white/30 uppercase tracking-widest flex items-center mr-2">Filtro Rápido IA:</span>
-                            {[
-                                { id: 'all', label: 'Todos' },
-                                { id: 'high', label: 'Alta Prob. (>80)', activeClass: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30 shadow-[0_0_10px_rgba(16,185,129,0.3)]' },
-                                { id: 'medium', label: 'Média (50-79)', activeClass: 'bg-amber-500/20 text-amber-400 border-amber-500/30 shadow-[0_0_10px_rgba(245,158,11,0.3)]' },
-                                { id: 'low', label: 'Baixa (<50)', activeClass: 'bg-red-500/20 text-red-400 border-red-500/30 shadow-[0_0_10px_rgba(239,68,68,0.3)]' }
-                            ].map(f => (
-                                <button
-                                    key={f.id}
-                                    onClick={() => setFilterScore(f.id)}
-                                    className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap border ${filterScore === f.id ? (f.activeClass || 'bg-white/20 text-white border-white/20') : 'bg-white/5 text-white/40 border-white/5 hover:bg-white/10'}`}
-                                >
-                                    {f.label}
-                                </button>
-                            ))}
-                        </div>
-
                         <div
                             ref={scrollContainerRef}
                             onScroll={handleScroll}
-                            className="flex gap-6 overflow-x-auto pb-10 min-h-[70vh] px-2 hide-scrollbar w-full"
+                            className="overflow-x-auto hide-scrollbar w-full"
                         >
-                            {([
-                                { id: 'aguardando', title: 'Aguardando', statuses: ['new', 'received'], color: 'bg-blue-500' },
-                                { id: 'atendimento', title: 'Em Atendimento', statuses: ['attempt', 'contacted', 'confirmed'], color: 'bg-amber-500' },
-                                { id: 'agendamento', title: 'Agendamento', statuses: ['scheduled'], color: 'bg-red-500' },
-                                { id: 'visita', title: 'Visita e Test Drive', statuses: ['visited', 'test_drive'], color: 'bg-red-600' },
-                                { id: 'negociacao', title: 'Negociação', statuses: ['proposed', 'negotiation'], color: 'bg-red-700' },
-                                { id: 'venda', title: 'Vendido', statuses: ['closed'], color: 'bg-emerald-500' },
-                                { id: 'sem_contato', title: 'Sem Contato', statuses: ['post_sale'], color: 'bg-white/10' },
-                                { id: 'perda', title: 'Perda Total', statuses: ['lost'], color: 'bg-white/5' }
-                            ] as { id: string; title: string; statuses: LeadStatus[]; color: string }[]).map((col) => {
-                                const colLeads = filteredLeads.filter(l => col.statuses.includes(l.status));
-                                return (
-                                    <div key={col.id} className="flex-shrink-0 w-80 flex flex-col gap-4">
-                                        <div className="flex items-center justify-between px-2 mb-2">
-                                            <div className="flex items-center gap-2">
-                                                <div className={`h-2.5 w-2.5 rounded-full ${col.color}`} />
-                                                <h3 className="text-xs font-black uppercase tracking-widest text-white/60">{col.title}</h3>
-                                                <span className="px-2 py-0.5 rounded-full bg-white/5 text-[10px] font-bold text-white/30">{colLeads.length}</span>
-                                            </div>
-                                        </div>
-
-                                        <div
-                                            className={`flex flex-col gap-3 min-h-[500px] p-2 -mx-2 rounded-[2rem] transition-all duration-300 ${dragOverColId === col.id ? 'bg-white/5 border-2 border-dashed border-red-500/50 shadow-[0_0_30px_rgba(220,38,38,0.1)]' : 'border-2 border-transparent'}`}
-                                            onDragOver={(e) => {
-                                                e.preventDefault();
-                                                if (dragOverColId !== col.id) setDragOverColId(col.id);
-                                            }}
-                                            onDragLeave={(e) => {
-                                                const relatedTarget = e.relatedTarget as Node | null;
-                                                if (relatedTarget && !e.currentTarget.contains(relatedTarget)) {
-                                                    setDragOverColId(null);
-                                                }
-                                            }}
-                                            onDrop={(e) => {
-                                                e.preventDefault();
-                                                setDragOverColId(null);
-                                                const leadId = e.dataTransfer.getData('leadId');
-                                                if (leadId && leadId !== draggingLeadId) {
-                                                    // Prevent redundant calls if not supported natively. 
-                                                }
-                                                if (leadId) {
-                                                    handleStatusChange(leadId, col.statuses[0] as LeadStatus);
-                                                }
-                                                setDraggingLeadId(null);
-                                            }}
-                                        >
-                                            {colLeads.map((lead) => (
-                                                <motion.div
-                                                    key={lead.id}
-                                                    layoutId={lead.id}
-                                                    draggable
-                                                    onDragStart={(e) => {
-                                                        const dragEvent = e as unknown as React.DragEvent;
-                                                        if (dragEvent.dataTransfer) {
-                                                            dragEvent.dataTransfer.setData('leadId', lead.id);
-                                                            dragEvent.dataTransfer.effectAllowed = 'move';
-                                                        }
-                                                        setDraggingLeadId(lead.id);
-                                                    }}
-                                                    onDragEnd={() => {
-                                                        setDraggingLeadId(null);
-                                                        setDragOverColId(null);
-                                                    }}
-                                                    onClick={() => handleLeadSmartClick(lead)}
-                                                    className={`glass-card rounded-2xl p-4 cursor-grab active:cursor-grabbing hover:border-red-500/30 transition-all group relative select-none border border-white/5 ${activeMoveMenu === lead.id ? 'z-[200] border-red-500/50 shadow-[0_0_50px_rgba(220,38,38,0.2)]' : 'z-10'} ${draggingLeadId === lead.id ? 'opacity-40 scale-[0.98] shadow-none !border-red-500/50 relative z-[200]' : 'opacity-100'}`}
-                                                >
-                                                    <div className="flex justify-between items-start mb-3 relative z-10">
-                                                        <div className="flex items-center gap-3">
-                                                            <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-red-600 to-red-900 flex items-center justify-center text-[10px] font-black text-white shadow-lg shrink-0">
-                                                                {lead.name[0]}
-                                                            </div>
-                                                            {(() => {
-                                                                const daysInStage = lead.created_at ? Math.floor((new Date().getTime() - new Date(lead.created_at).getTime()) / (1000 * 3600 * 24)) : 0;
-                                                                const badgeColor = daysInStage > 5 ? 'text-red-500 bg-red-500/10 border-red-500/20' : daysInStage > 2 ? 'text-amber-500 bg-amber-500/10 border-amber-500/20' : 'text-emerald-500 bg-emerald-500/10 border-emerald-500/20';
-                                                                return (
-                                                                    <div className={`px-2 py-1 rounded-lg border ${badgeColor} text-[9px] font-black uppercase tracking-widest flex items-center gap-1 shadow-sm shrink-0`} title={`Nesse estágio há ${daysInStage} dia(s)`}>
-                                                                        ⏳ {daysInStage}d
-                                                                    </div>
-                                                                );
-                                                            })()}
-                                                        </div>
-
-                                                        <div className="flex items-center gap-3">
-                                                            <div
-                                                                className="relative z-[100]"
-                                                            >
-                                                                <button
-                                                                    onClick={(e) => {
-                                                                        e.stopPropagation();
-                                                                        const rect = e.currentTarget.getBoundingClientRect();
-                                                                        const dropdownHeight = 350;
-                                                                        const spaceBelow = window.innerHeight - rect.bottom;
-                                                                        setMoveMenuDirection(spaceBelow < dropdownHeight ? 'up' : 'down');
-                                                                        setActiveMoveMenu(activeMoveMenu === lead.id ? null : lead.id);
-                                                                    }}
-                                                                    className={`h-8 w-8 rounded-lg flex items-center justify-center transition-all border shadow-lg ${activeMoveMenu === lead.id ? 'bg-red-600 border-red-500 text-white shadow-red-600/20' : 'bg-white/10 border-white/10 text-white/60 hover:text-red-500 hover:bg-white/20'}`}
-                                                                >
-                                                                    <ArrowRight size={18} className={activeMoveMenu === lead.id ? 'rotate-90 transition-transform' : 'transition-transform'} />
-                                                                </button>
-
-                                                                <AnimatePresence>
-                                                                    {activeMoveMenu === lead.id && (
-                                                                        <>
-                                                                            {/* Click Outside Backdrop */}
-                                                                            <div
-                                                                                className="fixed inset-0 z-[105]"
-                                                                                onClick={(e) => {
-                                                                                    e.stopPropagation();
-                                                                                    setActiveMoveMenu(null);
-                                                                                }}
-                                                                            />
-                                                                            <motion.div
-                                                                                initial={{ opacity: 0, scale: 0.95, y: moveMenuDirection === 'up' ? 10 : -10 }}
-                                                                                animate={{ opacity: 1, scale: 1, y: 0 }}
-                                                                                exit={{ opacity: 0, scale: 0.95, y: moveMenuDirection === 'up' ? 10 : -10 }}
-                                                                                style={{
-                                                                                    bottom: moveMenuDirection === 'up' ? 'calc(100% + 15px)' : 'auto',
-                                                                                    top: moveMenuDirection === 'down' ? 'calc(100% + 15px)' : 'auto',
-                                                                                }}
-                                                                                className={`absolute right-0 w-64 bg-[#0a0a0a] border border-white/20 rounded-2xl shadow-[0_40px_120px_rgba(0,0,0,1),0_0_20px_rgba(220,38,38,0.15)] z-[210] py-4 overflow-hidden backdrop-blur-3xl border-red-500/50 ${moveMenuDirection === 'up' ? 'origin-bottom-right' : 'origin-top-right'}`}
-                                                                            >
-                                                                                <div className="absolute inset-0 bg-gradient-to-br from-red-600/10 to-transparent pointer-events-none" />
-                                                                                <div className="relative z-10">
-                                                                                    <div className="px-6 pb-4 mb-2 border-b border-white/10">
-                                                                                        <p className="text-[10px] font-black uppercase tracking-[0.25em] text-red-500 flex items-center gap-2">
-                                                                                            <Zap size={10} fill="currentColor" /> Mover Lead para...
-                                                                                        </p>
-                                                                                    </div>
-                                                                                    <div className="max-h-[300px] overflow-y-auto px-2 space-y-1.5 custom-scrollbar">
-                                                                                        {[
-                                                                                            { id: 'received' as LeadStatus, label: 'Aguardando', icon: <Users size={14} /> },
-                                                                                            { id: 'attempt' as LeadStatus, label: 'Em Atendimento', icon: <Zap size={14} /> },
-                                                                                            { id: 'scheduled' as LeadStatus, label: 'Agendamento', icon: <Calendar size={14} /> },
-                                                                                            { id: 'visited' as LeadStatus, label: 'Visita e Test Drive', icon: <Car size={14} /> },
-                                                                                            { id: 'proposed' as LeadStatus, label: 'Negociação', icon: <CreditCard size={14} /> },
-                                                                                            { id: 'closed' as LeadStatus, label: 'Vendido', icon: <BadgeCheck size={14} className="text-emerald-500" /> },
-                                                                                            { id: 'post_sale' as LeadStatus, label: 'Sem Contato', icon: <BadgeCheck size={14} className="text-white/40" /> },
-                                                                                            { id: 'lost' as LeadStatus, label: 'Perda Total', icon: <AlertCircle size={14} className="text-white/20" /> }
-                                                                                        ].filter(st => st.id !== lead.status).map((st) => (
-                                                                                            <button
-                                                                                                key={st.id}
-                                                                                                onClick={(e) => {
-                                                                                                    e.stopPropagation();
-                                                                                                    handleStatusChange(lead.id, st.id);
-                                                                                                    setActiveMoveMenu(null);
-                                                                                                }}
-                                                                                                className="w-full flex items-center gap-4 px-4 py-3 rounded-xl text-[12px] font-bold text-white/50 hover:text-white hover:bg-white/5 transition-all group/item text-left"
-                                                                                            >
-                                                                                                <div className="p-2 rounded-lg bg-white/5 group-hover/item:bg-red-600/30 group-hover/item:text-red-500 transition-all">
-                                                                                                    {st.icon}
-                                                                                                </div>
-                                                                                                <span className="flex-1">{st.label}</span>
-                                                                                            </button>
-                                                                                        ))}
-                                                                                    </div>
-                                                                                </div>
-                                                                            </motion.div>
-                                                                        </>
-                                                                    )}
-                                                                </AnimatePresence>
-                                                            </div>
-
-                                                            <div className="text-right">
-                                                                <div className="text-xl font-black text-white leading-none">
-                                                                    {lead.ai_score || 0}<span className="text-[10px] text-red-500 ml-0.5">%</span>
-                                                                </div>
-                                                                <p className="text-[8px] font-black text-white/20 uppercase tracking-tighter">Score IA</p>
-                                                            </div>
-                                                        </div>
+                            <div className="flex flex-col gap-4 min-w-max pb-10">
+                                {/* Kanban Header Row */}
+                                <div className="flex gap-6 px-4">
+                                    {([
+                                        { id: 'aguardando', title: 'Aguardando', statuses: ['new', 'received'], color: 'bg-blue-500' },
+                                        { id: 'atendimento', title: 'Em Atendimento', statuses: ['attempt', 'contacted', 'confirmed'], color: 'bg-amber-500' },
+                                        { id: 'agendamento', title: 'Agendamento', statuses: ['scheduled'], color: 'bg-red-500' },
+                                        { id: 'visita', title: 'Visita e Test Drive', statuses: ['visited', 'test_drive'], color: 'bg-red-600' },
+                                        { id: 'negociacao', title: 'Negociação', statuses: ['proposed', 'negotiation'], color: 'bg-red-700' },
+                                        { id: 'venda', title: 'Vendido', statuses: ['closed'], color: 'bg-emerald-500' },
+                                        { id: 'sem_contato', title: 'Sem Contato', statuses: ['post_sale'], color: 'bg-white/10' },
+                                        { id: 'perda', title: 'Perda Total', statuses: ['lost'], color: 'bg-white/5' },
+                                        { id: 'comprado', title: 'Comprado', statuses: ['comprado'], color: 'bg-indigo-500' }
+                                    ] as const).map((col) => {
+                                        const colLeads = filteredLeads.filter(l => (col.statuses as unknown as LeadStatus[]).includes(l.status));
+                                        return (
+                                            <div key={`header-${col.id}`} className="w-80 flex-shrink-0">
+                                                <div className="flex items-center justify-between px-2">
+                                                    <div className="flex items-center gap-2">
+                                                        <div className={`h-2.5 w-2.5 rounded-full ${col.color}`} />
+                                                        <h3 className="text-xs font-black uppercase tracking-widest text-white/60">{col.title}</h3>
+                                                        <span className="px-2 py-0.5 rounded-full bg-white/5 text-[10px] font-bold text-white/30">{colLeads.length}</span>
                                                     </div>
-
-                                                    <h4 className="text-sm font-black text-white tracking-tight leading-tight truncate">{lead.name}</h4>
-                                                    <p className="text-[10px] font-bold text-white/40 mb-3 truncate italic">
-                                                        {lead.vehicle_interest || 'Interesse em Compra'}
-                                                    </p>
-
-                                                    <div className="flex items-center justify-between pt-3 border-t border-white/5 relative z-10">
-                                                        <span className="px-2 py-0.5 rounded-lg bg-red-600/10 text-[9px] font-black text-red-500 border border-red-500/10 max-w-[120px] truncate">
-                                                            {lead.origem || 'Contato Direto WhatsApp'}
-                                                        </span>
-
-                                                        <button
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                setActionLead(lead);
-                                                            }}
-                                                            className="h-7 px-3 glass-card rounded-lg flex items-center justify-center gap-1.5 text-[8px] font-black uppercase tracking-widest text-white/40 hover:text-red-400 hover:border-red-500/30 transition-all group/btn"
-                                                        >
-                                                            <Zap size={10} className="group-hover/btn:text-red-500 transition-colors" /> Ações
-                                                        </button>
-                                                    </div>
-                                                </motion.div>
-                                            ))}
-
-                                            {colLeads.length === 0 && (
-                                                <div className="h-32 rounded-2xl border-2 border-dashed border-white/5 flex items-center justify-center">
-                                                    <p className="text-[10px] font-black text-white/10 uppercase tracking-widest">Vazio</p>
                                                 </div>
-                                            )}
-                                        </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+
+                                {/* Custom Scrollbar - Sticky BETWEEN Header and Cards */}
+                                <div className="sticky left-0 w-full px-4 z-[60] flex items-center gap-4">
+                                    <div
+                                        className="h-1.5 bg-white/5 rounded-full overflow-hidden cursor-pointer group/scroll border border-white/5 shadow-inner flex-1 max-w-full"
+                                        onPointerDown={(e) => {
+                                            if (!scrollContainerRef.current) return;
+                                            const bar = e.currentTarget;
+                                            const rect = bar.getBoundingClientRect();
+
+                                            const updateScroll = (clientX: number) => {
+                                                const x = Math.max(0, Math.min(clientX - rect.left, rect.width));
+                                                const percentage = x / rect.width;
+                                                const container = scrollContainerRef.current!;
+                                                container.scrollLeft = percentage * (container.scrollWidth - container.clientWidth);
+                                            };
+
+                                            updateScroll(e.clientX);
+
+                                            const onPointerMove = (moveEvent: PointerEvent) => {
+                                                updateScroll(moveEvent.clientX);
+                                            };
+
+                                            const onPointerUp = () => {
+                                                window.removeEventListener('pointermove', onPointerMove);
+                                                window.removeEventListener('pointerup', onPointerUp);
+                                            };
+
+                                            window.addEventListener('pointermove', onPointerMove);
+                                            window.addEventListener('pointerup', onPointerUp);
+                                        }}
+                                    >
+                                        <motion.div
+                                            className="h-full bg-red-600 shadow-[0_0_15px_rgba(227,30,36,0.8)] group-hover/scroll:bg-red-500 transition-colors relative"
+                                            initial={{ width: 0 }}
+                                            animate={{ width: `${scrollProgress}%` }}
+                                            transition={{ type: 'spring', stiffness: 400, damping: 40 }}
+                                        >
+                                            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent animate-pulse" />
+                                        </motion.div>
                                     </div>
-                                );
-                            })}
+                                    <div className="flex items-center gap-1 animate-pulse">
+                                        <div className="h-4 w-4 rounded-full bg-red-600 flex items-center justify-center">
+                                            <ArrowRight size={10} className="text-white" />
+                                        </div>
+                                        <span className="text-[8px] font-black text-red-500 uppercase tracking-widest whitespace-nowrap">Role para ver mais</span>
+                                    </div>
+                                </div>
+
+                                {/* Kanban Cards Row */}
+                                <div className="flex gap-6 px-4 min-h-[70vh]">
+                                    {([
+                                        { id: 'aguardando', title: 'Aguardando', statuses: ['new', 'received'], color: 'bg-blue-500' },
+                                        { id: 'atendimento', title: 'Em Atendimento', statuses: ['attempt', 'contacted', 'confirmed'], color: 'bg-amber-500' },
+                                        { id: 'agendamento', title: 'Agendamento', statuses: ['scheduled'], color: 'bg-red-500' },
+                                        { id: 'visita', title: 'Visita e Test Drive', statuses: ['visited', 'test_drive'], color: 'bg-red-600' },
+                                        { id: 'negociacao', title: 'Negociação', statuses: ['proposed', 'negotiation'], color: 'bg-red-700' },
+                                        { id: 'venda', title: 'Vendido', statuses: ['closed'], color: 'bg-emerald-500' },
+                                        { id: 'sem_contato', title: 'Sem Contato', statuses: ['post_sale'], color: 'bg-white/10' },
+                                        { id: 'perda', title: 'Perda Total', statuses: ['lost'], color: 'bg-white/5' },
+                                        { id: 'comprado', title: 'Comprado', statuses: ['comprado'], color: 'bg-indigo-500' }
+                                    ] as const).map((col) => {
+                                        const colLeads = filteredLeads.filter(l => (col.statuses as unknown as LeadStatus[]).includes(l.status));
+                                        return (
+                                            <div
+                                                key={`cards-${col.id}`}
+                                                className={`flex-shrink-0 w-80 flex flex-col gap-3 p-2 -mx-2 rounded-[2rem] transition-all duration-300 ${dragOverColId === col.id ? 'bg-white/5 border-2 border-dashed border-red-500/50 shadow-[0_0_30px_rgba(220,38,38,0.1)]' : 'border-2 border-transparent'}`}
+                                                onDragOver={(e) => {
+                                                    e.preventDefault();
+                                                    if (dragOverColId !== col.id) setDragOverColId(col.id);
+                                                }}
+                                                onDragLeave={(e) => {
+                                                    const relatedTarget = e.relatedTarget as Node | null;
+                                                    if (relatedTarget && !e.currentTarget.contains(relatedTarget)) {
+                                                        setDragOverColId(null);
+                                                    }
+                                                }}
+                                                onDrop={(e) => {
+                                                    e.preventDefault();
+                                                    setDragOverColId(null);
+                                                    const leadId = e.dataTransfer.getData('leadId');
+                                                    if (leadId) {
+                                                        handleStatusChange(leadId, col.statuses[0] as LeadStatus);
+                                                    }
+                                                    setDraggingLeadId(null);
+                                                }}
+                                            >
+                                                {colLeads.map((lead) => (
+                                                    <motion.div
+                                                        key={lead.id}
+                                                        layoutId={lead.id}
+                                                        draggable
+                                                        onDragStart={(e) => {
+                                                            const dragEvent = e as unknown as React.DragEvent;
+                                                            if (dragEvent.dataTransfer) {
+                                                                dragEvent.dataTransfer.setData('leadId', lead.id);
+                                                                dragEvent.dataTransfer.effectAllowed = 'move';
+                                                            }
+                                                            setDraggingLeadId(lead.id);
+                                                        }}
+                                                        onDragEnd={() => {
+                                                            setDraggingLeadId(null);
+                                                            setDragOverColId(null);
+                                                        }}
+                                                        onClick={() => handleLeadSmartClick(lead)}
+                                                        className={`glass-card rounded-2xl p-4 cursor-grab active:cursor-grabbing hover:border-red-500/30 transition-all group relative select-none border border-white/5 ${activeMoveMenu === lead.id ? 'z-[200] border-red-500/50 shadow-[0_0_50px_rgba(220,38,38,0.2)]' : 'z-10'} ${draggingLeadId === lead.id ? 'opacity-40 scale-[0.98] shadow-none !border-red-500/50 relative z-[200]' : 'opacity-100'}`}
+                                                    >
+                                                        <div className="flex justify-between items-start mb-3 relative z-10">
+                                                            <div className="flex items-center gap-3">
+                                                                <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-red-600 to-red-900 flex items-center justify-center text-[10px] font-black text-white shadow-lg shrink-0">
+                                                                    {lead.name[0]}
+                                                                </div>
+                                                                {(() => {
+                                                                    if (!lead.created_at) return null;
+
+                                                                    const now = new Date();
+                                                                    const created = new Date(lead.created_at);
+                                                                    const diffMs = now.getTime() - created.getTime();
+                                                                    const diffHours = Math.floor(diffMs / (1000 * 3600));
+                                                                    const diffDays = Math.floor(diffHours / 24);
+
+                                                                    let timeLabel = '';
+                                                                    let badgeColor = '';
+
+                                                                    if (diffHours < 24) {
+                                                                        timeLabel = `${diffHours}h`;
+                                                                        if (diffHours < 3) {
+                                                                            badgeColor = 'text-emerald-500 bg-emerald-500/10 border-emerald-500/20';
+                                                                        } else {
+                                                                            badgeColor = 'text-amber-500 bg-amber-500/10 border-amber-500/20';
+                                                                        }
+                                                                    } else {
+                                                                        timeLabel = `${diffDays}d`;
+                                                                        badgeColor = 'text-red-500 bg-red-500/10 border-red-500/20';
+                                                                    }
+
+                                                                    return (
+                                                                        <div
+                                                                            className={`px-2 py-1 rounded-lg border ${badgeColor} text-[9px] font-black uppercase tracking-widest flex items-center gap-1 shadow-sm shrink-0`}
+                                                                            title={`Lead recebido há ${diffHours} horas`}
+                                                                        >
+                                                                            ⏳ {timeLabel}
+                                                                        </div>
+                                                                    );
+                                                                })()}
+                                                            </div>
+
+                                                            <div className="flex items-center gap-3">
+                                                                <div
+                                                                    className="relative z-[100]"
+                                                                >
+                                                                    <button
+                                                                        onClick={(e) => {
+                                                                            e.stopPropagation();
+                                                                            setMoveMenuDirection('down');
+                                                                            setActiveMoveMenu(activeMoveMenu === lead.id ? null : lead.id);
+                                                                        }}
+                                                                        className={`h-8 w-8 rounded-lg flex items-center justify-center transition-all border shadow-lg ${activeMoveMenu === lead.id ? 'bg-red-600 border-red-500 text-white shadow-red-600/20' : 'bg-white/10 border-white/10 text-white/60 hover:text-red-500 hover:bg-white/20'}`}
+                                                                    >
+                                                                        <ArrowRight size={18} className={activeMoveMenu === lead.id ? 'rotate-90 transition-transform' : 'transition-transform'} />
+                                                                    </button>
+
+                                                                    <AnimatePresence>
+                                                                        {activeMoveMenu === lead.id && (
+                                                                            <>
+                                                                                {/* Click Outside Backdrop */}
+                                                                                <div
+                                                                                    className="fixed inset-0 z-[105]"
+                                                                                    onClick={(e) => {
+                                                                                        e.stopPropagation();
+                                                                                        setActiveMoveMenu(null);
+                                                                                    }}
+                                                                                />
+                                                                                <motion.div
+                                                                                    initial={{ opacity: 0, scale: 0.95, y: -10 }}
+                                                                                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                                                                                    exit={{ opacity: 0, scale: 0.95, y: -10 }}
+                                                                                    style={{
+                                                                                        top: 'calc(100% + 15px)',
+                                                                                    }}
+                                                                                    className="absolute right-0 w-64 bg-[#0a0a0a] border border-white/20 rounded-2xl shadow-[0_40px_120px_rgba(0,0,0,1),0_0_20px_rgba(220,38,38,0.15)] z-[210] py-4 overflow-hidden backdrop-blur-3xl border-red-500/50 origin-top-right"
+                                                                                >
+                                                                                    <div className="absolute inset-0 bg-gradient-to-br from-red-600/10 to-transparent pointer-events-none" />
+                                                                                    <div className="relative z-10">
+                                                                                        <div className="px-6 pb-4 mb-2 border-b border-white/10">
+                                                                                            <p className="text-[10px] font-black uppercase tracking-[0.25em] text-red-500 flex items-center gap-2">
+                                                                                                <Zap size={10} fill="currentColor" /> Mover Lead para...
+                                                                                            </p>
+                                                                                        </div>
+                                                                                        <div className="max-h-[300px] overflow-y-auto px-2 space-y-1.5 custom-scrollbar">
+                                                                                            {[
+                                                                                                { id: 'received' as LeadStatus, label: 'Aguardando', icon: <Users size={14} /> },
+                                                                                                { id: 'attempt' as LeadStatus, label: 'Em Atendimento', icon: <Zap size={14} /> },
+                                                                                                { id: 'scheduled' as LeadStatus, label: 'Agendado', icon: <Calendar size={14} /> },
+                                                                                                { id: 'visited' as LeadStatus, label: 'Visita e Test Drive', icon: <Car size={14} /> },
+                                                                                                { id: 'proposed' as LeadStatus, label: 'Negociação', icon: <CreditCard size={14} /> },
+                                                                                                { id: 'closed' as LeadStatus, label: 'Vendido', icon: <BadgeCheck size={14} className="text-emerald-500" /> },
+                                                                                                { id: 'comprado' as LeadStatus, label: 'Comprado', icon: <Car size={14} className="text-indigo-500" /> },
+                                                                                                { id: 'post_sale' as LeadStatus, label: 'Sem Contato', icon: <Phone size={14} className="text-white/40" /> },
+                                                                                                { id: 'lost' as LeadStatus, label: 'Perda Total', icon: <AlertCircle size={14} className="text-white/20" /> }
+                                                                                            ].filter(st => st.id !== lead.status).map((st) => (
+                                                                                                <button
+                                                                                                    key={st.id}
+                                                                                                    onClick={(e) => {
+                                                                                                        e.stopPropagation();
+                                                                                                        handleStatusChange(lead.id, st.id);
+                                                                                                        setActiveMoveMenu(null);
+                                                                                                    }}
+                                                                                                    className="w-full flex items-center gap-4 px-4 py-3 rounded-xl text-[12px] font-bold text-white/50 hover:text-white hover:bg-white/5 transition-all group/item text-left"
+                                                                                                >
+                                                                                                    <div className="p-2 rounded-lg bg-white/5 group-hover/item:bg-red-600/30 group-hover/item:text-red-500 transition-all">
+                                                                                                        {st.icon}
+                                                                                                    </div>
+                                                                                                    <span className="flex-1">{st.label}</span>
+                                                                                                </button>
+                                                                                            ))}
+                                                                                        </div>
+                                                                                    </div>
+                                                                                </motion.div>
+                                                                            </>
+                                                                        )}
+                                                                    </AnimatePresence>
+                                                                </div>
+
+                                                                <div className="text-right">
+                                                                    <div className="text-xl font-black text-white leading-none">
+                                                                        {lead.ai_score || 0}<span className="text-[10px] text-red-500 ml-0.5">%</span>
+                                                                    </div>
+                                                                    <p className="text-[8px] font-black text-white/20 uppercase tracking-tighter">Score IA</p>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+                                                        <h4 className="text-sm font-black text-white tracking-tight leading-tight truncate">{lead.name}</h4>
+                                                        <p className="text-[10px] font-bold text-white/40 mb-3 truncate italic">
+                                                            {lead.vehicle_interest || 'Interesse em Compra'}
+                                                        </p>
+
+                                                        <div className="flex items-center justify-between pt-3 border-t border-white/5 relative z-10">
+                                                            <span className="px-2 py-0.5 rounded-lg bg-red-600/10 text-[9px] font-black text-red-500 border border-red-500/10 max-w-[120px] truncate">
+                                                                {lead.origem || 'Contato Direto WhatsApp'}
+                                                            </span>
+
+                                                            <button
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    setActionLead(lead);
+                                                                }}
+                                                                className="h-7 px-3 glass-card rounded-lg flex items-center justify-center gap-1.5 text-[8px] font-black uppercase tracking-widest text-white/40 hover:text-red-400 hover:border-red-500/30 transition-all group/btn"
+                                                            >
+                                                                <Zap size={10} className="group-hover/btn:text-red-500 transition-colors" /> Ações
+                                                            </button>
+                                                        </div>
+                                                    </motion.div>
+                                                ))}
+
+                                                {colLeads.length === 0 && (
+                                                    <div className="h-32 rounded-2xl border-2 border-dashed border-white/5 flex items-center justify-center">
+                                                        <p className="text-[10px] font-black text-white/10 uppercase tracking-widest">Vazio</p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
                         </div>
                     </motion.div>
                 ) : (
@@ -1516,11 +1878,81 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                                 </div>
                                             </td>
                                             <td className="px-3 md:px-6 py-4 md:py-6">
-                                                <div className="flex items-center gap-2">
-                                                    <div className={`h-2 w-2 rounded-full shrink-0 ${getStatusColor(lead.status)}`} />
-                                                    <span className="text-[10px] md:text-xs font-black uppercase text-white/50 tracking-wider truncate">
-                                                        {getStatusLabel(lead.status)}
-                                                    </span>
+                                                <div className="relative group/status">
+                                                    <button
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setMoveMenuDirection('down');
+                                                            setActiveMoveMenu(activeMoveMenu === lead.id ? null : lead.id);
+                                                        }}
+                                                        className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border transition-all ${activeMoveMenu === lead.id ? 'bg-red-600/20 border-red-500/50 shadow-[0_0_15px_rgba(220,38,38,0.2)]' : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'}`}
+                                                    >
+                                                        <div className={`h-2 w-2 rounded-full shrink-0 ${getStatusColor(lead.status)}`} />
+                                                        <span className="text-[10px] md:text-xs font-black uppercase text-white/50 tracking-wider truncate group-hover/status:text-white transition-colors">
+                                                            {getStatusLabel(lead.status)}
+                                                        </span>
+                                                        <ArrowRight size={10} className={`text-white/20 transition-transform ${activeMoveMenu === lead.id ? 'rotate-90 text-red-500' : 'group-hover/status:translate-x-0.5'}`} />
+                                                    </button>
+
+                                                    <AnimatePresence>
+                                                        {activeMoveMenu === lead.id && (
+                                                            <>
+                                                                <div
+                                                                    className="fixed inset-0 z-[105]"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        setActiveMoveMenu(null);
+                                                                    }}
+                                                                />
+                                                                <motion.div
+                                                                    initial={{ opacity: 0, scale: 0.95, y: moveMenuDirection === 'up' ? 10 : -10 }}
+                                                                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                                                                    exit={{ opacity: 0, scale: 0.95, y: moveMenuDirection === 'up' ? 10 : -10 }}
+                                                                    style={{
+                                                                        top: 'calc(100% + 15px)',
+                                                                    }}
+                                                                    className="absolute left-0 w-64 bg-[#0a0a0a] border border-white/20 rounded-2xl shadow-[0_40px_120px_rgba(0,0,0,1),0_0_20_rgba(220,38,38,0.15)] z-[210] py-4 overflow-hidden backdrop-blur-3xl border-red-500/50 origin-top-left"
+                                                                >
+                                                                    <div className="absolute inset-0 bg-gradient-to-br from-red-600/10 to-transparent pointer-events-none" />
+                                                                    <div className="relative z-10">
+                                                                        <div className="px-6 pb-4 mb-2 border-b border-white/10">
+                                                                            <p className="text-[10px] font-black uppercase tracking-[0.25em] text-red-500 flex items-center gap-2">
+                                                                                <Zap size={10} fill="currentColor" /> Alterar Status para...
+                                                                            </p>
+                                                                        </div>
+                                                                        <div className="max-h-[300px] overflow-y-auto px-2 space-y-1.5 custom-scrollbar">
+                                                                            {[
+                                                                                { id: 'received' as LeadStatus, label: 'Aguardando', icon: <Users size={14} /> },
+                                                                                { id: 'attempt' as LeadStatus, label: 'Em Atendimento', icon: <Zap size={14} /> },
+                                                                                { id: 'scheduled' as LeadStatus, label: 'Agendamento', icon: <Calendar size={14} /> },
+                                                                                { id: 'visited' as LeadStatus, label: 'Visita e Test Drive', icon: <Car size={14} /> },
+                                                                                { id: 'proposed' as LeadStatus, label: 'Negociação', icon: <CreditCard size={14} /> },
+                                                                                { id: 'closed' as LeadStatus, label: 'Vendido', icon: <BadgeCheck size={14} className="text-emerald-500" /> },
+                                                                                { id: 'comprado' as LeadStatus, label: 'Comprado', icon: <Car size={14} className="text-indigo-500" /> },
+                                                                                { id: 'post_sale' as LeadStatus, label: 'Sem Contato', icon: <Phone size={14} className="text-white/40" /> },
+                                                                                { id: 'lost' as LeadStatus, label: 'Perda Total', icon: <AlertCircle size={14} className="text-white/20" /> }
+                                                                            ].filter(st => st.id !== lead.status).map((st) => (
+                                                                                <button
+                                                                                    key={st.id}
+                                                                                    onClick={(e) => {
+                                                                                        e.stopPropagation();
+                                                                                        handleStatusChange(lead.id, st.id);
+                                                                                        setActiveMoveMenu(null);
+                                                                                    }}
+                                                                                    className="w-full flex items-center gap-4 px-4 py-3 rounded-xl text-[12px] font-bold text-white/50 hover:text-white hover:bg-white/5 transition-all group/item text-left"
+                                                                                >
+                                                                                    <div className="p-2 rounded-lg bg-white/5 group-hover/item:bg-red-600/30 group-hover/item:text-red-500 transition-all">
+                                                                                        {st.icon}
+                                                                                    </div>
+                                                                                    <span className="flex-1">{st.label}</span>
+                                                                                </button>
+                                                                            ))}
+                                                                        </div>
+                                                                    </div>
+                                                                </motion.div>
+                                                            </>
+                                                        )}
+                                                    </AnimatePresence>
                                                 </div>
                                             </td>
                                             <td className="px-3 md:px-6 py-4 md:py-6 text-center">
@@ -1981,34 +2413,41 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                                             placeholder="Ex: Mandei o preço e ele não visualizou mais..."
                                                             value={followupContext}
                                                             onChange={(e) => setFollowupContext(e.target.value)}
+                                                            onPaste={handlePaste}
                                                             className="w-full h-32 bg-white/5 border border-white/10 rounded-2xl p-4 text-xs text-white/80 focus:ring-1 focus:ring-indigo-500/50 resize-none italic"
+                                                            title="Dica: Você pode colar (Ctrl+V) o print da conversa diretamente aqui!"
                                                         />
                                                     </div>
 
+                                                    {pastedImage && (
+                                                        <div className="relative group w-fit">
+                                                            <div className="h-20 w-32 rounded-xl overflow-hidden border border-white/10 shadow-lg">
+                                                                <img src={pastedImage} alt="Print Colado" className="w-full h-full object-cover" />
+                                                            </div>
+                                                            <button
+                                                                onClick={() => setPastedImage(null)}
+                                                                className="absolute -top-2 -right-2 h-6 w-6 rounded-full bg-red-600 text-white flex items-center justify-center shadow-lg hover:bg-red-500 transition-colors"
+                                                            >
+                                                                ×
+                                                            </button>
+                                                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center rounded-xl">
+                                                                <span className="text-[8px] font-black text-white uppercase tracking-widest">Remover</span>
+                                                            </div>
+                                                        </div>
+                                                    )}
+
+
                                                     <div className="flex items-center justify-between px-2">
-                                                        <button
-                                                            onClick={() => document.getElementById('screenshot-upload')?.click()}
-                                                            className="text-[10px] font-black text-indigo-400 hover:text-indigo-300 transition-colors uppercase flex items-center gap-2"
-                                                        >
-                                                            <Upload size={14} /> Anexar Print da Conversa
-                                                        </button>
-                                                        <input
-                                                            id="screenshot-upload"
-                                                            type="file"
-                                                            accept="image/*"
-                                                            className="hidden"
-                                                            onChange={(e) => {
-                                                                if (e.target.files?.[0]) {
-                                                                    showToast("Print anexado com sucesso!", "success");
-                                                                }
-                                                            }}
-                                                        />
+                                                        <p className="text-[10px] font-black text-white/20 uppercase tracking-widest pl-1">
+                                                            {pastedImage ? 'Print identificado!' : 'Cole o print da conversa acima (Ctrl+V)'}
+                                                        </p>
                                                     </div>
+
 
                                                     <button
                                                         onClick={handleGenerateFollowup}
-                                                        disabled={isGeneratingFollowup || !followupContext}
-                                                        className={`w-full py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-all ${isGeneratingFollowup || !followupContext ? 'bg-white/5 text-white/20' : 'bg-indigo-600 text-white hover:bg-indigo-500 shadow-xl shadow-indigo-600/20'}`}
+                                                        disabled={isGeneratingFollowup || (!followupContext && !pastedImage)}
+                                                        className={`w-full py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-all ${isGeneratingFollowup || (!followupContext && !pastedImage) ? 'bg-white/5 text-white/20' : 'bg-indigo-600 text-white hover:bg-indigo-500 shadow-xl shadow-indigo-600/20'}`}
                                                     >
                                                         {isGeneratingFollowup ? <><RefreshCcw size={16} className="animate-spin" /> Gerando...</> : <><Sparkles size={16} /> Gerar Mensagem Estratégica</>}
                                                     </button>
@@ -2453,7 +2892,6 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                                             ref={fileInputRef}
                                                             onChange={handleFileUpload}
                                                             className="hidden"
-                                                            {...({ webkitdirectory: "", directory: "" } as any)}
                                                             multiple
                                                         />
                                                     </div>
@@ -2473,6 +2911,40 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                                     >
                                                         {isAnalyzing ? <><Plus size={16} className="animate-spin" /> Analisando...</> : <><Zap size={16} /> Analisar e Sugerir</>}
                                                     </button>
+
+                                                    {structuredAnalysis && (
+                                                        <motion.div
+                                                            initial={{ opacity: 0, y: 10 }}
+                                                            animate={{ opacity: 1, y: 0 }}
+                                                            className="space-y-4 pt-4 border-t border-white/5"
+                                                        >
+                                                            <div className="grid grid-cols-2 gap-3">
+                                                                <div className="p-4 rounded-2xl bg-white/5 border border-white/5 shadow-inner">
+                                                                    <p className="text-[8px] font-black text-white/20 uppercase tracking-[0.2em] mb-2">Intenção</p>
+                                                                    <p className="text-[10px] font-bold text-white/80 leading-tight">{structuredAnalysis.intencao_compra}</p>
+                                                                </div>
+                                                                <div className="p-4 rounded-2xl bg-white/5 border border-white/5 shadow-inner">
+                                                                    <p className="text-[8px] font-black text-white/20 uppercase tracking-[0.2em] mb-2">Estágio</p>
+                                                                    <p className="text-[10px] font-bold text-white/80 leading-tight">{structuredAnalysis.estagio_negociacao}</p>
+                                                                </div>
+                                                            </div>
+
+                                                            <div className="p-4 rounded-2xl bg-rose-500/[0.03] border border-rose-500/10 backdrop-blur-sm">
+                                                                <p className="text-[8px] font-black text-rose-500 uppercase tracking-[0.2em] mb-2 flex items-center gap-2">
+                                                                    <AlertCircle size={10} /> Objeções Principais
+                                                                </p>
+                                                                <p className="text-[10px] font-bold text-white/70 leading-relaxed italic">"{structuredAnalysis.objecoes}"</p>
+                                                            </div>
+
+                                                            <div className="p-5 rounded-2xl bg-emerald-500/[0.03] border border-emerald-500/10 backdrop-blur-sm relative overflow-hidden group">
+                                                                <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/5 blur-2xl rounded-full -mr-12 -mt-12" />
+                                                                <p className="text-[8px] font-black text-emerald-500 uppercase tracking-[0.2em] mb-2 flex items-center gap-2 relative z-10">
+                                                                    <Zap size={10} fill="currentColor" /> Recomendação Estratégica
+                                                                </p>
+                                                                <p className="text-[11px] font-black text-white leading-relaxed relative z-10">{structuredAnalysis.recomendacao_abordagem}</p>
+                                                            </div>
+                                                        </motion.div>
+                                                    )}
 
                                                     {actionLead.ai_reason && (
                                                         <div className="space-y-4">
@@ -2521,7 +2993,8 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                         </div>
 
                                     </div>
-                                )}
+                                )
+                                }
 
                                 <footer className="mt-8 pt-8 border-t border-white/5 grid grid-cols-2 md:grid-cols-4 gap-4">
                                     <a
@@ -2553,142 +3026,214 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                         </button>
                                     )}
                                 </footer>
-                            </motion.div>
+                            </motion.div >
 
                             {/* Render the Finshing Modals OUTSIDE the sliding scrollable div to avoid overflow clipping and trapped z-index */}
                             <AnimatePresence>
-                                {isFinishing && (
-                                    <motion.div
-                                        initial={{ opacity: 0, backdropFilter: 'blur(0px)' }}
-                                        animate={{ opacity: 1, backdropFilter: 'blur(10px)' }}
-                                        exit={{ opacity: 0, backdropFilter: 'blur(0px)' }}
-                                        className="fixed inset-0 z-[200] bg-black/80 flex items-center justify-center p-4 pointer-events-auto"
-                                    >
-                                        <div className="glass-card w-full max-w-md p-10 space-y-8 bg-[#0a0f1d] border-red-500/20 relative shadow-2xl rounded-[3rem]">
-                                            <button
-                                                onClick={() => setIsFinishing(false)}
-                                                className="absolute top-6 right-6 text-white/20 hover:text-white transition-colors"
-                                            >
-                                                <Plus size={24} className="rotate-45" />
-                                            </button>
-
-                                            <div className="text-center space-y-2">
-                                                <div className="h-16 w-16 rounded-3xl bg-red-600/20 border border-red-500/20 flex items-center justify-center mx-auto mb-6">
-                                                    <Zap size={32} className="text-red-500" />
-                                                </div>
-                                                <h3 className="text-2xl font-black text-white uppercase tracking-tighter">Finalizar Atendimento</h3>
-                                                <p className="text-xs text-white/40 uppercase font-bold tracking-widest">Qual foi o desfecho para {actionLead.name}?</p>
-                                            </div>
-
-                                            <div className="grid gap-4">
+                                {
+                                    isFinishing && (
+                                        <motion.div
+                                            initial={{ opacity: 0, backdropFilter: 'blur(0px)' }}
+                                            animate={{ opacity: 1, backdropFilter: 'blur(10px)' }}
+                                            exit={{ opacity: 0, backdropFilter: 'blur(0px)' }}
+                                            className="fixed inset-0 z-[200] bg-black/80 flex items-center justify-center p-4 pointer-events-auto"
+                                        >
+                                            <div className="glass-card w-full max-w-md p-10 space-y-8 bg-[#0a0f1d] border-red-500/20 relative shadow-2xl rounded-[3rem]">
                                                 <button
-                                                    onClick={() => {
-                                                        setIsRecordingSale(true);
-                                                        setIsFinishing(false);
-                                                    }}
-                                                    className="w-full py-6 rounded-3xl bg-emerald-600 text-white font-black uppercase tracking-[0.2em] shadow-xl shadow-emerald-500/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-3"
+                                                    onClick={() => setIsFinishing(false)}
+                                                    className="absolute top-6 right-6 text-white/20 hover:text-white transition-colors"
                                                 >
-                                                    <BadgeCheck size={20} /> VENDA REALIZADA
+                                                    <Plus size={24} className="rotate-45" />
                                                 </button>
 
-                                                <div className="space-y-4 pt-4 border-t border-white/5">
-                                                    <p className="text-[10px] font-black text-white/20 uppercase tracking-[0.2em] text-center">Ou motivo da perda</p>
-                                                    <select
-                                                        value={lossReason}
-                                                        onChange={(e) => setLossReason(e.target.value)}
-                                                        className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-sm text-white focus:outline-none focus:ring-1 focus:ring-red-500/50 transition-all font-medium [color-scheme:dark]"
-                                                    >
-                                                        <option value="" className="bg-[#080c18]">Selecione um motivo...</option>
-                                                        <option value="Preço alto" className="bg-[#080c18]">Preço alto / Sem margem</option>
-                                                        <option value="Comprou em outro lugar" className="bg-[#080c18]">Comprou em outro lugar</option>
-                                                        <option value="Desistiu da compra" className="bg-[#080c18]">Desistiu da compra</option>
-                                                        <option value="Sem crédito" className="bg-[#080c18]">Sem crédito aprovado</option>
-                                                        <option value="Veículo vendido" className="bg-[#080c18]">Veículo de interesse vendido</option>
-                                                        <option value="Sem contato/Frio" className="bg-[#080c18]">Sem resposta / Muito Frio</option>
-                                                    </select>
+                                                <div className="text-center space-y-2">
+                                                    <div className="h-16 w-16 rounded-3xl bg-red-600/20 border border-red-500/20 flex items-center justify-center mx-auto mb-6">
+                                                        <Zap size={32} className="text-red-500" />
+                                                    </div>
+                                                    <h3 className="text-2xl font-black text-white uppercase tracking-tighter">Finalizar Atendimento</h3>
+                                                    <p className="text-xs text-white/40 uppercase font-bold tracking-widest">Qual foi o desfecho para {actionLead.name}?</p>
+                                                </div>
 
-                                                    {lossReason && (
-                                                        <div className="space-y-2 mt-4 animate-in fade-in slide-in-from-top-4">
-                                                            <p className="text-[10px] font-black text-red-400 uppercase tracking-[0.2em] text-center mb-2">Descreva exatamente por que a venda não aconteceu</p>
-                                                            <textarea
-                                                                value={lossSummary}
-                                                                onChange={(e) => setLossSummary(e.target.value)}
-                                                                placeholder="Cole aqui a exportação do WhatsApp ou digite o resumo claro do desfecho..."
-                                                                className="w-full h-32 bg-white/5 border border-red-500/20 rounded-2xl p-4 text-sm text-white focus:outline-none focus:ring-1 focus:ring-red-500/50 transition-all resize-none custom-scrollbar"
-                                                            />
-                                                            <p className="text-[9px] text-white/30 text-center">*Obrigatório para registrar a perda.</p>
-                                                        </div>
-                                                    )}
+                                                <div className="grid gap-4">
+                                                    <button
+                                                        onClick={() => {
+                                                            setIsRecordingSale(true);
+                                                            setIsFinishing(false);
+                                                        }}
+                                                        className="w-full py-6 rounded-3xl bg-emerald-600 text-white font-black uppercase tracking-[0.2em] shadow-xl shadow-emerald-500/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-3"
+                                                    >
+                                                        <BadgeCheck size={20} /> VENDA REALIZADA
+                                                    </button>
 
                                                     <button
-                                                        disabled={!lossReason || !lossSummary.trim()}
-                                                        onClick={() => handleCloseLead('lost')}
-                                                        className={`w-full py-5 mt-4 rounded-3xl border text-xs font-black uppercase tracking-[0.2em] transition-all ${lossReason && lossSummary.trim() ? 'border-red-500/40 text-red-500 hover:bg-red-600 hover:text-white shadow-xl shadow-red-600/20' : 'border-white/5 text-white/10 cursor-not-allowed'}`}
+                                                        onClick={() => {
+                                                            setIsRecordingPurchase(true);
+                                                            setIsFinishing(false);
+                                                        }}
+                                                        className="w-full py-6 rounded-3xl bg-indigo-600 text-white font-black uppercase tracking-[0.2em] shadow-xl shadow-indigo-500/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-3"
                                                     >
-                                                        CONFIRMAR PERDA
+                                                        <Zap size={20} /> COMPRA REALIZADA
+                                                    </button>
+
+                                                    <div className="space-y-4 pt-4 border-t border-white/5">
+                                                        <p className="text-[10px] font-black text-white/20 uppercase tracking-[0.2em] text-center">Ou motivo da perda</p>
+                                                        <select
+                                                            value={lossReason}
+                                                            onChange={(e) => setLossReason(e.target.value)}
+                                                            className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-sm text-white focus:outline-none focus:ring-1 focus:ring-red-500/50 transition-all font-medium [color-scheme:dark]"
+                                                        >
+                                                            <option value="" className="bg-[#080c18]">Selecione um motivo...</option>
+                                                            <option value="Preço alto" className="bg-[#080c18]">Preço alto / Sem margem</option>
+                                                            <option value="Comprou em outro lugar" className="bg-[#080c18]">Comprou em outro lugar</option>
+                                                            <option value="Desistiu da compra" className="bg-[#080c18]">Desistiu da compra</option>
+                                                            <option value="Sem crédito" className="bg-[#080c18]">Sem crédito aprovado</option>
+                                                            <option value="Veículo vendido" className="bg-[#080c18]">Veículo de interesse vendido</option>
+                                                            <option value="Sem contato/Frio" className="bg-[#080c18]">Sem resposta / Muito Frio</option>
+                                                        </select>
+
+                                                        {lossReason && (
+                                                            <div className="space-y-2 mt-4 animate-in fade-in slide-in-from-top-4">
+                                                                <p className="text-[10px] font-black text-red-400 uppercase tracking-[0.2em] text-center mb-2">Descreva exatamente por que a venda não aconteceu</p>
+                                                                <textarea
+                                                                    value={lossSummary}
+                                                                    onChange={(e) => setLossSummary(e.target.value)}
+                                                                    placeholder="Cole aqui a exportação do WhatsApp ou digite o resumo claro do desfecho..."
+                                                                    className="w-full h-32 bg-white/5 border border-red-500/20 rounded-2xl p-4 text-sm text-white focus:outline-none focus:ring-1 focus:ring-red-500/50 transition-all resize-none custom-scrollbar"
+                                                                />
+                                                                <p className="text-[9px] text-white/30 text-center">*Obrigatório para registrar a perda.</p>
+                                                            </div>
+                                                        )}
+
+                                                        <button
+                                                            disabled={!lossReason || !lossSummary.trim()}
+                                                            onClick={() => handleCloseLead('lost')}
+                                                            className={`w-full py-5 mt-4 rounded-3xl border text-xs font-black uppercase tracking-[0.2em] transition-all ${lossReason && lossSummary.trim() ? 'border-red-500/40 text-red-500 hover:bg-red-600 hover:text-white shadow-xl shadow-red-600/20' : 'border-white/5 text-white/10 cursor-not-allowed'}`}
+                                                        >
+                                                            CONFIRMAR PERDA
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </motion.div>
+                                    )
+                                }
+
+                                {
+                                    isRecordingSale && (
+                                        <motion.div
+                                            initial={{ opacity: 0, backdropFilter: 'blur(0px)' }}
+                                            animate={{ opacity: 1, backdropFilter: 'blur(10px)' }}
+                                            exit={{ opacity: 0, backdropFilter: 'blur(0px)' }}
+                                            className="fixed inset-0 z-[200] bg-black/80 flex items-center justify-center p-4 pointer-events-auto"
+                                        >
+                                            <div className="glass-card w-full max-w-md p-10 space-y-8 bg-[#0a0f1d] border-emerald-500/20 relative shadow-2xl rounded-[3rem]">
+                                                <button
+                                                    onClick={() => setIsRecordingSale(false)}
+                                                    className="absolute top-6 right-6 text-white/20 hover:text-white transition-colors"
+                                                >
+                                                    <Plus size={24} className="rotate-45" />
+                                                </button>
+
+                                                <div className="text-center space-y-2">
+                                                    <div className="h-16 w-16 rounded-3xl bg-emerald-600/20 border border-emerald-500/20 flex items-center justify-center mx-auto mb-6">
+                                                        <CreditCard size={32} className="text-emerald-500" />
+                                                    </div>
+                                                    <h3 className="text-2xl font-black text-white uppercase tracking-tighter">Registrar Venda</h3>
+                                                    <p className="text-xs text-white/40 uppercase font-bold tracking-widest">Parabéns pela venda para {actionLead.name}!</p>
+                                                </div>
+
+                                                <div className="space-y-4">
+                                                    <div className="space-y-2">
+                                                        <label className="text-[10px] font-black text-white/30 uppercase tracking-[0.2em] ml-1">Valor Total da Venda</label>
+                                                        <input
+                                                            type="text"
+                                                            placeholder="R$ 0,00"
+                                                            value={saleData.sale_value}
+                                                            onChange={(e) => setSaleData({ ...saleData, sale_value: formatCurrencyInput(e.target.value) })}
+                                                            className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-sm text-white focus:outline-none focus:ring-1 focus:ring-emerald-500/50"
+                                                        />
+                                                    </div>
+                                                    <div className="space-y-2">
+                                                        <label className="text-[10px] font-black text-white/30 uppercase tracking-[0.2em] ml-1">Margem de Lucro Bruta</label>
+                                                        <input
+                                                            type="text"
+                                                            placeholder="R$ 0,00"
+                                                            value={saleData.profit_margin}
+                                                            onChange={(e) => setSaleData({ ...saleData, profit_margin: formatCurrencyInput(e.target.value) })}
+                                                            className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-sm text-white focus:outline-none focus:ring-1 focus:ring-emerald-500/50"
+                                                        />
+                                                    </div>
+
+                                                    <button
+                                                        onClick={handleRecordSale}
+                                                        className="w-full py-6 mt-4 rounded-3xl bg-emerald-600 text-white font-black uppercase tracking-[0.2em] shadow-xl shadow-emerald-500/20 hover:scale-[1.02] active:scale-95 transition-all"
+                                                    >
+                                                        CONFIRMAR E FINALIZAR
                                                     </button>
                                                 </div>
                                             </div>
-                                        </div>
-                                    </motion.div>
-                                )}
+                                        </motion.div>
+                                    )
+                                }
 
-                                {isRecordingSale && (
-                                    <motion.div
-                                        initial={{ opacity: 0, backdropFilter: 'blur(0px)' }}
-                                        animate={{ opacity: 1, backdropFilter: 'blur(10px)' }}
-                                        exit={{ opacity: 0, backdropFilter: 'blur(0px)' }}
-                                        className="fixed inset-0 z-[200] bg-black/80 flex items-center justify-center p-4 pointer-events-auto"
-                                    >
-                                        <div className="glass-card w-full max-w-md p-10 space-y-8 bg-[#0a0f1d] border-emerald-500/20 relative shadow-2xl rounded-[3rem]">
-                                            <button
-                                                onClick={() => setIsRecordingSale(false)}
-                                                className="absolute top-6 right-6 text-white/20 hover:text-white transition-colors"
-                                            >
-                                                <Plus size={24} className="rotate-45" />
-                                            </button>
-
-                                            <div className="text-center space-y-2">
-                                                <div className="h-16 w-16 rounded-3xl bg-emerald-600/20 border border-emerald-500/20 flex items-center justify-center mx-auto mb-6">
-                                                    <CreditCard size={32} className="text-emerald-500" />
-                                                </div>
-                                                <h3 className="text-2xl font-black text-white uppercase tracking-tighter">Registrar Venda</h3>
-                                                <p className="text-xs text-white/40 uppercase font-bold tracking-widest">Parabéns pela venda para {actionLead.name}!</p>
-                                            </div>
-
-                                            <div className="space-y-4">
-                                                <div className="space-y-2">
-                                                    <label className="text-[10px] font-black text-white/30 uppercase tracking-[0.2em] ml-1">Valor Total da Venda</label>
-                                                    <input
-                                                        type="text"
-                                                        placeholder="R$ 0,00"
-                                                        value={saleData.sale_value}
-                                                        onChange={(e) => setSaleData({ ...saleData, sale_value: formatCurrencyInput(e.target.value) })}
-                                                        className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-sm text-white focus:outline-none focus:ring-1 focus:ring-emerald-500/50"
-                                                    />
-                                                </div>
-                                                <div className="space-y-2">
-                                                    <label className="text-[10px] font-black text-white/30 uppercase tracking-[0.2em] ml-1">Margem de Lucro Bruta</label>
-                                                    <input
-                                                        type="text"
-                                                        placeholder="R$ 0,00"
-                                                        value={saleData.profit_margin}
-                                                        onChange={(e) => setSaleData({ ...saleData, profit_margin: formatCurrencyInput(e.target.value) })}
-                                                        className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-sm text-white focus:outline-none focus:ring-1 focus:ring-emerald-500/50"
-                                                    />
-                                                </div>
-
+                                {
+                                    isRecordingPurchase && (
+                                        <motion.div
+                                            initial={{ opacity: 0, backdropFilter: 'blur(0px)' }}
+                                            animate={{ opacity: 1, backdropFilter: 'blur(10px)' }}
+                                            exit={{ opacity: 0, backdropFilter: 'blur(0px)' }}
+                                            className="fixed inset-0 z-[200] bg-black/80 flex items-center justify-center p-4 pointer-events-auto"
+                                        >
+                                            <div className="glass-card w-full max-w-md p-10 space-y-8 bg-[#0a0f1d] border-indigo-500/20 relative shadow-2xl rounded-[3rem]">
                                                 <button
-                                                    onClick={handleRecordSale}
-                                                    className="w-full py-6 mt-4 rounded-3xl bg-emerald-600 text-white font-black uppercase tracking-[0.2em] shadow-xl shadow-emerald-500/20 hover:scale-[1.02] active:scale-95 transition-all"
+                                                    onClick={() => setIsRecordingPurchase(false)}
+                                                    className="absolute top-6 right-6 text-white/20 hover:text-white transition-colors"
                                                 >
-                                                    CONFIRMAR E FINALIZAR
+                                                    <Plus size={24} className="rotate-45" />
                                                 </button>
+
+                                                <div className="text-center space-y-2">
+                                                    <div className="h-16 w-16 rounded-3xl bg-indigo-600/20 border border-indigo-500/20 flex items-center justify-center mx-auto mb-6">
+                                                        <Zap size={32} className="text-indigo-500" />
+                                                    </div>
+                                                    <h3 className="text-2xl font-black text-white uppercase tracking-tighter">Registrar Compra</h3>
+                                                    <p className="text-xs text-white/40 uppercase font-bold tracking-widest">Parabéns pela compra de {actionLead.name}!</p>
+                                                </div>
+
+                                                <div className="space-y-4">
+                                                    <div className="space-y-2">
+                                                        <label className="text-[10px] font-black text-white/30 uppercase tracking-[0.2em] ml-1">Detalhes do Veículo</label>
+                                                        <input
+                                                            type="text"
+                                                            placeholder="Ex: Honda Civic 2020 LXR"
+                                                            value={purchaseData.vehicle_details}
+                                                            onChange={(e) => setPurchaseData({ ...purchaseData, vehicle_details: e.target.value })}
+                                                            className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-sm text-white focus:outline-none focus:ring-1 focus:ring-indigo-500/50"
+                                                        />
+                                                    </div>
+                                                    <div className="space-y-2">
+                                                        <label className="text-[10px] font-black text-white/30 uppercase tracking-[0.2em] ml-1">Valor da Compra</label>
+                                                        <input
+                                                            type="text"
+                                                            placeholder="R$ 0,00"
+                                                            value={purchaseData.purchase_value}
+                                                            onChange={(e) => setPurchaseData({ ...purchaseData, purchase_value: formatCurrencyInput(e.target.value) })}
+                                                            className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-sm text-white focus:outline-none focus:ring-1 focus:ring-indigo-500/50"
+                                                        />
+                                                    </div>
+
+                                                    <button
+                                                        onClick={handleRecordPurchase}
+                                                        className="w-full py-6 mt-4 rounded-3xl bg-indigo-600 text-white font-black uppercase tracking-[0.2em] shadow-xl shadow-indigo-500/20 hover:scale-[1.02] active:scale-95 transition-all"
+                                                    >
+                                                        CONFIRMAR E FINALIZAR
+                                                    </button>
+                                                </div>
                                             </div>
-                                        </div>
-                                    </motion.div>
-                                )}
-                            </AnimatePresence>
+                                        </motion.div>
+                                    )
+                                }
+                            </AnimatePresence >
                         </div>
                     )
                 }

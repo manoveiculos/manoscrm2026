@@ -292,7 +292,7 @@ export default function LoginPage() {
                                         </span>
                                     </button>
 
-                                    <div className="flex flex-col gap-4 text-center pt-2">
+                                    <div className="flex-col gap-4 text-center pt-2">
                                         {mode === 'login' ? (
                                             <>
                                                 <button
@@ -325,7 +325,7 @@ export default function LoginPage() {
                         </AnimatePresence>
                     </div>
 
-                    <div className="flex flex-col items-center gap-4">
+                    <div className="flex-col items-center gap-4">
                         <div
                             onClick={handleLogoClick}
                             className="text-[10px] font-black text-white/10 uppercase tracking-[0.5em] cursor-default active:text-red-500 transition-colors"

@@ -1,34 +1,39 @@
 import { dataService } from '@/lib/dataService';
 import { NextResponse } from 'next/server';
 
-export async function POST() {
+export async function POST(req: Request) {
     try {
+        const { fullClear } = await req.json().catch(() => ({ fullClear: true }));
+
         const token = process.env.META_ACCESS_TOKEN || process.env.NEXT_PUBLIC_META_ACCESS_TOKEN;
         const adAccountId = process.env.META_AD_ACCOUNT_ID || process.env.NEXT_PUBLIC_META_AD_ACCOUNT_ID;
 
         if (!token || !adAccountId) {
-            console.error("Missing Meta configuration in environment variables.");
             return NextResponse.json(
                 { success: false, error: 'Configuração do Meta Ads ausente no servidor.' },
                 { status: 500 }
             );
         }
 
-        console.log("🚀 Server-side Meta sync triggered...");
+        if (fullClear) {
+            await dataService.clearCampaigns();
+        }
+
         const count = await dataService.syncMetaCampaigns(token, adAccountId);
 
         return NextResponse.json({
             success: true,
             syncedCount: count,
-            message: `${count} campanhas sincronizadas com sucesso.`
+            message: `Sincronização concluída: ${count} campanhas encontradas na conta ${adAccountId}.`
         });
 
-    } catch (error: any) {
-        console.error('Meta Sync API Error:', error);
+    } catch (error: unknown) {
+        const err = error as Error;
+        console.error('Meta Sync Error:', err.message);
         return NextResponse.json({
             success: false,
             error: 'Falha na sincronização com o Meta',
-            details: error.message
+            details: err.message
         }, { status: 500 });
     }
 }

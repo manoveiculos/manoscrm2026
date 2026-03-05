@@ -6,10 +6,6 @@ import { NextResponse, type NextRequest } from 'next/server';
  * Compatível com Next.js padrão (middleware.ts) e ambientes customizados (proxy.ts).
  */
 export async function middleware(request: NextRequest) {
-    const timestamp = new Date().toISOString();
-    const debugPath = request.nextUrl.pathname;
-    console.log(`[${timestamp}] Middleware started for path: ${debugPath}`);
-
     let supabaseResponse = NextResponse.next({
         request,
     });
@@ -35,20 +31,13 @@ export async function middleware(request: NextRequest) {
         }
     );
 
-    console.log(`[${timestamp}] Supabase client created. Attempting to get user...`);
-
     // IMPORTANTE: getUser() é mais seguro que getSession() no middleware
     // pois verifica o token contra o banco de dados do Supabase.
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-
-    if (authError) {
-        console.error(`[${timestamp}] Supabase auth error:`, authError.message);
-    }
-    console.log(`[${timestamp}] User check completed. User found: ${!!user}`);
+    const { data: { user } } = await supabase.auth.getUser();
 
     const path = request.nextUrl.pathname;
     const isLoginPage = path === '/login';
-    const isPublicApi = path.startsWith('/api/auth');
+    const isPublicApi = path.startsWith('/api/auth') || path.startsWith('/api/webhook') || path.startsWith('/api/health');
     const isStaticAsset = path.includes('.') || path.startsWith('/_next');
 
     // Se for um asset estático ou API pública, ignoramos
@@ -69,7 +58,6 @@ export async function middleware(request: NextRequest) {
         return NextResponse.redirect(dashboardUrl);
     }
 
-    console.log(`[${timestamp}] Middleware finishing. Path: ${path}, User: ${!!user}`);
     return supabaseResponse;
 }
 
@@ -85,6 +73,6 @@ export const config = {
          * Corresponde a todos os caminhos, exceto arquivos estáticos conhecidos.
          * Usamos uma lógica mais abrangente para garantir segurança total.
          */
-        '/((?!api/auth|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+        '/((?!api/auth|api/webhook|api/health|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
     ],
 };

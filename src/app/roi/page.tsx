@@ -50,7 +50,7 @@ export default function ROIPage() {
     return (
         <div className="space-y-12 pb-20">
             {/* Header */}
-            <header className="flex flex-col md:flex-row md:items-end justify-between gap-6">
+            <header className="flex-col md:flex-row md:items-end justify-between gap-6">
                 <div className="space-y-2">
                     <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 w-fit text-[10px] font-bold uppercase tracking-wider border border-emerald-500/10">
                         <DollarSign size={12} />
@@ -132,13 +132,13 @@ export default function ROIPage() {
                                                 </div>
                                             </td>
                                             <td className="hidden sm:table-cell py-6">
-                                                <div className="flex flex-col">
+                                                <div className="flex-col">
                                                     <span className="text-sm font-black text-white">{leads}</span>
                                                     <span className="text-[9px] text-white/20 font-bold uppercase">Leads</span>
                                                 </div>
                                             </td>
                                             <td className="py-6 text-center">
-                                                <div className="flex flex-col">
+                                                <div className="flex-col">
                                                     <span className="text-sm font-black text-emerald-500">{sales}</span>
                                                     <span className="text-[9px] text-white/20 font-bold uppercase">Mês</span>
                                                 </div>

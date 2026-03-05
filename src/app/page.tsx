@@ -40,20 +40,20 @@ export default function Dashboard() {
   const [aiStatus, setAiStatus] = useState<'checking' | 'ok' | 'error'>('checking');
   const [userRole, setUserRole] = useState<'admin' | 'consultant' | null>(null);
   const [consultantInfo, setConsultantInfo] = useState<{ id: string; name: string } | null>(null);
+  const [period, setPeriod] = useState<'today' | 'this_week' | 'this_month'>('this_month');
 
   useEffect(() => {
     async function loadData() {
       try {
+        setLoading(true);
         const authResponse = await supabase.auth.getSession();
         const session = authResponse.data?.session;
 
         if (!session?.user) {
-          // Se não houver sessão, redireciona imediatamente
           window.location.href = '/login';
           return;
         }
 
-        // Default role is consultant
         let role: 'admin' | 'consultant' = 'consultant';
         let info = null;
 
@@ -76,7 +76,7 @@ export default function Dashboard() {
         setConsultantInfo(info);
 
         const [financials, leads, aiRes] = await Promise.all([
-          dataService.getFinancialMetrics(),
+          dataService.getFinancialMetrics(period),
           dataService.getLeads(role === 'consultant' ? info?.id : undefined),
           fetch('/api/health/ai').then(res => res.json()).catch(() => ({ status: 'error' }))
         ]);
@@ -90,9 +90,9 @@ export default function Dashboard() {
       }
     }
     loadData();
-  }, []);
+  }, [period]);
 
-  if (loading) {
+  if (loading && !metrics) {
     return (
       <div className="flex h-[80vh] items-center justify-center">
         <div className="h-12 w-12 border-4 border-red-500 border-t-transparent rounded-full animate-spin" />
@@ -113,14 +113,9 @@ export default function Dashboard() {
     return <ConsultantDashboard consultantId={consultantInfo.id} consultantName={consultantInfo.name} />;
   }
 
-  if (userRole !== 'admin') {
-    return null; // Should have redirected
-  }
-
   return (
     <div className="space-y-12 pb-20">
-      {/* Header */}
-      <header className="flex flex-col md:flex-row md:items-end justify-between gap-6">
+      <header className="flex-col md:flex-row md:items-end justify-between gap-6">
         <div className="space-y-2">
           <div className={`flex items-center gap-2 px-3 py-1 rounded-full w-fit text-[10px] font-bold uppercase tracking-wider border shadow-md transition-all ${aiStatus === 'ok' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/10 shadow-emerald-500/5' :
             aiStatus === 'error' ? 'bg-red-500/10 text-red-500 border-red-500/10 shadow-red-500/5 animate-pulse' :
@@ -136,13 +131,27 @@ export default function Dashboard() {
         </div>
 
         <div className="flex items-center gap-4 bg-white/5 p-1.5 rounded-2xl border border-white/10">
-          <button className="px-5 py-2.5 rounded-xl bg-white/5 text-xs font-bold text-white shadow-xl">Hoje</button>
-          <button className="px-5 py-2.5 rounded-xl text-xs font-bold text-white/40 hover:text-white transition-colors">Semana</button>
-          <button className="px-5 py-2.5 rounded-xl text-xs font-bold text-white/40 hover:text-white transition-colors">Mês</button>
+          <button
+            onClick={() => setPeriod('today')}
+            className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-all ${period === 'today' ? 'bg-white/5 text-white shadow-xl' : 'text-white/40 hover:text-white'}`}
+          >
+            Hoje
+          </button>
+          <button
+            onClick={() => setPeriod('this_week')}
+            className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-all ${period === 'this_week' ? 'bg-white/5 text-white shadow-xl' : 'text-white/40 hover:text-white'}`}
+          >
+            Semana
+          </button>
+          <button
+            onClick={() => setPeriod('this_month')}
+            className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-all ${period === 'this_month' ? 'bg-white/5 text-white shadow-xl' : 'text-white/40 hover:text-white'}`}
+          >
+            Mês
+          </button>
         </div>
       </header>
 
-      {/* Stats Grid */}
       <motion.section
         variants={container}
         initial="hidden"
@@ -179,9 +188,7 @@ export default function Dashboard() {
         />
       </motion.section>
 
-      {/* Main Content Area */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        {/* Left Column: Recent Hot Leads */}
         <motion.div
           variants={item}
           initial="hidden"
@@ -216,7 +223,7 @@ export default function Dashboard() {
                     </p>
                     <div className="flex items-center gap-2 mt-3">
                       <span className="text-[9px] font-black uppercase text-red-500 border border-red-500/20 px-1.5 py-0.5 rounded">
-                        {lead.source === 'Facebook Leads' ? 'Meta Ads' : lead.source}
+                        {lead.source}
                       </span>
                       <span className="text-[9px] font-bold text-white/20 uppercase tracking-tighter">
                         {new Date(lead.created_at).toLocaleDateString()}
@@ -240,7 +247,6 @@ export default function Dashboard() {
           </div>
         </motion.div>
 
-        {/* Right Column: Mini ROI Stats */}
         <motion.div
           variants={item}
           initial="hidden"

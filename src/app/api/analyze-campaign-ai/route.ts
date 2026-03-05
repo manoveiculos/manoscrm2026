@@ -1,6 +1,7 @@
 import { OpenAI } from 'openai';
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
 let openaiInstance: OpenAI | null = null;
 
@@ -55,11 +56,11 @@ export async function POST(req: Request) {
             messages: [
                 {
                     role: 'system',
-                    content: 'Você é um Especialista Sênior em Tráfego Pago e Análise de Dados focado em campanhas do Facebook Ads e Google Ads para Concessionárias de Veículos. Suas recomendações devem ser táticas, detalhadas (passo a passo) e altamente aplicáveis. Você deve ensinar e orientar a equipe no dia a dia para otimizar marketing, criar estratégias de remarketing e aumentar a conversão. Nunca invente dados; baseie-se estritamente nos números e datas fornecidos.'
+                    content: 'Você é um Especialista Sênior em Tráfego Pago e Análise de Dados focado em campanhas do Facebook Ads e Google Ads para Concessionárias de Veículos. Suas recomendações devem ser CIRÚRGICAS, táticas, detalhadas (passo a passo) e altamente aplicáveis. O maior investimento da empresa é aqui, então seja preciso. Você deve ensinar e orientar a equipe no dia a dia para otimizar marketing, criar estratégias de remarketing e aumentar a conversão. Nunca invente dados; baseie-se estritamente nos números e datas fornecidos.'
                 },
                 {
                     role: 'user',
-                    content: `Analise o desempenho atual desta campanha e nos oriente sobre os próximos passos.
+                    content: `Analise o desempenho atual desta campanha e nos oriente sobre os próximos passos com precisão CIRÚRGICA.
             
             DADOS REAIS DA CAMPANHA:
             - Nome: ${campaign.name}
@@ -80,9 +81,9 @@ export async function POST(req: Request) {
             ${historyPromptInfo}
             
             DIRETRIZES TÁTICAS PARA SUA RESPOSTA:
-            1. "analise_critica": Crie um parágrafo robusto analisando o funil da campanha. Se houver "Contexto Histórico" acima, mencione o que mudou e se a ação anterior funcionou.
-            2. "gargalo_identificado": Qual o maior problema atual (ex: criativo saturado pela alta frequência, cliques mas sem conversões no site, CPC muito caro, etc)?
-            3. "proximos_passos": Forneça EXATAMENTE 3 passos. Estes devem ser um GUIA DETALHADO. Exemplo: "1. Criar novo público de Remarketing (Pessoas que engajaram nos últimos 15 dias)", "2. Pausar os criativos com CTR abaixo de 1% e testar novos vídeos", "3. Aumentar R$ 50/dia na verba se o CPL estiver abaixo de R$ 30".
+            1. "analise_critica": Crie um parágrafo robusto analisando o funil da campanha e identificando exatamente onde o dinheiro está sendo perdido.
+            2. "gargalo_identificado": Qual o maior problema atual (ex: criativo saturado pela alta frequência, cliques mas sem conversões no CRM, CPC muito caro, etc)?
+            3. "proximos_passos": Forneça EXATAMENTE 3 passos numerados. Estes devem ser um GUIA DETALHADO. Exemplo: "1. Criar novo público de Remarketing (Pessoas que engajaram nos últimos 15 dias)", "2. Pausar os criativos com CTR abaixo de 1% e testar novos vídeos", "3. Aumentar R$ 50/dia na verba se o CPL estiver abaixo de R$ 30".
             4. "saude_campanha": APENAS usar "EXCELENTE", "BOA", "REGULAR" ou "CRÍTICA".
             
             RESPONDA APENAS NESTE FORMATO JSON:
@@ -90,7 +91,7 @@ export async function POST(req: Request) {
               "analise_critica": "Seu parágrafo detalhado de diagnóstico...",
               "saude_campanha": "EXCELENTE | BOA | REGULAR | CRÍTICA",
               "gargalo_identificado": "A causa raiz do problema ou o impulsionador do sucesso",
-              "proximos_passos": ["Ação 1 detalhada", "Ação 2 detalhada", "Ação 3 detalhada"],
+              "proximos_passos": ["1. Passo 1...", "2. Passo 2...", "3. Passo 3..."],
               "score_potencial": number (0-100)
             }`
                 }
@@ -112,13 +113,8 @@ export async function POST(req: Request) {
             history: updatedHistory
         };
 
-        // Salvar localmente no Supabase
-        const supabase = createClient(
-            process.env.NEXT_PUBLIC_SUPABASE_URL!,
-            process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-        );
-
-        const { error: updateError } = await supabase
+        // Salvar localmente no Supabase usando Admin Client (bypassing RLS)
+        const { error: updateError } = await supabaseAdmin
             .from('campaigns_manos_crm')
             .update({ ai_analysis_result: aiResultPayload })
             .eq('id', campaign.id);

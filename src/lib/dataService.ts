@@ -1,5 +1,47 @@
-import { supabase } from './supabase';
-import { Lead, Campaign, Sale, InventoryItem, LeadStatus, AIClassification } from './types';
+﻿import { supabase } from './supabase';
+import { Lead, Campaign, Sale, Purchase, InventoryItem, LeadStatus, AIClassification } from './types';
+
+// ============ PERFORMANCE: In-Memory Cache ============
+// Prevents redundant Supabase queries on re-renders & page navigations
+interface CacheEntry<T> {
+    data: T;
+    expiry: number;
+}
+
+const _cache = new Map<string, CacheEntry<any>>();
+
+function cacheGet<T>(key: string): T | null {
+    const entry = _cache.get(key);
+    if (!entry) return null;
+    if (Date.now() > entry.expiry) {
+        _cache.delete(key);
+        return null;
+    }
+    return entry.data as T;
+}
+
+function cacheSet<T>(key: string, data: T, ttlMs: number): void {
+    _cache.set(key, { data, expiry: Date.now() + ttlMs });
+}
+
+function cacheInvalidate(...patterns: string[]): void {
+    for (const key of _cache.keys()) {
+        if (patterns.some(p => key.startsWith(p))) {
+            _cache.delete(key);
+        }
+    }
+}
+
+// Cache TTLs (in ms)
+const TTL = {
+    LEADS: 30_000,         // 30s â€” leads refresh often
+    CONSULTANTS: 120_000,  // 2min â€” rarely changes
+    INVENTORY: 120_000,    // 2min â€” stock doesn't shift every second
+    CAMPAIGNS: 60_000,     // 1min
+    METRICS: 30_000,       // 30s
+};
+
+// ============ END Cache ============
 
 // LOCKS CONCORRENCIAIS: Previnem falhas por StrictMode do React ou duplo clique, evitando sobrecarga no Banco
 let isSyncingLeads = false;
@@ -7,23 +49,39 @@ let isDistributingLeads = false;
 
 export const dataService = {
     // Leads
-    async getLeads(consultantId?: string) {
-        // Trigger background auto-distribution
-        this.autoDistributePendingCRM26().catch(err => console.error("Distribute Error:", err));
-
-        let consultantName = undefined;
-        if (consultantId) {
-            const { data: consultant } = await supabase
-                .from('consultants_manos_crm')
-                .select('name')
-                .eq('id', consultantId)
-                .single();
-            consultantName = consultant?.name;
+    async getLeads(consultantId?: string, leadId?: string) {
+        // PERF: Rate-limit auto-distribution to once per 30s
+        const distKey = 'auto_dist_last';
+        const lastDist = cacheGet<number>(distKey);
+        if (!lastDist) {
+            cacheSet(distKey, Date.now(), 30_000);
+            this.autoDistributePendingCRM26().catch(err => console.error("Distribute Error:", err));
         }
 
+        // PERF: Cache the consultant name lookup
+        let consultantName = undefined;
+        if (consultantId) {
+            const cNameKey = `consultant_name_${consultantId}`;
+            consultantName = cacheGet<string>(cNameKey);
+            if (!consultantName) {
+                const { data: consultant } = await supabase
+                    .from('consultants_manos_crm')
+                    .select('name')
+                    .eq('id', consultantId)
+                    .single();
+                consultantName = consultant?.name;
+                if (consultantName) cacheSet(cNameKey, consultantName, TTL.CONSULTANTS);
+            }
+        }
+
+        // PERF: Cache leads by consultantId
+        const cacheKey = `leads_${consultantId || 'all'}_${leadId || 'none'}`;
+        const cached = cacheGet<Lead[]>(cacheKey);
+        if (cached) return cached;
+
         try {
-            // Ler estritamente e exclusivamente da nova tabela única unificada
-            const crm26Leads = await this.getLeadsCRM26(consultantName, true); // true param to override 'enviado' filter
+            const crm26Leads = await this.getLeadsCRM26(consultantName, true, !!leadId);
+            cacheSet(cacheKey, crm26Leads, TTL.LEADS);
             return crm26Leads;
         } catch (err) {
             console.error("Error fetching leads from Unified CRM 26 source:", err);
@@ -36,7 +94,7 @@ export const dataService = {
         isSyncingLeads = true;
 
         try {
-            console.log("🔄 Starting assigned leads sync...");
+
 
             // 1. Fetch un-sent leads from CRM 26 that HAVE a vendedor
             const { data: leadsToSync } = await supabase
@@ -113,7 +171,7 @@ export const dataService = {
             region: sourceLead.cidade || sourceLead.region || '',
             assigned_consultant_id: consultantId,
             status: 'received', // New active lead for the consultant, maps to 'Aguardando' stage
-            source: 'WhatsApp',
+            source: sourceLead.origem || sourceLead.source || (source === 'crm26' ? 'WhatsApp' : 'Facebook Leads'),
             ai_score: sourceLead.ai_score || 0,
             ai_classification: sourceLead.ai_classification || 'warm',
             ai_reason: sourceLead.ai_reason || sourceLead.resumo_consultor || '',
@@ -128,7 +186,7 @@ export const dataService = {
 
         if (!insertError) {
             await this.markLeadAsSent(sourceLead.id, source);
-            console.log(`✅ Lead ${leadData.name} promoted to main CRM.`);
+
         } else {
             console.error("Error promoting lead:", insertError);
         }
@@ -142,16 +200,21 @@ export const dataService = {
             .eq('id', id);
     },
 
-    async getLeadsCRM26(consultantName?: string, includeSent: boolean = false) {
+    async getLeadsCRM26(consultantName?: string, includeSent: boolean = false, showRedistributed: boolean = false) {
         // Trigger auto-distribution for any unassigned leads in the background
         this.autoDistributePendingCRM26().catch(console.error);
 
         let query = supabase
             .from('leads_distribuicao_crm_26')
-            .select('*')
-            .order('criado_em', { ascending: false });
+            .select('*');
 
-        // Se quisermos apenas os pendentes de sync, setamos false. Mas agora a tabela É a principal.
+        if (!showRedistributed) {
+            query = query.not('status', 'eq', 'lost_redistributed');
+        }
+
+        query = query.order('criado_em', { ascending: false });
+
+        // Se quisermos apenas os pendentes de sync, setamos false. Mas agora a tabela Ã‰ a principal.
         // if (!includeSent) {
         //   query = query.eq('enviado', false);
         // }
@@ -166,8 +229,13 @@ export const dataService = {
             console.error("Error on leads_distribuicao_crm_26:", error);
             return [];
         }
-
-        const { data: allConsultants } = await supabase.from('consultants_manos_crm').select('id, name');
+        // PERF: Cache consultant list used for vendedorâ†’id mapping
+        let allConsultants = cacheGet<any[]>('consultant_names');
+        if (!allConsultants) {
+            const { data: consultantsData } = await supabase.from('consultants_manos_crm').select('id, name');
+            allConsultants = consultantsData || [];
+            cacheSet('consultant_names', allConsultants, TTL.CONSULTANTS);
+        }
 
         // Filter: name and phone are mandatory
         return (data || [])
@@ -212,10 +280,18 @@ export const dataService = {
                 // Determine status: native column > tag in resumo > fallback
                 let leadStatus: LeadStatus = 'received';
                 if (item.status && item.status !== '') {
-                    leadStatus = item.status as LeadStatus;
+                    // Normalizar 'NOVO' para 'received'
+                    if (item.status.toUpperCase() === 'NOVO') {
+                        leadStatus = 'received';
+                    } else {
+                        leadStatus = item.status as LeadStatus;
+                    }
                 } else if (item.resumo) {
                     const statusMatch = item.resumo.match(/\[STATUS:(.*?)\]/);
-                    if (statusMatch) leadStatus = statusMatch[1] as LeadStatus;
+                    if (statusMatch) {
+                        const s = statusMatch[1].toUpperCase();
+                        leadStatus = s === 'NOVO' ? 'received' : statusMatch[1] as LeadStatus;
+                    }
                 }
 
                 return {
@@ -230,7 +306,9 @@ export const dataService = {
                     status: leadStatus,
                     created_at: item.criado_em,
                     updated_at: item.atualizado_em || item.criado_em,
-                    source: 'WhatsApp',
+                    source: item.origem && item.origem.toLowerCase().includes('facebook') ? 'Facebook Leads' :
+                        item.origem && item.origem.toLowerCase().includes('meta') ? 'Facebook Leads' :
+                            'WhatsApp',
                     consultants_manos_crm: { name: item.vendedor || 'Pendente' },
                     assigned_consultant_id: assignedConsultantId,
                     ai_summary: bestSummary,
@@ -242,7 +320,7 @@ export const dataService = {
                     motivo_perda: item.motivo_perda || '',
                     resumo_fechamento: item.resumo_fechamento || '',
                     email: '',
-                    origem: (!item.origem || item.origem.toLowerCase() === 'não identificado' || item.origem === 'null') ? 'Contato Direto WhatsApp' : item.origem,
+                    origem: (!item.origem || item.origem.toLowerCase() === 'nÃ£o identificado' || item.origem === 'null') ? 'Contato Direto WhatsApp' : item.origem,
                     estimated_ticket: 0
                 };
             }) as unknown as Lead[];
@@ -337,27 +415,108 @@ export const dataService = {
     },
 
     async getDistributedLeads(consultantId?: string) {
-        let query = supabase
-            .from('leads_distribuicao')
-            .select('*')
-            .order('criado_em', { ascending: false });
-
-        if (consultantId) {
-            query = query.eq('assigned_consultant_id', consultantId);
+        let consultantName = undefined;
+        if (consultantId && consultantId.length > 30) { // Likely a UUID/Auth ID
+            const { data: consultant } = await supabase
+                .from('consultants_manos_crm')
+                .select('name')
+                .eq('auth_id', consultantId)
+                .maybeSingle();
+            consultantName = consultant?.name;
         }
 
-        const { data, error } = await query;
+        // 2. Fetch from leads_distribuicao (vendedor is name)
+        let queryArchive = supabase
+            .from('leads_distribuicao')
+            .select('*');
+        if (consultantId) {
+            if (consultantName) {
+                queryArchive = queryArchive.or(`vendedor.ilike.%${consultantName.split(' ')[0]}%,vendedor.eq.${consultantId}`);
+            } else {
+                queryArchive = queryArchive.eq('vendedor', consultantId);
+            }
+        }
 
-        if (error) throw error;
+        // 3. Fetch from main CRM (closed/lost/perca)
+        // We include common variations of lost status used historically
+        let queryMain = supabase
+            .from('leads_manos_crm')
+            .select('*')
+            .or('status.in.(closed,lost,post_sale,lost_redistributed),status.ilike.%perca%,status.ilike.%perdido%,status.ilike.%contato%');
 
-        // Decode AI metadata or use dedicated columns
-        return (data || []).map((lead: any) => {
+        if (consultantId) {
+            queryMain = queryMain.eq('assigned_consultant_id', consultantId);
+        }
+
+        // 4. Fetch from secondary CRM (closed/lost)
+        let queryCrm26 = supabase
+            .from('leads_distribuicao_crm_26')
+            .select('*')
+            .or('status.in.(closed,lost,post_sale,lost_redistributed),status.ilike.%perca%,status.ilike.%perdido%,status.ilike.%contato%');
+
+        if (consultantId) {
+            if (consultantName) {
+                queryCrm26 = queryCrm26.or(`vendedor.ilike.%${consultantName.split(' ')[0]}%,vendedor.eq.${consultantId}`);
+            } else {
+                queryCrm26 = queryCrm26.eq('vendedor', consultantId);
+            }
+        }
+
+        const [resArchive, resMain, resCrm26] = await Promise.all([
+            queryArchive,
+            queryMain,
+            queryCrm26
+        ]);
+
+        // Virtual IDs to prevent React Key Collisions (prefix-table-id)
+        const archiveLeads = (resArchive.data || []).map((l: any) => ({
+            ...l,
+            id: `dist_${l.id}`,
+            real_id: l.id,
+            source_table: 'leads_distribuicao'
+        }));
+
+        const mainLeads = (resMain.data || []).map((l: any) => ({
+            id: `main_${l.id}`,
+            real_id: l.id,
+            nome: l.name,
+            telefone: l.phone,
+            vendedor: l.assigned_consultant_id,
+            origem: l.source || l.origem,
+            interesse: l.vehicle_interest,
+            resumo: l.ai_summary || l.observacoes,
+            ai_score: l.ai_score,
+            ai_classification: l.ai_classification,
+            ai_reason: l.ai_reason,
+            status: l.status,
+            enviado: true,
+            criado_em: l.created_at,
+            atualizado_em: l.updated_at,
+            source_table: 'leads_manos_crm'
+        }));
+
+        const crm26Leads = (resCrm26.data || []).map((l: any) => ({
+            ...l,
+            id: `crm26_${l.id}`,
+            real_id: l.id,
+            source_table: 'leads_distribuicao_crm_26'
+        }));
+
+        // Deduplicate: If same phone/name exists in multiple tables, prefer the archive one or most recent
+        const allLeadsRaw = [...archiveLeads, ...mainLeads, ...crm26Leads];
+        const seen = new Set();
+        const deduplicated = allLeadsRaw.filter(lead => {
+            const key = `${lead.telefone}_${lead.nome?.toLowerCase()}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+
+        return deduplicated.map((lead: any) => {
             let ai_classification = lead.ai_classification;
             let ai_reason = lead.ai_reason;
             let resumo = lead.resumo;
 
-            // Priority 1: Use dedicated columns if they have content
-            // Priority 2: Fallback to decoding metadata from 'resumo'
             if (resumo && resumo.includes('||IA_DATA||')) {
                 const parts = resumo.split('||IA_DATA||');
                 resumo = parts[0].trim();
@@ -372,21 +531,19 @@ export const dataService = {
 
             return {
                 ...lead,
-                resumo,
-                ai_classification: ai_classification || lead.ai_classification,
-                ai_reason: ai_reason || lead.ai_reason,
-                nivel_interesse: lead.nivel_interesse,
-                momento_compra: lead.momento_compra,
-                resumo_consultor: lead.resumo_consultor,
-                proxima_acao: lead.proxima_acao
+                ai_classification: (ai_classification || 'warm') as AIClassification,
+                ai_reason: ai_reason || '',
+                resumo: resumo || ''
             };
         });
     },
 
-    async updateDistributedLeadAI(id: number, aiData: any) {
-        // First, get the current lead to preserve the original resumo
+    async updateDistributedLeadAI(id: any, aiData: any, sourceTable: string = 'leads_distribuicao') {
+        // First, get the current lead to preserve the original resumo/summary
+        const resumoColumn = sourceTable === 'leads_manos_crm' ? 'ai_summary' : 'resumo';
+
         const { data: currentLead, error: fetchError } = await supabase
-            .from('leads_distribuicao')
+            .from(sourceTable)
             .select('*')
             .eq('id', id)
             .single();
@@ -394,13 +551,12 @@ export const dataService = {
         if (fetchError) throw fetchError;
 
         // Clean resumo (remove old legacy metadata if exists)
-        let cleanResumo = currentLead?.resumo || '';
+        let cleanResumo = currentLead?.[resumoColumn] || '';
         if (cleanResumo.includes('||IA_DATA||')) {
             cleanResumo = cleanResumo.split('||IA_DATA||')[0].trim();
         }
 
-        // Prepare new data structure
-        const timestamp = new Date().toISOString();
+        // Prepare new data structure for fallback
         const iaMetadataStr = JSON.stringify({
             classification: aiData.ai_classification,
             reason: aiData.ai_reason,
@@ -409,33 +565,33 @@ export const dataService = {
         });
 
         // Final fallback string
-        const finalResumo = `${cleanResumo} ||IA_DATA|| ${iaMetadataStr}`;
+        const finalResumo = `${cleanResumo} ||IA_DATA|| ${iaMetadataStr}`.trim();
 
-        // Attempt update with REAL columns first
+        // Prepare update data mapping for different tables
         const updateData: any = {
-            ...aiData,
-            atualizado_em: timestamp,
-            resumo: finalResumo // Always keep fallback for now
+            ai_score: aiData.ai_score,
+            ai_classification: aiData.ai_classification,
+            ai_reason: aiData.ai_reason,
+            atualizado_em: new Date().toISOString(),
+            [resumoColumn]: finalResumo
         };
 
+        // Add additional fields if they exist in the target table
+        if (aiData.nivel_interesse) updateData.nivel_interesse = aiData.nivel_interesse;
+        if (aiData.momento_compra) updateData.momento_compra = aiData.momento_compra;
+        if (aiData.resumo_consultor) updateData.resumo_consultor = aiData.resumo_consultor;
+        if (aiData.proxima_acao) updateData.proxima_acao = aiData.proxima_acao;
+
         const { error } = await supabase
-            .from('leads_distribuicao')
+            .from(sourceTable)
             .update(updateData)
             .eq('id', id);
 
-        // If it failed because of missing columns, retry with ONLY the fallback 'resumo'
-        if (error && (error.code === '42703' || error.message?.toLowerCase().includes('column'))) {
-            console.warn("⚠️ Legacy schema detected in leads_distribuicao. Using fallback persistence.");
-            const { error: retryError } = await supabase
-                .from('leads_distribuicao')
-                .update({ resumo: finalResumo })
-                .eq('id', id);
-            if (retryError) throw retryError;
-        } else if (error) {
-            throw error;
+        if (error) {
+            console.error(`Error updating lead AI in ${sourceTable}:`, error);
+            // Fallback: strictly update only the resumo if everything else fails (legacy schema)
+            await supabase.from(sourceTable).update({ [resumoColumn]: finalResumo }).eq('id', id);
         }
-
-        return true;
     },
 
     // Legacy alias to maintain compatibility during development
@@ -444,7 +600,7 @@ export const dataService = {
     },
 
     async distributeOldLeads(leadIds: number[], vendedores: string[]) {
-        if (vendedores.length === 0) throw new Error("Nenhum consultor disponível para distribuição.");
+        if (vendedores.length === 0) throw new Error("Nenhum consultor disponÃ­vel para distribuiÃ§Ã£o.");
 
         const timestamp = new Date().toISOString();
         const updates = leadIds.map((id, index) => {
@@ -464,7 +620,7 @@ export const dataService = {
 
         // Retry without atualizado_em if it fails (graceful degradation)
         if (firstError && (firstError.code === '42703' || firstError.message?.toLowerCase().includes('atualizado_em'))) {
-            console.warn("⚠️ Column 'atualizado_em' missing in leads_distribuicao. Retrying distribution without it.");
+            console.warn("âš ï¸ Column 'atualizado_em' missing in leads_distribuicao. Retrying distribution without it.");
             const retryUpdates = leadIds.map((id, index) => {
                 const vendedor = vendedores[index % vendedores.length];
                 return supabase
@@ -483,119 +639,193 @@ export const dataService = {
     },
 
     async getConsultants() {
+        const cacheKey = 'consultants_all';
+        const cached = cacheGet<any[]>(cacheKey);
+        if (cached) return cached;
+
         const { data, error } = await supabase
             .from('consultants_manos_crm')
             .select('*')
             .eq('is_active', true);
         if (error) throw error;
+        cacheSet(cacheKey, data, TTL.CONSULTANTS);
         return data;
     },
 
     async assignConsultant(leadId: string, consultantId: string) {
+        let table = 'leads_distribuicao';
+        let realId: any = leadId;
+
         if (leadId.startsWith('crm26_')) {
-            const realId = leadId.replace('crm26_', '');
+            table = 'leads_distribuicao_crm_26';
+            realId = leadId.replace('crm26_', '');
+        } else if (leadId.startsWith('main_')) {
+            table = 'leads_manos_crm';
+            realId = leadId.replace('main_', '');
+        } else if (leadId.startsWith('dist_')) {
+            table = 'leads_distribuicao';
+            realId = leadId.replace('dist_', '');
+        }
 
-            // For CRM26, we need the consultant name to store in 'vendedor' field
-            const { data: consultant } = await supabase
-                .from('consultants_manos_crm')
-                .select('name')
-                .eq('id', consultantId)
-                .single();
+        // For CRM26 and leads_distribuicao, we might need the consultant name
+        const { data: consultant } = await supabase
+            .from('consultants_manos_crm')
+            .select('name')
+            .eq('id', consultantId)
+            .single();
 
-            const { error } = await supabase
-                .from('leads_distribuicao_crm_26')
-                .update({ vendedor: consultant?.name || 'Desconhecido' })
-                .eq('id', realId);
+        const updateData: any = {
+            updated_at: new Date().toISOString()
+        };
 
-            if (error) throw error;
-            return;
+        if (table === 'leads_manos_crm') {
+            updateData.assigned_consultant_id = consultantId;
+        } else {
+            updateData.vendedor = consultant?.name || 'Desconhecido';
+            updateData.enviado = true;
         }
 
         const { error } = await supabase
-            .from('leads_manos_crm')
-            .update({
-                assigned_consultant_id: consultantId,
-                updated_at: new Date().toISOString()
-            })
-            .eq('id', leadId);
+            .from(table)
+            .update(updateData)
+            .eq('id', realId);
 
         if (error) throw error;
 
-        // Log history
-        await this.logHistory(leadId, 'contacted', undefined, 'Lead atribuído manualmente para um consultor.');
+        // Log history (only if table supports it)
+        if (table === 'leads_manos_crm') {
+            await this.logHistory(realId, 'contacted', undefined, 'Lead atribuÃ­do manualmente para um consultor.');
+        }
     },
 
     async updateLeadStatus(leadId: string, status: LeadStatus, oldStatus?: LeadStatus, notes?: string, motivo_perda?: string, resumo_fechamento?: string) {
+        let table = 'leads_manos_crm';
+        let realId: any = leadId;
+
         if (leadId.startsWith('crm26_')) {
-            const realId = leadId.replace('crm26_', '');
-
-            const updatePayload: any = { status };
-            if (motivo_perda) updatePayload.motivo_perda = motivo_perda;
-            if (resumo_fechamento) updatePayload.resumo_fechamento = resumo_fechamento;
-
-            // Try updating status directly first
-            const { error: directError } = await supabase
-                .from('leads_distribuicao_crm_26')
-                .update(updatePayload)
-                .eq('id', realId);
-
-            if (directError && (
-                directError.code === '42703' ||
-                directError.message.includes('column "status" does not exist') ||
-                directError.message.includes('schema cache')
-            )) {
-                // Fallback: Persist status inside 'resumo' field
-                const { data } = await supabase
-                    .from('leads_distribuicao_crm_26')
-                    .select('resumo')
-                    .eq('id', realId)
-                    .single();
-
-                const currentResumo = data?.resumo || '';
-                const cleanResumo = currentResumo.replace(/\[STATUS:.*?\]\s*/g, '');
-
-                let extraData = '';
-                if (motivo_perda) extraData += `Motivo: ${motivo_perda} - `;
-                if (resumo_fechamento) extraData += `${resumo_fechamento} - `;
-
-                const newResumo = `[STATUS:${status}] ${extraData}${cleanResumo}`.trim();
-
-                await supabase
-                    .from('leads_distribuicao_crm_26')
-                    .update({ ...updatePayload, resumo: newResumo })
-                    .eq('id', realId);
-            } else if (directError) {
-                throw directError;
-            }
-            return null;
+            table = 'leads_distribuicao_crm_26';
+            realId = leadId.replace('crm26_', '');
+        } else if (leadId.startsWith('main_')) {
+            table = 'leads_manos_crm';
+            realId = leadId.replace('main_', '');
+        } else if (leadId.startsWith('dist_')) {
+            table = 'leads_distribuicao';
+            realId = leadId.replace('dist_', '');
         }
 
-        const updatePayloadManos: any = { status, updated_at: new Date().toISOString() };
-        if (motivo_perda) updatePayloadManos.motivo_perda = motivo_perda;
-        if (resumo_fechamento) updatePayloadManos.resumo_fechamento = resumo_fechamento;
+        // REDISTRIBUTION LOGIC
+        // Target consultants: Victor, Sergio, Wilson
+        // Rules: 
+        // 1. Status is 'lost' or 'post_sale' (Sem Contato)
+        // 2. Redistribute among the 3, excluding current one
+        // 3. Status changes to 'lost_redistributed' to hide from main Kanban
 
-        const { data, error } = await supabase
-            .from('leads_manos_crm')
-            .update(updatePayloadManos)
-            .eq('id', leadId);
+        let targetStatus = status;
+        const isRedistributionStatus = status === 'lost' || status === 'post_sale' || (status as any) === 'Sem Contato';
+        const isRedistributionReason = motivo_perda === 'Sem contato/Frio' || motivo_perda === 'Perda Total' || resumo_fechamento?.includes('Perda Total');
 
-        if (error) throw error;
+        if (isRedistributionStatus && isRedistributionReason) {
+            targetStatus = 'lost_redistributed' as any;
 
-        // Log history
-        await this.logHistory(leadId, status, oldStatus, notes);
+            try {
+                // Get current lead to know current consultant
+                const { data: currentLead } = await supabase.from(table).select('*').eq('id', realId).single();
+                const currentConsultantName = currentLead?.vendedor || '';
+                const currentConsultantId = currentLead?.assigned_consultant_id || '';
 
-        // 🚀 META CONVERSIONS API: Enviar evento de Lead em qualquer mudança de status
-        // Buscamos o lead atual para ter o telefone normalizado
-        try {
-            const { data: lead } = await supabase.from('leads_manos_crm').select('phone').eq('id', leadId).single();
-            if (lead && lead.phone) {
-                this.enviarEventoLeadMeta(lead).catch(err => console.error("Meta CAPI Error:", err));
+                // Get target consultants
+                const { data: allConsultants } = await supabase
+                    .from('consultants_manos_crm')
+                    .select('id, name')
+                    .eq('is_active', true);
+
+                const participants = ['Victor', 'Sergio', 'Wilson'];
+                const filteredConsultants = allConsultants?.filter(c =>
+                    participants.some(p => c.name.toLowerCase().includes(p.toLowerCase())) &&
+                    c.id !== currentConsultantId &&
+                    !currentConsultantName.toLowerCase().includes(c.name.split(' ')[0].toLowerCase())
+                ) || [];
+
+                if (filteredConsultants.length > 0) {
+                    const next = filteredConsultants[Math.floor(Math.random() * filteredConsultants.length)];
+
+
+                    const redistributionPayload: any = {
+                        status: targetStatus,
+                        atualizado_em: new Date().toISOString(),
+                        updated_at: new Date().toISOString()
+                    };
+
+                    if (table === 'leads_manos_crm') {
+                        redistributionPayload.assigned_consultant_id = next.id;
+                    } else {
+                        redistributionPayload.vendedor = next.name;
+                        redistributionPayload.enviado = true;
+                    }
+
+                    if (motivo_perda) redistributionPayload.motivo_perda = motivo_perda;
+                    if (resumo_fechamento) redistributionPayload.resumo_fechamento = resumo_fechamento;
+
+                    const { error: redError } = await supabase
+                        .from(table)
+                        .update(redistributionPayload)
+                        .eq('id', realId);
+
+                    if (redError) throw redError;
+
+                    // Log the redistribution
+                    if (table === 'leads_manos_crm') {
+                        await this.logHistory(realId, targetStatus, oldStatus, `Lead redistribuÃ­do para ${next.name} (${motivo_perda})`);
+                    }
+
+                    return; // Exit after redistribution
+                }
+            } catch (err) {
+                console.error("Critical error in redistribution logic:", err);
+                // Fallback to normal status update if redistribution fails
             }
-        } catch (metaErr) {
-            console.error("Error fetching lead for Meta CAPI:", metaErr);
         }
 
-        return data;
+        const updatePayload: any = {
+            status: targetStatus,
+            atualizado_em: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+        };
+
+        if (motivo_perda) updatePayload.motivo_perda = motivo_perda;
+        if (resumo_fechamento) updatePayload.resumo_fechamento = resumo_fechamento;
+        if (notes) updatePayload.notas = notes;
+
+        const { error } = await supabase
+            .from(table)
+            .update(updatePayload)
+            .eq('id', realId);
+
+        if (error) {
+            console.warn(`Error updating status in ${table}, trying fallback:`, error);
+            // Fallback for legacy schemas
+            if (table === 'leads_distribuicao_crm_26') {
+                const { data } = await supabase.from(table).select('resumo').eq('id', realId).single();
+                let resumo = data?.resumo || '';
+                const statusMarker = `[STATUS:${targetStatus}]`;
+                if (!resumo.includes('[STATUS:')) resumo += ` ${statusMarker}`;
+                else resumo = resumo.replace(/\[STATUS:.*?\]/, statusMarker);
+                await supabase.from(table).update({ resumo }).eq('id', realId);
+            }
+        }
+
+        if (table === 'leads_manos_crm') {
+            await this.logHistory(realId, targetStatus, oldStatus, notes);
+
+            // Meta CAPI sync
+            const { data: lead } = await supabase.from('leads_manos_crm').select('phone').eq('id', realId).single();
+            if (lead?.phone) {
+                await this.enviarEventoLeadMeta(lead);
+            }
+        }
+
+        // PERF: Invalidate leads cache after status mutation
+        cacheInvalidate('leads_');
     },
 
     /**
@@ -605,11 +835,11 @@ export const dataService = {
         if (!lead.phone) return;
 
         try {
-            // Importação dinâmica do utility para preparar o payload (roda no client mas a API é server-side)
+            // ImportaÃ§Ã£o dinÃ¢mica do utility para preparar o payload (roda no client mas a API Ã© server-side)
             const { prepareMetaLeadPayload } = await import('./meta-capi');
             const payload = prepareMetaLeadPayload(lead.phone);
 
-            console.log("📤 Triggering Meta CAPI via /api/meta-capi...");
+
             const response = await fetch('/api/meta-capi', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -620,12 +850,16 @@ export const dataService = {
             if (!response.ok) {
                 throw new Error(result.error || 'Erro desconhecido na Meta CAPI');
             }
-            console.log("✅ Meta Lead Event synced:", result);
+
             return result;
         } catch (err) {
-            console.error("❌ Failed to send lead event to Meta:", err);
+            console.error("âŒ Failed to send lead event to Meta:", err);
             throw err;
         }
+    },
+
+    async reactivateLead(leadId: string) {
+        return this.updateLeadStatus(leadId, 'received' as LeadStatus, undefined, 'Lead reativado manualmente da Ã¡rea de reativaÃ§Ã£o.');
     },
 
     async updateLeadAI(leadId: string, aiData: { ai_score: number, ai_classification: string, ai_reason: string }) {
@@ -687,6 +921,8 @@ export const dataService = {
                 updateObj.status = details.status;
             }
 
+            updateObj.atualizado_em = new Date().toISOString();
+
             if (Object.keys(updateObj).length === 0) return null;
 
             const { data, error } = await supabase
@@ -698,13 +934,13 @@ export const dataService = {
             return data;
         }
 
-        // Removida atualização de details da tabela antiga
+        // Removida atualizaÃ§Ã£o de details da tabela antiga
         return null;
     },
 
     async logHistory(leadId: string, newStatus: LeadStatus, oldStatus?: LeadStatus, notes?: string) {
         if (leadId.startsWith('crm26_')) {
-            // Histórico nativo no resumo ou tabela dedicada no futuro
+            // HistÃ³rico nativo no resumo ou tabela dedicada no futuro
             return;
         }
 
@@ -759,7 +995,7 @@ export const dataService = {
         // 3. Automatic Distribution (Round Robin)
         if (newLead) {
             await this.distributeLead(newLead.id);
-            await this.logHistory(newLead.id, 'received', undefined, 'Lead capturado e em processamento de distribuição.');
+            await this.logHistory(newLead.id, 'received', undefined, 'Lead capturado e em processamento de distribuiÃ§Ã£o.');
         }
 
         return newLead;
@@ -792,52 +1028,71 @@ export const dataService = {
     },
 
     // ROI & Financials
-    async getFinancialMetrics() {
-        // Get start of current month
+    async getFinancialMetrics(period: string = 'this_month') {
+        const cacheKey = `metrics_${period}`;
+        const cached = cacheGet<any>(cacheKey);
+        if (cached) return cached;
+
         const now = new Date();
-        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+        let startDate: string;
 
-        // 1. Get all campaigns and their spend (all time)
-        const { data: campaigns } = await supabase.from('campaigns_manos_crm').select('*');
-        // 2. Get all sales (all time)
-        const { data: salesAll } = await supabase.from('sales_manos_crm').select('*');
-        // 3. Get sales (this month)
-        const { data: salesMonth } = await supabase.from('sales_manos_crm').select('*').gte('created_at', startOfMonth);
+        switch (period) {
+            case 'today':
+                startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+                break;
+            case 'yesterday':
+                const yesterday = new Date(now);
+                yesterday.setDate(yesterday.getDate() - 1);
+                startDate = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate()).toISOString();
+                break;
+            case 'this_week':
+                const day = now.getDay();
+                const diff = now.getDate() - day + (day === 0 ? -6 : 1); // Monday
+                startDate = new Date(now.setDate(diff)).toISOString();
+                break;
+            case 'this_month':
+            default:
+                startDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+                break;
+        }
 
-        // 4. Get total lead count EXCLUSIVAMENTE (CRM 26 / WhatsApp)
-        const { count: totalLeads } = await supabase.from('leads_distribuicao_crm_26').select('*', { count: 'exact', head: true });
+        // PERF: Fetch all 3 data sources in parallel
+        const [campaignsRes, salesRes, leadsCountRes] = await Promise.all([
+            supabase.from('campaigns_manos_crm').select('total_spend'),
+            supabase.from('sales_manos_crm').select('sale_value, profit_margin').gte('created_at', startDate),
+            supabase.from('leads_distribuicao_crm_26').select('*', { count: 'exact', head: true }).gte('criado_em', startDate)
+        ]);
 
-        // 5. Get leads (this month) EXCLUSIVAMENTE (CRM 26 / WhatsApp)
-        const { count: totalLeadsMonth } = await supabase.from('leads_distribuicao_crm_26').select('*', { count: 'exact', head: true }).gte('criado_em', startOfMonth);
+        const campaigns = campaignsRes.data;
+        const salesPeriod = salesRes.data;
+        const totalLeadsPeriod = leadsCountRes.count;
 
-        const totalSpend = campaigns?.reduce((acc: number, c: Campaign) => acc + (Number(c.total_spend) || 0), 0) || 0;
-        const totalRevenue = salesAll?.reduce((acc: number, s: Sale) => acc + (Number(s.sale_value) || 0), 0) || 0;
-        const totalProfit = salesAll?.reduce((acc: number, s: Sale) => acc + (Number(s.profit_margin) || 0), 0) || 0;
+        // Calculate metrics
+        const totalSpend = (campaigns as any[])?.reduce((acc: number, c: any) => acc + (Number(c.total_spend) || 0), 0) || 0;
+        const totalRevenue = (salesPeriod as any[])?.reduce((acc: number, s: any) => acc + (Number(s.sale_value) || 0), 0) || 0;
+        const totalProfit = (salesPeriod as any[])?.reduce((acc: number, s: any) => acc + (Number(s.profit_margin) || 0), 0) || 0;
 
-        const monthlyRevenue = salesMonth?.reduce((acc: number, s: Sale) => acc + (Number(s.sale_value) || 0), 0) || 0;
-        const monthlyProfit = salesMonth?.reduce((acc: number, s: Sale) => acc + (Number(s.profit_margin) || 0), 0) || 0;
-
-        const salesCount = salesAll?.length || 0;
-        const salesCountMonth = salesMonth?.length || 0;
-
+        const salesCount = salesPeriod?.length || 0;
         const cac = salesCount > 0 ? totalSpend / salesCount : 0;
-        const cpl = (totalLeads || 0) > 0 ? totalSpend / (totalLeads || 1) : 0;
+        const cpl = (totalLeadsPeriod || 0) > 0 ? totalSpend / (totalLeadsPeriod || 1) : 0;
         const roi = totalSpend > 0 ? (totalRevenue / totalSpend) : 0;
 
-        return {
+        const result = {
             totalSpend,
             totalRevenue,
             totalProfit,
-            monthlyRevenue,
-            monthlyProfit,
+            monthlyRevenue: totalRevenue,
+            monthlyProfit: totalProfit,
             salesCount,
-            salesCountMonth,
+            salesCountMonth: salesCount,
             cac,
             cpl,
             roi,
-            leadCount: totalLeads || 0,
-            leadCountMonth: totalLeadsMonth || 0
+            leadCount: totalLeadsPeriod || 0,
+            leadCountMonth: totalLeadsPeriod || 0
         };
+        cacheSet(cacheKey, result, TTL.METRICS);
+        return result;
     },
 
     // Consultant Performance
@@ -917,7 +1172,7 @@ export const dataService = {
                     vehicle_interest: item.interesse || '',
                     status: 'scheduled' as LeadStatus,
                     ai_summary: (item.resumo || '').split('||IA_DATA||')[0].replace(/\[STATUS:.*?\]\s*/g, ''),
-                    scheduled_at: new Date().toISOString() // Fallback temporário
+                    scheduled_at: new Date().toISOString() // Fallback temporÃ¡rio
                 }));
             }
         }
@@ -961,6 +1216,10 @@ export const dataService = {
 
     // Inventory
     async getInventory() {
+        const cacheKey = 'inventory_all';
+        const cached = cacheGet<InventoryItem[]>(cacheKey);
+        if (cached) return cached;
+
         const { data, error } = await supabase
             .from('estoque_manos_crm')
             .select('*');
@@ -969,17 +1228,23 @@ export const dataService = {
             console.error("Supabase error fetching inventory:", error);
             throw error;
         }
+        cacheSet(cacheKey, data, TTL.INVENTORY);
         return data as InventoryItem[];
     },
 
     // Campaigns
     async getCampaigns() {
+        const cacheKey = 'campaigns_all';
+        const cached = cacheGet<any[]>(cacheKey);
+        if (cached) return cached;
+
         const { data, error } = await supabase
             .from('campaigns_manos_crm')
             .select('*, leads_manos_crm(count)')
             .order('created_at', { ascending: false });
 
         if (error) throw error;
+        cacheSet(cacheKey, data, TTL.CAMPAIGNS);
         return data;
     },
 
@@ -1031,16 +1296,52 @@ export const dataService = {
             .gte('created_at', startDate.toISOString())
             .lte('created_at', endDate.toISOString());
 
-        if (error) {
-            console.error("Error fetching filtered leads:", error);
+        // 2. ALSO query leads from the main WhatsApp/CRM26 distribution table
+        const { data: data26, error: error26 } = await supabase
+            .from('leads_distribuicao_crm_26')
+            .select('origem, id')
+            .gte('criado_em', startDate.toISOString())
+            .lte('criado_em', endDate.toISOString());
+
+        if (error || error26) {
+            console.error("Error fetching filtered leads:", error || error26);
             return {};
         }
 
-        // Group by campaign_id
+        // 3. Match leads to campaigns
+        // We need campaign names to match with 'origem' in leads_distribuicao_crm_26
+        const { data: allCampaigns } = await supabase.from('campaigns_manos_crm').select('id, name');
+
         const countsByCampaign: Record<string, number> = {};
+
+        // Count from leads_manos_crm (direct ID match)
         data?.forEach(lead => {
             if (lead.campaign_id) {
                 countsByCampaign[lead.campaign_id] = (countsByCampaign[lead.campaign_id] || 0) + 1;
+            }
+        });
+
+        // Count from leads_distribuicao_crm_26 (name match with 'origem')
+        data26?.forEach(lead => {
+            if (lead.origem && allCampaigns) {
+                // Try to find a campaign whose name is contained in or equals the origin
+                // Normalizar nomes para aumentar chance de match (ignorar acentos, pontuaÃ§Ã£o)
+                const normalize = (s: string) => s.toLowerCase()
+                    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // remove acentos (ex: MARÃ‡O -> MARCO)
+                    .replace(/[\[\]\-\(\)\.]/g, '') // remove brackets/pontuaÃ§Ã£o
+                    .replace(/\s+/g, ' ').trim();
+
+                const lOrigemNorm = normalize(lead.origem);
+
+                const matchedCampaign = allCampaigns.find(c => {
+                    const cNameNorm = normalize(c.name);
+                    return lOrigemNorm.includes(cNameNorm) || cNameNorm.includes(lOrigemNorm) ||
+                        lead.origem.toLowerCase().includes(c.name.toLowerCase()) ||
+                        c.name.toLowerCase().includes(lead.origem.toLowerCase());
+                });
+                if (matchedCampaign) {
+                    countsByCampaign[matchedCampaign.id] = (countsByCampaign[matchedCampaign.id] || 0) + 1;
+                }
             }
         });
 
@@ -1070,7 +1371,7 @@ export const dataService = {
 
     // Sync Meta Campaigns with advanced analytics (Clicks, Reach, CPC, etc.)
     async syncMetaCampaigns(token: string, adAccountId: string) {
-        console.log("🚀 Iniciando sincronização avançada para conta:", adAccountId);
+
 
         try {
             // Usando status da campanha mestre para evitar campanhas ocultas por adsets pausados, com limite de 150
@@ -1087,7 +1388,7 @@ export const dataService = {
             if (result.error) throw new Error(result.error.message);
 
             const metaCampaigns = result.data || [];
-            console.log(`📊 Meta retornou ${metaCampaigns.length} campanhas filtrando por status real...`);
+
 
             const upsertData = metaCampaigns.map((c: { name?: string; status?: string; effective_status?: string; insights?: { data?: Record<string, unknown>[] } }) => {
                 const insights = c.insights?.data?.[0] || {};
@@ -1095,7 +1396,7 @@ export const dataService = {
                 // Prioriza o status mestre da campanha, pois se um adset pausar, o effective_status pausa a campanha inteira na API
                 const status = (c.status || c.effective_status || '').toLowerCase();
 
-                console.log(`- Campanha: ${c.name} | Status FB: ${c.status} | Effective: ${c.effective_status}`);
+
 
                 return {
                     name: c.name || 'Sem Nome',
@@ -1121,7 +1422,7 @@ export const dataService = {
                 if (error) {
                     // Fallback: If cpc/ctr/reach columns are missing, try a simpler upsert
                     if (error.code === '42703' || error.message.includes('column') || error.message.includes('not find')) {
-                        console.warn("⚠️ Advanced analytics columns missing in campaigns_manos_crm. Retrying with basic fields...");
+                        console.warn("âš ï¸ Advanced analytics columns missing in campaigns_manos_crm. Retrying with basic fields...");
                         const basicUpsertData = upsertData.map((d: any) => ({
                             name: d.name as string,
                             platform: d.platform as string,
@@ -1140,12 +1441,127 @@ export const dataService = {
                 }
             }
 
+            // Tentar sicronizar leads reais do Meta se for solicitaÃ§Ã£o geral
+            try {
+                await this.syncMetaLeads(token, adAccountId);
+            } catch (le) {
+                console.error("Warning: Lead Gen sync failed but campaign sync continued:", le);
+            }
+
             return upsertData.length;
         } catch (err) {
             console.error("Sync Error:", err);
             throw err;
         }
     },
+
+    // Sincroniza Leads reais do Meta para a tabela de distribuiÃ§Ã£o
+    async syncMetaLeads(token: string, adAccountId: string) {
+
+        try {
+            // Pegar os leads dos Ãºltimos 7 dias
+            const now = new Date();
+            const lastWeek = new Date();
+            lastWeek.setDate(now.getDate() - 7);
+            const since = Math.floor(lastWeek.getTime() / 1000);
+
+            const url = `https://graph.facebook.com/v19.0/act_${adAccountId}/leads?fields=campaign_id,campaign_name,created_time,full_name,phone_number,email,field_data&limit=100&access_token=${token}`;
+
+            const response = await fetch(url);
+            if (!response.ok) {
+                console.warn("Meta leads extraction not available or lacks permissions.");
+                return 0;
+            }
+
+            const result = await response.json();
+            const rawLeads = result.data || [];
+
+            if (rawLeads.length === 0) return 0;
+
+            const leadsToInsert = rawLeads.map((ml: any) => {
+                // Mapear field_data para campos conhecidos se telefone/email estiverem lÃ¡
+                let phone = ml.phone_number || '';
+                let name = ml.full_name || '';
+                let email = ml.email || '';
+
+                if (ml.field_data) {
+                    ml.field_data.forEach((field: any) => {
+                        const n = field.name.toLowerCase();
+                        if (n.includes('phone') || n.includes('tel')) phone = field.values[0];
+                        if (n.includes('name') || n.includes('nome')) name = field.values[0];
+                        if (n.includes('email')) email = field.values[0];
+                    });
+                }
+
+                return {
+                    nome: name || 'Lead Meta Form',
+                    telefone: phone,
+                    origem: ml.campaign_name || 'Facebook Leads',
+                    interesse: ml.campaign_name || '',
+                    status: 'received', // AGUARDANDO
+                    criado_em: ml.created_time,
+                    vendedor: null, // Deixar para distribuiÃ§Ã£o automÃ¡tica
+                    enviado: false,
+                    resumo: `[LEAD FB] Capturado do formulÃ¡rio via campanha: ${ml.campaign_name}`
+                };
+            }).filter((l: any) => l.telefone !== '');
+
+            if (leadsToInsert.length > 0) {
+                // Upsert para evitar duplicados baseados no telefone e origem se necessÃ¡rio
+                // Mas leads_distribuicao_crm_26 nÃ£o tem Unique Constraint no telefone em muitos casos
+                // Vamos inserir apenas os que nÃ£o existem no mesmo dia
+                const { error: insertError } = await supabase
+                    .from('leads_distribuicao_crm_26')
+                    .insert(leadsToInsert);
+
+                if (insertError) {
+                    console.error("Error inserting Meta leads:", insertError.message);
+                }
+            }
+
+            return leadsToInsert.length;
+        } catch (err) {
+            console.error("Error on syncMetaLeads:", err);
+            return 0;
+        }
+    },
+
+    // Sync Google Ads Campaigns
+    async syncGoogleCampaigns(creds: any) {
+
+
+        try {
+            const { fetchGoogleAdsCampaigns } = await import('./google-ads');
+            const googleCampaigns = await fetchGoogleAdsCampaigns(creds);
+
+
+
+            if (googleCampaigns.length > 0) {
+                const { error } = await supabase
+                    .from('campaigns_manos_crm')
+                    .upsert(googleCampaigns, { onConflict: 'name' });
+
+                if (error) throw new Error(`Supabase Google Upsert: ${error.message}`);
+            }
+
+            return googleCampaigns.length;
+        } catch (err) {
+            console.error("Google Sync Error:", err);
+            throw err;
+        }
+    },
+
+    // Clear all campaigns from the database (Zerar tudo)
+    async clearCampaigns() {
+        const { error } = await supabase
+            .from('campaigns_manos_crm')
+            .delete()
+            .neq('id', '00000000-0000-0000-0000-000000000000'); // Delete everything
+
+        if (error) throw error;
+        return true;
+    },
+
 
     // Sales Recording
     async recordSale(saleData: Partial<Sale>) {
@@ -1159,6 +1575,22 @@ export const dataService = {
             .single();
 
         if (error) throw error;
+        cacheInvalidate('leads_', 'metrics_');  // Invalidate leads & metrics cache after sale
+        return data;
+    },
+
+    async recordPurchase(purchaseData: Partial<Purchase>) {
+        const { data, error } = await supabase
+            .from('purchases_manos_crm')
+            .insert([{
+                ...purchaseData,
+                created_at: new Date().toISOString()
+            }])
+            .select()
+            .single();
+
+        if (error) throw error;
+        cacheInvalidate('leads_', 'metrics_');  // Invalidate leads & metrics cache after purchase
         return data;
     },
 
@@ -1166,8 +1598,8 @@ export const dataService = {
         if (leadId.startsWith('crm26_')) {
             const realId = leadId.replace('crm26_', '');
 
-            // Soft delete: Apenas move o status para lost ou exclui da visualização atual
-            // Aqui estamos marcando o status como 'lost' para simular a exclusão
+            // Soft delete: Apenas move o status para lost ou exclui da visualizaÃ§Ã£o atual
+            // Aqui estamos marcando o status como 'lost' para simular a exclusÃ£o
             const { error } = await supabase
                 .from('leads_distribuicao_crm_26')
                 .delete()
@@ -1177,6 +1609,83 @@ export const dataService = {
             return;
         }
 
-        // Removida deleção da tabela main_manos_crm
+        // Removida deleÃ§Ã£o da tabela main_manos_crm
+    },
+
+    // Intelligent Analysis Persistence
+    async saveIntelligentAnalysis(data: {
+        opportunities_of_the_day: string;
+        recommended_actions: any[];
+        stats: any;
+        analyses: any[];
+    }) {
+        try {
+            const { error } = await supabase
+                .from('intelligent_analysis_results')
+                .insert([{
+                    ...data,
+                    created_at: new Date().toISOString()
+                }]);
+
+            if (error) throw error;
+
+        } catch (err) {
+            console.error("Error saving intelligent analysis:", err);
+            throw err;
+        }
+    },
+
+    async getLastIntelligentAnalysis() {
+        try {
+            const { data, error } = await supabase
+                .from('intelligent_analysis_results')
+                .select('*')
+                .order('created_at', { ascending: false })
+                .limit(1);
+
+            if (error) throw error;
+            return data && data.length > 0 ? data[0] : null;
+        } catch (err) {
+            console.error("Error fetching last intelligent analysis:", err);
+            return null;
+        }
+    },
+
+    // New Individual Consultant Analysis Methods
+    async saveConsultantAnalysis(consultantId: string, text: string, json: any) {
+        try {
+            const { error } = await supabase
+                .from('crm_daily_analysis')
+                .insert([{
+                    consultor_id: consultantId,
+                    analysis_text: text,
+                    analysis_json: json,
+                    generated_at: new Date().toISOString(),
+                    expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() // 24h expiry
+                }]);
+
+            if (error) throw error;
+
+        } catch (err) {
+            console.error("Error saving consultant analysis:", err);
+            throw err;
+        }
+    },
+
+    async getLatestConsultantAnalysis(consultantId: string) {
+        try {
+            const { data, error } = await supabase
+                .from('crm_daily_analysis')
+                .select('*')
+                .eq('consultor_id', consultantId)
+                .order('generated_at', { ascending: false })
+                .limit(1);
+
+            if (error) throw error;
+            return data && data.length > 0 ? data[0] : null;
+        } catch (err: any) {
+            console.error("Error fetching consultant analysis:", err.message || err);
+            return null;
+        }
     }
 };

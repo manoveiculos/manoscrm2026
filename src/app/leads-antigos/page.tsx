@@ -20,14 +20,16 @@ import {
     ShieldAlert,
     Zap,
     BadgeCheck,
-    Phone
+    Phone,
+    X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { dataService } from '@/lib/dataService';
 import { DistributedLead } from '@/lib/types';
-import { formatDistanceToNow } from 'date-fns';
+import { formatDistanceToNow, subDays, startOfDay, isAfter, isBefore, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { supabase } from '@/lib/supabase';
+import { Filter, Calendar, ChevronDown, ListFilter, SortDesc } from 'lucide-react';
 
 type Category = 'all' | 'hot' | 'warm' | 'cold';
 
@@ -41,6 +43,17 @@ export default function OldLeadsPage() {
     const [role, setRole] = useState<string | null>(null);
     const [userName, setUserName] = useState<string | null>(null);
 
+    // AI Matching State
+    const [isMatching, setIsMatching] = useState<string | null>(null);
+    const [matchResults, setMatchResults] = useState<Record<string, any>>({});
+    const [selectedMatch, setSelectedMatch] = useState<DistributedLead | null>(null);
+
+    // Advanced Filtering State
+    const [sortBy, setSortBy] = useState('recent');
+    const [period, setPeriod] = useState('all');
+    const [startDate, setStartDate] = useState('');
+    const [endDate, setEndDate] = useState('');
+
     useEffect(() => {
         async function initialize() {
             setLoading(true);
@@ -48,37 +61,25 @@ export default function OldLeadsPage() {
                 // Get Role and User Name
                 const { data: { session } } = await supabase.auth.getSession();
                 if (session?.user) {
-                    if (session.user.email === 'alexandre_gorges@hotmail.com') {
+                    const { data: consultant } = await supabase
+                        .from('consultants_manos_crm')
+                        .select('role, name')
+                        .eq('auth_id', session.user.id)
+                        .maybeSingle();
+                    if (consultant) {
+                        setRole(consultant.role);
+                        setUserName(consultant.name);
+                    } else if (session.user.email === 'alexandre_gorges@hotmail.com') {
                         setRole('admin');
-                    } else {
-                        const { data: consultant } = await supabase
-                            .from('consultants_manos_crm')
-                            .select('role, name')
-                            .eq('auth_id', session.user.id)
-                            .maybeSingle();
-                        if (consultant) {
-                            setRole(consultant.role);
-                            setUserName(consultant.name);
-                        }
                     }
                 }
 
                 // Load Leads
-                let data: DistributedLead[] = [];
-                if (session?.user && session.user.email !== 'alexandre_gorges@hotmail.com') {
-                    const { data: consultant } = await supabase
-                        .from('consultants_manos_crm')
-                        .select('id')
-                        .eq('auth_id', session.user.id)
-                        .single();
+                // Filter by consultant if not admin to respect visibility rules
+                const isUserAdmin = role === 'admin' || session?.user?.email === 'alexandre_gorges@hotmail.com';
+                const consultantFilter = isUserAdmin ? undefined : session?.user?.id;
 
-                    if (consultant) {
-                        data = await dataService.getDistributedLeads(consultant.id) as unknown as DistributedLead[];
-                    }
-                } else {
-                    data = await dataService.getDistributedLeads() as unknown as DistributedLead[];
-                }
-
+                const data = await dataService.getDistributedLeads(consultantFilter) as unknown as DistributedLead[];
                 setLeads(data || []);
             } catch (err) {
                 console.error("Error initializing page:", err);
@@ -89,15 +90,96 @@ export default function OldLeadsPage() {
         initialize();
     }, []);
 
-    const filteredLeads = leads.filter(lead => {
-        const matchesSearch =
-            lead.nome?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            lead.interesse?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            lead.vendedor?.toLowerCase().includes(searchTerm.toLowerCase());
+    const handleMatchInventory = async (lead: DistributedLead) => {
+        if (isMatching) return;
+        setIsMatching(String(lead.id));
+        try {
+            const response = await fetch('/api/match-inventory', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ lead })
+            });
+            const data = await response.json();
+            setMatchResults(prev => ({ ...prev, [lead.id]: data }));
+            // Ao terminar a análise, abre o modal automaticamente se foi o usuário que pediu
+            setSelectedMatch(lead);
+        } catch (err) {
+            console.error("Match Error:", err);
+        } finally {
+            setIsMatching(null);
+        }
+    };
 
-        if (activeCategory === 'all') return matchesSearch;
-        return matchesSearch && lead.ai_classification === activeCategory;
-    });
+    const filteredLeads = leads
+        .filter(lead => {
+            const matchesSearch =
+                lead.nome?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                lead.interesse?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                lead.vendedor?.toLowerCase().includes(searchTerm.toLowerCase());
+
+            if (!matchesSearch) return false;
+
+            // Category Filter
+            if (activeCategory !== 'all' && lead.ai_classification !== activeCategory) return false;
+
+            // Period Filter
+            if (period !== 'all') {
+                const leadDate = parseISO(lead.criado_em);
+                const today = startOfDay(new Date());
+
+                if (period === 'today') {
+                    if (!isAfter(leadDate, today)) return false;
+                } else if (period === '7d') {
+                    if (!isAfter(leadDate, subDays(today, 7))) return false;
+                } else if (period === '15d') {
+                    if (!isAfter(leadDate, subDays(today, 15))) return false;
+                } else if (period === '30d') {
+                    if (!isAfter(leadDate, subDays(today, 30))) return false;
+                } else if (period === '90d') {
+                    if (!isAfter(leadDate, subDays(today, 90))) return false;
+                } else if (period === 'custom' && startDate && endDate) {
+                    const start = startOfDay(parseISO(startDate));
+                    const end = parseISO(endDate); // End of day would be better, but let's keep it simple
+                    if (isBefore(leadDate, start) || isAfter(leadDate, end)) return false;
+                }
+            }
+
+            return true;
+        })
+        .sort((a, b) => {
+            if (sortBy === 'recent') return new Date(b.criado_em).getTime() - new Date(a.criado_em).getTime();
+            if (sortBy === 'oldest') return new Date(a.criado_em).getTime() - new Date(b.criado_em).getTime();
+            if (sortBy === 'probability') return (b.ai_score || 0) - (a.ai_score || 0);
+
+            if (sortBy === 'hot') {
+                if (a.ai_classification === 'hot' && b.ai_classification !== 'hot') return -1;
+                if (a.ai_classification !== 'hot' && b.ai_classification === 'hot') return 1;
+                return new Date(b.criado_em).getTime() - new Date(a.criado_em).getTime();
+            }
+            if (sortBy === 'warm') {
+                if (a.ai_classification === 'warm' && b.ai_classification !== 'warm') return -1;
+                if (a.ai_classification !== 'warm' && b.ai_classification === 'warm') return 1;
+                return new Date(b.criado_em).getTime() - new Date(a.criado_em).getTime();
+            }
+            if (sortBy === 'cold') {
+                if (a.ai_classification === 'cold' && b.ai_classification !== 'cold') return -1;
+                if (a.ai_classification !== 'cold' && b.ai_classification === 'cold') return 1;
+                return new Date(b.criado_em).getTime() - new Date(a.criado_em).getTime();
+            }
+
+            if (sortBy === 'updated_recent') {
+                const da = a.atualizado_em || a.criado_em;
+                const db = b.atualizado_em || b.criado_em;
+                return new Date(db).getTime() - new Date(da).getTime();
+            }
+            if (sortBy === 'updated_oldest') {
+                const da = a.atualizado_em || a.criado_em;
+                const db = b.atualizado_em || b.criado_em;
+                return new Date(da).getTime() - new Date(db).getTime();
+            }
+
+            return 0;
+        });
 
     const counts = {
         all: leads.length,
@@ -140,12 +222,14 @@ export default function OldLeadsPage() {
                 const { results } = await response.json();
 
                 for (let j = 0; j < batch.length; j++) {
-                    const leadId = batch[j].id;
+                    const virtualLeadId = batch[j].id;
+                    const realLeadId = batch[j].real_id;
+                    const sourceTable = batch[j].source_table;
                     const result = results[j];
 
                     if (!result) continue;
 
-                    const index = newLeads.findIndex(l => l.id === leadId);
+                    const index = newLeads.findIndex(l => l.id === virtualLeadId);
                     if (index !== -1) {
                         newLeads[index] = {
                             ...newLeads[index],
@@ -158,16 +242,16 @@ export default function OldLeadsPage() {
                         };
                     }
                     try {
-                        await dataService.updateDistributedLeadAI(leadId, {
+                        await dataService.updateDistributedLeadAI(realLeadId, {
                             ai_classification: result.classification,
                             ai_reason: result.reasoning,
                             nivel_interesse: result.nivel_interesse,
                             momento_compra: result.momento_compra,
                             resumo_consultor: result.resumo_consultor,
                             proxima_acao: result.proxima_acao
-                        });
+                        }, sourceTable);
                     } catch (e) {
-                        console.error("Error updating lead AI", leadId, e);
+                        console.error("Error updating lead AI", realLeadId, e);
                     }
                 }
                 setLeads([...newLeads]);
@@ -230,12 +314,12 @@ export default function OldLeadsPage() {
     // a tabela vazia dizendo "Nenhum lead...". O usuário enxerga as abas limpas.
 
     return (
-        <div className="space-y-10 pb-20 max-w-[1600px] mx-auto px-4">
-            <header className="flex flex-col md:flex-row md:items-end justify-between gap-6">
+        <div className="space-y-10 pb-20 px-4">
+            <header className="flex-col md:flex-row md:items-end justify-between gap-6">
                 <div className="space-y-2">
-                    <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+                    <div className="flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
                         <h1 className="text-3xl md:text-5xl font-black tracking-tighter text-white font-outfit leading-none">
-                            Leads <span className="text-red-600">Antigos</span>
+                            Reativação de <span className="text-red-600">Leads</span>
                         </h1>
                         <div className="bg-red-500/10 border border-red-500/20 px-3 py-1 rounded-full w-fit">
                             <span className="text-[9px] md:text-[10px] font-black text-red-500 uppercase tracking-widest leading-none">Arquivo</span>
@@ -244,7 +328,7 @@ export default function OldLeadsPage() {
                     <p className="text-sm md:text-base text-white/40 font-medium italic">Base de dados histórica do sistema de distribuição.</p>
                 </div>
 
-                <div className="flex flex-col md:flex-row items-center gap-4">
+                <div className="flex-col md:flex-row items-center gap-4">
                     {role === 'admin' && (
                         <>
                             {leads.some(l => !l.ai_classification) ? (
@@ -296,6 +380,64 @@ export default function OldLeadsPage() {
                 </div>
             </header>
 
+            {/* Advanced Filters Bar */}
+            <div className="flex flex-wrap items-center gap-4 bg-white/[0.02] p-4 rounded-3xl border border-white/5">
+                <div className="flex items-center gap-3">
+                    <SortDesc size={18} className="text-red-500" />
+                    <select
+                        value={sortBy}
+                        onChange={(e) => setSortBy(e.target.value)}
+                        className="bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-[11px] font-black uppercase tracking-wider text-white focus:outline-none focus:ring-1 focus:ring-red-500/50 appearance-none"
+                    >
+                        <option value="recent" className="bg-[#0f0f0f]">Mais recentes primeiro</option>
+                        <option value="oldest" className="bg-[#0f0f0f]">Mais antigos primeiro</option>
+                        <option value="probability" className="bg-[#0f0f0f]">Maior probabilidade de fechamento</option>
+                        <option value="hot" className="bg-[#0f0f0f]">Leads quentes primeiro</option>
+                        <option value="warm" className="bg-[#0f0f0f]">Leads mornos</option>
+                        <option value="cold" className="bg-[#0f0f0f]">Leads frios</option>
+                        <option value="updated_recent" className="bg-[#0f0f0f]">Última interação mais recente</option>
+                        <option value="updated_oldest" className="bg-[#0f0f0f]">Última interação mais antiga</option>
+                    </select>
+                </div>
+
+                <div className="h-4 w-px bg-white/10 hidden md:block" />
+
+                <div className="flex items-center gap-3">
+                    <Calendar size={18} className="text-red-500" />
+                    <select
+                        value={period}
+                        onChange={(e) => setPeriod(e.target.value)}
+                        className="bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-[11px] font-black uppercase tracking-wider text-white focus:outline-none focus:ring-1 focus:ring-red-500/50 appearance-none"
+                    >
+                        <option value="all" className="bg-[#0f0f0f]">Todo o período</option>
+                        <option value="today" className="bg-[#0f0f0f]">Hoje</option>
+                        <option value="7d" className="bg-[#0f0f0f]">Últimos 7 dias</option>
+                        <option value="15d" className="bg-[#0f0f0f]">Últimos 15 dias</option>
+                        <option value="30d" className="bg-[#0f0f0f]">Últimos 30 dias</option>
+                        <option value="90d" className="bg-[#0f0f0f]">Últimos 90 dias</option>
+                        <option value="custom" className="bg-[#0f0f0f]">Personalizado</option>
+                    </select>
+
+                    {period === 'custom' && (
+                        <div className="flex items-center gap-2 animate-in fade-in slide-in-from-left-2 duration-300">
+                            <input
+                                type="date"
+                                value={startDate}
+                                onChange={(e) => setStartDate(e.target.value)}
+                                className="bg-white/5 border border-white/10 rounded-xl px-3 py-1.5 text-[10px] text-white focus:outline-none focus:ring-1 focus:ring-red-500/50"
+                            />
+                            <span className="text-white/20 text-xs">até</span>
+                            <input
+                                type="date"
+                                value={endDate}
+                                onChange={(e) => setEndDate(e.target.value)}
+                                className="bg-white/5 border border-white/10 rounded-xl px-3 py-1.5 text-[10px] text-white focus:outline-none focus:ring-1 focus:ring-red-500/50"
+                            />
+                        </div>
+                    )}
+                </div>
+            </div>
+
             {/* Classification Menu */}
             <div className="flex flex-wrap items-center gap-2 bg-white/5 p-1.5 rounded-[2rem] border border-white/10 w-fit">
                 {[
@@ -328,178 +470,137 @@ export default function OldLeadsPage() {
                 ))}
             </div>
 
-            <div className="flex flex-col gap-6">
+            <div className="flex flex-col gap-3">
                 <AnimatePresence mode="popLayout">
                     {filteredLeads.map((lead) => (
                         <motion.div
                             key={lead.id}
                             layout
-                            initial={{ opacity: 0, y: 20 }}
+                            initial={{ opacity: 0, y: 10 }}
                             animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, x: -20 }}
-                            className="glass-card rounded-[2.5rem] border border-white/5 overflow-hidden flex flex-col md:flex-row min-h-[180px] hover:border-red-500/30 transition-all group relative bg-[#050608]/80 backdrop-blur-xl"
+                            exit={{ opacity: 0, scale: 0.95 }}
+                            className="glass-card rounded-2xl md:rounded-3xl border border-white/5 overflow-hidden hover:border-red-500/40 transition-all group relative bg-[#050608]/60 backdrop-blur-xl hover:shadow-[0_0_30px_rgba(239,68,68,0.05)]"
                         >
-                            {/* Status and Interest Level Badge */}
-                            {(lead.ai_classification || lead.nivel_interesse) && (
-                                <div className="absolute top-4 right-4 md:top-6 md:right-8 z-20 flex flex-col sm:flex-row items-end sm:items-center gap-2 md:gap-3">
-                                    {lead.nivel_interesse && (
-                                        <div className="flex items-center gap-2 bg-purple-500/10 backdrop-blur-md px-3 md:px-4 py-1.5 md:py-2 rounded-xl md:rounded-2xl border border-purple-500/20">
-                                            <Sparkles size={10} className="text-purple-400" />
-                                            <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-purple-400">
-                                                {lead.nivel_interesse}
-                                            </span>
-                                        </div>
-                                    )}
-                                    {lead.ai_classification && (
-                                        <div className={`flex items-center gap-2 backdrop-blur-md px-3 md:px-4 py-1.5 md:py-2 rounded-xl md:rounded-2xl border ${lead.ai_classification === 'hot' ? 'bg-red-500/10 border-red-500/20' :
-                                            lead.ai_classification === 'warm' ? 'bg-amber-500/10 border-amber-500/20' :
-                                                'bg-blue-500/10 border-blue-500/20'
-                                            }`}>
-                                            {lead.ai_classification === 'hot' && <Flame size={10} className="text-red-500" />}
-                                            {lead.ai_classification === 'warm' && <Thermometer size={10} className="text-amber-500" />}
-                                            {lead.ai_classification === 'cold' && <Snowflake size={10} className="text-blue-400" />}
-                                            <span className={`text-[9px] md:text-[10px] font-black uppercase tracking-widest ${lead.ai_classification === 'hot' ? 'text-red-500' :
-                                                lead.ai_classification === 'warm' ? 'text-amber-500' :
-                                                    'text-blue-400'
-                                                }`}>
-                                                {lead.ai_classification === 'hot' ? 'Quente' : lead.ai_classification === 'warm' ? 'Morno' : 'Frio'}
-                                            </span>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
+                            <div className="flex flex-col md:flex-row items-stretch">
+                                {/* Status Strip (Left Border) */}
+                                <div className={`w-1.5 shrink-0 ${lead.ai_classification === 'hot' ? 'bg-red-500 shadow-[0_0_15px_rgba(239,68,68,0.5)]' :
+                                    lead.ai_classification === 'warm' ? 'bg-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.5)]' :
+                                        'bg-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.5)]'
+                                    }`} />
 
-                            {/* Glow Effect */}
-                            <div className="absolute inset-0 bg-gradient-to-r from-red-600/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                                {/* Main Content Row */}
+                                <div className="flex-1 flex flex-col lg:flex-row p-4 md:p-6 gap-6 items-center">
 
-                            {/* Column 1: Identity & Action */}
-                            <div className="w-full md:w-[300px] p-6 md:p-8 border-b md:border-b-0 md:border-r border-white/5 flex flex-col justify-between relative z-10">
-                                <div className="space-y-2">
-                                    <h3 className="text-xl md:text-2xl font-black text-white tracking-tight truncate group-hover:text-red-500 transition-colors">
-                                        {lead.nome}
-                                    </h3>
-                                    <div className="flex items-center gap-3 text-white/40">
-                                        <div className="bg-white/5 p-1.5 rounded-lg border border-white/5">
-                                            <MessageSquare size={14} className="text-red-500" />
-                                        </div>
-                                        <span className="text-xs md:text-sm font-bold tracking-wider">{lead.telefone}</span>
-                                    </div>
-                                </div>
-
-                                <button
-                                    onClick={() => handleWhatsApp(lead.telefone)}
-                                    className="mt-6 w-full bg-red-600 hover:bg-red-500 text-white py-3.5 md:py-4 rounded-2xl flex items-center justify-center gap-3 transition-all font-black text-[9px] md:text-[10px] uppercase tracking-[0.2em] shadow-lg shadow-red-600/20 active:scale-95"
-                                >
-                                    <MessageSquare size={16} fill="white" />
-                                    CONTATO WHATSAPP
-                                </button>
-                            </div>
-
-                            {/* Column 2: Details */}
-                            <div className="w-full md:flex-1 p-6 md:p-8 border-b md:border-b-0 md:border-r border-white/5 grid grid-cols-1 gap-6 relative z-10">
-                                <div className="grid grid-cols-2 md:grid-cols-1 md:space-y-6 gap-4">
-                                    <div>
-                                        <div className="flex items-center gap-2 mb-2">
-                                            <MapPin size={14} className="text-white/20" />
-                                            <span className="text-[9px] md:text-[10px] font-black text-white/20 uppercase tracking-[0.2em]">LOCALIDADE</span>
-                                        </div>
-                                        <p className="text-xs md:text-sm font-bold text-white/80 truncate">
-                                            {lead.cidade || 'Não informada'}
-                                        </p>
-                                    </div>
-
-                                    <div>
-                                        <div className="flex items-center gap-2 mb-2">
-                                            <Car size={14} className="text-white/20" />
-                                            <span className="text-[9px] md:text-[10px] font-black text-white/20 uppercase tracking-[0.2em]">INTERESSE</span>
-                                        </div>
-                                        <p className="text-xs md:text-sm font-bold text-white/80 line-clamp-1 md:line-clamp-2">
-                                            {lead.interesse || 'N/A'}
-                                        </p>
-                                    </div>
-
-                                    {lead.troca && (
-                                        <div className="col-span-2 md:col-span-1 pt-2">
-                                            <div className="flex items-center gap-2 mb-2">
-                                                <RefreshCw size={14} className="text-emerald-500/50" />
-                                                <span className="text-[9px] md:text-[10px] font-black text-emerald-500/50 uppercase tracking-[0.2em]">CARRO NA TROCA</span>
-                                            </div>
-                                            <p className="text-xs md:text-sm font-bold text-emerald-500 line-clamp-1">
-                                                {lead.troca}
-                                            </p>
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-
-                            {/* Column 3: AI Analysis (Unified Panel) */}
-                            <div className="w-full md:flex-[2] p-6 md:p-8 border-b md:border-b-0 md:border-r border-white/5 flex flex-col relative z-10 bg-white/[0.01]">
-                                <div className="flex items-center gap-2 mb-6">
-                                    <Sparkles size={16} className="text-red-500/50" />
-                                    <span className="text-[9px] md:text-[10px] font-black text-white/20 uppercase tracking-[0.2em]">ANÁLISE ESTRATÉGICA IA</span>
-                                </div>
-                                <div className="space-y-6 flex-1">
-                                    {/* Executive Summary */}
-                                    <div className="p-4 md:p-5 rounded-2xl md:rounded-3xl bg-red-600/10 border border-red-500/20">
-                                        <p className="text-[8px] md:text-[9px] font-black text-red-500 uppercase tracking-widest mb-1 italic">Resumo do Consultor</p>
-                                        <p className="text-[10px] md:text-[11px] font-bold text-white/80 leading-relaxed">
-                                            {lead.resumo_consultor || lead.resumo || 'Nenhuma observação automática registrada para este lead.'}
-                                        </p>
-                                    </div>
-
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div className="bg-blue-500/5 p-3 md:p-4 rounded-xl md:rounded-2xl border border-blue-500/10">
-                                            <span className="text-[8px] md:text-[9px] font-black uppercase text-blue-500/40 tracking-wider block mb-1">Momento</span>
-                                            <span className="text-[10px] md:text-xs font-black text-white uppercase">{lead.momento_compra || 'Pesquisa'}</span>
-                                        </div>
-                                        {lead.ai_reason && (
-                                            <div className="bg-white/5 p-3 md:p-4 rounded-xl md:rounded-2xl border border-white/5">
-                                                <span className="text-[8px] md:text-[9px] font-black uppercase text-white/20 tracking-wider block mb-1">Score IA</span>
-                                                <span className="text-[10px] md:text-xs font-black text-white uppercase">Analisado</span>
-                                            </div>
-                                        )}
-                                    </div>
-
-                                    {/* Next Action */}
-                                    <div className="bg-emerald-500/5 p-4 md:p-5 rounded-2xl md:rounded-3xl border border-emerald-500/10 space-y-2">
-                                        <div className="flex items-center gap-2">
-                                            <Zap size={12} className="text-emerald-500" />
-                                            <span className="text-[8px] md:text-[9px] font-black uppercase text-emerald-500/40 tracking-wider italic">Próxima Ação Sugerida</span>
-                                        </div>
-                                        <p className="text-[10px] md:text-[11px] font-black text-white leading-relaxed">
-                                            {lead.proxima_acao || 'Retomar contato para entender interesse atual.'}
-                                        </p>
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* Column 4: Seller & Date */}
-                            <div className="w-full md:w-[240px] p-6 md:p-8 bg-white/[0.02] flex flex-col justify-between relative z-10">
-                                <div className="flex flex-row md:flex-col items-center md:items-start justify-between md:justify-start gap-4">
-                                    <div className="flex items-center gap-4">
-                                        <div className="w-10 h-10 md:w-12 md:h-12 rounded-xl md:rounded-2xl bg-gradient-to-br from-red-600 to-red-900 flex items-center justify-center text-white font-black text-xs md:text-sm shadow-xl shadow-red-900/40 flex-shrink-0">
-                                            {lead.vendedor?.[0] || 'U'}
+                                    {/* Identity Section (Narrowest) */}
+                                    <div className="w-full lg:w-[220px] flex items-center gap-4 border-b lg:border-b-0 lg:border-r border-white/5 pb-4 lg:pb-0">
+                                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-red-600/20 to-red-900/20 border border-red-500/20 flex items-center justify-center text-red-500 font-black text-sm shrink-0">
+                                            {lead.nome?.[0] || 'U'}
                                         </div>
                                         <div className="overflow-hidden">
-                                            <p className="text-xs md:text-sm font-black text-white truncate">{lead.vendedor || 'Padrão'}</p>
-                                            <p className="text-[8px] md:text-[9px] font-bold text-red-500 uppercase tracking-tighter">Manos Veículos</p>
+                                            <h3 className="font-black text-white tracking-tight truncate group-hover:text-red-500 transition-colors">
+                                                {lead.nome}
+                                            </h3>
+                                            <div className="flex items-center gap-1.5 text-white/30">
+                                                <Phone size={10} className="text-red-500/50" />
+                                                <span className="text-[10px] font-bold">{lead.telefone}</span>
+                                            </div>
                                         </div>
+                                    </div>
+
+                                    {/* Core Details (Dense) */}
+                                    <div className="flex-1 flex items-center w-full">
+                                        <div className="space-y-1">
+                                            <span className="text-[8px] font-black text-white/20 uppercase tracking-widest block">Registro</span>
+                                            <p className="text-[10px] font-bold text-white/40">
+                                                {formatDistanceToNow(new Date(lead.criado_em), { locale: ptBR, addSuffix: true })}
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    {/* AI Insight Block (Condensed) */}
+                                    <div className="w-full lg:w-[400px] bg-white/[0.02] border border-white/5 rounded-2xl p-3 flex flex-col gap-2">
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-1.5">
+                                                <Sparkles size={10} className="text-red-500" />
+                                                <span className="text-[8px] font-black text-red-500/60 uppercase tracking-widest italic">Análise IA</span>
+                                            </div>
+                                            {lead.ai_classification && (
+                                                <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-md border ${lead.ai_classification === 'hot' ? 'bg-red-500/10 border-red-500/20 text-red-500' :
+                                                    lead.ai_classification === 'warm' ? 'bg-amber-500/10 border-amber-500/20 text-amber-500' :
+                                                        'bg-blue-500/10 border-blue-500/20 text-blue-400'
+                                                    }`}>
+                                                    {lead.ai_classification === 'hot' ? 'Quente' : lead.ai_classification === 'warm' ? 'Morno' : 'Frio'}
+                                                </span>
+                                            )}
+                                        </div>
+                                        <p className="text-[10px] font-medium text-white/60 line-clamp-2 leading-relaxed italic">
+                                            "{lead.resumo_consultor || lead.resumo || 'Nenhuma observação automática.'}"
+                                        </p>
+                                    </div>
+
+                                    {/* Action Area (Right) */}
+                                    <div className="flex flex-col gap-2 shrink-0 min-w-[160px]">
+                                        <button
+                                            onClick={async (e) => {
+                                                const btn = e.currentTarget;
+                                                const originalContent = btn.innerHTML;
+                                                btn.disabled = true;
+                                                btn.innerHTML = '<div class="h-4 w-4 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>';
+
+                                                try {
+                                                    // Use real_id if available, otherwise strip prefix or use raw id
+                                                    const targetId = lead.real_id ? `${lead.source_table === 'leads_manos_crm' ? 'main_' : lead.source_table === 'leads_distribuicao_crm_26' ? 'crm26_' : 'dist_'}${lead.real_id}` : lead.id;
+                                                    await dataService.reactivateLead(targetId);
+                                                    window.location.href = `/leads?id=${targetId}&tab=flow-up`;
+                                                } catch (err) {
+                                                    console.error("Error reactivating lead:", err);
+                                                    btn.disabled = false;
+                                                    btn.innerHTML = originalContent;
+                                                    alert("Erro ao reativar lead. Tente novamente.");
+                                                }
+                                            }}
+                                            className="h-10 px-4 rounded-xl bg-red-600 border border-red-600 text-white shadow-lg shadow-red-600/20 hover:bg-red-500 transition-all flex items-center justify-center gap-2 font-black text-[9px] uppercase tracking-widest active:scale-95 disabled:opacity-50"
+                                        >
+                                            <Sparkles size={14} fill="white" />
+                                            REATIVAR (FLOW-UP)
+                                        </button>
+
+                                        <button
+                                            onClick={() => {
+                                                if (matchResults[lead.id]) {
+                                                    setSelectedMatch(lead);
+                                                } else {
+                                                    handleMatchInventory(lead);
+                                                }
+                                            }}
+                                            disabled={isMatching === String(lead.id)}
+                                            className={`h-8 px-4 rounded-xl border transition-all flex items-center justify-center gap-2 font-black text-[8px] uppercase tracking-widest ${isMatching === String(lead.id)
+                                                ? 'bg-white/5 border-white/5 text-white/20'
+                                                : matchResults[lead.id]
+                                                    ? 'bg-white/10 border-white/20 text-white shadow-lg'
+                                                    : 'bg-white/5 border-white/10 text-white/40 hover:bg-white/10 hover:text-white hover:border-white/20 shadow-red-500/10 active:scale-95'
+                                                }`}
+                                        >
+                                            {isMatching === String(lead.id) ? (
+                                                <div className="h-4 w-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                                            ) : <Zap size={10} />}
+                                            {isMatching === String(lead.id) ? 'BUSCANDO...' : matchResults[lead.id] ? 'VER OPORTUNIDADE' : 'ANALISAR ESTOQUE'}
+                                        </button>
+
+                                        <button
+                                            onClick={() => handleWhatsApp(lead.telefone)}
+                                            className="h-8 px-4 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-white/40 hover:text-white flex items-center justify-center gap-2 transition-all font-black text-[8px] uppercase tracking-widest active:scale-95"
+                                        >
+                                            CONTATO DIRETO
+                                        </button>
                                     </div>
                                 </div>
 
-                                <div className="pt-4 md:pt-6 mt-4 md:mt-6 border-t border-white/5 flex flex-row md:flex-col justify-between items-end md:items-start">
-                                    <div className="text-right md:text-left">
-                                        <div className="flex items-center justify-end md:justify-start gap-2 mb-1 md:mb-2">
-                                            <Clock size={12} className="text-white/20" />
-                                            <span className="text-[9px] md:text-[10px] font-black text-white/20 uppercase tracking-[0.2em]">REGISTRO</span>
-                                        </div>
-                                        <p className="text-[10px] md:text-xs font-bold text-white/60">
-                                            {formatDistanceToNow(new Date(lead.criado_em), { locale: ptBR, addSuffix: true })}
-                                        </p>
-                                    </div>
-                                    <p className="hidden md:block text-[9px] text-white/20 font-medium mt-1 uppercase tracking-widest text-right md:text-left">
-                                        {new Date(lead.criado_em).toLocaleDateString('pt-BR')}
-                                    </p>
+
+                                {/* Desktop Sidebar Info (Vendedor) */}
+                                <div className="hidden xl:flex w-[180px] p-6 bg-white/[0.02] border-l border-white/5 flex-col justify-center items-center text-center gap-1">
+                                    <div className="text-[8px] font-black text-white/10 uppercase tracking-widest mb-1">Vendedor</div>
+                                    <p className="text-xs font-black text-white/40 truncate w-full">{lead.vendedor || 'Padrão'}</p>
                                 </div>
                             </div>
                         </motion.div>
@@ -524,6 +625,104 @@ export default function OldLeadsPage() {
                     </motion.div>
                 )}
             </div>
+
+            {/* AI Match Modal Overlay */}
+            <AnimatePresence>
+                {selectedMatch && matchResults[selectedMatch.id] && (
+                    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+                        <motion.div
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            onClick={() => setSelectedMatch(null)}
+                            className="absolute inset-0 bg-black/80 backdrop-blur-xl"
+                        />
+                        <motion.div
+                            initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                            animate={{ scale: 1, opacity: 1, y: 0 }}
+                            exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                            className="relative w-full max-w-2xl bg-[#0a0c10] border border-white/10 rounded-[2.5rem] overflow-hidden shadow-2xl"
+                        >
+                            <div className="p-8 md:p-12 space-y-8">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-4">
+                                        <div className="w-12 h-12 rounded-2xl bg-red-500/20 flex items-center justify-center shadow-[0_0_20px_rgba(239,68,68,0.2)]">
+                                            <Sparkles className="text-red-500" size={24} />
+                                        </div>
+                                        <div>
+                                            <h2 className="text-2xl font-black text-white uppercase tracking-tight">Oportunidade Inteligente</h2>
+                                            <p className="text-white/40 text-[10px] font-black uppercase tracking-[0.2em]">{selectedMatch.nome}</p>
+                                        </div>
+                                    </div>
+                                    <button
+                                        onClick={() => setSelectedMatch(null)}
+                                        className="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition-all"
+                                    >
+                                        <X size={20} />
+                                    </button>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    {matchResults[selectedMatch.id].matches?.map((m: any, idx: number) => (
+                                        <div key={idx} className="bg-white/[0.03] border border-white/5 p-6 rounded-3xl space-y-3 group hover:border-red-500/30 transition-all">
+                                            <div className="flex justify-between items-start">
+                                                <div className="space-y-0.5">
+                                                    <span className="text-[10px] font-black text-red-500 uppercase tracking-widest">Opção #{idx + 1}</span>
+                                                    <h4 className="text-lg font-black text-white">{m.veiculo}</h4>
+                                                </div>
+                                                <div className="text-right">
+                                                    <span className="text-xs font-black text-red-500">{m.preco}</span>
+                                                </div>
+                                            </div>
+                                            <p className="text-[11px] font-medium text-white/40 leading-relaxed italic border-l-2 border-red-500/20 pl-3">
+                                                {m.motivo}
+                                            </p>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                <div className="bg-red-500/5 border border-red-500/10 rounded-3xl p-6 space-y-4 shadow-inner">
+                                    <div className="flex items-center gap-2 text-red-500">
+                                        <MessageSquare size={16} />
+                                        <span className="text-[10px] font-black uppercase tracking-widest leading-none">Abordagem Recomendada</span>
+                                    </div>
+                                    <p className="text-sm font-medium text-white/70 leading-relaxed italic">
+                                        "{matchResults[selectedMatch.id].sugestao_mensagem.replace('[Consultor]', userName || 'Consultor')}"
+                                    </p>
+                                </div>
+
+                                <div className="flex gap-4">
+                                    <button
+                                        onClick={() => {
+                                            const msg = matchResults[selectedMatch.id].sugestao_mensagem.replace('[Consultor]', userName || 'Consultor');
+                                            window.open(`https://wa.me/55${selectedMatch.telefone.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`, '_blank');
+                                        }}
+                                        className="flex-1 h-16 bg-red-600 hover:bg-red-500 text-white rounded-2xl flex items-center justify-center gap-3 transition-all font-black text-xs uppercase tracking-widest shadow-xl shadow-red-600/20 active:scale-[0.98]"
+                                    >
+                                        <MessageSquare size={20} fill="white" />
+                                        Reativar Via WhatsApp
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            window.location.href = `/leads?id=${selectedMatch.id}&tab=flow-up`;
+                                        }}
+                                        className="px-8 h-16 bg-white/5 hover:bg-white/10 text-white/60 hover:text-white rounded-2xl transition-all font-black text-[10px] uppercase tracking-widest border border-white/5 active:scale-[0.98] flex items-center justify-center gap-2"
+                                    >
+                                        <Sparkles size={16} />
+                                        Ver no CRM
+                                    </button>
+                                    <button
+                                        onClick={() => setSelectedMatch(null)}
+                                        className="px-6 h-16 bg-white/5 hover:bg-white/10 text-white/40 hover:text-white rounded-2xl transition-all font-black text-[10px] uppercase tracking-widest border border-white/5 active:scale-[0.98]"
+                                    >
+                                        Fechar
+                                    </button>
+                                </div>
+                            </div>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
         </div>
     );
 }

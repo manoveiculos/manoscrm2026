@@ -1,4 +1,4 @@
-export type LeadStatus = 'new' | 'received' | 'attempt' | 'contacted' | 'confirmed' | 'scheduled' | 'visited' | 'test_drive' | 'proposed' | 'negotiation' | 'closed' | 'post_sale' | 'lost';
+export type LeadStatus = 'new' | 'received' | 'attempt' | 'contacted' | 'confirmed' | 'scheduled' | 'visited' | 'test_drive' | 'proposed' | 'negotiation' | 'closed' | 'post_sale' | 'lost' | 'lost_redistributed' | 'comprado';
 export type AIClassification = 'hot' | 'warm' | 'cold';
 export type Platform = 'facebook' | 'google' | 'instagram' | 'whatsapp' | 'site';
 
@@ -140,6 +140,15 @@ export interface Sale {
   sale_date: string;
 }
 
+export interface Purchase {
+  id: string;
+  lead_id: string;
+  consultant_id: string;
+  vehicle_details: string;
+  purchase_value: number;
+  purchase_date: string;
+}
+
 export interface FinancialMetrics {
   totalSpend: number;
   totalRevenue: number;
@@ -162,7 +171,7 @@ export interface MarketingReport {
   recommendations: Recommendation[];
 }
 export interface DistributedLead {
-  id: number;
+  id: any;
   telefone: string;
   nome: string;
   cidade: string;
@@ -170,10 +179,13 @@ export interface DistributedLead {
   troca: string;
   resumo: string;
   vendedor: string;
+  real_id?: any;
+  source_table?: string;
   enviado: boolean;
   criado_em: string;
   ai_classification?: AIClassification;
   ai_reason?: string;
+  ai_score?: number;
   nivel_interesse?: string;
   momento_compra?: string;
   resumo_consultor?: string;

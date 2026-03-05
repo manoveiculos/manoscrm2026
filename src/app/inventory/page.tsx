@@ -13,9 +13,13 @@ import {
     Fuel,
     Calculator,
     AlertCircle,
-    Sparkles
+    Sparkles,
+    Share2,
+    Check
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { toBlob } from 'html-to-image';
+import { SimulationProposal } from '@/components/SimulationProposal';
 import { dataService } from '@/lib/dataService';
 import { InventoryItem } from '@/lib/types';
 import { StatsCard } from '@/components/StatsCard';
@@ -51,7 +55,7 @@ const CarImage = ({ car, className = "w-full h-full object-cover transition-tran
 
     if (!imgSrc || error) {
         return (
-            <div className={`w-full h-full bg-[#1a1a1a] flex flex-col items-center justify-center ${className.includes('transition') ? 'transition-transform duration-700 group-hover:scale-110' : ''}`}>
+            <div className={`w-full h-full bg-[#1a1a1a] flex-col items-center justify-center ${className.includes('transition') ? 'transition-transform duration-700 group-hover:scale-110' : ''}`}>
                 <Car className="text-white/10 mb-3" size={64} />
                 <span className="text-white/30 text-xs font-black uppercase tracking-widest text-center px-6 line-clamp-2">
                     {car.marca} <br /><span className="text-white/50 text-base">{car.modelo}</span>
@@ -108,6 +112,9 @@ export default function InventoryPage() {
     const [filter] = useState<'all' | 'in_stock' | 'sold' | 'reserved'>('all');
     const [selectedCarForFinancing, setSelectedCarForFinancing] = useState<InventoryItem | null>(null);
     const [downPayment, setDownPayment] = useState<number>(0);
+    const [isSharing, setIsSharing] = useState(false);
+    const [shareSuccess, setShareSuccess] = useState(false);
+    const proposalRef = React.useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         async function loadInventory() {
@@ -146,6 +153,76 @@ export default function InventoryPage() {
         return installment;
     };
 
+    const handleShareSimulation = async () => {
+        if (!proposalRef.current || !selectedCarForFinancing) {
+            console.error("Missing ref or car data", { ref: !!proposalRef.current, car: !!selectedCarForFinancing });
+            return;
+        }
+
+        try {
+            setIsSharing(true);
+            const proposalElement = proposalRef.current;
+            const originalStyle = proposalElement.style.cssText;
+
+            // Ensure perfect capture conditions
+            proposalElement.style.display = 'flex';
+            proposalElement.style.opacity = '1';
+            proposalElement.style.visibility = 'visible';
+            proposalElement.style.position = 'fixed';
+            proposalElement.style.left = '0';
+            proposalElement.style.top = '0';
+            proposalElement.style.zIndex = '-9999';
+            proposalElement.style.width = '1080px';
+            proposalElement.style.height = '1920px';
+
+            // Wait for all resources (images and fonts)
+            await new Promise(resolve => setTimeout(resolve, 1500));
+
+            const blob = await toBlob(proposalElement, {
+                quality: 1,
+                pixelRatio: 2,
+                cacheBust: true,
+                skipFonts: false,
+                backgroundColor: '#000000',
+                style: {
+                    transform: 'scale(1)',
+                    transformOrigin: 'top left'
+                }
+            });
+
+            proposalElement.style.cssText = originalStyle;
+
+            if (blob) {
+                try {
+                    await navigator.clipboard.write([
+                        new ClipboardItem({ [blob.type]: blob })
+                    ]);
+                    setShareSuccess(true);
+                    setTimeout(() => setShareSuccess(false), 3000);
+                } catch (clipboardError) {
+                    console.warn("Clipboard error, falling back to download:", clipboardError);
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = `proposta-${selectedCarForFinancing.modelo.toLowerCase().replace(/\s+/g, '-')}.png`;
+                    link.click();
+                }
+            } else {
+                throw new Error("Blob generation returned null");
+            }
+        } catch (error: any) {
+            console.error("CAPTURE ERROR DETAILS:", {
+                message: error.message,
+                name: error.name,
+                stack: error.stack,
+                all: error
+            });
+            alert("Erro ao gerar imagem. Tentando novamente...");
+        } finally {
+            setIsSharing(false);
+        }
+    };
+
     if (loading) {
         return (
             <div className="flex h-[80vh] items-center justify-center">
@@ -160,7 +237,7 @@ export default function InventoryPage() {
     return (
         <div className="space-y-12 pb-20">
             {/* Header */}
-            <header className="flex flex-col md:flex-row md:items-end justify-between gap-6">
+            <header className="flex-col md:flex-row md:items-end justify-between gap-6">
                 <div className="space-y-2">
                     <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-red-500/10 text-red-400 w-fit text-[10px] font-bold uppercase tracking-wider border border-red-500/10 shadow-[0_0_15px_rgba(239,68,68,0.1)]">
                         <Tag size={12} />
@@ -240,7 +317,7 @@ export default function InventoryPage() {
                                 initial={{ opacity: 0, scale: 0.9 }}
                                 animate={{ opacity: 1, scale: 1 }}
                                 exit={{ opacity: 0, scale: 0.9 }}
-                                className="bg-[#141414] border border-white/5 overflow-hidden shadow-2xl hover:border-red-600/50 transition-all cursor-pointer flex flex-col group rounded-2xl"
+                                className="bg-[#141414] border border-white/5 overflow-hidden shadow-2xl hover:border-red-600/50 transition-all cursor-pointer flex-col group rounded-2xl"
                             >
                                 {/* Car Image - Clickable for Calculator */}
                                 <div
@@ -271,7 +348,7 @@ export default function InventoryPage() {
                                     {formatPrice(car.preco)}
                                 </div>
 
-                                <div className="p-6 flex-1 flex flex-col justify-between space-y-6">
+                                <div className="p-6 flex-1 flex-col justify-between space-y-6">
                                     <div>
                                         <div className="flex items-center gap-2 mb-2">
                                             <span className="text-[10px] font-black text-red-500 uppercase tracking-[0.2em]">{car.marca}</span>
@@ -333,36 +410,36 @@ export default function InventoryPage() {
             {/* Financing Calculator Modal */}
             <AnimatePresence>
                 {selectedCarForFinancing && (
-                    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+                    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-y-auto">
                         <motion.div
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
                             exit={{ opacity: 0 }}
                             onClick={() => setSelectedCarForFinancing(null)}
-                            className="absolute inset-0 bg-black/80 backdrop-blur-md"
+                            className="fixed inset-0 bg-black/80 backdrop-blur-md"
                         />
                         <motion.div
                             initial={{ opacity: 0, scale: 0.9, y: 20 }}
                             animate={{ opacity: 1, scale: 1, y: 0 }}
                             exit={{ opacity: 0, scale: 0.9, y: 20 }}
-                            className="bg-[#141414] border border-white/10 w-full max-w-2xl rounded-[2.5rem] overflow-hidden shadow-2xl relative z-10 flex flex-col md:flex-row"
+                            className="bg-[#141414] border border-white/10 w-full max-w-xl rounded-[2.5rem] overflow-hidden shadow-2xl relative z-10 flex flex-col md:flex-row"
                         >
                             {/* Left Side: Car Info */}
                             <div className="w-full md:w-5/12 bg-black relative">
                                 <CarImage car={selectedCarForFinancing} className="w-full h-full object-cover" />
                                 <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent" />
-                                <div className="absolute bottom-6 left-6 right-6">
-                                    <p className="text-red-500 text-[10px] font-black uppercase tracking-[0.2em]">{selectedCarForFinancing.marca}</p>
-                                    <h3 className="text-white font-black text-xl uppercase tracking-tighter leading-tight mt-1">{selectedCarForFinancing.modelo}</h3>
-                                    <p className="text-white/60 text-lg font-black mt-2">{formatPrice(selectedCarForFinancing.preco)}</p>
+                                <div className="absolute bottom-4 left-5 right-5">
+                                    <p className="text-red-500 text-[8px] font-black uppercase tracking-[0.2em]">{selectedCarForFinancing.marca}</p>
+                                    <h3 className="text-white font-black text-lg uppercase tracking-tighter leading-tight mt-0.5">{selectedCarForFinancing.modelo}</h3>
+                                    <p className="text-white/60 text-base font-black mt-1">{formatPrice(selectedCarForFinancing.preco)}</p>
                                 </div>
                             </div>
 
                             {/* Right Side: Calculator */}
-                            <div className="flex-1 p-8 space-y-6 bg-[#141414] flex flex-col justify-center">
-                                <div className="text-center space-y-1 mb-2">
-                                    <h2 className="text-white font-black text-xs uppercase tracking-[0.3em]">Simulador de financiamento</h2>
-                                    <p className="text-white/20 text-[8px] font-bold uppercase tracking-widest">Escolha sua entrada e veja as parcelas</p>
+                            <div className="flex-1 p-5 space-y-4 bg-[#141414] flex flex-col justify-start">
+                                <div className="text-center space-y-1">
+                                    <h2 className="text-white font-black text-[10px] uppercase tracking-[0.3em] bg-red-600/10 py-1 rounded-full px-4 inline-block">Simulador de financiamento</h2>
+                                    <p className="text-white/20 text-[7px] font-bold uppercase tracking-widest block">Escolha sua entrada e veja as parcelas</p>
                                 </div>
 
                                 <div className="space-y-6 flex-1">
@@ -403,11 +480,11 @@ export default function InventoryPage() {
                                             </div>
                                         </div>
 
-                                        <p className="text-white/20 text-[7px] font-black uppercase tracking-widest italic animate-pulse text-center">
+                                        <p className="text-white/20 text-[6px] font-black uppercase tracking-widest italic animate-pulse text-center">
                                             <span className="text-red-500">→</span> movimente a barra para simular <span className="text-red-500">←</span>
                                         </p>
 
-                                        <div className="relative h-1.5 w-full bg-white/10 rounded-full overflow-hidden">
+                                        <div className="relative h-1 w-full bg-white/10 rounded-full overflow-hidden">
                                             <div
                                                 className="absolute top-0 left-0 h-full bg-gradient-to-r from-red-900 via-red-600 to-red-400 transition-all duration-300"
                                                 style={{ width: `${(downPayment / cleanPriceForStats(selectedCarForFinancing.preco)) * 100}%` }}
@@ -430,24 +507,24 @@ export default function InventoryPage() {
                                             <p className="text-white/40 text-[9px] font-black uppercase tracking-widest">Opções de Financiamento</p>
                                             <p className="text-white/20 text-[8px] font-bold uppercase">Parcelas Fixas</p>
                                         </div>
-                                        <div className="grid grid-cols-1 gap-2">
+                                        <div className="grid grid-cols-1 gap-1.5">
                                             {[12, 24, 36, 48, 60].map((m) => {
                                                 const installment = calculateInstallment(cleanPriceForStats(selectedCarForFinancing.preco), downPayment, m);
                                                 const isHighlight = m === 48;
                                                 return (
                                                     <div
                                                         key={m}
-                                                        className={`flex items-center justify-between px-5 py-3 rounded-2xl border transition-all group ${isHighlight
-                                                            ? 'bg-red-600/10 border-red-600/30 shadow-[0_0_15px_rgba(220,38,38,0.1)]'
+                                                        className={`flex items-center justify-between px-4 py-2 rounded-xl border transition-all group ${isHighlight
+                                                            ? 'bg-red-600/10 border-red-600/30'
                                                             : 'bg-white/[0.02] border-white/5 hover:bg-white/5'
                                                             }`}
                                                     >
-                                                        <span className={`text-[10px] font-black uppercase tracking-widest transition-colors ${isHighlight ? 'text-red-500' : 'text-white/40 group-hover:text-red-500'
+                                                        <span className={`text-[9px] font-black uppercase tracking-widest transition-colors ${isHighlight ? 'text-red-500' : 'text-white/40 group-hover:text-red-500'
                                                             }`}>
                                                             {m} Parcelas
                                                         </span>
                                                         <div className="text-right">
-                                                            <span className={`text-lg font-black tracking-tight transition-colors ${isHighlight ? 'text-red-500' : 'text-white'
+                                                            <span className={`text-base font-black tracking-tight transition-colors ${isHighlight ? 'text-red-500' : 'text-white'
                                                                 }`}>
                                                                 {formatPrice(installment)}
                                                             </span>
@@ -460,19 +537,21 @@ export default function InventoryPage() {
                                 </div>
 
                                 <div className="space-y-4 pt-4">
-                                    <div className="bg-white/[0.03] border border-white/10 rounded-xl p-3 backdrop-blur-sm">
-                                        <p className="text-[9px] font-black text-white/50 uppercase tracking-widest text-center leading-relaxed">
-                                            Simulação sujeita a <span className="text-red-500">aprovação de crédito</span><br />
-                                            e análise de <span className="text-red-500">score</span> pelo banco parceiro.
+                                    <div className="bg-white/[0.03] border border-white/10 rounded-xl p-2.5 backdrop-blur-sm">
+                                        <p className="text-[8px] font-black text-white/50 uppercase tracking-widest text-center leading-relaxed">
+                                            Simulação sujeita a <span className="text-red-500 uppercase">aprovação de crédito</span> e análise de <span className="text-red-500 uppercase">score</span>.
                                         </p>
                                     </div>
-                                    <div className="flex flex-col items-center gap-3">
-                                        <img
-                                            src="https://manosveiculos.com.br/wp-content/uploads/2024/02/LogoManos.png"
-                                            alt="Logo Manos"
-                                            className="h-10 w-auto opacity-100 brightness-110"
-                                        />
-                                        <div className="h-0.5 w-12 bg-red-600 rounded-full shadow-[0_0_10px_rgba(220,38,38,0.5)]" />
+
+                                    <div className="flex flex-col items-center justify-center pt-2">
+                                        <div className="flex flex-col items-center gap-2">
+                                            <img
+                                                src="https://manosveiculos.com.br/wp-content/uploads/2024/02/LogoManos.png"
+                                                alt="Logo Manos"
+                                                className="h-7 w-auto opacity-100 brightness-110"
+                                            />
+                                            <div className="h-0.5 w-10 bg-red-600 rounded-full shadow-[0_0_10px_rgba(220,38,38,0.5)]" />
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -480,6 +559,20 @@ export default function InventoryPage() {
                     </div>
                 )}
             </AnimatePresence>
+
+            {/* Hidden Proposal Element for Capture */}
+            <div className="fixed top-0 left-0 -z-50 pointer-events-none overflow-hidden" style={{ width: '1080px', height: '1920px', left: '-2000px' }}>
+                {selectedCarForFinancing && (
+                    <SimulationProposal
+                        ref={proposalRef}
+                        car={selectedCarForFinancing}
+                        downPayment={downPayment}
+                        financedAmount={cleanPriceForStats(selectedCarForFinancing.preco) - downPayment}
+                        installmentsCount={48}
+                        installmentValue={calculateInstallment(cleanPriceForStats(selectedCarForFinancing.preco), downPayment, 48)}
+                    />
+                )}
+            </div>
         </div>
     );
 }

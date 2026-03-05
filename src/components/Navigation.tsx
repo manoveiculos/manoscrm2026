@@ -15,16 +15,29 @@ import {
     Shield,
     History,
     Menu,
+    Sparkles,
+    Zap,
+    CreditCard,
     X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
 
-const NAV_ITEMS = [
+interface NavItem {
+    label: string;
+    icon: any;
+    href: string;
+    adminOnly?: boolean;
+    blocked?: boolean;
+}
+
+const NAV_ITEMS: NavItem[] = [
     { label: 'Visão Geral', icon: LayoutDashboard, href: '/' },
+    { label: 'Análise Inteligente', icon: Sparkles, href: '/analysis' },
     { label: 'Campanhas Ativas', icon: Search, href: '/marketing', adminOnly: true },
     { label: 'Central de Leads', icon: Users, href: '/leads' },
-    { label: 'Leads Antigos', icon: History, href: '/leads-antigos' },
+    { label: 'Análise de Crédito', icon: CreditCard, href: '/finance' },
+    { label: 'Reativação de Leads', icon: Zap, href: '/leads-antigos' },
     { label: 'Marketing Investimento', icon: BarChart3, href: '/roi', adminOnly: true },
     { label: 'Estoque Central', icon: Car, href: '/inventory' },
     { label: 'Gerenciar Equipe', icon: Shield, href: '/admin/equipe', adminOnly: true },
@@ -107,7 +120,7 @@ export const Navigation = () => {
         <>
             {/* Brand */}
             <motion.div
-                className="mb-10 md:mb-16 flex flex-col items-center gap-3 md:gap-4 group cursor-pointer w-full px-6 md:px-8"
+                className="mb-10 md:mb-16 flex-col items-center gap-3 md:gap-4 group cursor-pointer w-full px-6 md:px-8"
                 onClick={handleLogoClick}
                 whileTap={{ scale: 0.95 }}
             >
@@ -136,17 +149,24 @@ export const Navigation = () => {
                     return (
                         <Link
                             key={item.label}
-                            href={item.href}
-                            className={`relative flex items-center gap-3 md:gap-4 px-5 md:px-6 py-3.5 md:py-4 rounded-2xl md:rounded-3xl transition-all group overflow-hidden ${isActive ? 'bg-white/5 text-white shadow-inner' : 'text-white/40 hover:text-white/80 hover:bg-white/[0.02]'
+                            href={item.blocked ? '#' : item.href}
+                            onClick={(e) => item.blocked && e.preventDefault()}
+                            className={`relative flex items-center gap-3 md:gap-4 px-5 md:px-6 py-3.5 md:py-4 rounded-2xl md:rounded-3xl transition-all group overflow-hidden ${isActive ? 'bg-white/5 text-white shadow-inner' :
+                                item.blocked ? 'opacity-40 cursor-not-allowed grayscale' : 'text-white/40 hover:text-white/80 hover:bg-white/[0.02]'
                                 }`}
                         >
                             <div className="shrink-0 flex items-center justify-center w-6">
                                 <item.icon size={20} className={isActive ? 'text-red-500' : 'group-hover:text-white/60 transition-colors'} />
                             </div>
 
-                            <span className="font-bold text-sm tracking-tight whitespace-nowrap">
-                                {item.label}
-                            </span>
+                            <div className="flex flex-col">
+                                <span className={`font-bold text-sm tracking-tight whitespace-nowrap ${item.blocked ? 'text-white/30' : ''}`}>
+                                    {item.label}
+                                </span>
+                                {(item.blocked || item.href === '/finance') && (
+                                    <span className="text-[8px] font-black uppercase tracking-widest text-red-500/60 leading-none mt-0.5">Em breve</span>
+                                )}
+                            </div>
 
                             {isActive && (
                                 <motion.div
@@ -232,7 +252,7 @@ export const Navigation = () => {
                             animate={{ x: 0 }}
                             exit={{ x: '-100%' }}
                             transition={{ type: 'spring', damping: 25, stiffness: 250 }}
-                            className="md:hidden fixed left-0 top-0 h-screen w-72 bg-[#03060b] border-r border-white/5 py-8 flex flex-col items-center z-[100] shadow-2xl overflow-hidden"
+                            className="md:hidden fixed left-0 top-0 h-screen w-72 bg-[#03060b] border-r border-white/5 py-8 flex-col items-center z-[100] shadow-2xl overflow-hidden"
                         >
                             <button
                                 onClick={() => setMobileOpen(false)}
