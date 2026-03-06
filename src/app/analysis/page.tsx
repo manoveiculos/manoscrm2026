@@ -268,303 +268,408 @@ export default function AnalysisPage() {
 
             {activeTab === 'strategy' || !isAdmin ? (
                 <>
-                    {/* 1) CABEÇALHO PODEROSO: ESTRATÉGIA (ESQUERDA) + DASHBOARD (DIREITA) */}
-                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-                        {/* LADO ESQUERDO: ESTRATÉGIA E MENSAGEM */}
-                        <div className="lg:col-span-7 flex flex-col justify-between p-10 md:p-14 rounded-[2.5rem] bg-gradient-to-br from-[#0c0c0e] to-[#040405] border border-white/5 relative overflow-hidden">
-                            <div className="relative z-10 text-pretty">
-                                <div className="flex items-center gap-3 mb-6">
-                                    <div className="p-3 rounded-2xl bg-red-600/10 border border-red-600/20 text-red-500 font-black text-[10px] tracking-widest uppercase">
-                                        Inteligência Comercial
+                    {/* --- SYSTEM HEADER --- */}
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-2">
+                        <div>
+                            <div className="flex items-center gap-2 mb-1">
+                                <div className="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)] animate-pulse" />
+                                <span className="text-[10px] font-bold uppercase tracking-widest text-white/40">Sistema de Inteligência Ativo</span>
+                            </div>
+                            <h1 className="text-3xl font-black text-white tracking-tight uppercase">
+                                {isAdmin ? 'Painel Estratégico' : 'Seu Comando IA'}
+                            </h1>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 border border-white/10">
+                                <Clock size={14} className="text-white/40" />
+                                <span className="text-[11px] font-bold text-white/50 uppercase tracking-wider text-nowrap">
+                                    Base: {isAdmin ? (globalInsights?.leads_analyzed || 0) : (individualAnalysis?.base_count || 0)} Leads
+                                </span>
+                            </div>
+                            {isAdmin && (
+                                <button
+                                    onClick={handleRunAnalysis}
+                                    disabled={isAnalyzing}
+                                    className="px-6 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-black text-[11px] uppercase tracking-widest transition-all shadow-lg shadow-red-600/20 flex items-center gap-2 disabled:opacity-50"
+                                >
+                                    {isAnalyzing ? <RefreshCcw className="animate-spin" size={14} /> : <Zap size={14} />}
+                                    {isAnalyzing ? 'Processando...' : 'Atualizar Análise'}
+                                </button>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* --- AI COMMAND CENTER (HERO) --- */}
+                    <div className="relative group overflow-hidden rounded-[2rem] bg-[#0c0c0e] border border-white/10 p-1 md:p-1">
+                        <div className="absolute inset-0 bg-gradient-to-br from-red-600/10 via-transparent to-transparent opacity-50" />
+                        <div className="absolute -right-20 -top-20 h-64 w-64 rounded-full bg-red-600/10 blur-[100px]" />
+
+                        <div className="relative z-10 glass-card rounded-[1.8rem] p-8 md:p-12 flex flex-col md:flex-row items-center gap-10">
+                            <div className="flex-1 text-center md:text-left">
+                                <span className="inline-block px-4 py-1.5 rounded-full bg-red-600/10 border border-red-600/20 text-red-600 font-black text-[10px] tracking-widest uppercase mb-6">
+                                    Insights de {userName || 'Companheiro'}
+                                </span>
+                                <h2 className="text-2xl md:text-4xl font-bold text-white mb-6 leading-tight italic">
+                                    &ldquo;{isAdmin ? "Visão global da operação e alertas de inteligência em tempo real." : (individualAnalysis?.daily_guide || 'A IA está analisando seus leads para gerar seu roteiro de hoje...')}&rdquo;
+                                </h2>
+                                <p className="text-white/40 text-sm font-medium max-w-2xl">
+                                    Nossa IA processou os leads ativos e identificou padrões de comportamento, interesse e tempo de resposta para otimizar sua conversão agora.
+                                </p>
+                            </div>
+
+                            <div className="w-full md:w-auto grid grid-cols-2 gap-3 min-w-[300px]">
+                                <div className="p-6 rounded-2xl bg-white/[0.03] border border-white/5 backdrop-blur-sm">
+                                    <span className="text-[10px] font-black text-white/30 uppercase tracking-widest block mb-1">Eficiência</span>
+                                    <div className="flex items-baseline gap-2">
+                                        <span className="text-3xl font-black text-white">{metrics.responseRate}</span>
                                     </div>
                                 </div>
-                                <h1 className="text-4xl md:text-5xl font-black text-red-600 mb-6 leading-tight uppercase tracking-tighter">
-                                    {isAdmin ? 'Gestão de Vendas' : 'Sua Estratégia IA'}
-                                </h1>
-                                <p className="text-xl md:text-2xl text-white/90 leading-tight font-black italic mb-8">
-                                    "{isAdmin ? "Visão global da operação e alertas de equipe." : (individualAnalysis?.daily_guide || 'A IA está analisando seus leads para hoje...')}"
-                                </p>
-                                <div className="flex flex-wrap gap-4">
-                                    {isAdmin && (
-                                        <button
-                                            onClick={handleRunAnalysis}
-                                            disabled={isAnalyzing}
-                                            className="px-8 py-4 rounded-2xl bg-red-600 hover:bg-red-500 text-white font-bold text-sm transition-all shadow-xl shadow-red-600/20 flex items-center gap-3 disabled:opacity-50"
-                                        >
-                                            {isAnalyzing ? <RefreshCcw className="animate-spin" size={18} /> : <Zap size={18} />}
-                                            {isAnalyzing ? 'PROCESSANDO...' : 'EXECUTAR ANÁLISE'}
-                                        </button>
-                                    )}
-                                    <div className="flex items-center gap-2 px-6 py-4 rounded-2xl bg-white/5 border border-white/10 text-white/40 text-[10px] font-bold uppercase tracking-widest leading-none">
-                                        <Clock size={14} />
-                                        Base: {isAdmin ? (globalInsights?.leads_analyzed || 0) : (individualAnalysis?.base_count || 0)} Leads
+                                <div className="p-6 rounded-2xl bg-white/[0.03] border border-white/5 backdrop-blur-sm">
+                                    <span className="text-[10px] font-black text-white/30 uppercase tracking-widest block mb-1">Fechamento</span>
+                                    <div className="flex items-baseline gap-2">
+                                        <span className="text-3xl font-black text-emerald-500">{metrics.closingOpps}</span>
                                     </div>
                                 </div>
                             </div>
-                            {/* Efeito decorativo */}
-                            <div className="absolute top-0 right-0 p-10 opacity-5 group-hover:opacity-10 transition-opacity">
-                                <Sparkles size={160} className="text-red-600" />
+                        </div>
+                    </div>
+
+                    {/* --- KPI GRID --- */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                        <div className="glass-card p-6 rounded-2xl group hover:border-red-600/30 transition-all">
+                            <div className="flex items-center justify-between mb-4">
+                                <div className="p-3 rounded-xl bg-blue-500/10 text-blue-500">
+                                    <Users size={20} />
+                                </div>
+                                <Activity size={16} className="text-emerald-500 animate-pulse" />
+                            </div>
+                            <span className="text-[10px] font-black text-white/30 uppercase tracking-widest block mb-1">{isAdmin ? 'Total leads ativos' : 'Meus Leads Ativos'}</span>
+                            <div className="flex items-baseline gap-2">
+                                <span className="text-4xl font-black text-white">{metrics.activeLeads}</span>
+                                <span className="text-[10px] font-bold text-white/20 uppercase tracking-wider">Leads</span>
                             </div>
                         </div>
 
-                        {/* LADO DIREITO: DASHBOARD INTEGRADO */}
-                        <div className="lg:col-span-5 grid grid-cols-2 gap-4">
-                            <div className="p-8 rounded-[2.5rem] bg-[#0c0c0e] border border-white/5 flex flex-col justify-between">
-                                <span className="text-[10px] font-black text-white/20 uppercase tracking-widest">{isAdmin ? 'Total Leads Ativos' : 'Leads Ativos'}</span>
-                                <div className="mt-4 flex items-baseline gap-2">
-                                    <span className="text-4xl font-black text-white">{metrics.activeLeads}</span>
-                                    <Activity size={20} className="text-emerald-500" />
+                        <div className="glass-card p-6 rounded-2xl group hover:border-emerald-500/30 transition-all">
+                            <div className="flex items-center justify-between mb-4">
+                                <div className="p-3 rounded-xl bg-emerald-500/10 text-emerald-500">
+                                    <MessageSquare size={20} />
+                                </div>
+                                <div className="h-1.5 w-20 rounded-full bg-white/5 overflow-hidden">
+                                    <div className="h-full bg-emerald-500" style={{ width: `${(metrics.responded24h / (metrics.activeLeads || 1)) * 100}%` }}></div>
                                 </div>
                             </div>
-                            <div className="p-8 rounded-[2.5rem] bg-[#0c0c0e] border border-white/5 flex flex-col justify-between">
-                                <span className="text-[10px] font-black text-white/20 uppercase tracking-widest">Atendidos 24h</span>
-                                <div className="mt-4 flex items-baseline gap-2">
-                                    <span className="text-4xl font-black text-emerald-500">{metrics.responded24h}</span>
-                                    <div className="w-16 h-2 rounded-full bg-white/5 overflow-hidden">
-                                        <div className="h-full bg-emerald-500" style={{ width: `${(metrics.responded24h / (metrics.activeLeads || 1)) * 100}%` }}></div>
-                                    </div>
-                                </div>
+                            <span className="text-[10px] font-black text-white/30 uppercase tracking-widest block mb-1">Atendidos (24h)</span>
+                            <div className="flex items-baseline gap-2">
+                                <span className="text-4xl font-black text-emerald-500">{metrics.responded24h}</span>
+                                <span className="text-[10px] font-bold text-white/20 uppercase tracking-wider text-nowrap">Respostas</span>
                             </div>
-                            <div className="p-8 rounded-[2.5rem] bg-[#0c0c0e] border border-white/5 flex flex-col justify-between">
-                                <span className="text-[10px] font-black text-white/20 uppercase tracking-widest">{isAdmin ? 'Atenção (Total Equipe)' : 'Resgate (48h+)'}</span>
-                                <div className="mt-4 flex items-baseline gap-2">
-                                    <span className={`text-4xl font-black ${metrics.neglected48h > 0 ? 'text-red-500' : 'text-white/20'}`}>{metrics.neglected48h}</span>
-                                    {metrics.neglected48h > 0 && <AlertTriangle size={20} className="text-red-500 animate-pulse" />}
+                        </div>
+
+                        <div className="glass-card p-6 rounded-2xl group hover:border-red-500/30 transition-all">
+                            <div className="flex items-center justify-between mb-4">
+                                <div className="p-3 rounded-xl bg-red-600/10 text-red-600">
+                                    <AlertTriangle size={20} />
                                 </div>
+                                {metrics.neglected48h > 0 && <div className="h-2 w-2 rounded-full bg-red-600 animate-ping" />}
                             </div>
-                            <div className="p-8 rounded-[2.5rem] bg-[#0c0c0e] border border-white/5 flex flex-col justify-between">
-                                <span className="text-[10px] font-black text-white/20 uppercase tracking-widest">Iniciados Hoje</span>
-                                <div className="mt-4 flex items-baseline gap-2">
-                                    <span className="text-4xl font-black text-white">{metrics.startedToday}</span>
-                                    <TrendingUp size={20} className="text-blue-500" />
-                                </div>
+                            <span className="text-[10px] font-black text-white/30 uppercase tracking-widest block mb-1">Negligenciados (+48h)</span>
+                            <div className="flex items-baseline gap-2">
+                                <span className={`text-4xl font-black ${metrics.neglected48h > 0 ? 'text-red-500' : 'text-white/20'}`}>{metrics.neglected48h}</span>
+                                <span className="text-[10px] font-bold text-white/20 uppercase tracking-wider text-nowrap">Atenção</span>
                             </div>
-                            <div className="col-span-2 p-8 rounded-[2.5rem] bg-red-600/[0.03] border border-red-600/10 flex items-center justify-between">
-                                <div>
-                                    <span className="text-[10px] font-black text-red-500/50 uppercase tracking-widest block mb-1">{isAdmin ? 'Média de Resposta Equipe' : 'Tempo Médio Resposta'}</span>
-                                    <span className="text-2xl font-black text-white">{metrics.avgResponse}</span>
+                        </div>
+
+                        <div className="glass-card p-6 rounded-2xl group hover:border-blue-500/30 transition-all">
+                            <div className="flex items-center justify-between mb-4">
+                                <div className="p-3 rounded-xl bg-blue-600/10 text-blue-600">
+                                    <TrendingUp size={20} />
                                 </div>
-                                <div className="text-right">
-                                    <span className="text-[10px] font-black text-red-500/50 uppercase tracking-widest block mb-1">{isAdmin ? 'Eficiência de Atendimento' : 'Taxa de Resposta'}</span>
-                                    <span className="text-2xl font-black text-emerald-500">{metrics.responseRate}</span>
-                                </div>
+                                <ArrowUpRight size={16} className="text-blue-500" />
+                            </div>
+                            <span className="text-[10px] font-black text-white/30 uppercase tracking-widest block mb-1">Iniciados Hoje</span>
+                            <div className="flex items-baseline gap-2">
+                                <span className="text-4xl font-black text-white">{metrics.startedToday}</span>
+                                <span className="text-[10px] font-bold text-white/20 uppercase tracking-wider text-nowrap">Entradas</span>
                             </div>
                         </div>
                     </div>
 
                     {/* PAINEL DE CONTROLE DE EQUIPE (Apenas Admin) */}
+                    {/* --- TEAM PERFORMANCE BOARD (ADMIN ONLY) --- */}
                     {isAdmin && (
-                        <div className="space-y-8">
-                            <div className="flex items-center gap-3">
-                                <Users className="text-red-600" size={28} />
-                                <h2 className="text-3xl font-black text-white uppercase tracking-tighter">Controle de Performance da Equipe</h2>
+                        <div className="space-y-6 pt-4">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2 rounded-lg bg-white/5 text-white/40">
+                                        <Users size={20} />
+                                    </div>
+                                    <h2 className="text-xl font-bold text-white uppercase tracking-tight">Estatísticas da Equipe</h2>
+                                </div>
+                                <span className="text-[10px] font-bold text-white/30 uppercase tracking-widest">Atualizado em tempo real</span>
                             </div>
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                                {teamPerformance.map((c) => (
-                                    <div key={c.id} className="p-8 rounded-[2.5rem] bg-[#0c0c0e] border border-white/5 hover:border-red-600/20 transition-all group">
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+                                {teamPerformance.map((c, i) => (
+                                    <motion.div
+                                        key={c.id}
+                                        initial={{ opacity: 0, y: 10 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        transition={{ delay: 0.3 + (i * 0.05) }}
+                                        className="glass-card p-6 rounded-2xl hover:border-red-600/20 transition-all group overflow-hidden relative"
+                                    >
+                                        <div className="absolute top-0 right-0 w-1 h-full bg-red-600 opacity-0 group-hover:opacity-100 transition-opacity" />
+
                                         <div className="flex items-center justify-between mb-6">
-                                            <h4 className="font-black text-white uppercase group-hover:text-red-600 transition-colors">{c.name?.split(' ')[0]}</h4>
-                                            <div className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${c.grade > 80 ? 'bg-emerald-500/10 text-emerald-500' : 'bg-red-500/10 text-red-500'}`}>
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center font-black text-white/40 group-hover:bg-red-600 group-hover:text-white transition-all uppercase">
+                                                    {c.name?.charAt(0)}
+                                                </div>
+                                                <h4 className="font-bold text-white group-hover:text-red-600 transition-colors uppercase tracking-tight leading-none">{c.name?.split(' ')[0]}</h4>
+                                            </div>
+                                            <div className={`px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${c.grade > 80 ? 'bg-emerald-500/10 text-emerald-500' : 'bg-red-500/10 text-red-500'}`}>
                                                 Nota: {c.grade.toFixed(0)}
                                             </div>
                                         </div>
+
                                         <div className="space-y-4">
-                                            <div className="flex justify-between items-center text-[10px] font-bold uppercase tracking-widest text-white/30">
-                                                <span>Leads Ativos</span>
-                                                <span className="text-white">{c.active}</span>
+                                            <div>
+                                                <div className="flex justify-between items-center mb-1.5">
+                                                    <span className="text-[10px] font-bold uppercase tracking-widest text-white/30">Taxa de Resposta</span>
+                                                    <span className={`text-[10px] font-black ${c.grade > 80 ? 'text-emerald-500' : 'text-orange-500'}`}>{c.grade.toFixed(0)}%</span>
+                                                </div>
+                                                <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">
+                                                    <motion.div
+                                                        initial={{ width: 0 }}
+                                                        animate={{ width: `${c.grade}%` }}
+                                                        className={`h-full ${c.grade > 80 ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-orange-500 shadow-[0_0_8px_rgba(249,115,22,0.5)]'}`}
+                                                    />
+                                                </div>
                                             </div>
-                                            <div className="flex justify-between items-center text-[10px] font-bold uppercase tracking-widest text-white/30">
-                                                <span>Atendidos 24h</span>
-                                                <span className="text-emerald-500">{c.responded24h}</span>
+
+                                            <div className="flex justify-between items-center pt-2">
+                                                <span className="text-[10px] font-bold uppercase tracking-widest text-white/20">Leads Ativos</span>
+                                                <span className="text-sm font-black text-white">{c.active}</span>
                                             </div>
-                                            <div className="flex justify-between items-center text-[10px] font-bold uppercase tracking-widest text-white/30">
-                                                <span>Negligenciados</span>
-                                                <span className={c.neglected > 0 ? 'text-red-500' : 'text-white'}>{c.neglected}</span>
+                                            <div className="flex justify-between items-center">
+                                                <span className="text-[10px] font-bold uppercase tracking-widest text-white/20">Atendidos 24h</span>
+                                                <span className="text-sm font-black text-emerald-500/80">{c.responded24h}</span>
+                                            </div>
+                                            <div className="flex justify-between items-center">
+                                                <span className="text-[10px] font-bold uppercase tracking-widest text-white/20">Pendentes</span>
+                                                <span className={`text-sm font-black ${c.neglected > 0 ? 'text-red-500' : 'text-white/40'}`}>{c.neglected}</span>
                                             </div>
                                         </div>
+
                                         {c.neglected > 0 && (
                                             <div className="mt-6 pt-6 border-t border-white/5">
-                                                <button className="w-full py-3 rounded-xl bg-red-600/10 hover:bg-red-600 text-red-500 hover:text-white font-black text-[10px] uppercase tracking-widest transition-all">
-                                                    Cobrar Pendências
+                                                <button className="w-full py-2.5 rounded-xl bg-red-600 shadow-lg shadow-red-600/10 hover:bg-red-500 text-white font-black text-[10px] uppercase tracking-widest transition-all">
+                                                    Cobrar Vendedor
                                                 </button>
                                             </div>
                                         )}
-                                    </div>
+
+                                    </motion.div>
                                 ))}
                             </div>
                         </div>
                     )}
 
-                    {/* ALERTAS ESTRATÉGICOS DA IA (Apenas Admin) */}
+                    {/* --- AI STRATEGIC ALERTS (ADMIN) --- */}
                     {isAdmin && globalInsights?.team_alerts && (
-                        <div className="space-y-8">
+                        <div className="space-y-6">
                             <div className="flex items-center gap-3">
-                                <ShieldCheck className="text-red-600" size={28} />
-                                <h2 className="text-3xl font-black text-white uppercase tracking-tighter">Alertas do Comandante</h2>
+                                <div className="p-2 rounded-lg bg-red-600/10 text-red-600">
+                                    <ShieldCheck size={20} />
+                                </div>
+                                <h2 className="text-xl font-bold text-white uppercase tracking-tight">Alertas do Comandante</h2>
                             </div>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                                {globalInsights.team_alerts.map((alert: string, i: number) => (
-                                    <div key={i} className="p-10 rounded-[3rem] bg-gradient-to-r from-red-600/10 to-transparent border border-red-600/20 flex gap-6 items-start">
-                                        <div className="p-4 rounded-2xl bg-red-600 text-white shadow-lg shadow-red-600/20">
-                                            <AlertTriangle size={24} />
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                {globalInsights.team_alerts.map((teamAlert: string, i: number) => (
+                                    <motion.div
+                                        key={i}
+                                        initial={{ opacity: 0, x: -20 }}
+                                        animate={{ opacity: 1, x: 0 }}
+                                        transition={{ delay: 0.5 + (i * 0.1) }}
+                                        className="p-8 rounded-3xl bg-[#0c0c0e] border border-white/5 border-l-4 border-l-red-600 flex gap-6 items-start group shadow-2xl relative overflow-hidden"
+                                    >
+                                        <div className="absolute top-0 right-0 p-8 opacity-[0.03] group-hover:rotate-12 transition-transform">
+                                            <Brain size={120} className="text-red-600" />
                                         </div>
-                                        <div>
-                                            <span className="text-[10px] font-black text-red-500 uppercase tracking-widest block mb-2">ALERTA CRÍTICO</span>
-                                            <p className="text-xl font-black text-white italic leading-tight">"{alert}"</p>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-
-                    {/* 1) LEADS QUALIFICADOS PARA FECHAMENTO (Item 6 & 7) */}
-                    <div className="space-y-8">
-                        <div className="flex items-center gap-3">
-                            <Target className="text-red-600" size={28} />
-                            <h2 className="text-3xl font-black text-white uppercase tracking-tighter">{isAdmin ? 'Ranking Global de Fechamento' : 'Leads Qualificados para Fechamento'}</h2>
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                            {closingOpportunities.length > 0 ? closingOpportunities.map((lead: any) => (
-                                <motion.div
-                                    key={lead.id}
-                                    whileHover={{ y: -8 }}
-                                    className="p-10 rounded-[3rem] bg-gradient-to-b from-emerald-600/[0.08] to-transparent border border-emerald-500/20 cursor-pointer group hover:border-emerald-500/40 transition-all shadow-2xl"
-                                    onClick={() => router.push(`/leads?id=${lead.id}&tab=timeline`)}
-                                >
-                                    <div className="flex items-center justify-between mb-8">
-                                        <div className="flex items-center gap-5">
-                                            <div className="w-16 h-16 rounded-[1.5rem] bg-emerald-500 text-white flex items-center justify-center font-black text-2xl shadow-xl shadow-emerald-500/20">
-                                                {lead.name[0]}
+                                        <div className="relative z-10 flex gap-6 items-start">
+                                            <div className="p-4 rounded-2xl bg-red-600 text-white shadow-lg shadow-red-600/20 group-hover:scale-110 transition-transform flex-shrink-0">
+                                                <AlertTriangle size={24} />
                                             </div>
                                             <div>
-                                                <h3 className="font-black text-white text-xl leading-tight uppercase group-hover:text-emerald-500 transition-colors">{lead.name}</h3>
-                                                {isAdmin && (
-                                                    <div className="flex items-center gap-2 mt-1">
-                                                        <Users size={12} className="text-white/40" />
-                                                        <span className="text-[10px] font-black text-white/40 uppercase tracking-widest">{consultants.find(c => c.id === lead.assigned_consultant_id)?.name?.split(' ')[0] || 'Sem Consultor'}</span>
-                                                    </div>
-                                                )}
-                                                <span className="text-[11px] font-black text-white/30 uppercase tracking-[0.2em]">{lead.vehicle_interest || 'Aguardando Perfil'}</span>
+                                                <span className="text-[10px] font-black text-red-500 uppercase tracking-widest block mb-2 leading-none">Diretiva de Comando</span>
+                                                <p className="text-xl font-bold text-white leading-tight pr-10 italic">&ldquo;{teamAlert}&rdquo;</p>
                                             </div>
                                         </div>
-                                        <div className="text-3xl font-black text-emerald-500 tracking-tighter">{lead.ai_score}%</div>
-                                    </div>
-                                    <div className="space-y-5">
-                                        <div className="p-5 rounded-[1.5rem] bg-emerald-500/[0.03] border border-emerald-500/10">
-                                            <span className="text-[10px] font-black text-emerald-500/50 uppercase tracking-widest block mb-1.5">Gatilho de Fechamento</span>
-                                            <p className="text-md text-white/80 font-bold leading-relaxed line-clamp-2">{lead.closing_reason || 'Detectado alto engajamento e intenção de compra.'}</p>
+                                    </motion.div>
+                                ))}
+
+                            </div>
+
+                        </div>
+                    )}
+
+                    {/* --- OPPORTUNITY RANKING (FECHAMENTO) --- */}
+                    <div className="space-y-6">
+                        <div className="flex items-center gap-3">
+                            <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-500">
+                                <Target size={20} />
+                            </div>
+                            <h2 className="text-xl font-bold text-white uppercase tracking-tight">
+                                {isAdmin ? 'Ranking Global de Fechamento' : 'Oportunidades de Ouro'}
+                            </h2>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            {closingOpportunities.length > 0 ? closingOpportunities.map((lead: any, i: number) => (
+                                <motion.div
+                                    key={lead.id}
+                                    initial={{ opacity: 0, y: 10 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    transition={{ delay: 0.6 + (i * 0.05) }}
+                                    className="glass-card p-8 rounded-3xl group cursor-pointer hover:border-emerald-500/30 transition-all flex flex-col justify-between h-full"
+                                    onClick={() => router.push(`/leads?id=${lead.id}&tab=timeline`)}
+                                >
+                                    <div>
+                                        <div className="flex items-center justify-between mb-6">
+                                            <div className="flex items-center gap-4">
+                                                <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center font-black text-xl border border-emerald-500/20 uppercase">
+                                                    {lead.name[0]}
+                                                </div>
+                                                <div>
+                                                    <h3 className="font-bold text-white text-lg group-hover:text-emerald-500 transition-colors uppercase leading-none">{lead.name}</h3>
+                                                    <span className="text-[10px] font-bold text-white/30 uppercase tracking-widest">{lead.vehicle_interest || 'Interesse Geral'}</span>
+                                                </div>
+                                            </div>
+                                            <div className="text-2xl font-black text-emerald-500 tracking-tighter">{lead.ai_score}%</div>
                                         </div>
-                                        <div className="p-5 rounded-[1.5rem] bg-red-600/5 border border-red-600/10">
-                                            <span className="text-[10px] font-black text-red-500 uppercase tracking-widest block mb-1.5">Estratégia</span>
-                                            <p className="text-md text-red-500 font-black leading-relaxed italic">{lead.proxima_acao || 'Aguardando atualização da IA...'}</p>
+
+                                        <div className="space-y-4">
+                                            <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5">
+                                                <span className="text-[9px] font-black text-emerald-500 uppercase tracking-widest block mb-1">Diagnóstico IA</span>
+                                                <p className="text-xs text-white/50 font-medium leading-relaxed italic line-clamp-2">&ldquo;{lead.closing_reason || 'Padrão de compra identificado.'}&rdquo;</p>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="mt-6 pt-6 border-t border-white/5 flex items-center justify-between">
+                                        <div className="flex items-center gap-2">
+                                            <Users size={12} className="text-white/20" />
+                                            <span className="text-[9px] font-bold text-white/30 uppercase">
+                                                {consultants.find(c => c.id === lead.assigned_consultant_id)?.name?.split(' ')[0] || 'S/V'}
+                                            </span>
+                                        </div>
+                                        <div className="flex items-center gap-2 text-emerald-500 font-bold text-[9px] uppercase tracking-widest group-hover:translate-x-1 transition-transform">
+                                            <span>Fechar agora</span>
+                                            <ArrowRight size={12} />
                                         </div>
                                     </div>
                                 </motion.div>
                             )) : (
-                                <div className="col-span-full p-20 rounded-[3rem] border border-white/5 bg-[#0c0c0e] flex flex-col items-center justify-center text-center opacity-30 grayscale">
-                                    <Target size={60} className="mb-4 text-white/20" />
-                                    <p className="text-lg font-black text-white/40 uppercase tracking-widest">Nenhuma oportunidade crítica detectada.</p>
+                                <div className="col-span-full glass-card p-20 rounded-3xl flex flex-col items-center justify-center opacity-30 grayscale border-dashed border-2">
+                                    <Target size={40} className="mb-4" />
+                                    <p className="text-xs font-black uppercase tracking-widest">Nenhuma oportunidade crítica no radar</p>
                                 </div>
                             )}
                         </div>
                     </div>
 
-                    {/* 2) AÇÕES RECOMENDADAS PELA IA (Item 9) */}
-                    {!isAdmin && (
-                        <div className="space-y-8">
+                    {/* --- RECOVERY OPPORTUNITIES (NEGLECTED) --- */}
+                    <div className="space-y-6">
+                        <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">
-                                <Rocket className="text-red-600" size={28} />
-                                <h2 className="text-3xl font-black text-white uppercase tracking-tighter">Ações Recomendadas</h2>
+                                <div className="p-2 rounded-lg bg-red-600/10 text-red-600">
+                                    <Clock size={20} />
+                                </div>
+                                <h2 className="text-xl font-bold text-white uppercase tracking-tight">Leads em Ponto de Resgate</h2>
                             </div>
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
-                                {individualAnalysis?.recommended_actions?.map((action: any, i: number) => (
-                                    <div
-                                        key={i}
-                                        className={`p-10 rounded-[2.5rem] bg-[#0c0c0e] border border-white/5 transition-all group shadow-xl relative overflow-hidden ${action.lead_id ? 'cursor-pointer hover:border-red-600/40 hover:bg-red-600/[0.02]' : ''}`}
-                                        onClick={() => {
-                                            if (action.lead_id) {
-                                                router.push(`/leads?id=${action.lead_id}&tab=timeline`);
-                                            }
-                                        }}
-                                    >
-                                        <div className="w-12 h-12 rounded-2xl bg-white/5 text-white/20 flex items-center justify-center mb-8 group-hover:bg-red-600 group-hover:text-white transition-all">
-                                            <Zap size={24} />
+                            <span className="px-4 py-1 rounded-full bg-red-600 text-white text-[9px] font-black uppercase tracking-widest shadow-lg shadow-red-600/20">Urgente</span>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            {neglectedLeads.length > 0 ? neglectedLeads.slice(0, 6).map((lead: Lead, i: number) => (
+                                <motion.div
+                                    key={lead.id}
+                                    initial={{ opacity: 0, y: 10 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    transition={{ delay: 0.7 + (i * 0.05) }}
+                                    className="glass-card p-8 rounded-3xl border-red-600/10 hover:border-red-600/30 transition-all cursor-pointer group relative overflow-hidden"
+                                    onClick={() => router.push(`/leads?id=${lead.id}&tab=timeline`)}
+                                >
+                                    <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
+                                        <AlertTriangle size={60} className="text-red-600" />
+                                    </div>
+                                    <div className="flex items-center gap-4 mb-6">
+                                        <div className="w-12 h-12 rounded-2xl bg-red-600/10 text-red-500 border border-red-600/20 flex items-center justify-center font-black text-xl uppercase">
+                                            {lead.name[0]}
                                         </div>
-                                        <h4 className="text-lg font-black text-white mb-3 leading-tight uppercase tracking-tight group-hover:text-red-600 transition-colors uppercase">{action.task}</h4>
-                                        <p className="text-sm text-white/40 leading-relaxed font-medium mb-6">{action.reason}</p>
+                                        <div>
+                                            <h4 className="font-bold text-white text-lg uppercase group-hover:text-red-600 transition-colors leading-none">{lead.name}</h4>
+                                            <p className="text-[9px] font-bold text-red-500 uppercase tracking-widest mt-1">Negligenciado há 48h+</p>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center justify-between pt-4 border-t border-white/5">
+                                        <span className="text-[10px] font-bold text-white/20 uppercase tracking-widest">{lead.vehicle_interest || 'Geral'}</span>
+                                        <div className="flex items-center gap-2 text-red-600 font-bold text-[9px] uppercase tracking-widest group-hover:translate-x-1 transition-transform">
+                                            <span>Atender agora</span>
+                                            <ArrowRight size={12} />
+                                        </div>
+                                    </div>
+                                </motion.div>
+                            )) : (
+                                <div className="col-span-full glass-card p-20 rounded-3xl flex flex-col items-center justify-center text-center opacity-40">
+                                    <CheckCircle2 className="text-emerald-500 mb-4" size={40} />
+                                    <p className="text-xs font-black uppercase tracking-widest">Base 100% atualizada no prazo</p>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+
+                    {/* --- AI ACTION CARDS (RECOMENDAÇÕES) --- */}
+                    {!isAdmin && individualAnalysis?.recommended_actions && (
+                        <div className="space-y-6">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2 rounded-lg bg-red-600/10 text-red-600">
+                                    <Rocket size={20} />
+                                </div>
+                                <h2 className="text-xl font-bold text-white uppercase tracking-tight">Roteiro Recomendado</h2>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                                {individualAnalysis.recommended_actions.map((action: any, i: number) => (
+                                    <motion.div
+                                        key={i}
+                                        initial={{ opacity: 0, scale: 0.95 }}
+                                        animate={{ opacity: 1, scale: 1 }}
+                                        transition={{ delay: 0.8 + (i * 0.1) }}
+                                        className={`glass-card p-8 rounded-3xl group relative overflow-hidden transition-all ${action.lead_id ? 'cursor-pointer hover:border-red-600/40' : ''}`}
+                                        onClick={() => action.lead_id && router.push(`/leads?id=${action.lead_id}&tab=timeline`)}
+                                    >
+                                        <div className="w-10 h-10 rounded-xl bg-white/5 text-white/20 flex items-center justify-center mb-6 group-hover:bg-red-600 group-hover:text-white transition-all">
+                                            <Zap size={20} />
+                                        </div>
+                                        <h4 className="text-lg font-black text-white mb-2 leading-tight uppercase group-hover:text-red-600 transition-colors">{action.task}</h4>
+                                        <p className="text-[11px] text-white/40 leading-relaxed font-medium mb-6 uppercase tracking-wider">{action.reason}</p>
 
                                         {action.lead_id && (
-                                            <div className="flex items-center gap-2 text-red-600 group-hover:translate-x-1 transition-all">
-                                                <span className="text-[10px] font-black uppercase tracking-widest">Acessar agora</span>
-                                                <ArrowRight size={14} />
+                                            <div className="flex items-center gap-2 text-red-600 font-bold text-[9px] uppercase tracking-widest group-hover:translate-x-1 transition-transform">
+                                                <span>Acessar lead</span>
+                                                <ArrowRight size={12} />
                                             </div>
                                         )}
-                                    </div>
+                                    </motion.div>
                                 ))}
                             </div>
                         </div>
                     )}
 
-                    {/* 3) OPORTUNIDADES PARA RESGATE (Item 4 & 5) */}
-                    <div className="space-y-8">
-                        <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                                <Clock className="text-red-600" size={28} />
-                                <h2 className="text-3xl font-black text-white uppercase tracking-tighter">{isAdmin ? 'Leads Críticos: Sem Retorno (Time)' : 'Oportunidades para Resgate'}</h2>
-                            </div>
-                            <span className="px-6 py-2 rounded-full bg-red-600 text-white shadow-lg shadow-red-600/20 text-[10px] font-black uppercase tracking-widest">Resgate Imediato</span>
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                            {neglectedLeads.length > 0 ? neglectedLeads.map((lead: Lead) => (
-                                <div
-                                    key={lead.id}
-                                    className="p-10 rounded-[3rem] bg-[#0c0c0e] border border-red-600/10 hover:border-red-600/40 transition-all cursor-pointer group shadow-xl relative overflow-hidden"
-                                    onClick={() => router.push(`/leads?id=${lead.id}&tab=timeline`)}
-                                >
-                                    <div className="absolute top-0 right-0 p-6 opacity-5 group-hover:opacity-10 transition-opacity">
-                                        <AlertTriangle size={60} className="text-red-600" />
-                                    </div>
-                                    <div className="flex items-start justify-between mb-8">
-                                        <div className="flex items-center gap-5">
-                                            <div className="w-16 h-16 rounded-[1.5rem] bg-red-600/10 text-red-500 border border-red-600/20 flex items-center justify-center font-black text-2xl">
-                                                {lead.name[0]}
-                                            </div>
-                                            <div>
-                                                <h4 className="font-black text-white text-xl uppercase group-hover:text-red-500 transition-colors leading-tight">{lead.name}</h4>
-                                                <div className="flex flex-col gap-1 mt-1.5 ">
-                                                    <p className="text-[11px] font-bold text-red-500 uppercase tracking-widest italic">Atenção Crítica: 48h sem resposta</p>
-                                                    {isAdmin && (
-                                                        <div className="flex items-center gap-2">
-                                                            <Users size={12} className="text-white/20" />
-                                                            <span className="text-[10px] font-black text-white/30 uppercase tracking-widest">{consultants.find(c => c.id === lead.assigned_consultant_id)?.name?.split(' ')[0] || 'Sem Resp'}</span>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div className="space-y-4">
-                                        <div className="flex items-center justify-between pt-6 border-t border-white/5">
-                                            <span className="text-[10px] font-black text-white/20 uppercase tracking-[0.2em]">{lead.vehicle_interest || 'Interesse Geral'}</span>
-                                            <div className="flex items-center gap-3 text-red-600 group-hover:translate-x-2 transition-transform">
-                                                <span className="text-[11px] font-black uppercase tracking-widest">{isAdmin ? 'Ver Detalhes' : 'Atender Agora'}</span>
-                                                <ArrowRight size={18} />
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            )) : (
-                                <div className="col-span-full p-20 rounded-[3rem] border-2 border-dashed border-white/5 flex flex-col items-center justify-center text-center">
-                                    <CheckCircle2 className="text-emerald-500/20 mb-6" size={80} />
-                                    <p className="text-xl font-black uppercase tracking-widest text-white/20">Sua base está 100% atualizada.</p>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-
                     {/* 4) LEADS QUALIFICADOS (Legado ranking) */}
+
                     <div className="space-y-8">
                         <div className="flex items-center gap-3">
                             <TrendingUp className="text-red-600" size={28} />

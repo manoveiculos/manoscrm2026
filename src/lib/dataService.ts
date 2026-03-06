@@ -80,11 +80,19 @@ export const dataService = {
         if (cached) return cached;
 
         try {
-            const crm26Leads = await this.getLeadsCRM26(consultantName, true, !!leadId);
-            cacheSet(cacheKey, crm26Leads, TTL.LEADS);
-            return crm26Leads;
+            const [crm26Leads, mainLeads] = await Promise.all([
+                this.getLeadsCRM26(consultantName, true, !!leadId),
+                this.getLeadsManos(consultantId, leadId)
+            ]);
+
+            const unifiedLeads = [...mainLeads, ...crm26Leads].sort((a, b) =>
+                new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+            );
+
+            cacheSet(cacheKey, unifiedLeads, TTL.LEADS);
+            return unifiedLeads;
         } catch (err) {
-            console.error("Error fetching leads from Unified CRM 26 source:", err);
+            console.error("Error fetching leads from unified sources:", err);
             return [];
         }
     },
@@ -325,6 +333,34 @@ export const dataService = {
                     estimated_ticket: 0
                 };
             }) as unknown as Lead[];
+    },
+
+    async getLeadsManos(consultantId?: string, leadId?: string) {
+        let query = supabase
+            .from('leads_manos_crm')
+            .select('*, consultants_manos_crm(name)')
+            .order('created_at', { ascending: false });
+
+        if (consultantId) {
+            query = query.eq('assigned_consultant_id', consultantId);
+        }
+
+        if (leadId) {
+            const realId = leadId.replace('main_', '');
+            query = query.eq('id', realId);
+        }
+
+        const { data, error } = await query;
+        if (error) {
+            console.error("Error on leads_manos_crm:", error);
+            return [];
+        }
+
+        return (data || []).map(item => ({
+            ...item,
+            id: `main_${item.id}`,
+            consultants_manos_crm: item.consultants_manos_crm || { name: 'Pendente' }
+        })) as unknown as Lead[];
     },
 
     async autoDistributePendingCRM26() {
@@ -668,28 +704,33 @@ export const dataService = {
             realId = leadId.replace('dist_', '');
         }
 
-        // For CRM26 and leads_distribuicao, we might need the consultant name
-        const { data: consultant } = await supabase
-            .from('consultants_manos_crm')
-            .select('name')
-            .eq('id', consultantId)
-            .single();
+        let consultantName = 'Desconhecido';
+        if (consultantId) {
+            const { data: consultant } = await supabase
+                .from('consultants_manos_crm')
+                .select('name')
+                .eq('id', consultantId)
+                .maybeSingle();
+            consultantName = consultant?.name || 'Desconhecido';
+        }
 
         const now = new Date().toISOString();
         const updateData: any = {};
 
         if (table === 'leads_manos_crm') {
             updateData.updated_at = now;
-            updateData.assigned_consultant_id = consultantId;
+            updateData.assigned_consultant_id = consultantId || null;
         } else {
             updateData.atualizado_em = now;
-            updateData.vendedor = consultant?.name || 'Desconhecido';
-            updateData.enviado = true;
+            updateData.vendedor = consultantId ? consultantName : null;
+            updateData.enviado = consultantId ? true : false;
 
             // TRACK FIRST CONSULTANT
-            const { data: existing } = await supabase.from(table).select('primeiro_vendedor').eq('id', realId).single();
-            if (!existing?.primeiro_vendedor) {
-                updateData.primeiro_vendedor = consultant?.name || 'Desconhecido';
+            if (consultantId) {
+                const { data: existing } = await supabase.from(table).select('primeiro_vendedor').eq('id', realId).single();
+                if (!existing?.primeiro_vendedor) {
+                    updateData.primeiro_vendedor = consultantName;
+                }
             }
         }
 
@@ -698,11 +739,14 @@ export const dataService = {
             .update(updateData)
             .eq('id', realId);
 
-        if (error) throw error;
+        if (error) {
+            console.error(`Error updating ${table} (ID: ${realId}):`, error);
+            throw error;
+        }
 
         // Log history (only if table supports it)
         if (table === 'leads_manos_crm') {
-            await this.logHistory(realId, 'contacted', undefined, 'Lead atribuÃ­do manualmente para um consultor.');
+            await this.logHistory(realId, 'contacted', undefined, `Lead ${consultantId ? 'atribuído para ' + consultantName : 'desatribuído'} manualmente.`);
         }
     },
 
@@ -914,49 +958,74 @@ export const dataService = {
     },
 
     async updateLeadDetails(leadId: string, details: Partial<Lead>) {
-        if (leadId.startsWith('crm26_')) {
-            const realId = leadId.replace('crm26_', '');
+        const isCRM26 = leadId.startsWith('crm26_');
+        const isLegacy = leadId.startsWith('dist_');
+        const isMain = leadId.startsWith('main_');
 
-            // Map common fields to CRM26 table fields
-            const updateObj: any = {};
+        let table = 'leads_manos_crm'; // Default to main
+        if (isCRM26) table = 'leads_distribuicao_crm_26';
+        else if (isLegacy) table = 'leads_distribuicao';
+        else if (isMain) table = 'leads_manos_crm';
 
-            // Native AI data mapping
+        const realId = leadId.replace(/crm26_|main_|dist_/, '');
+
+        const updateObj: any = {};
+
+        if (isCRM26) {
+            // CRM26 Table (nome, telefone, interesse, troca, cidade, etc)
+            if (details.name !== undefined) updateObj.nome = details.name;
+            if (details.phone !== undefined) updateObj.telefone = details.phone.replace(/\D/g, '');
+            if (details.vehicle_interest !== undefined) updateObj.interesse = details.vehicle_interest;
+            if (details.carro_troca !== undefined) updateObj.troca = details.carro_troca;
+            if (details.region !== undefined) updateObj.cidade = details.region;
+            if (details.status !== undefined) updateObj.status = details.status;
+
+            // AI Fields
             if (details.ai_score !== undefined) updateObj.ai_score = details.ai_score;
-            if (details.ai_classification) updateObj.ai_classification = details.ai_classification;
-            if (details.ai_reason) updateObj.ai_reason = details.ai_reason;
-
-            if (details.ai_summary) {
-                updateObj.resumo = details.ai_summary;
-            }
-            if (details.vehicle_interest) updateObj.interesse = details.vehicle_interest;
-            if (details.carro_troca) updateObj.troca = details.carro_troca;
-            if (details.region) updateObj.cidade = details.region;
-
-            // New AI fields mapping for CRM26
-            if (details.nivel_interesse) updateObj.nivel_interesse = details.nivel_interesse;
-            if (details.momento_compra) updateObj.momento_compra = details.momento_compra;
-            if (details.resumo_consultor) updateObj.resumo_consultor = details.resumo_consultor;
-            if (details.proxima_acao) updateObj.proxima_acao = details.proxima_acao;
-
-            if (details.status) {
-                updateObj.status = details.status;
-            }
+            if (details.ai_classification !== undefined) updateObj.ai_classification = details.ai_classification;
+            if (details.ai_reason !== undefined) updateObj.ai_reason = details.ai_reason;
+            if (details.ai_summary !== undefined) updateObj.resumo = details.ai_summary;
+            if (details.nivel_interesse !== undefined) updateObj.nivel_interesse = details.nivel_interesse;
+            if (details.momento_compra !== undefined) updateObj.momento_compra = details.momento_compra;
+            if (details.resumo_consultor !== undefined) updateObj.resumo_consultor = details.resumo_consultor;
+            if (details.proxima_acao !== undefined) updateObj.proxima_acao = details.proxima_acao;
+            if (details.valor_investimento !== undefined) updateObj.valor_investimento = details.valor_investimento;
+            if (details.metodo_compra !== undefined) updateObj.metodo_compra = details.metodo_compra;
+            if (details.prazo_troca !== undefined) updateObj.prazo_troca = details.prazo_troca;
 
             updateObj.atualizado_em = new Date().toISOString();
+        } else {
+            // Standard / Main Table
+            if (details.name !== undefined) updateObj.name = details.name;
+            if (details.phone !== undefined) updateObj.phone = details.phone;
+            if (details.email !== undefined) updateObj.email = details.email;
+            if (details.vehicle_interest !== undefined) updateObj.vehicle_interest = details.vehicle_interest;
+            if (details.carro_troca !== undefined) updateObj.carro_troca = details.carro_troca;
+            if (details.valor_investimento !== undefined) updateObj.valor_investimento = details.valor_investimento;
+            if (details.status !== undefined) updateObj.status = details.status;
+            if (details.ai_score !== undefined) updateObj.ai_score = details.ai_score;
+            if (details.ai_classification !== undefined) updateObj.ai_classification = details.ai_classification;
+            if (details.ai_reason !== undefined) updateObj.ai_reason = details.ai_reason;
+            if (details.ai_summary !== undefined) updateObj.ai_summary = details.ai_summary;
+            if (details.scheduled_at !== undefined) updateObj.scheduled_at = details.scheduled_at;
 
-            if (Object.keys(updateObj).length === 0) return null;
-
-            const { data, error } = await supabase
-                .from('leads_distribuicao_crm_26')
-                .update(updateObj)
-                .eq('id', realId);
-
-            if (error) throw error;
-            return data;
+            updateObj.updated_at = new Date().toISOString();
         }
 
-        // Removida atualizaÃ§Ã£o de details da tabela antiga
-        return null;
+        if (Object.keys(updateObj).length === 0) return null;
+
+        const { data, error } = await supabase
+            .from(table)
+            .update(updateObj)
+            .eq('id', realId);
+
+        if (error) {
+            console.error(`Error updating ${table} (ID: ${realId}):`, error);
+            throw error;
+        }
+
+        cacheInvalidate('leads_');
+        return data;
     },
 
     async logHistory(leadId: string, newStatus: LeadStatus, oldStatus?: LeadStatus, notes?: string) {
@@ -965,10 +1034,12 @@ export const dataService = {
             return;
         }
 
+        const realId = leadId.replace(/crm26_|main_|dist_/, '');
+
         const { error } = await supabase
             .from('interactions_manos_crm')
             .insert([{
-                lead_id: leadId,
+                lead_id: realId,
                 old_status: oldStatus,
                 new_status: newStatus,
                 notes: notes,
@@ -995,10 +1066,6 @@ export const dataService = {
             .limit(1)
             .maybeSingle();
 
-        if (existingLead) {
-            leadData.duplicate_id = existingLead.id;
-        }
-
         // 2. Insert Lead
         const { data: newLead, error } = await supabase
             .from('leads_manos_crm')
@@ -1017,6 +1084,7 @@ export const dataService = {
         if (newLead) {
             await this.distributeLead(newLead.id);
             await this.logHistory(newLead.id, 'received', undefined, 'Lead capturado e em processamento de distribuiÃ§Ã£o.');
+            return { ...newLead, id: `main_${newLead.id}` };
         }
 
         return newLead;

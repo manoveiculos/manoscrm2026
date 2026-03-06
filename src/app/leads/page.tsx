@@ -86,6 +86,7 @@ function LeadsContent() {
     const [searchTerm, setSearchTerm] = useState('');
     const [leads, setLeads] = useState<Lead[]>([]);
     const [loading, setLoading] = useState(true);
+    const [isSavingDetails, setIsSavingDetails] = useState(false);
     const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
     const [actionLead, setActionLead] = useState<Lead | null>(null);
     const [viewMode, setViewMode] = useState<'list' | 'kanban'>(viewFromUrl === 'kanban' ? 'kanban' : 'list');
@@ -207,6 +208,8 @@ function LeadsContent() {
     useEffect(() => {
         if (actionLead) {
             setEditDetails({
+                name: actionLead.name || '',
+                phone: actionLead.phone || '',
                 vehicle_interest: actionLead.vehicle_interest || '',
                 carro_troca: actionLead.carro_troca || '',
                 valor_investimento: actionLead.valor_investimento || '',
@@ -219,9 +222,16 @@ function LeadsContent() {
 
     const handleSaveDetails = async () => {
         if (!actionLead) return;
+        setIsSavingDetails(true);
         try {
             // Clean up details before saving
-            const detailsToSave = { ...editDetails };
+            const detailsToSave: Partial<Lead> = { ...editDetails };
+
+            // Only admins can change name/phone
+            if (userRole !== 'admin') {
+                delete (detailsToSave as any).name;
+                delete (detailsToSave as any).phone;
+            }
 
             // If we are scheduling or rescheduling, update status and log it
             if (detailsToSave.scheduled_at && detailsToSave.scheduled_at !== actionLead.scheduled_at) {
@@ -234,16 +244,14 @@ function LeadsContent() {
                 });
 
                 const schedNote = `📅 AGENDAMENTO REALIZADO PARA: ${formattedSched}`;
-                detailsToSave.ai_summary = actionLead.ai_summary
-                    ? `${schedNote}\n\n${actionLead.ai_summary}`
+                detailsToSave.ai_summary = detailsToSave.ai_summary
+                    ? `${schedNote}\n\n${detailsToSave.ai_summary}`
                     : schedNote;
-            } else {
-                detailsToSave.ai_summary = actionLead.ai_summary; // Keep existing summary if not scheduling
             }
 
             // Remove empty date strings to prevent DB errors
             if (!detailsToSave.scheduled_at) {
-                delete detailsToSave.scheduled_at;
+                delete (detailsToSave as any).scheduled_at;
             }
 
             // If we are saving a new note, append it to the history with timestamp
@@ -261,21 +269,18 @@ function LeadsContent() {
             // Save lead details to database
             await dataService.updateLeadDetails(actionLead.id, detailsToSave);
 
-            setLeads(prev => prev.map(l => l.id === actionLead.id ? { ...l, ...detailsToSave } : l));
+            const finalUpdatedLead = { ...actionLead, ...detailsToSave };
+            setLeads(prev => prev.map(l => l.id === actionLead.id ? finalUpdatedLead : l));
+            setActionLead(finalUpdatedLead);
+            if (selectedLead?.id === actionLead.id) setSelectedLead(finalUpdatedLead);
 
-            if (selectedLead?.id === actionLead.id) {
-                setSelectedLead(prev => prev ? { ...prev, ...detailsToSave } : null);
-            }
-
-            setActionLead(prev => prev ? { ...prev, ...detailsToSave } : null);
-
-            // Clear ONLY the new note input area
             setNewNoteText('');
-
             showToast("Dados atualizados com sucesso!", "success");
         } catch (err: any) {
             console.error("Error saving lead details:", err);
             showToast(`Erro ao salvar alterações: ${err.message || 'Erro desconhecido'}`, "error");
+        } finally {
+            setIsSavingDetails(false);
         }
     };
 
@@ -2825,6 +2830,28 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                                     <h4 className="text-xs font-black uppercase tracking-widest text-white/60">Veículo & Negócio</h4>
                                                 </div>
                                                 <div className="glass-card rounded-3xl p-6 space-y-6">
+                                                    {userRole === 'admin' && (
+                                                        <div className="grid grid-cols-1 gap-4 pb-4 border-b border-white/5">
+                                                            <div className="space-y-2">
+                                                                <label className="text-[9px] font-black uppercase text-white/20 tracking-widest pl-2">Nome do Lead</label>
+                                                                <input
+                                                                    type="text"
+                                                                    value={editDetails.name || ''}
+                                                                    onChange={(e) => setEditDetails({ ...editDetails, name: e.target.value })}
+                                                                    className="w-full bg-white/5 border border-white/10 rounded-2xl py-3 px-4 text-xs text-white focus:outline-none focus:ring-1 focus:ring-red-500/50"
+                                                                />
+                                                            </div>
+                                                            <div className="space-y-2">
+                                                                <label className="text-[9px] font-black uppercase text-white/20 tracking-widest pl-2">Telefone</label>
+                                                                <input
+                                                                    type="text"
+                                                                    value={editDetails.phone || ''}
+                                                                    onChange={(e) => setEditDetails({ ...editDetails, phone: e.target.value })}
+                                                                    className="w-full bg-white/5 border border-white/10 rounded-2xl py-3 px-4 text-xs text-white focus:outline-none focus:ring-1 focus:ring-red-500/50"
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    )}
                                                     <div className="space-y-2">
                                                         <label className="text-[9px] font-black uppercase text-white/20 tracking-widest pl-2">Veículo de Interesse</label>
                                                         <div className="relative">

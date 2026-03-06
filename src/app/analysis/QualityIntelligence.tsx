@@ -22,7 +22,9 @@ import {
     MousePointer2,
     Calendar,
     MessageSquare,
-    Phone
+    Phone,
+    ShieldCheck,
+    Rocket
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
@@ -159,176 +161,186 @@ export function QualityIntelligence({ isAdmin, consultantName }: { isAdmin: bool
         "Aguardando análise estratégica para consolidar métricas de qualidade real.";
 
     return (
-        <div className="space-y-8 animate-in fade-in duration-500">
+        <div className="space-y-10 animate-in fade-in duration-500 pb-20">
             {/* Header com estilo "Dashboard Sênior" */}
             <header className="flex flex-col md:flex-row md:items-end justify-between gap-8">
                 <div>
                     <div className="flex items-center gap-2 mb-2">
-                        <div className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-red-500/80">Monitoramento Preditivo IA</span>
+                        <div className="h-2 w-2 rounded-full bg-red-600 animate-pulse shadow-[0_0_8px_rgba(220,38,38,0.5)]" />
+                        <span className="text-[10px] font-black uppercase tracking-widest text-red-600/80">Monitoramento Preditivo IA</span>
                     </div>
-                    <h1 className="text-3xl font-black tracking-tight text-[#f0f6fc] uppercase">Diagnóstico de Qualidade</h1>
-                    <p className="text-[#8b949e] mt-1 text-sm font-medium">Análise qualitativa e probabilística dos leads gerados.</p>
+                    <h1 className="text-4xl font-black tracking-tight text-white uppercase">Diagnóstico de Qualidade</h1>
+                    <p className="text-white/40 mt-1 text-sm font-medium uppercase tracking-wider">Análise qualitativa e probabilística dos leads gerados.</p>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-3">
+                <div className="flex flex-wrap items-center gap-4">
                     <div className="relative group">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8b949e] group-focus-within:text-red-500 transition-colors" size={14} />
+                        <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20 group-focus-within:text-red-600 transition-colors" size={16} />
                         <input
                             type="text"
-                            placeholder="Buscar nome, carro ou tel..."
-                            className="bg-[#0d1117] border border-[#30363d] rounded-lg pl-9 pr-4 py-2 text-[10px] font-bold uppercase tracking-widest text-[#c9d1d9] focus:outline-none focus:border-red-500/50 w-64 transition-all"
+                            placeholder="BUSCAR NOME OU CARRO..."
+                            className="bg-[#0c0c0e] border border-white/5 rounded-xl pl-12 pr-6 py-3 text-[10px] font-black uppercase tracking-[0.2em] text-white focus:outline-none focus:border-red-600/50 w-72 transition-all placeholder:text-white/10"
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                         />
-                    </div>
-
-                    <div className="relative">
-                        <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8b949e]" size={14} />
-                        <div className="bg-[#0d1117] border border-[#30363d] rounded-lg pl-9 pr-4 py-2 text-[10px] font-bold uppercase tracking-widest text-[#c9d1d9]">
-                            {new Date().toLocaleDateString('pt-BR')}
-                        </div>
                     </div>
 
                     {isAdmin && (
                         <button
                             onClick={handleRunAnalysis}
                             disabled={isAnalyzing}
-                            className="px-6 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white font-black text-[10px] uppercase tracking-widest flex items-center gap-2 transition-all shadow-lg shadow-red-600/10"
+                            className="px-8 py-3 rounded-xl bg-red-600 hover:bg-red-500 text-white font-black text-[10px] uppercase tracking-widest flex items-center gap-2 transition-all shadow-lg shadow-red-600/20 disabled:opacity-50"
                         >
-                            {isAnalyzing ? <RefreshCcw size={14} className="animate-spin" /> : <Zap size={14} />}
-                            {isAnalyzing ? 'Processando' : 'Executar Diagnóstico'}
+                            {isAnalyzing ? <RefreshCcw size={16} className="animate-spin" /> : <Zap size={16} />}
+                            {isAnalyzing ? 'Processando' : 'Atualizar Diagnóstico'}
                         </button>
                     )}
                 </div>
             </header>
 
-            {/* KPI Cards Estilo MarketingPage */}
+            {/* KPI Cards Estilo Glassmorphic */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 {[
-                    { type: 'all', label: "Média de Qualidade", value: `${report?.quality_average.toFixed(0) || 0}%`, unit: "PRECISÃO", icon: <TrendingUp size={24} className="text-blue-400" /> },
-                    { type: 'hot', label: "Leads Quentes", value: report?.quentes.toString() || "0", unit: "ESTRELAS", icon: <Flame size={24} className="text-orange-500" /> },
-                    { type: 'warm', label: "Campanha Score", value: `${report?.overall_score.toFixed(1) || 0}`, unit: "/ 10", icon: <BarChart3 size={24} className="text-red-500" /> },
-                    { type: 'all', label: "Total Analisado", value: (report?.total_leads || 0).toString(), unit: "LEADS", icon: <Activity size={24} className="text-emerald-400" /> }
+                    { type: 'all', label: "Qualidade Média", value: `${report?.quality_average.toFixed(0) || 0}%`, unit: "PRECISÃO", icon: TrendingUp, color: 'blue' },
+                    { type: 'hot', label: "Leads Quentes", value: report?.quentes.toString() || "0", unit: "ESTRELAS", icon: Flame, color: 'orange' },
+                    { type: 'warm', label: "Campanha Score", value: `${report?.overall_score.toFixed(1) || 0}`, unit: "/ 10", icon: Target, color: 'red' },
+                    { type: 'all', label: "Total Analisado", value: (report?.total_leads || 0).toString(), unit: "LEADS", icon: Activity, color: 'emerald' }
                 ].map((kpi, idx) => (
-                    <div
+                    <motion.div
                         key={idx}
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: idx * 0.1 }}
                         onClick={() => kpi.type !== 'all' && setFilterType(kpi.type as any)}
-                        className={`p-5 rounded-xl border shadow-sm relative overflow-hidden group cursor-pointer transition-all
-                            ${filterType === kpi.type ? 'bg-red-600/5 border-red-600/30' : 'bg-[#0d1117] border-[#30363d] hover:border-white/10'}`}
+                        className={`glass-card p-8 rounded-3xl border transition-all cursor-pointer group relative overflow-hidden
+                            ${filterType === kpi.type ? 'border-red-600/40 bg-red-600/[0.02]' : 'hover:border-white/10'}`}
                     >
-                        <div className="flex items-center justify-between mb-4">
-                            <div className="text-[#8b949e] group-hover:scale-110 transition-transform">{kpi.icon}</div>
-                            {filterType === kpi.type && <div className="p-1 rounded-full bg-red-600 animate-pulse" />}
+                        <div className="flex items-center justify-between mb-6">
+                            <div className={`p-3 rounded-2xl bg-white/5 text-${kpi.color}-500 group-hover:scale-110 transition-transform`}>
+                                <kpi.icon size={24} />
+                            </div>
+                            {filterType === kpi.type && <div className="h-2 w-2 rounded-full bg-red-600 shadow-[0_0_8px_rgba(220,38,38,0.5)] animate-pulse" />}
                         </div>
-                        <p className="text-[10px] font-bold text-[#8b949e] uppercase mb-1 tracking-widest">{kpi.label}</p>
+                        <p className="text-[10px] font-black text-white/30 uppercase mb-1 tracking-widest leading-none">{kpi.label}</p>
                         <div className="flex items-baseline gap-2">
-                            <h4 className="text-3xl font-black text-[#f0f6fc] tracking-tighter">{kpi.value}</h4>
-                            <span className="text-[9px] text-[#484f58] font-bold uppercase tracking-widest">{kpi.unit}</span>
+                            <h4 className="text-4xl font-black text-white tracking-tighter">{kpi.value}</h4>
+                            <span className="text-[10px] text-white/20 font-black uppercase tracking-widest">{kpi.unit}</span>
                         </div>
-                        <div className="absolute top-0 right-0 w-2 h-full bg-gradient-to-b from-transparent via-red-600/10 to-transparent translate-x-3 group-hover:translate-x-0 transition-transform" />
-                    </div>
+                        <div className="absolute top-0 right-0 w-1 h-full bg-red-600 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </motion.div>
                 ))}
             </div>
 
-            {/* AI Analysis Quote Section (Estilo MarketingPage) */}
+            {/* AI Analysis Quote Section */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-                <div className="lg:col-span-8 p-8 rounded-2xl bg-[#0d1117] border border-[#30363d] relative overflow-hidden group">
-                    <div className="flex items-center gap-3 mb-6">
-                        <Sparkles size={22} className="text-red-500" />
-                        <h2 className="text-xl font-black text-[#f0f6fc] uppercase tracking-tight">Análise Estratégica IA</h2>
-                    </div>
-                    <div className="mb-8 p-6 rounded-xl bg-red-600/[0.03] border-l-4 border-red-600">
-                        <p className="text-lg md:text-xl text-[#c9d1d9] leading-relaxed italic font-medium">&quot;{dynamicSummary}&quot;</p>
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {report?.recommendations?.slice(0, 2).map((rec, i) => (
-                            <div key={i} className="p-5 rounded-xl bg-white/[0.02] border border-[#30363d] hover:border-red-600/50 transition-all flex gap-4">
-                                <div className="p-2 h-fit rounded-lg bg-red-600/10 text-red-500 font-bold text-[10px]">{i + 1}</div>
-                                <div>
-                                    <p className="text-[10px] font-black text-[#8b949e] uppercase mb-1">Próximo Passo</p>
-                                    <p className="text-sm font-bold text-white leading-tight">{rec}</p>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-
-                <div className="lg:col-span-4 p-8 rounded-2xl bg-[#0d1117] border border-[#30363d] flex flex-col justify-center text-center relative overflow-hidden group">
+                <motion.div
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    className="lg:col-span-8 p-10 rounded-[2.5rem] bg-[#0c0c0e] border border-white/5 relative overflow-hidden group shadow-2xl"
+                >
+                    <div className="absolute inset-0 bg-gradient-to-br from-red-600/[0.03] to-transparent" />
                     <div className="relative z-10">
-                        <p className="text-[10px] font-black text-[#8b949e] uppercase mb-4 tracking-widest">Qualidade Preditiva</p>
-                        <div className="flex items-baseline justify-center gap-2 mb-6">
-                            <span className="text-6xl font-black text-[#f0f6fc] tracking-tighter">{(report?.quality_average || 0).toFixed(0)}</span>
-                            <span className="text-xl font-bold text-red-500 tracking-widest">%</span>
+                        <div className="flex items-center gap-3 mb-8">
+                            <Sparkles size={22} className="text-red-600" />
+                            <h2 className="text-xl font-black text-white uppercase tracking-tight">Veredito da Inteligência</h2>
                         </div>
-                        <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden border border-white/5">
+                        <div className="mb-10 text-center md:text-left">
+                            <p className="text-2xl md:text-3xl text-white leading-tight italic font-bold tracking-tight opacity-90">&ldquo;{dynamicSummary}&rdquo;</p>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            {report?.recommendations?.slice(0, 2).map((rec, i) => (
+                                <div key={i} className="p-6 rounded-2xl bg-white/5 border border-white/5 hover:border-red-600/30 transition-all flex gap-5 group/item">
+                                    <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-red-600/10 text-red-600 flex items-center justify-center font-black text-xs group-hover/item:bg-red-600 group-hover/item:text-white transition-all">{i + 1}</div>
+                                    <div>
+                                        <p className="text-[9px] font-black text-white/30 uppercase mb-1 tracking-[0.2em]">Prioridade IA</p>
+                                        <p className="text-sm font-bold text-white leading-snug uppercase">{rec}</p>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </motion.div>
+
+                <motion.div
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    className="lg:col-span-4 p-10 rounded-[2.5rem] bg-[#0c0c0e] border border-white/5 flex flex-col justify-center text-center relative overflow-hidden group shadow-2xl"
+                >
+                    <div className="absolute inset-0 bg-gradient-to-b from-red-600/[0.05] to-transparent" />
+                    <div className="relative z-10">
+                        <p className="text-[10px] font-black text-white/30 uppercase mb-6 tracking-[0.3em]">Qualidade Preditiva</p>
+                        <div className="flex items-baseline justify-center gap-2 mb-8">
+                            <span className="text-7xl font-black text-white tracking-tighter">{(report?.quality_average || 0).toFixed(0)}</span>
+                            <span className="text-2xl font-black text-red-600 tracking-widest">%</span>
+                        </div>
+                        <div className="h-3 w-full bg-white/5 rounded-full overflow-hidden border border-white/5 p-0.5">
                             <motion.div
                                 initial={{ width: 0 }}
                                 animate={{ width: `${report?.quality_average || 0}%` }}
-                                className="h-full bg-red-600 shadow-[0_0_15px_rgba(220,38,38,0.5)]"
+                                className="h-full bg-gradient-to-r from-red-600 to-red-500 rounded-full shadow-[0_0_20px_rgba(220,38,38,0.4)]"
                             />
                         </div>
-                        <p className="text-[10px] text-[#484f58] font-bold uppercase mt-4 tracking-widest">Fidelidade do Público-Alvo</p>
+                        <p className="text-[10px] text-white/20 font-black uppercase mt-6 tracking-[0.2em]">Fidelidade de Conversão</p>
                     </div>
-                    <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:rotate-12 transition-transform">
-                        <Target size={120} className="text-red-600" />
-                    </div>
-                </div>
+                    <Target size={140} className="absolute -bottom-10 -right-10 opacity-[0.03] group-hover:rotate-12 transition-transform" />
+                </motion.div>
             </div>
 
             {/* SEÇÃO DE LEADS - FOCO EM CONVERSÃO */}
-            <div className="space-y-12 pt-8">
+            <div className="space-y-16 pt-10">
                 {/* 1. ALTA PRIORIDADE (QUENTES) */}
-                <div className="space-y-6">
-                    <div className="flex items-center gap-3">
-                        <div className="p-2 rounded-lg bg-orange-500/10 text-orange-500">
-                            <Flame size={20} />
+                <div className="space-y-8">
+                    <div className="flex items-center gap-4">
+                        <div className="p-3 rounded-2xl bg-orange-600/10 text-orange-500">
+                            <Flame size={24} />
                         </div>
-                        <h2 className="text-xl font-black text-white uppercase tracking-tight">Oportunidades Reais de Venda</h2>
-                        <span className="px-3 py-0.5 rounded-full bg-orange-500 text-white text-[9px] font-black uppercase tracking-widest leading-none">Alta Probabilidade</span>
+                        <div>
+                            <h2 className="text-2xl font-black text-white uppercase tracking-tight">Oportunidades de Ouro</h2>
+                            <p className="text-[10px] font-black text-orange-500/60 uppercase tracking-widest mt-1">Máxima probabilidade de fechamento imediato</p>
+                        </div>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {highPriorityLeads.map(lead => (
-                            <LeadCard key={lead.id} lead={lead} variant="hot" onClick={(id) => router.push(`/leads?id=crm26_${id}&tab=timeline`)} />
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {highPriorityLeads.map((lead, i) => (
+                            <LeadCard key={lead.id} lead={lead} variant="hot" index={i} onClick={(id) => router.push(`/leads?id=crm26_${id}&tab=timeline`)} />
                         ))}
                         {highPriorityLeads.length === 0 && (
-                            <div className="col-span-full py-12 text-center rounded-2xl border-2 border-dashed border-[#30363d] opacity-40">
-                                <Search size={40} className="mx-auto mb-4" />
-                                <p className="text-sm font-bold uppercase tracking-widest">Nenhuma oportunidade crítica no radar</p>
+                            <div className="col-span-full py-24 text-center rounded-[3rem] border-2 border-dashed border-white/5 bg-[#0c0c0e]/50">
+                                <Search size={48} className="mx-auto mb-6 text-white/10" />
+                                <p className="text-sm font-black text-white/20 uppercase tracking-[0.3em]">Nenhum lead crítico detectado</p>
                             </div>
                         )}
                     </div>
                 </div>
 
                 {/* 2. LEADS MORNOS / FRIOS */}
-                <div className="space-y-6">
-                    <div className="flex items-center gap-3">
-                        <div className="p-2 rounded-lg bg-blue-500/10 text-blue-500">
-                            <Thermometer size={20} />
+                <div className="space-y-8">
+                    <div className="flex items-center gap-4">
+                        <div className="p-3 rounded-2xl bg-blue-600/10 text-blue-500">
+                            <Thermometer size={24} />
                         </div>
-                        <h2 className="text-xl font-black text-white uppercase tracking-tight">Potencial em Desenvolvimento</h2>
+                        <h2 className="text-2xl font-black text-white uppercase tracking-tight">Fila de Nutrição</h2>
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                        {mediumLeads.map(lead => (
-                            <LeadCard key={lead.id} lead={lead} variant="medium" onClick={(id) => router.push(`/leads?id=crm26_${id}&tab=timeline`)} />
+                        {mediumLeads.map((lead, i) => (
+                            <LeadCard key={lead.id} lead={lead} variant="medium" index={i} onClick={(id) => router.push(`/leads?id=crm26_${id}&tab=timeline`)} />
                         ))}
                     </div>
                 </div>
 
                 {/* 3. DEMAIS LEADS / DESQUALIFICADOS */}
-                <div className="space-y-6 opacity-60 grayscale hover:opacity-100 hover:grayscale-0 transition-all">
-                    <div className="flex items-center gap-3">
-                        <div className="p-2 rounded-lg bg-white/5 text-white/40">
-                            <Skull size={20} />
+                <div className="space-y-8 opacity-40 grayscale hover:opacity-100 hover:grayscale-0 transition-all">
+                    <div className="flex items-center gap-4">
+                        <div className="p-3 rounded-2xl bg-white/5 text-white/40">
+                            <Skull size={24} />
                         </div>
-                        <h2 className="text-lg font-black text-white/60 uppercase tracking-tight">Desqualificados / Arquivo</h2>
+                        <h2 className="text-xl font-black text-white/40 uppercase tracking-tight">Arquivo de Qualidade Baixa</h2>
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
-                        {lowLeads.map(lead => (
-                            <LeadCard key={lead.id} lead={lead} variant="low" onClick={(id) => router.push(`/leads?id=crm26_${id}&tab=timeline`)} />
+                        {lowLeads.map((lead, i) => (
+                            <LeadCard key={lead.id} lead={lead} variant="low" index={i} onClick={(id) => router.push(`/leads?id=crm26_${id}&tab=timeline`)} />
                         ))}
                     </div>
                 </div>
@@ -337,73 +349,78 @@ export function QualityIntelligence({ isAdmin, consultantName }: { isAdmin: bool
     );
 }
 
-function LeadCard({ lead, variant, onClick }: { lead: LeadResult, variant: 'hot' | 'medium' | 'low', onClick: (id: any) => void }) {
+function LeadCard({ lead, variant, index, onClick }: { lead: LeadResult, variant: 'hot' | 'medium' | 'low', index: number, onClick: (id: any) => void }) {
     const isHot = variant === 'hot';
     const isLow = variant === 'low';
 
     return (
         <motion.div
-            whileHover={{ scale: 1.01, y: -2 }}
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 1 + (index * 0.05) }}
+            whileHover={{ y: -5 }}
             onClick={() => onClick(lead.id)}
-            className={`cursor-pointer rounded-xl border p-5 flex flex-col justify-between transition-all duration-300 relative overflow-hidden group
-                ${isHot ? 'bg-[#0d1117] border-orange-500/30 hover:border-orange-500/60 shadow-lg shadow-orange-500/5' :
-                    isLow ? 'bg-[#090b0e] border-[#30363d] hover:border-red-600/30' :
-                        'bg-[#0d1117] border-[#30363d] hover:border-blue-500/40'}`}
+            className={`cursor-pointer rounded-[2.5rem] border p-8 flex flex-col justify-between transition-all duration-500 relative overflow-hidden group shadow-xl
+                ${isHot ? 'bg-[#0c0c0e] border-orange-500/20 hover:border-orange-500/50' :
+                    isLow ? 'bg-[#090b0e] border-white/5 hover:border-red-600/20' :
+                        'bg-[#0c0c0e] border-white/5 hover:border-blue-500/30'}`}
         >
-            <div className="flex items-start justify-between mb-4">
-                <div className="flex items-center gap-3">
-                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center font-black text-sm uppercase
-                        ${isHot ? 'bg-orange-500 text-white' :
-                            isLow ? 'bg-white/5 text-white/20' :
-                                'bg-blue-600/20 text-blue-400'}`}>
-                        {lead.nome[0]}
-                    </div>
-                    <div>
-                        <h4 className="font-bold text-white text-sm leading-tight group-hover:text-red-600 transition-colors uppercase tracking-tight">{lead.nome}</h4>
-                        <div className="flex items-center gap-1.5 mt-1">
-                            <span className="text-[10px] font-black text-[#8b949e] uppercase tracking-widest">{lead.vendedor?.split(' ')[0] || 'TBD'}</span>
-                            <span className="w-0.5 h-0.5 rounded-full bg-white/10" />
-                            <span className="text-[10px] text-[#484f58] font-bold uppercase">{lead.interesse?.slice(0, 15) || 'Geral'}</span>
-                        </div>
-                    </div>
-                </div>
-                <div className="text-right">
-                    <div className={`text-xl font-black tracking-tighter leading-none ${isHot ? 'text-orange-500' : 'text-white/60'}`}>
-                        {lead.probability_of_sale || 0}%
-                    </div>
-                    <span className="text-[8px] font-black text-[#484f58] uppercase tracking-widest">Chance</span>
-                </div>
+            <div className="absolute top-0 right-0 p-6 opacity-[0.02] group-hover:opacity-[0.05] transition-opacity">
+                {isHot ? <Rocket size={100} /> : <Target size={100} />}
             </div>
 
-            {!isLow && (
-                <div className="mt-2 space-y-3">
-                    <div className={`p-3 rounded-lg text-[11px] font-medium leading-relaxed italic
-                        ${isHot ? 'bg-orange-500/5 text-orange-200/80 border-l-2 border-orange-500' : 'bg-white/[0.02] text-white/40 border-l-2 border-blue-500/30'}`}>
-                        &quot;{lead.recommended_approach || 'Aguardando próxima ação estratégica de atendimento.'}&quot;
-                    </div>
-                    <div className="flex items-center justify-between pt-2">
-                        <div className="flex items-center gap-1.5">
-                            {isHot ? <Flame size={12} className="text-orange-500 animate-pulse" /> : <Activity size={12} className="text-blue-500" />}
-                            <span className="text-[10px] font-black uppercase tracking-widest text-[#8b949e]">{lead.ai_classification}</span>
+            <div className="relative z-10">
+                <div className="flex items-start justify-between mb-8">
+                    <div className="flex items-center gap-5">
+                        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center font-black text-xl uppercase shadow-lg
+                            ${isHot ? 'bg-orange-600 text-white shadow-orange-500/20' :
+                                isLow ? 'bg-white/5 text-white/20' :
+                                    'bg-blue-600 text-white shadow-blue-500/20'}`}>
+                            {lead.nome[0]}
                         </div>
-                        <div className="flex items-center gap-1 text-red-600 transform group-hover:translate-x-1 transition-transform">
-                            <span className="text-[9px] font-black uppercase tracking-widest">Atender</span>
+                        <div>
+                            <h4 className="font-bold text-white text-lg leading-none uppercase group-hover:text-red-600 transition-colors">{lead.nome}</h4>
+                            <div className="flex items-center gap-2 mt-2">
+                                <span className="text-[10px] font-black text-white/30 uppercase tracking-widest">{lead.vendedor?.split(' ')[0] || 'SEM VENDEDOR'}</span>
+                                <span className="w-1 h-1 rounded-full bg-white/10" />
+                                <span className="text-[10px] text-white/20 font-bold uppercase tracking-widest leading-none">{lead.interesse?.slice(0, 15) || 'INTERESSE GERAL'}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {!isLow && (
+                    <div className="space-y-6">
+                        <div className={`p-5 rounded-2xl text-xs font-medium leading-relaxed italic border-l-4
+                            ${isHot ? 'bg-orange-500/[0.03] text-orange-200/60 border-orange-500' : 'bg-white/[0.02] text-white/30 border-blue-500/30'}`}>
+                            &ldquo;{lead.recommended_approach || 'Padrão de abordagem não definido.'}&rdquo;
+                        </div>
+                        <div className="flex items-center justify-between pt-4 border-t border-white/5">
+                            <div className="flex items-center gap-2">
+                                {isHot ? <Flame size={14} className="text-orange-500 animate-pulse" /> : <Activity size={14} className="text-blue-500" />}
+                                <span className="text-[10px] font-black uppercase tracking-[0.2em] text-white/40">{lead.ai_classification}</span>
+                            </div>
+                            <div className="flex items-baseline gap-1">
+                                <span className={`text-2xl font-black tracking-tighter ${isHot ? 'text-orange-500' : 'text-white'}`}>{lead.probability_of_sale || 0}%</span>
+                                <span className="text-[8px] font-black text-white/20 uppercase tracking-widest">Chance</span>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {isLow && (
+                    <div className="mt-8 flex items-center justify-between">
+                        <span className="text-[10px] font-black text-white/20 uppercase tracking-[0.2em]">{lead.ai_classification}</span>
+                        <div className="flex items-center gap-2 text-white/10 group-hover:text-white transition-colors">
+                            <span className="text-[9px] font-black uppercase tracking-widest">Ver detalhes</span>
                             <ArrowRight size={12} />
                         </div>
                     </div>
-                </div>
-            )}
+                )}
+            </div>
 
-            {isLow && (
-                <div className="mt-2 flex items-center justify-between">
-                    <span className="text-[10px] font-bold text-[#484f58] uppercase tracking-widest">{lead.ai_classification}</span>
-                    <button className="text-[9px] font-black text-white/20 uppercase tracking-widest hover:text-white transition-colors">Detalhes</button>
-                </div>
-            )}
-
-            {/* Efeito de hover lateral */}
-            <div className={`absolute top-0 right-0 w-1 h-full opacity-0 group-hover:opacity-100 transition-opacity
-                ${isHot ? 'bg-orange-500' : 'bg-red-600'}`} />
+            <div className={`absolute bottom-0 left-0 h-1 bg-gradient-to-r from-transparent via-red-600/50 to-transparent w-full opacity-0 group-hover:opacity-100 transition-opacity`} />
         </motion.div>
     );
 }
+
