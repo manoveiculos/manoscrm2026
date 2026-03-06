@@ -192,7 +192,7 @@ export const Navigation = () => {
                         </div>
                         <div className="overflow-hidden">
                             <p className="text-[11px] font-black text-white truncate leading-tight">
-                                {user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Usuário'}
+                                {(user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Usuário').split(' ')[0]}
                             </p>
                             <p className="text-[8px] text-white/30 font-bold uppercase tracking-widest truncate">
                                 {role === 'admin' ? 'Acesso Gerencial' : role === 'consultant' ? 'Consultor Manos' : 'Processando...'}

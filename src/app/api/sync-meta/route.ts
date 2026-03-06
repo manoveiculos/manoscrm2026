@@ -19,12 +19,17 @@ export async function POST(req: Request) {
             await dataService.clearCampaigns();
         }
 
-        const count = await dataService.syncMetaCampaigns(token, adAccountId);
+        // Sync campaigns (insights)
+        const campaignCount = await dataService.syncMetaCampaigns(token, adAccountId);
+
+        // Sync leads (Lead Ads forms)
+        const leadCount = await dataService.syncMetaLeads(token, adAccountId);
 
         return NextResponse.json({
             success: true,
-            syncedCount: count,
-            message: `Sincronização concluída: ${count} campanhas encontradas na conta ${adAccountId}.`
+            syncedCampaigns: campaignCount,
+            syncedLeads: leadCount,
+            message: `Sincronização concluída: ${campaignCount} campanhas e ${leadCount} leads sincronizados.`
         });
 
     } catch (error: unknown) {

@@ -164,7 +164,7 @@ export default function EquipePage() {
                             </div>
 
                             <div>
-                                <h3 className="text-xl font-black text-white truncate">{consultant.name || 'Sem Nome'}</h3>
+                                <h3 className="text-xl font-black text-white truncate">{consultant.name?.split(' ')[0] || 'Sem Nome'}</h3>
                                 <p className="text-sm font-medium text-white/30 truncate italic">{consultant.email}</p>
                             </div>
 

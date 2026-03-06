@@ -1258,7 +1258,6 @@ export const dataService = {
 
         switch (datePreset) {
             case 'today':
-                // already set
                 break;
             case 'yesterday':
                 startDate.setDate(today.getDate() - 1);
@@ -1276,63 +1275,88 @@ export const dataService = {
             case 'last_30d':
                 startDate.setDate(today.getDate() - 30);
                 break;
-            case 'this_week':
-                const day = today.getDay(); // 0 is Sunday
-                const diff = today.getDate() - day + (day == 0 ? -6 : 1); // Adjust to Monday
+            case 'this_week': {
+                const day = today.getDay();
+                const diff = today.getDate() - day + (day == 0 ? -6 : 1);
                 startDate.setDate(diff);
                 break;
+            }
             case 'this_month':
                 startDate = new Date(today.getFullYear(), today.getMonth(), 1);
                 break;
             case 'maximum':
             default:
-                startDate = new Date(2000, 0, 1); // Arbitrary old date for lifetime
+                startDate = new Date(2000, 0, 1);
                 break;
         }
 
-        const { data, error } = await supabase
+        // Query leads from leads_manos_crm (legacy table with campaign_id)
+        const { data } = await supabase
             .from('leads_manos_crm')
             .select('campaign_id, id')
             .gte('created_at', startDate.toISOString())
             .lte('created_at', endDate.toISOString());
 
-        // 2. ALSO query leads from the main WhatsApp/CRM26 distribution table
-        const { data: data26, error: error26 } = await supabase
+        // Query leads from CRM26 distribution table
+        const { data: data26 } = await supabase
             .from('leads_distribuicao_crm_26')
-            .select('origem, id')
+            .select('origem, id, id_meta, criado_em')
             .gte('criado_em', startDate.toISOString())
             .lte('criado_em', endDate.toISOString());
 
-        if (error || error26) {
-            console.error("Error fetching filtered leads:", error || error26);
-            return {};
-        }
+        // Also fetch Facebook leads specifically (in case date filter misses them)
+        const { data: fbLeads } = await supabase
+            .from('leads_distribuicao_crm_26')
+            .select('id, id_meta, criado_em')
+            .not('id_meta', 'is', null);
 
-        // 3. Match leads to campaigns
-        // We need campaign names to match with 'origem' in leads_distribuicao_crm_26
-        const { data: allCampaigns } = await supabase.from('campaigns_manos_crm').select('id, name');
+        // Filter Facebook leads by date in JavaScript (more reliable than DB filter)
+        const fbLeadsInRange = (fbLeads || []).filter(l => {
+            const d = new Date(l.criado_em);
+            return d >= startDate && d <= endDate;
+        });
+
+        // Get all campaigns
+        const { data: allCampaigns } = await supabase.from('campaigns_manos_crm').select('id, name, platform');
 
         const countsByCampaign: Record<string, number> = {};
+        const countedIds = new Set<string>();
 
-        // Count from leads_manos_crm (direct ID match)
+        // Count from leads_manos_crm (direct campaign_id match)
         data?.forEach(lead => {
             if (lead.campaign_id) {
                 countsByCampaign[lead.campaign_id] = (countsByCampaign[lead.campaign_id] || 0) + 1;
             }
         });
 
-        // Count from leads_distribuicao_crm_26 (name match with 'origem')
+        // Count Facebook leads from dedicated query (more reliable)
+        if (fbLeadsInRange.length > 0 && allCampaigns) {
+            const metaCampaign = allCampaigns.find(c =>
+                (c.platform || '').toLowerCase().includes('meta')
+            );
+            if (metaCampaign) {
+                countsByCampaign[metaCampaign.id] = (countsByCampaign[metaCampaign.id] || 0) + fbLeadsInRange.length;
+                fbLeadsInRange.forEach(l => countedIds.add(l.id));
+            }
+        }
+
+        // Count remaining leads from data26 (non-Facebook, name-based matching)
         data26?.forEach(lead => {
-            if (lead.origem && allCampaigns) {
-                // Try to find a campaign whose name is contained in or equals the origin
-                // Normalizar nomes para aumentar chance de match (ignorar acentos, pontuaÃ§Ã£o)
+            if (!allCampaigns || countedIds.has(lead.id)) return;
+
+            const origem = (lead.origem || '').toLowerCase();
+
+            // Skip if it's a Facebook lead (already counted above)
+            if (!!lead.id_meta || origem.includes('facebook') || origem.includes('leads facebook')) return;
+
+            // Name-based matching for other leads
+            if (lead.origem) {
                 const normalize = (s: string) => s.toLowerCase()
-                    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // remove acentos (ex: MARÃ‡O -> MARCO)
-                    .replace(/[\[\]\-\(\)\.]/g, '') // remove brackets/pontuaÃ§Ã£o
+                    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+                    .replace(/[\[\]\-\(\)\.]/g, '')
                     .replace(/\s+/g, ' ').trim();
 
                 const lOrigemNorm = normalize(lead.origem);
-
                 const matchedCampaign = allCampaigns.find(c => {
                     const cNameNorm = normalize(c.name);
                     return lOrigemNorm.includes(cNameNorm) || cNameNorm.includes(lOrigemNorm) ||
@@ -1455,73 +1479,143 @@ export const dataService = {
         }
     },
 
-    // Sincroniza Leads reais do Meta para a tabela de distribuiÃ§Ã£o
+    // Sincroniza Leads reais do Meta Lead Ads para a tabela de distribuição
+    // Fluxo correto da Graph API: Campaigns → Ads → /{ad_id}/leads
     async syncMetaLeads(token: string, adAccountId: string) {
-
         try {
-            // Pegar os leads dos Ãºltimos 7 dias
-            const now = new Date();
-            const lastWeek = new Date();
-            lastWeek.setDate(now.getDate() - 7);
-            const since = Math.floor(lastWeek.getTime() / 1000);
+            let totalImported = 0;
 
-            const url = `https://graph.facebook.com/v19.0/act_${adAccountId}/leads?fields=campaign_id,campaign_name,created_time,full_name,phone_number,email,field_data&limit=100&access_token=${token}`;
-
-            const response = await fetch(url);
-            if (!response.ok) {
-                console.warn("Meta leads extraction not available or lacks permissions.");
+            // 1. Buscar campanhas com objetivo de lead_generation
+            const campaignsUrl = `https://graph.facebook.com/v19.0/act_${adAccountId}/campaigns?fields=id,name,status,objective&limit=50&access_token=${token}`;
+            const campaignsRes = await fetch(campaignsUrl);
+            if (!campaignsRes.ok) {
+                console.error("Meta Campaigns fetch failed:", await campaignsRes.text());
                 return 0;
             }
+            const campaignsData = await campaignsRes.json();
+            const campaigns = campaignsData.data || [];
 
-            const result = await response.json();
-            const rawLeads = result.data || [];
+            // 2. Para cada campanha, buscar os ads
+            for (const campaign of campaigns) {
+                try {
+                    const adsUrl = `https://graph.facebook.com/v19.0/${campaign.id}/ads?fields=id,name,status&limit=100&access_token=${token}`;
+                    const adsRes = await fetch(adsUrl);
+                    if (!adsRes.ok) continue;
 
-            if (rawLeads.length === 0) return 0;
+                    const adsData = await adsRes.json();
+                    const ads = adsData.data || [];
 
-            const leadsToInsert = rawLeads.map((ml: any) => {
-                // Mapear field_data para campos conhecidos se telefone/email estiverem lÃ¡
-                let phone = ml.phone_number || '';
-                let name = ml.full_name || '';
-                let email = ml.email || '';
+                    // 3. Para cada ad, buscar leads gerados
+                    for (const ad of ads) {
+                        try {
+                            const leadsUrl = `https://graph.facebook.com/v19.0/${ad.id}/leads?fields=id,created_time,field_data,campaign_id,ad_id,form_id&limit=500&access_token=${token}`;
+                            const leadsRes = await fetch(leadsUrl);
+                            if (!leadsRes.ok) continue;
 
-                if (ml.field_data) {
-                    ml.field_data.forEach((field: any) => {
-                        const n = field.name.toLowerCase();
-                        if (n.includes('phone') || n.includes('tel')) phone = field.values[0];
-                        if (n.includes('name') || n.includes('nome')) name = field.values[0];
-                        if (n.includes('email')) email = field.values[0];
-                    });
-                }
+                            const leadsData = await leadsRes.json();
+                            const rawLeads = leadsData.data || [];
 
-                return {
-                    nome: name || 'Lead Meta Form',
-                    telefone: phone,
-                    origem: ml.campaign_name || 'Facebook Leads',
-                    interesse: ml.campaign_name || '',
-                    status: 'received', // AGUARDANDO
-                    criado_em: ml.created_time,
-                    vendedor: null, // Deixar para distribuiÃ§Ã£o automÃ¡tica
-                    enviado: false,
-                    resumo: `[LEAD FB] Capturado do formulÃ¡rio via campanha: ${ml.campaign_name}`
-                };
-            }).filter((l: any) => l.telefone !== '');
+                            if (rawLeads.length === 0) continue;
 
-            if (leadsToInsert.length > 0) {
-                // Upsert para evitar duplicados baseados no telefone e origem se necessÃ¡rio
-                // Mas leads_distribuicao_crm_26 nÃ£o tem Unique Constraint no telefone em muitos casos
-                // Vamos inserir apenas os que nÃ£o existem no mesmo dia
-                const { error: insertError } = await supabase
-                    .from('leads_distribuicao_crm_26')
-                    .insert(leadsToInsert);
+                            // 4. Buscar IDs de leads já importados para evitar duplicatas
+                            const metaIds = rawLeads.map((l: any) => l.id);
+                            const { data: existing } = await supabase
+                                .from('leads_distribuicao_crm_26')
+                                .select('id_meta')
+                                .in('id_meta', metaIds);
 
-                if (insertError) {
-                    console.error("Error inserting Meta leads:", insertError.message);
+                            const existingMetaIds = new Set((existing || []).map((e: any) => e.id_meta));
+
+                            // 5. Mapear leads para inserção
+                            const leadsToInsert = rawLeads
+                                .filter((ml: any) => !existingMetaIds.has(ml.id))
+                                .map((ml: any) => {
+                                    let phone = '';
+                                    let name = '';
+                                    let email = '';
+                                    let city = '';
+                                    let interest = '';
+
+                                    let urgency = '';
+                                    let tradeIn = '';
+
+                                    if (ml.field_data) {
+                                        ml.field_data.forEach((field: any) => {
+                                            const n = (field.name || '').toLowerCase();
+                                            const v = field.values?.[0] || '';
+                                            const vClean = v.replace(/_/g, ' ').replace(/\./g, '');
+                                            if (n.includes('phone') || n.includes('tel') || n === 'phone_number') phone = v;
+                                            else if (n.includes('full_name') || n.includes('nome') || n === 'name') name = v;
+                                            else if (n.includes('email')) email = v;
+                                            else if (n.includes('city') || n.includes('cidade')) city = v;
+                                            else if (n.includes('tipo') || n.includes('vehicle') || n.includes('veiculo') || n.includes('buscando')) interest = vClean;
+                                            else if (n.includes('urg') || n.includes('fechar')) urgency = vClean;
+                                            else if (n.includes('troca') || n.includes('incluir') || n.includes('negocia')) tradeIn = vClean;
+                                        });
+                                    }
+
+                                    // Build specific interest description
+                                    const interestParts: string[] = [];
+                                    if (interest) interestParts.push(interest);
+                                    if (urgency) interestParts.push(`Urgência: ${urgency}`);
+                                    if (tradeIn) interestParts.push(`Troca: ${tradeIn}`);
+                                    const specificInterest = interestParts.length > 0 ? interestParts.join(' | ') : 'Busca veículo (via formulário)';
+
+                                    // Limpar telefone
+                                    const cleanPhone = phone.replace(/\D/g, '');
+
+                                    return {
+                                        nome: name || 'Lead Meta Form',
+                                        telefone: cleanPhone,
+                                        origem: 'Leads Facebook',
+                                        interesse: specificInterest,
+                                        cidade: city || '',
+                                        status: 'received',
+                                        criado_em: ml.created_time || new Date().toISOString(),
+                                        vendedor: null,
+                                        enviado: false,
+                                        id_meta: ml.id,
+                                        resumo: `[LEAD FB] Capturado via formulário | Campanha: ${campaign.name} | Ad: ${ad.name}`
+                                    };
+                                })
+                                .filter((l: any) => l.telefone && l.telefone.length >= 8);
+
+                            if (leadsToInsert.length > 0) {
+                                // Insert one by one to handle telefone unique constraint
+                                for (const lead of leadsToInsert) {
+                                    const { error: insertError } = await supabase
+                                        .from('leads_distribuicao_crm_26')
+                                        .upsert(lead, { onConflict: 'telefone' });
+
+                                    if (insertError) {
+                                        // If upsert fails, try to just update id_meta on existing lead
+                                        await supabase
+                                            .from('leads_distribuicao_crm_26')
+                                            .update({ id_meta: lead.id_meta, origem: lead.origem })
+                                            .eq('telefone', lead.telefone);
+                                    }
+                                    totalImported++;
+                                }
+                            }
+                        } catch (adErr) {
+                            // Continua para o próximo ad se um falhar
+                            continue;
+                        }
+                    }
+                } catch (campaignErr) {
+                    // Continua para a próxima campanha se uma falhar
+                    continue;
                 }
             }
 
-            return leadsToInsert.length;
+            // Invalidar cache de leads após importação
+            if (totalImported > 0) {
+                cacheInvalidate('leads_');
+            }
+
+            return totalImported;
         } catch (err) {
-            console.error("Error on syncMetaLeads:", err);
+            console.error("syncMetaLeads error:", err);
             return 0;
         }
     },

@@ -26,6 +26,10 @@ export interface Campaign {
       proximos_passos: string[];
       score_potencial: number;
       analyzed_at?: string;
+      dica_do_dia?: string;
+      o_que_fazer_hoje?: string;
+      alerta_de_verba?: string;
+      comparativo_mercado?: string;
     };
     history?: any[];
     // Fallbacks for older records
@@ -34,6 +38,10 @@ export interface Campaign {
     gargalo_identificado?: string;
     proximos_passos?: string[];
     score_potencial?: number;
+    dica_do_dia?: string;
+    o_que_fazer_hoje?: string;
+    alerta_de_verba?: string;
+    comparativo_mercado?: string;
   };
 }
 

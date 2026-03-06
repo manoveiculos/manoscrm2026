@@ -145,7 +145,7 @@ export default function MarketingPage() {
             const data = await res.json();
             if (data.success) {
                 await loadData();
-                alert(fullClear ? "Base zerada e sincronizada!" : "Sincronização concluída!");
+                alert(fullClear ? "Base zerada e sincronizada!" : `Sincronização concluída! ${data.syncedCampaigns || 0} campanhas, ${data.syncedLeads || 0} leads importados.`);
             } else {
                 alert("Erro: " + data.error);
             }
@@ -387,93 +387,251 @@ export default function MarketingPage() {
                 </table>
             </div>
 
-            {/* Analysis Modal */}
+            {/* Campaign Report Modal */}
             <AnimatePresence>
-                {selectedCampaign && (
-                    <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 lg:p-20">
-                        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/95" onClick={() => setSelectedCampaign(null)} />
-                        <motion.div
-                            initial={{ scale: 0.95, opacity: 0 }}
-                            animate={{ scale: 1, opacity: 1 }}
-                            exit={{ scale: 0.95, opacity: 0 }}
-                            className="relative w-full max-w-5xl h-full max-h-[90vh] bg-[#010409] border border-[#30363d] rounded-2xl overflow-hidden flex flex-col"
-                        >
-                            <div className="px-8 py-5 border-b border-[#30363d] flex items-center justify-between bg-[#0d1117]">
-                                <h3 className="text-xl font-bold text-white">{selectedCampaign.name}</h3>
-                                <button onClick={() => setSelectedCampaign(null)} className="text-[#8b949e] hover:text-white">
-                                    <X size={24} />
-                                </button>
-                            </div>
+                {selectedCampaign && (() => {
+                    const campLeads = crmLeadsByCampaign[selectedCampaign.id] || 0;
+                    const campSpend = Number(selectedCampaign.total_spend || 0);
+                    const campClicks = Number(selectedCampaign.link_clicks || 0);
+                    const campReach = Number(selectedCampaign.reach || 0);
+                    const campImps = Number(selectedCampaign.impressions || 0);
+                    const campCpc = Number(selectedCampaign.cpc || 0);
+                    const campCtr = Number(selectedCampaign.ctr || 0);
+                    const campCpm = Number(selectedCampaign.cpm || 0);
+                    const campFreq = Number(selectedCampaign.frequency || 0);
+                    const campCpl = campLeads > 0 ? campSpend / campLeads : 0;
+                    const clickToLead = campClicks > 0 ? (campLeads / campClicks * 100) : 0;
+                    const impToClick = campImps > 0 ? (campClicks / campImps * 100) : 0;
+                    const efficiency = Math.min(
+                        ((campLeads > 0 ? 3 : 0) + (campCpl < 30 ? 3 : campCpl < 60 ? 1.5 : 0) + (campCtr > 1 ? 2 : campCtr > 0.5 ? 1 : 0) + (clickToLead > 5 ? 2 : clickToLead > 1 ? 1 : 0)),
+                        10
+                    );
 
-                            <div className="flex-1 overflow-y-auto p-8 grid grid-cols-1 lg:grid-cols-3 gap-8">
-                                <div className="space-y-6">
-                                    <div className="p-6 rounded-xl bg-[#0d1117] border border-[#30363d]">
-                                        <p className="text-xs font-bold text-[#8b949e] uppercase mb-2">Leads Reais CRM</p>
-                                        <h4 className="text-4xl font-bold text-[#3fb950]">{crmLeadsByCampaign[selectedCampaign.id] || 0}</h4>
+                    return (
+                        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 lg:p-10">
+                            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/95" onClick={() => setSelectedCampaign(null)} />
+                            <motion.div
+                                initial={{ scale: 0.95, opacity: 0 }}
+                                animate={{ scale: 1, opacity: 1 }}
+                                exit={{ scale: 0.95, opacity: 0 }}
+                                className="relative w-full max-w-6xl h-full max-h-[92vh] bg-[#010409] border border-[#30363d] rounded-2xl overflow-hidden flex flex-col"
+                            >
+                                {/* Header */}
+                                <div className="px-8 py-5 border-b border-[#30363d] flex items-center justify-between bg-[#0d1117]">
+                                    <div className="flex items-center gap-4">
+                                        <div className="flex items-center gap-2">
+                                            {(selectedCampaign.platform || '').toLowerCase().includes('meta') ? <Facebook size={20} className="text-blue-400" /> : <Globe size={20} className="text-emerald-400" />}
+                                            <h3 className="text-lg font-bold text-white">{selectedCampaign.name}</h3>
+                                        </div>
+                                        <span className={`px-3 py-1 rounded-full text-[10px] font-bold border ${selectedCampaign.status === 'active' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20'}`}>
+                                            {selectedCampaign.status === 'active' ? '● ATIVA' : '● PAUSADA'}
+                                        </span>
                                     </div>
-                                    <div className="p-6 rounded-xl bg-[#0d1117] border border-[#30363d]">
-                                        <p className="text-xs font-bold text-[#8b949e] uppercase mb-2">Investimento</p>
-                                        <h4 className="text-3xl font-bold text-white">R$ {Number(selectedCampaign.total_spend || 0).toFixed(2)}</h4>
-                                    </div>
-                                    <button
-                                        onClick={() => handleAnalyze(selectedCampaign)}
-                                        disabled={!!analyzingId}
-                                        className="w-full py-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold flex items-center justify-center gap-2 transition-all disabled:opacity-50"
-                                    >
-                                        {analyzingId ? <RefreshCcw className="animate-spin" /> : <Zap size={18} />}
-                                        SOLICITAR ANÁLISE IA
+                                    <button onClick={() => setSelectedCampaign(null)} className="text-[#8b949e] hover:text-white transition-colors">
+                                        <X size={24} />
                                     </button>
                                 </div>
 
-                                <div className="lg:col-span-2 p-8 rounded-2xl bg-[#0d1117] border border-[#30363d] relative overflow-hidden">
-                                    {selectedCampaign.ai_analysis_result ? (() => {
-                                        const ai = selectedCampaign.ai_analysis_result.current_analysis || selectedCampaign.ai_analysis_result;
-                                        return (
-                                            <div className="space-y-8">
-                                                <div className="flex items-center justify-between">
-                                                    <div className="flex items-center gap-2 text-blue-400">
-                                                        <Sparkles size={20} />
-                                                        <span className="text-xs font-black uppercase tracking-widest">Diagnóstico Cirúrgico</span>
+                                <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                                    {/* KPI Grid - Main Metrics */}
+                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                        <div className="p-5 rounded-xl bg-[#0d1117] border border-[#30363d]">
+                                            <p className="text-[10px] font-bold text-[#8b949e] uppercase mb-1">Leads no CRM</p>
+                                            <h4 className="text-3xl font-bold text-[#3fb950]">{campLeads}</h4>
+                                            <p className="text-[10px] text-[#484f58] mt-1">Capturados do formulário</p>
+                                        </div>
+                                        <div className="p-5 rounded-xl bg-[#0d1117] border border-[#30363d]">
+                                            <p className="text-[10px] font-bold text-[#8b949e] uppercase mb-1">Custo por Lead</p>
+                                            <h4 className={`text-3xl font-bold ${campCpl < 30 ? 'text-[#3fb950]' : campCpl < 60 ? 'text-yellow-400' : 'text-red-400'}`}>
+                                                {campCpl > 0 ? `R$ ${campCpl.toFixed(2)}` : '—'}
+                                            </h4>
+                                            <p className="text-[10px] text-[#484f58] mt-1">{campCpl < 30 ? 'Excelente' : campCpl < 60 ? 'Aceitável' : 'Acima do ideal'}</p>
+                                        </div>
+                                        <div className="p-5 rounded-xl bg-[#0d1117] border border-[#30363d]">
+                                            <p className="text-[10px] font-bold text-[#8b949e] uppercase mb-1">Investimento</p>
+                                            <h4 className="text-3xl font-bold text-white">R$ {campSpend.toFixed(2)}</h4>
+                                            <p className="text-[10px] text-[#484f58] mt-1">Valor gasto total</p>
+                                        </div>
+                                        <div className="p-5 rounded-xl bg-[#0d1117] border border-[#30363d]">
+                                            <p className="text-[10px] font-bold text-[#8b949e] uppercase mb-1">Score Eficiência</p>
+                                            <div className="flex items-baseline gap-1">
+                                                <h4 className={`text-3xl font-bold ${efficiency >= 6 ? 'text-[#3fb950]' : efficiency >= 3 ? 'text-yellow-400' : 'text-red-400'}`}>{efficiency.toFixed(1)}</h4>
+                                                <span className="text-sm text-[#484f58]">/10</span>
+                                            </div>
+                                            <div className="h-1.5 w-full bg-[#161b22] rounded-full overflow-hidden mt-2">
+                                                <div className={`h-full rounded-full ${efficiency >= 6 ? 'bg-[#3fb950]' : efficiency >= 3 ? 'bg-yellow-400' : 'bg-red-400'}`} style={{ width: `${efficiency * 10}%` }} />
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Detailed Metrics */}
+                                    <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+                                        {[
+                                            { label: 'Impressões', value: campImps.toLocaleString(), sub: 'visualizações' },
+                                            { label: 'Alcance', value: campReach.toLocaleString(), sub: 'pessoas únicas' },
+                                            { label: 'Cliques', value: campClicks.toLocaleString(), sub: 'no link' },
+                                            { label: 'CTR', value: `${campCtr.toFixed(2)}%`, sub: campCtr >= 1 ? 'Bom' : 'Baixo' },
+                                            { label: 'CPC', value: `R$ ${campCpc.toFixed(2)}`, sub: 'custo/clique' },
+                                            { label: 'Frequência', value: campFreq.toFixed(1), sub: campFreq > 3 ? 'Saturado!' : 'Normal' },
+                                        ].map((m, i) => (
+                                            <div key={i} className="p-4 rounded-lg bg-[#0d1117] border border-[#21262d]">
+                                                <p className="text-[9px] font-bold text-[#8b949e] uppercase">{m.label}</p>
+                                                <p className="text-lg font-bold text-[#e6edf3] mt-1">{m.value}</p>
+                                                <p className="text-[9px] text-[#484f58]">{m.sub}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+
+                                    {/* Conversion Funnel */}
+                                    <div className="p-6 rounded-xl bg-[#0d1117] border border-[#30363d]">
+                                        <h4 className="text-xs font-bold text-[#8b949e] uppercase mb-5 flex items-center gap-2">
+                                            <BarChart3 size={14} className="text-blue-400" />
+                                            Funil de Conversão
+                                        </h4>
+                                        <div className="flex items-end gap-3 h-32">
+                                            {[
+                                                { label: 'Impressões', value: campImps, color: 'bg-blue-500/60' },
+                                                { label: 'Alcance', value: campReach, color: 'bg-blue-500/80' },
+                                                { label: 'Cliques', value: campClicks, color: 'bg-purple-500' },
+                                                { label: 'Leads', value: campLeads, color: 'bg-[#3fb950]' },
+                                            ].map((step, i) => {
+                                                const maxVal = Math.max(campImps, 1);
+                                                const height = Math.max((step.value / maxVal) * 100, 4);
+                                                return (
+                                                    <div key={i} className="flex-1 flex flex-col items-center gap-2">
+                                                        <p className="text-xs font-bold text-white">{step.value.toLocaleString()}</p>
+                                                        <div className="w-full rounded-t-lg relative" style={{ height: `${height}%` }}>
+                                                            <div className={`absolute inset-0 ${step.color} rounded-t-lg`} />
+                                                        </div>
+                                                        <p className="text-[9px] text-[#8b949e] text-center">{step.label}</p>
+                                                        {i < 3 && (
+                                                            <p className="text-[9px] text-[#484f58]">
+                                                                {i === 0 && campImps > 0 ? `${impToClick.toFixed(1)}% →` : ''}
+                                                                {i === 1 ? '' : ''}
+                                                                {i === 2 && campClicks > 0 ? `${clickToLead.toFixed(1)}% →` : ''}
+                                                            </p>
+                                                        )}
                                                     </div>
-                                                    <span className={`px-3 py-1 rounded-full text-[10px] font-bold border ${ai.saude_campanha === 'CRÍTICA' ? 'bg-red-500/10 text-red-500 border-red-500/20' : 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'}`}>
-                                                        SAÚDE: {ai.saude_campanha}
-                                                    </span>
-                                                </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
 
-                                                <div>
-                                                    <h4 className="text-[10px] font-bold text-[#8b949e] uppercase mb-3">Gargalo Identificado</h4>
-                                                    <p className="text-lg font-bold text-red-400 leading-tight">{ai.gargalo_identificado}</p>
-                                                </div>
+                                    {/* AI Analysis Section */}
+                                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                        <div className="flex flex-col gap-4">
+                                            <button
+                                                onClick={() => handleAnalyze(selectedCampaign)}
+                                                disabled={!!analyzingId}
+                                                className="w-full py-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+                                            >
+                                                {analyzingId ? <RefreshCcw className="animate-spin" size={16} /> : <Sparkles size={16} />}
+                                                {analyzingId ? 'ANALISANDO...' : 'ANÁLISE COMPLETA IA'}
+                                            </button>
 
-                                                <div>
-                                                    <h4 className="text-[10px] font-bold text-[#8b949e] uppercase mb-3">Análise Crítica</h4>
-                                                    <p className="text-sm text-[#c9d1d9] leading-relaxed whitespace-pre-line">{ai.analise_critica}</p>
-                                                </div>
-
-                                                <div className="pt-6 border-t border-[#30363d]">
-                                                    <h4 className="text-[10px] font-bold text-blue-400 uppercase mb-4">Plano de Ação Imediato</h4>
-                                                    <div className="space-y-3">
-                                                        {ai.proximos_passos?.map((step: string, i: number) => (
-                                                            <div key={i} className="flex gap-4 p-4 rounded-xl bg-[#161b22] border border-[#30363d]">
-                                                                <span className="h-6 w-6 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 flex items-center justify-center text-xs font-bold">{i + 1}</span>
-                                                                <p className="text-sm text-white font-medium">{step}</p>
-                                                            </div>
-                                                        ))}
-                                                    </div>
+                                            {/* Quick Intel */}
+                                            <div className="p-5 rounded-xl bg-[#0d1117] border border-[#30363d] space-y-3">
+                                                <h5 className="text-[10px] font-black text-[#8b949e] uppercase">Resumo Rápido</h5>
+                                                <div className="space-y-2 text-xs text-[#c9d1d9]">
+                                                    <p>• {campLeads > 0 ? `${campLeads} leads capturados com CPL de R$ ${campCpl.toFixed(2)}` : 'Nenhum lead capturado ainda'}</p>
+                                                    <p>• {campCtr >= 1 ? `CTR de ${campCtr.toFixed(2)}% indica boa atração` : `CTR de ${campCtr.toFixed(2)}% — criativos precisam melhorar`}</p>
+                                                    <p>• {campFreq > 3 ? `Frequência ${campFreq.toFixed(1)} — público saturado, ampliar` : `Frequência ${campFreq.toFixed(1)} — dentro do normal`}</p>
+                                                    <p>• {clickToLead > 5 ? `Conversão click→lead de ${clickToLead.toFixed(1)}% é excelente` : campClicks > 0 ? `Conversão click→lead de ${clickToLead.toFixed(1)}% — formulário pode melhorar` : 'Sem cliques no período'}</p>
                                                 </div>
                                             </div>
-                                        );
-                                    })() : (
-                                        <div className="h-full flex flex-col items-center justify-center text-center p-12 opacity-50">
-                                            <Zap size={48} className="mb-4 text-[#30363d]" />
-                                            <p className="text-sm">Clique no botão ao lado para gerar o diagnóstico cirúrgico desta campanha.</p>
                                         </div>
-                                    )}
+
+                                        {/* AI Full Analysis */}
+                                        <div className="lg:col-span-2 p-6 rounded-xl bg-[#0d1117] border border-[#30363d] min-h-[300px]">
+                                            {selectedCampaign.ai_analysis_result ? (() => {
+                                                const ai = selectedCampaign.ai_analysis_result.current_analysis || selectedCampaign.ai_analysis_result;
+                                                return (
+                                                    <div className="space-y-6">
+                                                        <div className="flex items-center justify-between">
+                                                            <div className="flex items-center gap-2 text-blue-400">
+                                                                <Sparkles size={18} />
+                                                                <span className="text-xs font-black uppercase tracking-widest">Diagnóstico Estratégico</span>
+                                                            </div>
+                                                            <span className={`px-3 py-1 rounded-full text-[10px] font-bold border ${ai.saude_campanha === 'CRÍTICA' ? 'bg-red-500/10 text-red-500 border-red-500/20' : ai.saude_campanha === 'SAUDÁVEL' ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' : 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20'}`}>
+                                                                SAÚDE: {ai.saude_campanha || 'ANALISANDO'}
+                                                            </span>
+                                                        </div>
+
+                                                        {ai.gargalo_identificado && (
+                                                            <div className="p-4 rounded-lg bg-red-500/5 border border-red-500/10">
+                                                                <h5 className="text-[10px] font-bold text-red-400 uppercase mb-2">⚠️ Gargalo Identificado</h5>
+                                                                <p className="text-sm font-semibold text-red-300">{ai.gargalo_identificado}</p>
+                                                            </div>
+                                                        )}
+
+                                                        {ai.analise_critica && (
+                                                            <div>
+                                                                <h5 className="text-[10px] font-bold text-[#8b949e] uppercase mb-2">Análise Detalhada</h5>
+                                                                <p className="text-sm text-[#c9d1d9] leading-relaxed whitespace-pre-line">{ai.analise_critica}</p>
+                                                            </div>
+                                                        )}
+
+                                                        {ai.proximos_passos && ai.proximos_passos.length > 0 && (
+                                                            <div className="pt-4 border-t border-[#21262d]">
+                                                                <h5 className="text-[10px] font-bold text-blue-400 uppercase mb-3">🎯 Próximos Passos — Máquina de Vendas</h5>
+                                                                <div className="space-y-2">
+                                                                    {ai.proximos_passos.map((step: string, i: number) => (
+                                                                        <div key={i} className="flex gap-3 p-3 rounded-lg bg-[#161b22] border border-[#21262d]">
+                                                                            <span className="h-5 w-5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 flex items-center justify-center text-[10px] font-bold flex-shrink-0 mt-0.5">{i + 1}</span>
+                                                                            <p className="text-xs text-[#e6edf3]">{step}</p>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            </div>
+                                                        )}
+
+                                                        {/* New AI Insights Cards */}
+                                                        {(ai.dica_do_dia || ai.o_que_fazer_hoje || ai.alerta_de_verba || ai.comparativo_mercado) && (
+                                                            <div className="pt-4 border-t border-[#21262d] space-y-4">
+                                                                {ai.o_que_fazer_hoje && (
+                                                                    <div className="p-4 rounded-lg bg-emerald-500/5 border border-emerald-500/15">
+                                                                        <h5 className="text-[10px] font-bold text-emerald-400 uppercase mb-2">🚀 O Que Fazer HOJE</h5>
+                                                                        <p className="text-sm text-emerald-200 font-medium">{ai.o_que_fazer_hoje}</p>
+                                                                    </div>
+                                                                )}
+
+                                                                {ai.dica_do_dia && (
+                                                                    <div className="p-4 rounded-lg bg-yellow-500/5 border border-yellow-500/15">
+                                                                        <h5 className="text-[10px] font-bold text-yellow-400 uppercase mb-2">💡 Dica do Dia</h5>
+                                                                        <p className="text-sm text-yellow-200">{ai.dica_do_dia}</p>
+                                                                    </div>
+                                                                )}
+
+                                                                {ai.alerta_de_verba && (
+                                                                    <div className="p-4 rounded-lg bg-blue-500/5 border border-blue-500/15">
+                                                                        <h5 className="text-[10px] font-bold text-blue-400 uppercase mb-2">💰 Alerta de Verba</h5>
+                                                                        <p className="text-sm text-blue-200">{ai.alerta_de_verba}</p>
+                                                                    </div>
+                                                                )}
+
+                                                                {ai.comparativo_mercado && (
+                                                                    <div className="p-4 rounded-lg bg-purple-500/5 border border-purple-500/15">
+                                                                        <h5 className="text-[10px] font-bold text-purple-400 uppercase mb-2">📊 Comparativo de Mercado</h5>
+                                                                        <p className="text-sm text-purple-200">{ai.comparativo_mercado}</p>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })() : (
+                                                <div className="h-full flex flex-col items-center justify-center text-center p-8 opacity-40">
+                                                    <Sparkles size={40} className="mb-3 text-[#30363d]" />
+                                                    <p className="text-sm text-[#8b949e]">Clique em &quot;Análise Completa IA&quot; para gerar o diagnóstico estratégico com recomendações personalizadas para transformar esta campanha em máquina de vendas.</p>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
                                 </div>
-                            </div>
-                        </motion.div>
-                    </div>
-                )}
+                            </motion.div>
+                        </div>
+                    );
+                })()}
             </AnimatePresence>
         </div>
     );

@@ -129,7 +129,7 @@ REQUISITOS DO JSON:
 
       if (consultantLeads.length === 0) return null;
 
-      const individualPrompt = `Você é o Mentor de Vendas e Gerente de ${consultant.name}. 
+      const individualPrompt = `Você é o Mentor de Vendas e Gerente de ${consultant.name.split(' ')[0]}. 
 Seu tom é motivador, mas extremamente exigente e focado em fechar negócio HOJE.
 NÃO seja neutro. Dê ordens claras.
 
@@ -156,7 +156,7 @@ DIRETRIZES:
 
 REQUISITOS DO JSON:
 {
-  "daily_guide": "Texto motivador de gerente. Ex: '${consultant.name}, hoje o dia é de fechamento! Temos leads quentes querendo assinar. Foco total em [Nome] e [Nome].'",
+  "daily_guide": "Texto motivador de gerente. Ex: '${consultant.name.split(' ')[0]}, hoje o dia é de fechamento! Temos leads quentes querendo assinar. Foco total em [Nome] e [Nome].'",
   "recommended_actions": [
     { 
       "task": "Ligar para [Nome] agora sobre o [Carro]", 
@@ -180,7 +180,7 @@ REQUISITOS DO JSON:
 
       const res = await openai.chat.completions.create({
         model: 'gpt-4o',
-        messages: [{ role: 'system', content: `Você orienta o consultor ${consultant.name}. Seja tático e direto. Responda apenas com JSON.` }, { role: 'user', content: individualPrompt }],
+        messages: [{ role: 'system', content: `Você orienta o consultor ${consultant.name.split(' ')[0]}. Seja tático e direto. Responda apenas com JSON.` }, { role: 'user', content: individualPrompt }],
         response_format: { type: "json_object" },
         temperature: 0.3,
       });

@@ -56,6 +56,7 @@ Retorne EXATAMENTE um objeto JSON no formato:
       "reasoning": "...",
       "nivel_interesse": "alto" | "medio" | "baixo",
       "momento_compra": "imediato" | "breve" | "em pesquisa" | "indefinido",
+      "summarized_interest": "1-2 palavras do carro ou tipo",
       "resumo_consultor": "resumo estratégico curto para o consultor",
       "proxima_acao": "ação prática recomendada"
     },

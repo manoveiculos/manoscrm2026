@@ -60,7 +60,7 @@ export default function AnalysisPage() {
         try {
             const { data: { session } } = await supabase.auth.getSession();
             if (session?.user) {
-                const fullName = session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || '';
+                const fullName = (session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || '').split(' ')[0];
                 setUserName(fullName);
 
                 let isAdminUser = session.user.email === 'alexandre_gorges@hotmail.com';
@@ -341,7 +341,7 @@ export default function AnalysisPage() {
                         {teamPerformance.map((c) => (
                             <div key={c.id} className="p-8 rounded-[2.5rem] bg-[#0c0c0e] border border-white/5 hover:border-red-600/20 transition-all group">
                                 <div className="flex items-center justify-between mb-6">
-                                    <h4 className="font-black text-white uppercase group-hover:text-red-600 transition-colors">{c.name}</h4>
+                                    <h4 className="font-black text-white uppercase group-hover:text-red-600 transition-colors">{c.name?.split(' ')[0]}</h4>
                                     <div className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${c.grade > 80 ? 'bg-emerald-500/10 text-emerald-500' : 'bg-red-500/10 text-red-500'}`}>
                                         Nota: {c.grade.toFixed(0)}
                                     </div>
@@ -420,7 +420,7 @@ export default function AnalysisPage() {
                                         {isAdmin && (
                                             <div className="flex items-center gap-2 mt-1">
                                                 <Users size={12} className="text-white/40" />
-                                                <span className="text-[10px] font-black text-white/40 uppercase tracking-widest">{consultants.find(c => c.id === lead.assigned_consultant_id)?.name || 'Sem Consultor'}</span>
+                                                <span className="text-[10px] font-black text-white/40 uppercase tracking-widest">{consultants.find(c => c.id === lead.assigned_consultant_id)?.name?.split(' ')[0] || 'Sem Consultor'}</span>
                                             </div>
                                         )}
                                         <span className="text-[11px] font-black text-white/30 uppercase tracking-[0.2em]">{lead.vehicle_interest || 'Aguardando Perfil'}</span>
@@ -516,7 +516,7 @@ export default function AnalysisPage() {
                                             {isAdmin && (
                                                 <div className="flex items-center gap-2">
                                                     <Users size={12} className="text-white/20" />
-                                                    <span className="text-[10px] font-black text-white/30 uppercase tracking-widest">{consultants.find(c => c.id === lead.assigned_consultant_id)?.name || 'Sem Resp'}</span>
+                                                    <span className="text-[10px] font-black text-white/30 uppercase tracking-widest">{consultants.find(c => c.id === lead.assigned_consultant_id)?.name?.split(' ')[0] || 'Sem Resp'}</span>
                                                 </div>
                                             )}
                                         </div>
@@ -564,7 +564,7 @@ export default function AnalysisPage() {
                                         {isAdmin && (
                                             <>
                                                 <span className="w-1 h-1 rounded-full bg-white/10"></span>
-                                                <span className="text-[10px] font-black text-red-600/50 uppercase tracking-widest">{consultants.find(c => c.id === lead.assigned_consultant_id)?.name || 'Sem Resp'}</span>
+                                                <span className="text-[10px] font-black text-red-600/50 uppercase tracking-widest">{consultants.find(c => c.id === lead.assigned_consultant_id)?.name?.split(' ')[0] || 'Sem Resp'}</span>
                                             </>
                                         )}
                                     </div>

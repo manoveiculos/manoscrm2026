@@ -226,7 +226,7 @@ export default function Dashboard() {
                         {lead.source}
                       </span>
                       <span className="text-[9px] font-bold text-white/20 uppercase tracking-tighter">
-                        {new Date(lead.created_at).toLocaleDateString()}
+                        {new Date(lead.created_at).toLocaleDateString('pt-BR')} {new Date(lead.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                       </span>
                     </div>
                   </div>

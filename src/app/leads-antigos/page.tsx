@@ -68,7 +68,7 @@ export default function OldLeadsPage() {
                         .maybeSingle();
                     if (consultant) {
                         setRole(consultant.role);
-                        setUserName(consultant.name);
+                        setUserName(consultant.name?.split(' ')[0] || '');
                     } else if (session.user.email === 'alexandre_gorges@hotmail.com') {
                         setRole('admin');
                     }
@@ -600,7 +600,7 @@ export default function OldLeadsPage() {
                                 {/* Desktop Sidebar Info (Vendedor) */}
                                 <div className="hidden xl:flex w-[180px] p-6 bg-white/[0.02] border-l border-white/5 flex-col justify-center items-center text-center gap-1">
                                     <div className="text-[8px] font-black text-white/10 uppercase tracking-widest mb-1">Vendedor</div>
-                                    <p className="text-xs font-black text-white/40 truncate w-full">{lead.vendedor || 'Padrão'}</p>
+                                    <p className="text-xs font-black text-white/40 truncate w-full">{lead.vendedor?.split(' ')[0] || 'Padrão'}</p>
                                 </div>
                             </div>
                         </motion.div>
