@@ -2186,19 +2186,38 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                                     )}
                                                 </div>
                                                 <p className="text-[10px] font-black text-white/30 uppercase tracking-[0.2em]">Operação Direta: {actionLead?.name}</p>
+                                                {actionLead?.primeiro_vendedor && (
+                                                    <div className="mt-1 flex items-center gap-2">
+                                                        <div className="h-1.5 w-1.5 rounded-full bg-blue-500" />
+                                                        <span className="text-[9px] font-black text-blue-400 uppercase tracking-widest">Atendedor Original: {actionLead.primeiro_vendedor}</span>
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
                                         <div className="flex items-center gap-4">
-                                            {userRole === 'admin' && (
-                                                <button
-                                                    onClick={() => analyzeConversation()}
-                                                    disabled={isAnalyzing}
-                                                    className="px-5 py-2.5 rounded-2xl bg-white/5 border border-white/10 text-[9px] font-black text-white uppercase hover:bg-red-600 hover:border-red-500 transition-all flex items-center gap-2 group shadow-xl"
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-[10px] font-black text-white/30 uppercase tracking-widest mr-2">Estágio:</span>
+                                                <select
+                                                    value={actionLead.status}
+                                                    onChange={(e) => handleStatusChange(actionLead.id, e.target.value as any)}
+                                                    className="bg-[#0d1117] border border-white/10 rounded-xl px-4 py-2 text-[10px] font-black uppercase text-white tracking-widest focus:outline-none focus:border-red-500 transition-colors cursor-pointer shadow-lg"
                                                 >
-                                                    <RefreshCcw size={14} className={isAnalyzing ? 'animate-spin' : 'group-hover:rotate-180 transition-transform duration-500 text-red-500'} />
-                                                    {isAnalyzing ? 'Analisando...' : 'Reanalisar Lead (IA)'}
-                                                </button>
-                                            )}
+                                                    <option value="new">Aguardando</option>
+                                                    <option value="received">Recebido</option>
+                                                    <option value="attempt">Tentativa de Contato</option>
+                                                    <option value="contacted">Em Atendimento</option>
+                                                    <option value="confirmed">Confirmado</option>
+                                                    <option value="scheduled">Agendamento Realizado</option>
+                                                    <option value="visited">Visitou a Loja</option>
+                                                    <option value="test_drive">Test Drive Realizado</option>
+                                                    <option value="proposed">Proposta Enviada</option>
+                                                    <option value="negotiation">Em Negociação</option>
+                                                    <option value="post_sale">Sem Contato / Pós-Venda</option>
+                                                    <option value="closed">Vendido</option>
+                                                    <option value="lost">Perdido / Descarte</option>
+                                                    <option value="comprado">Compra Realizada</option>
+                                                </select>
+                                            </div>
                                             <button onClick={() => {
                                                 setActionLead(null);
                                                 setIsFinishing(false);

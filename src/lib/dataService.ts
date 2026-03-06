@@ -318,6 +318,7 @@ export const dataService = {
                     resumo_consultor: item.resumo_consultor,
                     proxima_acao: item.proxima_acao,
                     motivo_perda: item.motivo_perda || '',
+                    primeiro_vendedor: item.primeiro_vendedor || '',
                     resumo_fechamento: item.resumo_fechamento || '',
                     email: '',
                     origem: (!item.origem || item.origem.toLowerCase() === 'nÃ£o identificado' || item.origem === 'null') ? 'Contato Direto WhatsApp' : item.origem,
@@ -674,15 +675,22 @@ export const dataService = {
             .eq('id', consultantId)
             .single();
 
-        const updateData: any = {
-            updated_at: new Date().toISOString()
-        };
+        const now = new Date().toISOString();
+        const updateData: any = {};
 
         if (table === 'leads_manos_crm') {
+            updateData.updated_at = now;
             updateData.assigned_consultant_id = consultantId;
         } else {
+            updateData.atualizado_em = now;
             updateData.vendedor = consultant?.name || 'Desconhecido';
             updateData.enviado = true;
+
+            // TRACK FIRST CONSULTANT
+            const { data: existing } = await supabase.from(table).select('primeiro_vendedor').eq('id', realId).single();
+            if (!existing?.primeiro_vendedor) {
+                updateData.primeiro_vendedor = consultant?.name || 'Desconhecido';
+            }
         }
 
         const { error } = await supabase
@@ -786,11 +794,17 @@ export const dataService = {
             }
         }
 
+        const now = new Date().toISOString();
         const updatePayload: any = {
-            status: targetStatus,
-            atualizado_em: new Date().toISOString(),
-            updated_at: new Date().toISOString()
+            status: targetStatus
         };
+
+        // Table-specific timestamp columns
+        if (table === 'leads_manos_crm') {
+            updatePayload.updated_at = now;
+        } else {
+            updatePayload.atualizado_em = now;
+        }
 
         if (motivo_perda) updatePayload.motivo_perda = motivo_perda;
         if (resumo_fechamento) updatePayload.resumo_fechamento = resumo_fechamento;
@@ -803,14 +817,21 @@ export const dataService = {
 
         if (error) {
             console.warn(`Error updating status in ${table}, trying fallback:`, error);
-            // Fallback for legacy schemas
+            // Fallback for legacy schemas or missing timestamp columns
             if (table === 'leads_distribuicao_crm_26') {
                 const { data } = await supabase.from(table).select('resumo').eq('id', realId).single();
                 let resumo = data?.resumo || '';
                 const statusMarker = `[STATUS:${targetStatus}]`;
                 if (!resumo.includes('[STATUS:')) resumo += ` ${statusMarker}`;
                 else resumo = resumo.replace(/\[STATUS:.*?\]/, statusMarker);
-                await supabase.from(table).update({ resumo }).eq('id', realId);
+
+                // CRITICAL: Also update the status column if it exists, to prevent reverts on load
+                const { error: fallbackError } = await supabase.from(table).update({ resumo, status: targetStatus }).eq('id', realId);
+                if (fallbackError) throw fallbackError;
+            } else {
+                // Secondary fallback for other tables, try updating just the status
+                const { error: fallbackError } = await supabase.from(table).update({ status: targetStatus }).eq('id', realId);
+                if (fallbackError) throw fallbackError;
             }
         }
 

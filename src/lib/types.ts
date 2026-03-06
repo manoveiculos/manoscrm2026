@@ -119,6 +119,7 @@ export interface Lead {
   momento_compra?: string;
   resumo_consultor?: string;
   proxima_acao?: string;
+  primeiro_vendedor?: string;
 }
 
 export interface InventoryItem {
