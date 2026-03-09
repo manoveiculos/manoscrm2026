@@ -1,5 +1,6 @@
 ﻿import { supabase } from './supabase';
 import { Lead, Campaign, Sale, Purchase, InventoryItem, LeadStatus, AIClassification } from './types';
+import { sendMetaConversion } from './meta-service';
 
 // ============ PERFORMANCE: In-Memory Cache ============
 // Prevents redundant Supabase queries on re-renders & page navigations
@@ -47,7 +48,19 @@ const TTL = {
 let isSyncingLeads = false;
 let isDistributingLeads = false;
 
+let isRedistributingLeads = false;
+
 export const dataService = {
+    _client: null as any,
+
+    setClient(client: any) {
+        this._client = client;
+    },
+
+    getClient() {
+        return this._client || supabase;
+    },
+
     // Leads
     async getLeads(consultantId?: string, leadId?: string) {
         // PERF: Rate-limit auto-distribution to once per 30s
@@ -56,6 +69,7 @@ export const dataService = {
         if (!lastDist) {
             cacheSet(distKey, Date.now(), 30_000);
             this.autoDistributePendingCRM26().catch(err => console.error("Distribute Error:", err));
+            this.autoRedistributeLeads().catch(err => console.error("Redistribute Error:", err));
         }
 
         // PERF: Cache the consultant name lookup
@@ -81,11 +95,37 @@ export const dataService = {
 
         try {
             const [crm26Leads, mainLeads] = await Promise.all([
-                this.getLeadsCRM26(consultantName, true, !!leadId),
+                this.getLeadsCRM26(consultantName, true, !!leadId, leadId),
                 this.getLeadsManos(consultantId, leadId)
             ]);
 
-            const unifiedLeads = [...mainLeads, ...crm26Leads].sort((a, b) =>
+            // Deduplicate by clean phone number
+            const seenPhones = new Set<string>();
+            const uniqueLeads: Lead[] = [];
+
+            // Prioritize mainLeads (they are already in the main CRM table)
+            for (const lead of mainLeads) {
+                const clean = (lead.phone || '').replace(/\D/g, '');
+                if (clean && !seenPhones.has(clean)) {
+                    seenPhones.add(clean);
+                    uniqueLeads.push(lead);
+                } else if (!clean) {
+                    uniqueLeads.push(lead);
+                }
+            }
+
+            // Add crm26Leads ONLY if they don't exist in mainLeads
+            for (const lead of crm26Leads) {
+                const clean = (lead.phone || '').replace(/\D/g, '');
+                if (clean && !seenPhones.has(clean)) {
+                    seenPhones.add(clean);
+                    uniqueLeads.push(lead);
+                } else if (!clean) {
+                    uniqueLeads.push(lead);
+                }
+            }
+
+            const unifiedLeads = uniqueLeads.sort((a, b) =>
                 new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
             );
 
@@ -154,49 +194,35 @@ export const dataService = {
     },
 
     async promoteLeadToMain(sourceLead: any, source: 'crm26' | 'legacy', consultantId: string) {
-        // Clean phone for duplicate check
+        // Clean phone for consistency
         const cleanPhone = (sourceLead.telephone || sourceLead.telefone || '').replace(/\D/g, '');
         if (!cleanPhone) return;
 
-        // Check if already exists in main
-        const { data: existing } = await supabase
-            .from('leads_manos_crm')
-            .select('id')
-            .eq('phone', cleanPhone)
-            .limit(1);
-
-        if (existing && existing.length > 0) {
-            // Already exists, just mark as sent in source to stop syncing
-            await this.markLeadAsSent(sourceLead.id, source);
-            return;
-        }
-
-        // Mapping fields
+        // Mapping fields to match Lead type
         const leadData: Partial<Lead> = {
             name: sourceLead.nome || sourceLead.name || 'Lead Importado',
             phone: cleanPhone,
             vehicle_interest: sourceLead.interesse || sourceLead.vehicle_interest || '',
             region: sourceLead.cidade || sourceLead.region || '',
             assigned_consultant_id: consultantId,
-            status: 'received', // New active lead for the consultant, maps to 'Aguardando' stage
             source: sourceLead.origem || sourceLead.source || (source === 'crm26' ? 'WhatsApp' : 'Facebook Leads'),
             ai_score: sourceLead.ai_score || 0,
             ai_classification: sourceLead.ai_classification || 'warm',
             ai_reason: sourceLead.ai_reason || sourceLead.resumo_consultor || '',
             ai_summary: sourceLead.resumo || '',
             carro_troca: sourceLead.troca || sourceLead.carro_troca || '',
-            created_at: sourceLead.criado_em || new Date().toISOString()
+            created_at: sourceLead.criado_em || new Date().toISOString(),
+            lead_id: sourceLead.lead_id || sourceLead.id_meta
         };
 
-        const { error: insertError } = await supabase
-            .from('leads_manos_crm')
-            .insert(leadData);
-
-        if (!insertError) {
-            await this.markLeadAsSent(sourceLead.id, source);
-
-        } else {
-            console.error("Error promoting lead:", insertError);
+        try {
+            // Use createLead (which now handles deduplication, reactivation and history)
+            const result = await this.createLead(leadData);
+            if (result) {
+                await this.markLeadAsSent(sourceLead.id, source);
+            }
+        } catch (err) {
+            console.error("Error promoting lead to main:", err);
         }
     },
 
@@ -208,7 +234,7 @@ export const dataService = {
             .eq('id', id);
     },
 
-    async getLeadsCRM26(consultantName?: string, includeSent: boolean = false, showRedistributed: boolean = false) {
+    async getLeadsCRM26(consultantName?: string, includeSent: boolean = false, showRedistributed: boolean = false, leadId?: string) {
         // Trigger auto-distribution for any unassigned leads in the background
         this.autoDistributePendingCRM26().catch(console.error);
 
@@ -230,6 +256,11 @@ export const dataService = {
         if (consultantName) {
             const firstName = consultantName.trim().split(' ')[0];
             query = query.ilike('vendedor', `%${firstName}%`);
+        }
+
+        if (leadId && leadId.startsWith('crm26_')) {
+            const realId = leadId.replace('crm26_', '');
+            query = query.eq('id', realId);
         }
 
         const { data, error } = await query;
@@ -330,7 +361,8 @@ export const dataService = {
                     resumo_fechamento: item.resumo_fechamento || '',
                     email: '',
                     origem: (!item.origem || item.origem.toLowerCase() === 'nÃ£o identificado' || item.origem === 'null') ? 'Contato Direto WhatsApp' : item.origem,
-                    estimated_ticket: 0
+                    estimated_ticket: 0,
+                    lead_id: item.lead_id
                 };
             }) as unknown as Lead[];
     },
@@ -338,7 +370,7 @@ export const dataService = {
     async getLeadsManos(consultantId?: string, leadId?: string) {
         let query = supabase
             .from('leads_manos_crm')
-            .select('*, consultants_manos_crm(name)')
+            .select('*')
             .order('created_at', { ascending: false });
 
         if (consultantId) {
@@ -346,21 +378,115 @@ export const dataService = {
         }
 
         if (leadId) {
+            // If leadId has a prefix that is NOT 'main_', it's definitely not for this table
+            if (leadId.includes('_') && !leadId.startsWith('main_')) {
+                return [];
+            }
             const realId = leadId.replace('main_', '');
+
+            // Basic UUID format check to prevent PostgreSQL 22P02 errors
+            const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+            if (!uuidRegex.test(realId)) {
+                return [];
+            }
+
             query = query.eq('id', realId);
         }
 
         const { data, error } = await query;
         if (error) {
-            console.error("Error on leads_manos_crm:", error);
+            console.error("Error on leads_manos_crm:", JSON.stringify(error, null, 2));
             return [];
+        }
+
+        // Fetch consultants to map the name manually (safer than join if RLS/FK issues)
+        let allConsultants = cacheGet<any[]>('consultant_names');
+        if (!allConsultants) {
+            const { data: consultantsData } = await supabase.from('consultants_manos_crm').select('id, name');
+            allConsultants = consultantsData || [];
+            cacheSet('consultant_names', allConsultants, TTL.CONSULTANTS);
         }
 
         return (data || []).map(item => ({
             ...item,
             id: `main_${item.id}`,
-            consultants_manos_crm: item.consultants_manos_crm || { name: 'Pendente' }
+            consultants_manos_crm: allConsultants?.find(c => c.id === item.assigned_consultant_id) || { name: 'Pendente' }
         })) as unknown as Lead[];
+    },
+
+    async autoRedistributeLeads() {
+        if (isRedistributingLeads) return;
+        isRedistributingLeads = true;
+
+        try {
+            const now = new Date().toISOString();
+            const client = this.getClient();
+
+            // 1. Find eligible leads for redistribution
+            const { data: eligible } = await client
+                .from('leads_manos_crm')
+                .select('*')
+                .eq('status', 'lost_redistributed')
+                .limit(20);
+
+            if (!eligible || eligible.length === 0) return;
+
+            for (const lead of eligible) {
+                const meta = lead.dados_brutos || {};
+                const eligibleAt = meta.redistribution_eligible_at;
+
+                if (!eligibleAt || new Date(eligibleAt) > new Date()) {
+                    continue; // Not time yet
+                }
+
+                // 2. Determine who to exclude
+                const excludedId = meta.previous_consultant_id;
+                const excludedName = meta.previous_consultant_name;
+
+                // 3. Pick New Consultant - Restricted to Wilson, Sergio, Victor
+                const nextConsultant = await this.pickNextConsultant(lead.name, excludedId, ['Wilson', 'Sergio', 'Victor'], excludedName);
+
+                if (nextConsultant) {
+                    const updatePayload: any = {
+                        status: 'received', // Move back to main pipeline (Aguardando)
+                        assigned_consultant_id: nextConsultant.id,
+                        vendedor_anterior: excludedName || lead.vendedor_anterior, // Store permanently in column
+                        updated_at: now,
+                        created_at: now, // Bump to top of list
+                        // Clear redistribution meta but keep previous info for the UI alert
+                        dados_brutos: {
+                            ...meta,
+                            redistributed_at: now,
+                            new_consultant_id: nextConsultant.id,
+                            redistribution_eligible_at: null // Clear trigger
+                        }
+                    };
+
+                    const { error: updateError } = await client
+                        .from('leads_manos_crm')
+                        .update(updatePayload)
+                        .eq('id', lead.id);
+
+                    if (!updateError) {
+                        // Update consultant last assigned timestamp
+                        await client
+                            .from('consultants_manos_crm')
+                            .update({ last_lead_assigned_at: now })
+                            .eq('id', nextConsultant.id);
+
+                        // Log history
+                        await this.logHistory(
+                            lead.id,
+                            'received',
+                            'lost_redistributed',
+                            `🔄 Lead REDISTRIBUÍDO para ${nextConsultant.name}. (Atendimento anterior: ${excludedName || 'Desconhecido'})`
+                        );
+                    }
+                }
+            }
+        } finally {
+            isRedistributingLeads = false;
+        }
     },
 
     async autoDistributePendingCRM26() {
@@ -398,37 +524,74 @@ export const dataService = {
         }
     },
 
-    async pickNextConsultant(leadName?: string) {
+    async pickNextConsultant(leadName?: string, excludedId?: string, allowedNames?: string[], excludedName?: string) {
+        const client = this.getClient();
+
+        // 0. Robust resolution of excludedId if only excludedName is provided
+        let effectiveExcludedId = excludedId;
+        if (!effectiveExcludedId && excludedName) {
+            const firstName = excludedName.toLowerCase().trim().split(' ')[0];
+            const { data: allConsultants } = await client.from('consultants_manos_crm').select('id, name');
+            const excludedConsultant = allConsultants?.find((c: any) => c.name.toLowerCase().includes(firstName));
+            if (excludedConsultant) effectiveExcludedId = excludedConsultant.id;
+        }
+
         // Special Rules
         if (leadName) {
             const name = leadName.toLowerCase();
             if (name.includes('wilson')) {
-                const { data: sergio } = await supabase
+                const { data: sergio } = await client
                     .from('consultants_manos_crm')
                     .select('*')
                     .ilike('name', '%Sergio%')
                     .single();
-                if (sergio) return sergio;
+                if (sergio && sergio.id !== effectiveExcludedId) return sergio;
             }
             if (name.includes('rodrigo')) {
-                const { data: victor } = await supabase
+                const { data: victor } = await client
                     .from('consultants_manos_crm')
                     .select('*')
                     .ilike('name', '%Victor%')
                     .single();
-                if (victor) return victor;
+                if (victor && victor.id !== effectiveExcludedId) return victor;
             }
         }
 
-        // Round Robin: Active, oldest assignment
-        const { data: consultants } = await supabase
+        // Round Robin: Active, oldest assignment, excluding specified ID
+        let query = client
             .from('consultants_manos_crm')
             .select('*')
-            .eq('is_active', true)
+            .eq('is_active', true);
+
+        if (effectiveExcludedId) {
+            query = query.neq('id', effectiveExcludedId);
+        }
+
+        if (allowedNames && allowedNames.length > 0) {
+            const orFilters = allowedNames.map(name => `name.ilike.%${name}%`).join(',');
+            query = query.or(orFilters);
+        }
+
+        const { data: consultants, error: queryError } = await query
             .order('last_lead_assigned_at', { ascending: true, nullsFirst: true })
             .limit(1);
 
+        if (queryError) {
+            console.error("Error picking next consultant:", queryError);
+            return null;
+        }
+
         if (!consultants || consultants.length === 0) {
+            // If no one is available and we were excluding someone, fallback to ignoring the exclusion
+            if (effectiveExcludedId) {
+                const { data: fallback } = await client
+                    .from('consultants_manos_crm')
+                    .select('*')
+                    .eq('is_active', true)
+                    .order('last_lead_assigned_at', { ascending: true, nullsFirst: true })
+                    .limit(1);
+                return fallback?.[0] || null;
+            }
             return null;
         }
 
@@ -499,6 +662,14 @@ export const dataService = {
             }
         }
 
+        // 5. Fetch consultants for name resolution
+        let allConsultants = cacheGet<any[]>('consultant_names');
+        if (!allConsultants) {
+            const { data: consultantsData } = await supabase.from('consultants_manos_crm').select('id, name');
+            allConsultants = consultantsData || [];
+            cacheSet('consultant_names', allConsultants, TTL.CONSULTANTS);
+        }
+
         const [resArchive, resMain, resCrm26] = await Promise.all([
             queryArchive,
             queryMain,
@@ -506,38 +677,55 @@ export const dataService = {
         ]);
 
         // Virtual IDs to prevent React Key Collisions (prefix-table-id)
-        const archiveLeads = (resArchive.data || []).map((l: any) => ({
-            ...l,
-            id: `dist_${l.id}`,
-            real_id: l.id,
-            source_table: 'leads_distribuicao'
-        }));
+        const archiveLeads = (resArchive.data || []).map((l: any) => {
+            const consultant = allConsultants?.find(c => c.name.toLowerCase().includes(l.vendedor?.toLowerCase().split(' ')[0]));
+            return {
+                ...l,
+                id: `dist_${l.id}`,
+                real_id: l.id,
+                assigned_consultant_id: consultant?.id,
+                source_table: 'leads_distribuicao'
+            };
+        });
 
-        const mainLeads = (resMain.data || []).map((l: any) => ({
-            id: `main_${l.id}`,
-            real_id: l.id,
-            nome: l.name,
-            telefone: l.phone,
-            vendedor: l.assigned_consultant_id,
-            origem: l.source || l.origem,
-            interesse: l.vehicle_interest,
-            resumo: l.ai_summary || l.observacoes,
-            ai_score: l.ai_score,
-            ai_classification: l.ai_classification,
-            ai_reason: l.ai_reason,
-            status: l.status,
-            enviado: true,
-            criado_em: l.created_at,
-            atualizado_em: l.updated_at,
-            source_table: 'leads_manos_crm'
-        }));
+        const mainLeads = (resMain.data || []).map((l: any) => {
+            const consultant = allConsultants?.find(c => c.id === l.assigned_consultant_id);
+            return {
+                id: `main_${l.id}`,
+                real_id: l.id,
+                nome: l.name,
+                telefone: l.phone,
+                vendedor: consultant?.name || l.assigned_consultant_id,
+                origem: l.source || l.origem,
+                interesse: l.vehicle_interest,
+                resumo: l.ai_summary || l.observacoes,
+                ai_score: l.ai_score,
+                ai_classification: l.ai_classification,
+                ai_reason: l.ai_reason,
+                status: l.status,
+                enviado: true,
+                criado_em: l.created_at,
+                atualizado_em: l.updated_at,
+                primeiro_vendedor: l.primeiro_vendedor,
+                nivel_interesse: l.nivel_interesse,
+                momento_compra: l.momento_compra,
+                resumo_consultor: l.resumo_consultor,
+                proxima_acao: l.proxima_acao,
+                assigned_consultant_id: l.assigned_consultant_id,
+                source_table: 'leads_manos_crm'
+            };
+        });
 
-        const crm26Leads = (resCrm26.data || []).map((l: any) => ({
-            ...l,
-            id: `crm26_${l.id}`,
-            real_id: l.id,
-            source_table: 'leads_distribuicao_crm_26'
-        }));
+        const crm26Leads = (resCrm26.data || []).map((l: any) => {
+            const consultant = allConsultants?.find(c => c.name.toLowerCase().includes(l.vendedor?.toLowerCase().split(' ')[0]));
+            return {
+                ...l,
+                id: `crm26_${l.id}`,
+                real_id: l.id,
+                assigned_consultant_id: consultant?.id,
+                source_table: 'leads_distribuicao_crm_26'
+            };
+        });
 
         // Deduplicate: If same phone/name exists in multiple tables, prefer the archive one or most recent
         const allLeadsRaw = [...archiveLeads, ...mainLeads, ...crm26Leads];
@@ -570,7 +758,8 @@ export const dataService = {
                 ...lead,
                 ai_classification: (ai_classification || 'warm') as AIClassification,
                 ai_reason: ai_reason || '',
-                resumo: resumo || ''
+                resumo: resumo || '',
+                vendedor_anterior: lead.vendedor_anterior || lead.dados_brutos?.previous_consultant_name || lead.primeiro_vendedor || ''
             };
         });
     },
@@ -636,42 +825,148 @@ export const dataService = {
         return this.updateDistributedLeadAI(id, { ai_classification, ai_reason });
     },
 
-    async distributeOldLeads(leadIds: number[], vendedores: string[]) {
-        if (vendedores.length === 0) throw new Error("Nenhum consultor disponÃ­vel para distribuiÃ§Ã£o.");
+    async distributeOldLeads(leadsToDistribute: { id: string | number, currentConsultant?: string, currentConsultantId?: string }[], vendedores: string[]) {
+        if (vendedores.length === 0) throw new Error("Nenhum consultor disponível para distribuição.");
 
         const timestamp = new Date().toISOString();
-        const updates = leadIds.map((id, index) => {
-            const vendedor = vendedores[index % vendedores.length];
+        const { data: allConsultants } = await supabase.from('consultants_manos_crm').select('id, name');
+
+        const updates = leadsToDistribute.map((leadInfo, index) => {
+            const id = leadInfo.id;
+            const currentId = leadInfo.currentConsultantId;
+            const currentName = leadInfo.currentConsultant?.toLowerCase().trim().split(' ')[0];
+
+            // Se houver apenas 1 vendedor na lista e ele for o atual, não temos escolha a não ser repetir ou dar erro
+            // Mas com Wilson, Sergio, Victor (3), sempre teremos pelo menos 2 opções de troca
+            let availableVendedores = vendedores.filter(name => {
+                const nameLower = name.toLowerCase().trim();
+                const firstName = nameLower.split(' ')[0];
+                const consultants = allConsultants || [];
+                const consultantId = consultants.find(c => c.name.toLowerCase().includes(firstName))?.id;
+
+                if (currentId && consultantId) return currentId !== consultantId;
+                if (currentName) return firstName !== currentName;
+                return true;
+            });
+
+            // Fallback se todos forem filtrados (improvável com a regra atual)
+            if (availableVendedores.length === 0) availableVendedores = vendedores;
+
+            // Usa o index para manter o round-robin dentro dos disponíveis para este lead
+            const vendedor = availableVendedores[index % availableVendedores.length];
+
+            let table = 'leads_distribuicao';
+            let realId: any = id;
+
+            if (typeof id === 'string') {
+                if (id.startsWith('crm26_')) {
+                    table = 'leads_distribuicao_crm_26';
+                    realId = id.replace('crm26_', '');
+                } else if (id.startsWith('main_')) {
+                    table = 'leads_manos_crm';
+                    realId = id.replace('main_', '');
+                } else if (id.startsWith('dist_')) {
+                    table = 'leads_distribuicao';
+                    realId = id.replace('dist_', '');
+                }
+            }
+
+            const updatePayload: any = {
+                enviado: true,
+                vendedor,
+                atualizado_em: timestamp
+            };
+
+            // Specialized handling for main CRM table
+            if (table === 'leads_manos_crm') {
+                updatePayload.updated_at = timestamp;
+                // Get consultant ID from name
+                const firstName = vendedor.toLowerCase().split(' ')[0];
+                const consultantsArray = allConsultants || [];
+                const consultant = consultantsArray.find(c => c.name.toLowerCase().includes(firstName));
+                if (consultant) {
+                    updatePayload.assigned_consultant_id = consultant.id;
+                    updatePayload.status = 'received'; // Mark as new for the consultant
+                }
+                return supabase.from(table).update(updatePayload).eq('id', realId);
+            }
+
             return supabase
-                .from('leads_distribuicao')
-                .update({
-                    vendedor,
-                    enviado: true,
-                    atualizado_em: timestamp
-                })
-                .eq('id', id);
+                .from(table)
+                .update(updatePayload)
+                .eq('id', realId);
         });
 
         const results = await Promise.all(updates);
         const firstError = results.find(r => r.error)?.error;
 
-        // Retry without atualizado_em if it fails (graceful degradation)
-        if (firstError && (firstError.code === '42703' || firstError.message?.toLowerCase().includes('atualizado_em'))) {
-            console.warn("âš ï¸ Column 'atualizado_em' missing in leads_distribuicao. Retrying distribution without it.");
-            const retryUpdates = leadIds.map((id, index) => {
-                const vendedor = vendedores[index % vendedores.length];
-                return supabase
-                    .from('leads_distribuicao')
-                    .update({ vendedor, enviado: true })
-                    .eq('id', id);
-            });
-            const retryResults = await Promise.all(retryUpdates);
-            const retryError = retryResults.find(r => r.error)?.error;
-            if (retryError) throw retryError;
-            return retryResults;
-        }
+        if (firstError) {
+            // Retry logic without 'atualizado_em' if it fails
+            if (firstError.code === '42703' || (firstError.message && firstError.message.toLowerCase().includes('atualizado_em'))) {
+                console.warn("⚠️ Column 'atualizado_em' missing. Retrying distribution without it.");
+                const retryUpdates = leadsToDistribute.map((leadInfo, index) => {
+                    const id = leadInfo.id;
+                    const currentId = leadInfo.currentConsultantId;
+                    const currentName = leadInfo.currentConsultant?.toLowerCase().trim().split(' ')[0];
 
-        if (firstError) throw firstError;
+                    let availableVendedores = vendedores.filter(name => {
+                        const nameLower = name.toLowerCase().trim();
+                        const firstName = nameLower.split(' ')[0];
+                        const consultants = allConsultants || [];
+                        const consultantId = consultants.find(c => c.name.toLowerCase().includes(firstName))?.id;
+
+                        if (currentId && consultantId) {
+                            return currentId !== consultantId;
+                        }
+                        if (currentName) {
+                            return firstName !== currentName;
+                        }
+                        return true;
+                    });
+
+                    if (availableVendedores.length === 0) availableVendedores = vendedores;
+                    const vendedor = availableVendedores[index % availableVendedores.length];
+
+                    let table = 'leads_distribuicao';
+                    let realId: any = id;
+                    if (typeof id === 'string') {
+                        if (id.startsWith('crm26_')) {
+                            table = 'leads_distribuicao_crm_26';
+                            realId = id.replace('crm26_', '');
+                        } else if (id.startsWith('main_')) {
+                            table = 'leads_manos_crm';
+                            realId = id.replace('main_', '');
+                        } else if (id.startsWith('dist_')) {
+                            table = 'leads_distribuicao';
+                            realId = id.replace('dist_', '');
+                        }
+                    }
+
+                    if (table === 'leads_manos_crm') {
+                        const payload: any = { updated_at: timestamp };
+                        const firstName = vendedor.toLowerCase().split(' ')[0];
+                        const consultantsArray = allConsultants || [];
+                        const consultant = consultantsArray.find((c: { name: string, id: string }) => c.name.toLowerCase().includes(firstName));
+                        if (consultant) {
+                            payload.assigned_consultant_id = consultant.id;
+                            payload.status = 'received';
+                        }
+                        return supabase.from(table).update(payload).eq('id', realId);
+                    }
+
+                    return supabase
+                        .from(table)
+                        .update({ vendedor, enviado: true })
+                        .eq('id', realId);
+                });
+                const retryResults = await Promise.all(retryUpdates);
+                const retryError = retryResults.find(r => r.error)?.error;
+                if (retryError) throw retryError;
+                return retryResults;
+            } else {
+                throw firstError;
+            }
+        }
         return results;
     },
 
@@ -702,6 +997,14 @@ export const dataService = {
         } else if (leadId.startsWith('dist_')) {
             table = 'leads_distribuicao';
             realId = leadId.replace('dist_', '');
+        }
+
+        if (table === 'leads_manos_crm') {
+            const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+            if (!uuidRegex.test(realId)) {
+                console.warn(`Attempted to assign consultant for non-UUID lead in main table: ${realId}`);
+                return;
+            }
         }
 
         let consultantName = 'Desconhecido';
@@ -751,6 +1054,7 @@ export const dataService = {
     },
 
     async updateLeadStatus(leadId: string, status: LeadStatus, oldStatus?: LeadStatus, notes?: string, motivo_perda?: string, resumo_fechamento?: string) {
+        console.log('DEBUG: Status recebido no updateLeadStatus:', status);
         let table = 'leads_manos_crm';
         let realId: any = leadId;
 
@@ -765,76 +1069,65 @@ export const dataService = {
             realId = leadId.replace('dist_', '');
         }
 
-        // REDISTRIBUTION LOGIC
-        // Target consultants: Victor, Sergio, Wilson
-        // Rules: 
-        // 1. Status is 'lost' or 'post_sale' (Sem Contato)
-        // 2. Redistribute among the 3, excluding current one
-        // 3. Status changes to 'lost_redistributed' to hide from main Kanban
-
+        // REDISTRIBUTION TRIGGER LOGIC
+        // When a lead is lost or has no contact, move to a queue for later redistribution
+        const isRedistributionTrigger = ['lost', 'post_sale'].includes(status);
         let targetStatus = status;
-        const isRedistributionStatus = status === 'lost' || status === 'post_sale' || (status as any) === 'Sem Contato';
-        const isRedistributionReason = motivo_perda === 'Sem contato/Frio' || motivo_perda === 'Perda Total' || resumo_fechamento?.includes('Perda Total');
 
-        if (isRedistributionStatus && isRedistributionReason) {
+        if (isRedistributionTrigger) {
             targetStatus = 'lost_redistributed' as any;
 
-            try {
-                // Get current lead to know current consultant
-                const { data: currentLead } = await supabase.from(table).select('*').eq('id', realId).single();
-                const currentConsultantName = currentLead?.vendedor || '';
-                const currentConsultantId = currentLead?.assigned_consultant_id || '';
-
-                // Get target consultants
-                const { data: allConsultants } = await supabase
-                    .from('consultants_manos_crm')
-                    .select('id, name')
-                    .eq('is_active', true);
-
-                const participants = ['Victor', 'Sergio', 'Wilson'];
-                const filteredConsultants = allConsultants?.filter(c =>
-                    participants.some(p => c.name.toLowerCase().includes(p.toLowerCase())) &&
-                    c.id !== currentConsultantId &&
-                    !currentConsultantName.toLowerCase().includes(c.name.split(' ')[0].toLowerCase())
-                ) || [];
-
-                if (filteredConsultants.length > 0) {
-                    const next = filteredConsultants[Math.floor(Math.random() * filteredConsultants.length)];
-
-
-                    const redistributionPayload: any = {
-                        status: targetStatus,
-                        atualizado_em: new Date().toISOString(),
-                        updated_at: new Date().toISOString()
-                    };
-
-                    if (table === 'leads_manos_crm') {
-                        redistributionPayload.assigned_consultant_id = next.id;
-                    } else {
-                        redistributionPayload.vendedor = next.name;
-                        redistributionPayload.enviado = true;
-                    }
-
-                    if (motivo_perda) redistributionPayload.motivo_perda = motivo_perda;
-                    if (resumo_fechamento) redistributionPayload.resumo_fechamento = resumo_fechamento;
-
-                    const { error: redError } = await supabase
-                        .from(table)
-                        .update(redistributionPayload)
-                        .eq('id', realId);
-
-                    if (redError) throw redError;
-
-                    // Log the redistribution
-                    if (table === 'leads_manos_crm') {
-                        await this.logHistory(realId, targetStatus, oldStatus, `Lead redistribuÃ­do para ${next.name} (${motivo_perda})`);
-                    }
-
-                    return; // Exit after redistribution
+            // UUID Check for main table
+            if (table === 'leads_manos_crm') {
+                const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+                if (!uuidRegex.test(realId)) {
+                    console.warn(`[REDIST] Skipping redistribution trigger for non-UUID lead: ${realId}`);
+                    return;
                 }
+            }
+
+            try {
+                // Fetch current lead to preserve metadata and consultant name
+                const { data: currentLead } = await supabase.from(table).select('*, consultants_manos_crm(name)').eq('id', realId).single();
+
+                const meta = {
+                    ...(currentLead?.dados_brutos || {}),
+                    previous_consultant_id: currentLead?.assigned_consultant_id || currentLead?.vendedor,
+                    previous_consultant_name: currentLead?.consultants_manos_crm?.name || currentLead?.vendedor || 'Desconhecido',
+                    lost_at: new Date().toISOString(),
+                    redistribution_eligible_at: new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString(), // 12 hours later
+                    motivo_perda: motivo_perda || 'Não especificado'
+                };
+
+                const redistributionPayload: any = {
+                    status: targetStatus,
+                    vendedor_anterior: meta.previous_consultant_name, // Permanent column update
+                    dados_brutos: meta,
+                    updated_at: new Date().toISOString()
+                };
+
+                // Unassign consultant to make it available for redistribution
+                if (table === 'leads_manos_crm') {
+                    redistributionPayload.assigned_consultant_id = null;
+                } else {
+                    redistributionPayload.vendedor = null;
+                    redistributionPayload.enviado = false;
+                }
+
+                if (motivo_perda) redistributionPayload.motivo_perda = motivo_perda;
+                if (resumo_fechamento) redistributionPayload.resumo_fechamento = resumo_fechamento;
+
+                const { error: redError } = await supabase
+                    .from(table)
+                    .update(redistributionPayload)
+                    .eq('id', realId);
+
+                if (redError) throw redError;
+
+                await this.logHistory(realId, targetStatus, oldStatus, `Lead movido para fila de reativação (Frio: ${motivo_perda || 'Sem contato'}).`);
+                return; // Early exit, trigger handled
             } catch (err) {
-                console.error("Critical error in redistribution logic:", err);
-                // Fallback to normal status update if redistribution fails
+                console.error("Redistribution trigger error:", err);
             }
         }
 
@@ -879,13 +1172,41 @@ export const dataService = {
             }
         }
 
-        if (table === 'leads_manos_crm') {
+        if (table === 'leads_manos_crm' || table === 'leads_distribuicao_crm_26') {
             await this.logHistory(realId, targetStatus, oldStatus, notes);
 
-            // Meta CAPI sync
-            const { data: lead } = await supabase.from('leads_manos_crm').select('phone').eq('id', realId).single();
-            if (lead?.phone) {
-                await this.enviarEventoLeadMeta(lead);
+            // NEW Meta Conversions API Integration
+            try {
+                const { data: leadData } = await supabase.from(table).select('*').eq('id', realId).single();
+                if (leadData && (leadData.phone || leadData.telefone)) {
+                    let eventName: string | null = null;
+                    let extraData: any = undefined;
+                    const s = String(status).toUpperCase().trim();
+
+                    // FINAL META CAPI MAPPING (Refined labels)
+                    if (['AGUARDANDO', 'EM ATENDIMENTO', 'NEW', 'RECEIVED', 'ATTEMPT', 'CONTACTED', 'CONFIRMED'].includes(s)) {
+                        eventName = 'Lead';
+                    } else if (['AGENDAMENTO', 'SCHEDULED'].includes(s)) {
+                        eventName = 'Schedule';
+                    } else if (['VISITA E TEST DRIVE', 'VISITED', 'TEST_DRIVE', 'VISITOU'].includes(s)) {
+                        eventName = 'StoreVisit';
+                    } else if (['NEGOCIAÇÃO', 'PROPOSTA ENVIADA', 'PROPOSED', 'NEGOTIATION'].includes(s)) {
+                        eventName = 'Contact';
+                    } else if (['VENDIDO', 'COMPRA REALIZADA', 'CLOSED', 'COMPRADO', 'FECHADO', 'VENDA'].includes(s)) {
+                        eventName = 'Purchase';
+                    } else if (['PERDA / SEM CONTATO', 'PERDIDO / DESCARTE', 'LOST', 'LOST_REDISTRIBUTED', 'POST_SALE', 'TRASH'].includes(s)) {
+                        eventName = 'DisqualifiedLead';
+                        extraData = { lead_quality: "disqualified", reason: s };
+                        console.log(`⚠️ Evento de Desqualificação enviado para Meta | Motivo: ${s}`);
+                    }
+
+                    if (eventName) {
+                        console.log(`DEBUG: Disparando Meta Conversion [${eventName}] para ${leadData.nome || 'Lead'} (Lead ID: ${leadData.id || realId})...`);
+                        await sendMetaConversion(leadData, eventName, extraData);
+                    }
+                }
+            } catch (metaErr) {
+                console.warn("Non-blocking Meta CAPI error:", metaErr);
             }
         }
 
@@ -893,65 +1214,38 @@ export const dataService = {
         cacheInvalidate('leads_');
     },
 
-    /**
-     * Envia evento de Lead para a Meta Conversions API via server-side route.
-     */
-    async enviarEventoLeadMeta(lead: { phone: string }) {
-        if (!lead.phone) return;
-
-        try {
-            // ImportaÃ§Ã£o dinÃ¢mica do utility para preparar o payload (roda no client mas a API Ã© server-side)
-            const { prepareMetaLeadPayload } = await import('./meta-capi');
-            const payload = prepareMetaLeadPayload(lead.phone);
-
-
-            const response = await fetch('/api/meta-capi', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-
-            const result = await response.json();
-            if (!response.ok) {
-                throw new Error(result.error || 'Erro desconhecido na Meta CAPI');
-            }
-
-            return result;
-        } catch (err) {
-            console.error("âŒ Failed to send lead event to Meta:", err);
-            throw err;
-        }
-    },
-
     async reactivateLead(leadId: string) {
-        return this.updateLeadStatus(leadId, 'received' as LeadStatus, undefined, 'Lead reativado manualmente da Ã¡rea de reativaÃ§Ã£o.');
+        return this.updateLeadStatus(leadId, 'received' as LeadStatus, undefined, 'Lead reativado manualmente da área de reativação.');
     },
 
     async updateLeadAI(leadId: string, aiData: { ai_score: number, ai_classification: string, ai_reason: string }) {
-        if (leadId.startsWith('crm26_')) {
-            const realId = leadId.replace('crm26_', '');
-            const { data, error } = await supabase
-                .from('leads_distribuicao_crm_26')
-                .update({
-                    ai_score: aiData.ai_score,
-                    ai_classification: aiData.ai_classification,
-                    ai_reason: aiData.ai_reason,
-                    // Keep old behavior just in case someone relies on this format before schema rebuild cache
-                    resumo: `[${aiData.ai_classification.toUpperCase()}] ${aiData.ai_reason}`
-                })
-                .eq('id', realId);
+        let table = 'leads_manos_crm';
+        let realId = leadId;
 
-            if (error) throw error;
-            return data;
+        if (leadId.startsWith('crm26_')) {
+            table = 'leads_distribuicao_crm_26';
+            realId = leadId.replace('crm26_', '');
+        } else if (leadId.startsWith('main_')) {
+            table = 'leads_manos_crm';
+            realId = leadId.replace('main_', '');
+        }
+
+        if (table === 'leads_manos_crm') {
+            const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+            if (!uuidRegex.test(realId)) {
+                console.warn(`Attempted to update AI data for non-UUID lead in main table: ${realId}`);
+                return;
+            }
         }
 
         const { data, error } = await supabase
-            .from('leads_manos_crm')
+            .from(table)
             .update({
                 ...aiData,
-                updated_at: new Date().toISOString()
+                // Fallback for crm26 which might still use 'resumo' for persistence
+                ...(table === 'leads_distribuicao_crm_26' ? { resumo: `[${aiData.ai_classification.toUpperCase()}] ${aiData.ai_reason}` } : { updated_at: new Date().toISOString() })
             })
-            .eq('id', leadId);
+            .eq('id', realId);
 
         if (error) throw error;
         return data;
@@ -968,6 +1262,14 @@ export const dataService = {
         else if (isMain) table = 'leads_manos_crm';
 
         const realId = leadId.replace(/crm26_|main_|dist_/, '');
+
+        if (table === 'leads_manos_crm') {
+            const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+            if (!uuidRegex.test(realId)) {
+                console.warn(`Attempted to update details for non-UUID lead in main table: ${realId}`);
+                return;
+            }
+        }
 
         const updateObj: any = {};
 
@@ -992,6 +1294,7 @@ export const dataService = {
             if (details.valor_investimento !== undefined) updateObj.valor_investimento = details.valor_investimento;
             if (details.metodo_compra !== undefined) updateObj.metodo_compra = details.metodo_compra;
             if (details.prazo_troca !== undefined) updateObj.prazo_troca = details.prazo_troca;
+            if (details.lead_id !== undefined) updateObj.lead_id = details.lead_id;
 
             updateObj.atualizado_em = new Date().toISOString();
         } else {
@@ -1008,6 +1311,7 @@ export const dataService = {
             if (details.ai_reason !== undefined) updateObj.ai_reason = details.ai_reason;
             if (details.ai_summary !== undefined) updateObj.ai_summary = details.ai_summary;
             if (details.scheduled_at !== undefined) updateObj.scheduled_at = details.scheduled_at;
+            if (details.lead_id !== undefined) updateObj.lead_id = details.lead_id;
 
             updateObj.updated_at = new Date().toISOString();
         }
@@ -1036,7 +1340,16 @@ export const dataService = {
 
         const realId = leadId.replace(/crm26_|main_|dist_/, '');
 
-        const { error } = await supabase
+        // interactions_manos_crm.lead_id is UUID, so we MUST validate format
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (!uuidRegex.test(realId)) {
+            console.warn(`Skipping history log for non-UUID leadId: ${realId}`);
+            return;
+        }
+
+        const client = this.getClient();
+
+        const { error } = await client
             .from('interactions_manos_crm')
             .insert([{
                 lead_id: realId,
@@ -1053,25 +1366,83 @@ export const dataService = {
     },
 
     async createLead(leadData: Partial<Lead>) {
-        // 1. Duplicate Detection (last 30 days)
-        const thirtyDaysAgo = new Date();
-        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        const cleanPhone = (leadData.phone || '').replace(/\D/g, '');
+        if (!cleanPhone) throw new Error("Telefone é obrigatório para criar um lead.");
 
+        // 1. Detection (No time limit, full database check)
         const { data: existingLead } = await supabase
             .from('leads_manos_crm')
-            .select('id')
-            .eq('phone', leadData.phone)
-            .gt('created_at', thirtyDaysAgo.toISOString())
+            .select('*, consultants_manos_crm(name)')
+            .eq('phone', cleanPhone)
             .order('created_at', { ascending: false })
             .limit(1)
             .maybeSingle();
 
-        // 2. Insert Lead
+        if (existingLead) {
+            // 2. Reactivation & Update Logic (Supports labels for robustness)
+            const currentStatus = (existingLead.status || '').toLowerCase();
+            const inactiveStatuses = ['lost', 'post_sale', 'lost_redistributed', 'desqualificado', 'reativacao', 'perda total', 'sem contato'];
+            const isInactive = inactiveStatuses.includes(currentStatus);
+
+            const now = new Date().toISOString();
+
+            const updatePayload: any = {
+                updated_at: now,
+                // Append new summary/interest to existing one
+                ai_summary: `${existingLead.ai_summary || ''}\n\n[NOVO CONTATO - ${new Date().toLocaleDateString('pt-BR')}] Origem: ${leadData.origem || leadData.source || 'Não especificada'}. Interesse: ${leadData.vehicle_interest || 'Não especificado'}.`.trim()
+            };
+
+            // If it was inactive, reactivate it and move to top
+            if (isInactive) {
+                updatePayload.status = 'received';
+                updatePayload.created_at = now; // Reactivation moves to top of list
+                updatePayload.motivo_perda = null; // Clear loss reason on reactivation
+
+                // REDISTRIBUTION ON REACTIVATION
+                const excludedId = existingLead.assigned_consultant_id;
+                const excludedName = (existingLead.consultants_manos_crm as any)?.name;
+                const nextConsultant = await this.pickNextConsultant(leadData.name || existingLead.name, excludedId, undefined, excludedName);
+
+                if (nextConsultant) {
+                    updatePayload.assigned_consultant_id = nextConsultant.id;
+                    updatePayload.vendedor_anterior = excludedName || existingLead.vendedor_anterior || 'Desconhecido';
+
+                    // Update consultant last assigned timestamp
+                    await supabase
+                        .from('consultants_manos_crm')
+                        .update({ last_lead_assigned_at: now })
+                        .eq('id', nextConsultant.id);
+                }
+            }
+
+            const { data: updatedLead, error: updateError } = await supabase
+                .from('leads_manos_crm')
+                .update(updatePayload)
+                .eq('id', existingLead.id)
+                .select()
+                .single();
+
+            if (updateError) throw updateError;
+
+            // Log history of reactivation/new contact
+            await this.logHistory(
+                updatedLead.id,
+                updatedLead.status,
+                existingLead.status,
+                `🔔 [${isInactive ? 'REATIVADO' : 'NOVO CONTATO'}] Recebido via ${leadData.origem || leadData.source || 'Sistema'}.` +
+                (isInactive && updatePayload.assigned_consultant_id ? ` Reatribuído para ${updatePayload.vendedor_anterior ? 'a partir de ' + updatePayload.vendedor_anterior : 'novo consultor'}.` : '')
+            );
+
+            return { ...updatedLead, id: `main_${updatedLead.id}` };
+        }
+
+        // 3. Insert New Lead (Normal flow)
         const { data: newLead, error } = await supabase
             .from('leads_manos_crm')
             .insert([{
                 ...leadData,
-                status: 'received', // Match 'leads_distribuicao_crm_26' default status for consistency
+                phone: cleanPhone,
+                status: 'received',
                 created_at: new Date().toISOString(),
                 updated_at: new Date().toISOString()
             }])
@@ -1080,10 +1451,14 @@ export const dataService = {
 
         if (error) throw error;
 
-        // 3. Automatic Distribution (Round Robin)
+        // 4. Automatic Distribution (Round Robin) - Only if not already assigned
         if (newLead) {
-            await this.distributeLead(newLead.id);
-            await this.logHistory(newLead.id, 'received', undefined, 'Lead capturado e em processamento de distribuiÃ§Ã£o.');
+            if (!newLead.assigned_consultant_id) {
+                await this.distributeLead(newLead.id);
+                await this.logHistory(newLead.id, 'received', undefined, 'Lead capturado e em processamento de distribuição.');
+            } else {
+                await this.logHistory(newLead.id, 'received', undefined, 'Lead importado com consultor já atribuído.');
+            }
             return { ...newLead, id: `main_${newLead.id}` };
         }
 
@@ -1098,6 +1473,15 @@ export const dataService = {
             return null;
         }
 
+        const realId = leadId.replace(/crm26_|main_|dist_/, '');
+
+        // UUID validation for leads_manos_crm
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (!uuidRegex.test(realId)) {
+            console.warn(`Attempted to distribute to non-UUID lead in main table: ${realId}`);
+            return null;
+        }
+
         // Assign to main table
         await supabase
             .from('leads_manos_crm')
@@ -1105,7 +1489,7 @@ export const dataService = {
                 assigned_consultant_id: next.id,
                 updated_at: new Date().toISOString()
             })
-            .eq('id', leadId);
+            .eq('id', realId);
 
         // Update consultant timestamp
         await supabase
@@ -1277,6 +1661,7 @@ export const dataService = {
         };
     },
 
+    // Consultant Performance
     async getConsultantPerformance() {
         const { data: consultants, error } = await supabase
             .from('consultants_manos_crm')
@@ -1488,7 +1873,7 @@ export const dataService = {
 
         try {
             // Usando status da campanha mestre para evitar campanhas ocultas por adsets pausados, com limite de 150
-            const response = await fetch(`https://graph.facebook.com/v19.0/act_${adAccountId}/campaigns?limit=150&fields=name,status,effective_status,objective,insights{spend,inline_link_clicks,reach,impressions,cpc,ctr,cpm,frequency}&access_token=${token}`);
+            const response = await fetch(`https://graph.facebook.com/v19.0/act_${adAccountId}/campaigns?limit=250&fields=name,status,effective_status,objective,insights{spend,inline_link_clicks,reach,impressions,cpc,ctr,cpm,frequency}&access_token=${token}`);
 
             if (!response.ok) {
                 const errorText = await response.text();
@@ -1664,6 +2049,7 @@ export const dataService = {
                                         vendedor: null,
                                         enviado: false,
                                         id_meta: ml.id,
+                                        lead_id: ml.id,
                                         resumo: `[LEAD FB] Capturado via formulário | Campanha: ${campaign.name} | Ad: ${ad.name}`
                                     };
                                 })
@@ -1792,7 +2178,14 @@ export const dataService = {
             return;
         }
 
-        // Removida deleÃ§Ã£o da tabela main_manos_crm
+        if (leadId.startsWith('main_')) {
+            const realId = leadId.replace('main_', '');
+            const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+            if (uuidRegex.test(realId)) {
+                // Se desejar habilitar a exclusÃ£o na main futuramente, descomente abaixo
+                // await supabase.from('leads_manos_crm').delete().eq('id', realId);
+            }
+        }
     },
 
     // Intelligent Analysis Persistence

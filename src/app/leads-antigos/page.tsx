@@ -60,25 +60,30 @@ export default function OldLeadsPage() {
             try {
                 // Get Role and User Name
                 const { data: { session } } = await supabase.auth.getSession();
+                let currentRole: string | null = null;
+                let consultantFilter = undefined;
+
                 if (session?.user) {
                     const { data: consultant } = await supabase
                         .from('consultants_manos_crm')
                         .select('role, name')
                         .eq('auth_id', session.user.id)
                         .maybeSingle();
+
                     if (consultant) {
+                        currentRole = consultant.role;
                         setRole(consultant.role);
                         setUserName(consultant.name?.split(' ')[0] || '');
                     } else if (session.user.email === 'alexandre_gorges@hotmail.com') {
+                        currentRole = 'admin';
                         setRole('admin');
                     }
+
+                    const isUserAdmin = currentRole === 'admin' || session.user.email === 'alexandre_gorges@hotmail.com';
+                    consultantFilter = isUserAdmin ? undefined : session.user.id;
                 }
 
                 // Load Leads
-                // Filter by consultant if not admin to respect visibility rules
-                const isUserAdmin = role === 'admin' || session?.user?.email === 'alexandre_gorges@hotmail.com';
-                const consultantFilter = isUserAdmin ? undefined : session?.user?.id;
-
                 const data = await dataService.getDistributedLeads(consultantFilter) as unknown as DistributedLead[];
                 setLeads(data || []);
             } catch (err) {
@@ -190,6 +195,9 @@ export default function OldLeadsPage() {
 
     const handleWhatsApp = (phone: string) => {
         const cleanPhone = phone.replace(/\D/g, '');
+        // Garantir que a mensagem enviada seja limpa (sem emojis/hifens) se houver template padrão
+        // Mas como aqui abre o link direto, o usuário decide. 
+        // No entanto, para o contato direto do card, vamos apenas abrir.
         window.open(`https://wa.me/${cleanPhone}`, '_blank');
     };
 
@@ -268,10 +276,10 @@ export default function OldLeadsPage() {
     const handleDistribute = async () => {
         if (isDistributing) return;
 
-        // Leads available for distribution: Qualified but not sent
-        const toDistribute = leads.filter(l => l.ai_classification && !l.enviado);
+        // Leads available for distribution: Qualified leads in the current view
+        const toDistribute = filteredLeads.filter(l => l.ai_classification);
         if (toDistribute.length === 0) {
-            alert("Não há leads novos qualificados para distribuir.");
+            alert("Não há leads qualificados na visão atual para distribuir.");
             return;
         }
 
@@ -281,14 +289,22 @@ export default function OldLeadsPage() {
         setIsDistributing(true);
         try {
             const consultants = await dataService.getConsultants();
-            const activeConsultants = consultants.filter(c => c.is_active).map(c => c.name);
+            // Restringir apenas para Wilson, Sergio e Victor conforme solicitado
+            const allowedNames = ['Wilson', 'Sergio', 'Victor'];
+            const activeConsultants = consultants
+                .filter(c => c.is_active && allowedNames.some(name => c.name.toLowerCase().includes(name.toLowerCase())))
+                .map(c => c.name);
 
             if (activeConsultants.length === 0) {
-                throw new Error("Não há consultores ativos para receber os leads.");
+                throw new Error("Não há consultores autorizados (Wilson, Sergio, Victor) ativos para receber os leads.");
             }
 
-            const ids = toDistribute.map(l => l.id);
-            await dataService.distributeOldLeads(ids, activeConsultants);
+            const leadsToDistribute = toDistribute.map(l => ({
+                id: l.id,
+                currentConsultant: l.vendedor, // Nome para fallback
+                currentConsultantId: l.assigned_consultant_id // UUID para precisão
+            }));
+            await dataService.distributeOldLeads(leadsToDistribute, activeConsultants);
 
             // Refresh leads
             const updated = await dataService.getDistributedLeads();
@@ -328,43 +344,56 @@ export default function OldLeadsPage() {
                     <p className="text-sm md:text-base text-white/40 font-medium italic">Base de dados histórica do sistema de distribuição.</p>
                 </div>
 
-                <div className="flex-col md:flex-row items-center gap-4">
-                    {role === 'admin' && (
-                        <>
-                            {leads.some(l => !l.ai_classification) ? (
-                                <button
-                                    onClick={runBulkClassification}
-                                    disabled={isClassifying}
-                                    className={`px-6 py-3.5 rounded-2xl border transition-all flex items-center gap-3 font-black text-[10px] uppercase tracking-[0.2em] shadow-2xl ${isClassifying
-                                        ? 'bg-white/5 border-white/5 text-white/20 cursor-wait'
-                                        : 'bg-red-500/10 border-red-500/20 text-red-500 hover:bg-red-500 hover:text-white hover:border-red-500 shadow-red-500/10 active:scale-95'
-                                        }`}
-                                >
-                                    {isClassifying ? (
-                                        <div className="h-4 w-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
-                                    ) : (
-                                        <Sparkles size={16} />
+                <div className="flex items-center gap-4">
+                    {loading ? (
+                        <div className="flex items-center gap-3 bg-white/5 px-6 py-3.5 rounded-2xl border border-white/10 animate-pulse">
+                            <div className="h-4 w-4 bg-white/20 rounded-full" />
+                            <div className="h-2 w-24 bg-white/20 rounded" />
+                        </div>
+                    ) : (
+                        <div className="flex items-center gap-2">
+                            {(role === 'admin' || role === 'manager') && (
+                                <>
+                                    {/* Qualificação por IA: Mostra se houver leads sem classificação na visão atual */}
+                                    {filteredLeads.some(l => !l.ai_classification) && (
+                                        <button
+                                            onClick={runBulkClassification}
+                                            disabled={isClassifying}
+                                            className={`px-6 py-3.5 rounded-2xl border transition-all flex items-center gap-2 font-black text-[10px] uppercase tracking-[0.2em] shadow-2xl ${isClassifying
+                                                ? 'bg-white/5 border-white/5 text-white/20 cursor-wait'
+                                                : 'bg-red-500/10 border-red-500/20 text-red-500 hover:bg-red-500 hover:text-white hover:border-red-500 shadow-red-500/10 active:scale-95'
+                                                }`}
+                                        >
+                                            {isClassifying ? (
+                                                <div className="h-4 w-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                                            ) : (
+                                                <Sparkles size={16} />
+                                            )}
+                                            {isClassifying ? 'ANALISANDO...' : 'QUALIFICAR POR IA'}
+                                        </button>
                                     )}
-                                    {isClassifying ? 'ANALISANDO...' : 'QUALIFICAR POR IA'}
-                                </button>
-                            ) : leads.some(l => !l.enviado) && (
-                                <button
-                                    onClick={handleDistribute}
-                                    disabled={isDistributing}
-                                    className={`px-6 py-3.5 rounded-2xl border transition-all flex items-center gap-3 font-black text-[10px] uppercase tracking-[0.2em] shadow-2xl ${isDistributing
-                                        ? 'bg-white/5 border-white/5 text-white/20 cursor-wait'
-                                        : 'bg-blue-500/10 border-blue-500/20 text-blue-500 hover:bg-blue-500 hover:text-white hover:border-blue-500 shadow-blue-500/10 active:scale-95'
-                                        }`}
-                                >
-                                    {isDistributing ? (
-                                        <div className="h-4 w-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
-                                    ) : (
-                                        <Copy size={16} />
+
+                                    {/* Distribuição: Mostra se houver leads qualificados na visão atual */}
+                                    {filteredLeads.some(l => l.ai_classification) && (
+                                        <button
+                                            onClick={handleDistribute}
+                                            disabled={isDistributing}
+                                            className={`px-6 py-3.5 rounded-2xl border transition-all flex items-center gap-2 font-black text-[10px] uppercase tracking-[0.2em] shadow-2xl ${isDistributing
+                                                ? 'bg-white/5 border-white/5 text-white/20 cursor-wait'
+                                                : 'bg-blue-500/10 border-blue-500/20 text-blue-500 hover:bg-blue-500 hover:text-white hover:border-blue-500 shadow-blue-500/10 active:scale-95'
+                                                }`}
+                                        >
+                                            {isDistributing ? (
+                                                <div className="h-4 w-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                                            ) : (
+                                                <Copy size={16} />
+                                            )}
+                                            {isDistributing ? 'DISTRIBUINDO...' : 'DISTRIBUIR FILTRADOS'}
+                                        </button>
                                     )}
-                                    {isDistributing ? 'DISTRIBUINDO...' : 'DISTRIBUIR AOS CONSULTORES'}
-                                </button>
+                                </>
                             )}
-                        </>
+                        </div>
                     )}
 
                     <div className="relative group">
@@ -541,28 +570,14 @@ export default function OldLeadsPage() {
                                     {/* Action Area (Right) */}
                                     <div className="flex flex-col gap-2 shrink-0 min-w-[160px]">
                                         <button
-                                            onClick={async (e) => {
-                                                const btn = e.currentTarget;
-                                                const originalContent = btn.innerHTML;
-                                                btn.disabled = true;
-                                                btn.innerHTML = '<div class="h-4 w-4 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>';
-
-                                                try {
-                                                    // Use real_id if available, otherwise strip prefix or use raw id
-                                                    const targetId = lead.real_id ? `${lead.source_table === 'leads_manos_crm' ? 'main_' : lead.source_table === 'leads_distribuicao_crm_26' ? 'crm26_' : 'dist_'}${lead.real_id}` : lead.id;
-                                                    await dataService.reactivateLead(targetId);
-                                                    window.location.href = `/leads?id=${targetId}&tab=flow-up`;
-                                                } catch (err) {
-                                                    console.error("Error reactivating lead:", err);
-                                                    btn.disabled = false;
-                                                    btn.innerHTML = originalContent;
-                                                    alert("Erro ao reativar lead. Tente novamente.");
-                                                }
+                                            onClick={() => {
+                                                const targetId = lead.real_id ? `${lead.source_table === 'leads_manos_crm' ? 'main_' : lead.source_table === 'leads_distribuicao_crm_26' ? 'crm26_' : 'dist_'}${lead.real_id}` : lead.id;
+                                                window.location.href = `/leads?id=${targetId}`;
                                             }}
                                             className="h-10 px-4 rounded-xl bg-red-600 border border-red-600 text-white shadow-lg shadow-red-600/20 hover:bg-red-500 transition-all flex items-center justify-center gap-2 font-black text-[9px] uppercase tracking-widest active:scale-95 disabled:opacity-50"
                                         >
                                             <Sparkles size={14} fill="white" />
-                                            REATIVAR (FLOW-UP)
+                                            ACESSAR O LEAD
                                         </button>
 
                                         <button
@@ -599,8 +614,18 @@ export default function OldLeadsPage() {
 
                                 {/* Desktop Sidebar Info (Vendedor) */}
                                 <div className="hidden xl:flex w-[180px] p-6 bg-white/[0.02] border-l border-white/5 flex-col justify-center items-center text-center gap-1">
-                                    <div className="text-[8px] font-black text-white/10 uppercase tracking-widest mb-1">Vendedor</div>
-                                    <p className="text-xs font-black text-white/40 truncate w-full">{lead.vendedor?.split(' ')[0] || 'Padrão'}</p>
+                                    <div className="space-y-4 w-full">
+                                        <div>
+                                            <div className="text-[8px] font-black text-white/10 uppercase tracking-widest mb-1">Vendedor</div>
+                                            <p className="text-xs font-black text-white/40 truncate w-full">{lead.vendedor?.split(' ')[0] || 'Padrão'}</p>
+                                        </div>
+                                        {lead.vendedor_anterior && (
+                                            <div className="pt-4 border-t border-white/5">
+                                                <div className="text-[8px] font-black text-blue-500/40 uppercase tracking-widest mb-1">Vendedor Anterior</div>
+                                                <p className="text-[10px] font-black text-blue-400 truncate w-full uppercase">{lead.vendedor_anterior?.split(' ')[0] || 'Não encontrado'}</p>
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
                         </motion.div>
@@ -694,7 +719,11 @@ export default function OldLeadsPage() {
                                 <div className="flex gap-4">
                                     <button
                                         onClick={() => {
-                                            const msg = matchResults[selectedMatch.id].sugestao_mensagem.replace('[Consultor]', userName || 'Consultor');
+                                            let msg = matchResults[selectedMatch.id].sugestao_mensagem.replace('[Consultor]', userName || 'Consultor');
+                                            // Sanitização: Remover emojis e hifens conforme solicitado
+                                            msg = msg.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]|\u200d|[\u2700-\u27bf]|[\u2b50]|[\u2600-\u26ff]/g, '');
+                                            msg = msg.replace(/-/g, ' ');
+                                            msg = msg.replace(/\s+/g, ' ').trim();
                                             window.open(`https://wa.me/55${selectedMatch.telefone.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`, '_blank');
                                         }}
                                         className="flex-1 h-16 bg-red-600 hover:bg-red-500 text-white rounded-2xl flex items-center justify-center gap-3 transition-all font-black text-xs uppercase tracking-widest shadow-xl shadow-red-600/20 active:scale-[0.98]"

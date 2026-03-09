@@ -25,11 +25,13 @@ import {
     Instagram,
     MessageCircle,
     Globe,
-    RefreshCcw
+    RefreshCcw,
+    ShieldAlert
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useSearchParams } from 'next/navigation';
 import { dataService } from '@/lib/dataService';
+import { updateLeadStatusAction } from '@/app/actions/leads';
 import { supabase } from '@/lib/supabase';
 import { Lead, LeadStatus, Consultant, InventoryItem, AIClassification } from '@/lib/types';
 
@@ -372,30 +374,40 @@ function LeadsContent() {
     };
 
     const getWhatsAppMessage = (lead: Lead, type: 'initial' | 'stage' | 'flowup' = 'stage') => {
-        if (type === 'flowup' && generatedFollowup) return generatedFollowup;
-
         const firstName = lead.name.split(' ')[0];
         const consultantFirstName = (userName || 'Consultor').trim().split(' ')[0];
         const vehicle = lead.vehicle_interest || 'um veículo do nosso estoque';
 
+        let message = '';
+
         if (type === 'initial') {
-            return `Olá ${firstName}! Tudo bem? Sou ${consultantFirstName} da Manos Veículos. Vimos seu interesse no ${vehicle} e gostaria de saber: como posso te ajudar hoje?`;
+            message = `Olá ${firstName}! Tudo bem? Sou ${consultantFirstName} da Manos Veículos. Vimos seu interesse no ${vehicle} e gostaria de saber: como posso te ajudar hoje?`;
+        } else {
+            switch (lead.status) {
+                case 'new':
+                case 'received':
+                    message = `Olá ${firstName}! Tudo bem? Sou ${consultantFirstName} da Manos Veículos. Vimos seu interesse no ${vehicle} e gostaria de saber: como posso te ajudar hoje?`;
+                    break;
+                case 'scheduled':
+                    const dateStr = lead.scheduled_at ? new Date(lead.scheduled_at).toLocaleDateString('pt-BR') : '';
+                    const hourStr = lead.scheduled_at ? new Date(lead.scheduled_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
+                    message = `Olá ${firstName}! Sou ${consultantFirstName}. Confirmando nosso agendamento para ver o ${vehicle} no dia ${dateStr} às ${hourStr}. Esperamos você!`;
+                    break;
+                case 'negotiation':
+                case 'proposed':
+                    message = `Olá ${firstName}! Sou ${consultantFirstName} da Manos Veículos. Estava revendo nossa negociação sobre o ${vehicle} e consegui uma condição melhor para fecharmos hoje. O que você acha?`;
+                    break;
+                default:
+                    message = `Olá ${firstName}! Tudo bem? Sou ${consultantFirstName} da Manos Veículos. Gostaria de dar continuidade ao nosso atendimento sobre o ${vehicle}.`;
+            }
         }
 
-        switch (lead.status) {
-            case 'new':
-            case 'received':
-                return `Olá ${firstName}! Tudo bem? Sou ${consultantFirstName} da Manos Veículos. Vimos seu interesse no ${vehicle} e gostaria de saber: como posso te ajudar hoje?`;
-            case 'scheduled':
-                const dateStr = lead.scheduled_at ? new Date(lead.scheduled_at).toLocaleDateString('pt-BR') : '';
-                const hourStr = lead.scheduled_at ? new Date(lead.scheduled_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
-                return `Olá ${firstName}! Sou ${consultantFirstName}. Confirmando nosso agendamento para ver o ${vehicle} no dia ${dateStr} às ${hourStr}. Esperamos você!`;
-            case 'negotiation':
-            case 'proposed':
-                return `Olá ${firstName}! Sou ${consultantFirstName} da Manos Veículos. Estava revendo nossa negociação sobre o ${vehicle} e consegui uma condição melhor para fecharmos hoje. O que você acha?`;
-            default:
-                return `Olá ${firstName}! Tudo bem? Sou ${consultantFirstName} da Manos Veículos. Gostaria de dar continuidade ao nosso atendimento sobre o ${vehicle}.`;
-        }
+        // SANITIZE: Remove emojis and hyphens
+        return message
+            .replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E6}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '')
+            .replace(/-/g, '')
+            .replace(/\s+/g, ' ')
+            .trim();
     };
 
     const handleClearNotes = async () => {
@@ -575,9 +587,8 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
             'comprado': 'Comprado'
         };
         const s = status.toLowerCase();
-        if (s === 'novo') return 'Aguardando';
-        if (s === 'perdido') return 'Perda Total';
-        if (s === 'sem contato') return 'Sem Contato';
+        if (s === 'lost' || s === 'lost_redistributed') return 'Perda Total';
+        if (s === 'post_sale' || s === 'sem contato') return 'Sem Contato';
         return labels[status] || status.toUpperCase();
     };
 
@@ -590,7 +601,7 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
         if (['proposed', 'negotiation'].includes(s)) return 'bg-red-700';
         if (s === 'closed') return 'bg-emerald-500';
         if (s === 'post_sale' || s === 'sem contato') return 'bg-orange-500/80';
-        if (s === 'lost' || s === 'perda total') return 'bg-slate-500/80';
+        if (s === 'lost' || s === 'lost_redistributed' || s === 'perda total') return 'bg-slate-500/80';
         if (s === 'comprado') return 'bg-indigo-500';
         return 'bg-white/10';
     };
@@ -747,12 +758,21 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
         }
 
         try {
-            await dataService.updateLeadStatus(leadId, newStatus, lead.status);
+            // Optimistic UI update
             setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: newStatus } : l));
             if (selectedLead?.id === leadId) setSelectedLead({ ...lead, status: newStatus });
+
+            // Call Server Action for terminal logging and Meta conversion
+            await updateLeadStatusAction(leadId, newStatus, lead.status);
+
+            // Still update locally just in case dataService cache needs invalidation (if used elsewhere)
+            // await dataService.updateLeadStatus(leadId, newStatus, lead.status); 
         } catch (err) {
             console.error("Error updating status:", err);
             alert("Erro ao atualizar status do lead.");
+
+            // Rollback optimistic update
+            setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: lead.status } : l));
         }
     };
 
@@ -1035,7 +1055,7 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                 const finalLead: Lead = {
                     ...(newLead as Lead),
                     name: aiResult.extracted_name || (newLead as Lead).name,
-                    ai_summary: historicalNote,
+                    ai_summary: `${(newLead as Lead).ai_summary || ''}\n\n${historicalNote}`.trim(),
                     ai_score: aiResult.score !== undefined ? aiResult.score : 0,
                     ai_classification: (aiResult.classificacao?.toLowerCase() || 'warm') as AIClassification,
                     ai_reason: aiResult.resumo_estrategico || aiResult.ai_reason,
@@ -1227,7 +1247,11 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
 
         // 4. Kanban Stage Filter
         if (filterStage !== 'all') {
-            if (lead.status !== filterStage) return false;
+            if (filterStage === 'lost' && lead.status === 'lost_redistributed') {
+                // Keep it
+            } else if (lead.status !== filterStage) {
+                return false;
+            }
         }
 
         // 5. Interest Filter (AI Classification)
@@ -1586,10 +1610,8 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                         { id: 'agendamento', title: 'Agendamento', statuses: ['scheduled'], color: 'bg-red-500' },
                                         { id: 'visita', title: 'Visita e Test Drive', statuses: ['visited', 'test_drive'], color: 'bg-red-600' },
                                         { id: 'negociacao', title: 'Negociação', statuses: ['proposed', 'negotiation'], color: 'bg-red-700' },
-                                        { id: 'venda', title: 'Vendido', statuses: ['closed'], color: 'bg-emerald-500' },
-                                        { id: 'sem_contato', title: 'Sem Contato', statuses: ['post_sale'], color: 'bg-white/10' },
-                                        { id: 'perda', title: 'Perda Total', statuses: ['lost'], color: 'bg-white/5' },
-                                        { id: 'comprado', title: 'Comprado', statuses: ['comprado'], color: 'bg-indigo-500' }
+                                        { id: 'venda', title: 'Vendido', statuses: ['closed', 'comprado'], color: 'bg-emerald-500' },
+                                        { id: 'perda', title: 'Perda / Sem Contato', statuses: ['lost', 'lost_redistributed', 'post_sale', 'trash'], color: 'bg-white/10' }
                                     ] as const).map((col) => {
                                         const colLeads = filteredLeads.filter(l => (col.statuses as unknown as LeadStatus[]).includes(l.status));
                                         return (
@@ -1662,10 +1684,8 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                         { id: 'agendamento', title: 'Agendamento', statuses: ['scheduled'], color: 'bg-red-500' },
                                         { id: 'visita', title: 'Visita e Test Drive', statuses: ['visited', 'test_drive'], color: 'bg-red-600' },
                                         { id: 'negociacao', title: 'Negociação', statuses: ['proposed', 'negotiation'], color: 'bg-red-700' },
-                                        { id: 'venda', title: 'Vendido', statuses: ['closed'], color: 'bg-emerald-500' },
-                                        { id: 'sem_contato', title: 'Sem Contato', statuses: ['post_sale'], color: 'bg-white/10' },
-                                        { id: 'perda', title: 'Perda Total', statuses: ['lost'], color: 'bg-white/5' },
-                                        { id: 'comprado', title: 'Comprado', statuses: ['comprado'], color: 'bg-indigo-500' }
+                                        { id: 'venda', title: 'Vendido', statuses: ['closed', 'comprado'], color: 'bg-emerald-500' },
+                                        { id: 'perda', title: 'Perda / Sem Contato', statuses: ['lost', 'lost_redistributed', 'post_sale', 'trash'], color: 'bg-white/10' }
                                     ] as const).map((col) => {
                                         const colLeads = filteredLeads.filter(l => (col.statuses as unknown as LeadStatus[]).includes(l.status));
                                         return (
@@ -1715,7 +1735,7 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                                         <div className="flex justify-between items-start mb-3 relative z-10">
                                                             <div className="flex items-center gap-3">
                                                                 <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-red-600 to-red-900 flex items-center justify-center text-[10px] font-black text-white shadow-lg shrink-0">
-                                                                    {lead.name[0]}
+                                                                    {(lead.name || '?')[0]}
                                                                 </div>
                                                                 {(() => {
                                                                     if (!lead.created_at) return null;
@@ -2091,6 +2111,18 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                     </div>
                                 </div>
 
+                                {/* Previous Consultant Alert */}
+                                {selectedLead.dados_brutos && (selectedLead.dados_brutos as any).previous_consultant_id && (
+                                    <div className="bg-amber-500/10 border border-amber-500/20 p-5 rounded-3xl flex items-center gap-4 animate-in slide-in-from-top-2">
+                                        <ShieldAlert size={20} className="text-amber-500 shrink-0" />
+                                        <p className="text-[10px] font-black uppercase tracking-widest text-amber-500/80 leading-tight">
+                                            Este lead já teve atendimento anterior pelo consultor: <span className="text-amber-500">{
+                                                consultants.find(c => c.id === (selectedLead.dados_brutos as any).previous_consultant_id || c.name === (selectedLead.dados_brutos as any).previous_consultant_id)?.name || 'Outro Consultor'
+                                            }</span>
+                                        </p>
+                                    </div>
+                                )}
+
                                 {/* Executive Summary */}
                                 <div className="space-y-3">
                                     <p className="text-[10px] font-black uppercase text-red-500/60 tracking-widest pl-2">Resumo Executivo</p>
@@ -2131,21 +2163,32 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                 </div>
                             </div>
 
-                            <footer className="mt-auto pt-8 border-t border-white/10 grid grid-cols-2 gap-4">
-                                <a
-                                    href={`tel:${selectedLead.phone}`}
-                                    className="py-4 rounded-[2rem] bg-white/5 border border-white/10 text-[10px] font-black text-white hover:bg-white/10 transition-all flex items-center justify-center gap-2"
+                            <footer className="mt-auto pt-8 border-t border-white/10 flex flex-col gap-4">
+                                <button
+                                    onClick={() => {
+                                        setActionLead(selectedLead);
+                                        setSelectedLead(null);
+                                    }}
+                                    className="w-full py-5 rounded-[2rem] bg-red-600 text-white text-[10px] font-black uppercase tracking-[0.2em] shadow-xl shadow-red-600/20 hover:bg-red-500 transition-all flex items-center justify-center gap-3 active:scale-95"
                                 >
-                                    <Phone size={16} /> LIGAR
-                                </a>
-                                <a
-                                    href={`https://wa.me/${selectedLead.phone.replace(/\D/g, '')}?text=${encodeURIComponent(getWhatsAppMessage(selectedLead, 'initial'))}`}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="py-4 rounded-[2rem] bg-emerald-600 text-white text-[10px] font-black shadow-xl shadow-emerald-500/20 hover:bg-emerald-500 transition-all flex items-center justify-center gap-2"
-                                >
-                                    <MessageSquare size={16} /> WHATSAPP
-                                </a>
+                                    <Zap size={18} fill="currentColor" /> ACESSAR CENTRO DE GESTÃO
+                                </button>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <a
+                                        href={`tel:${selectedLead.phone}`}
+                                        className="py-4 rounded-[2rem] bg-white/5 border border-white/10 text-[10px] font-black text-white hover:bg-white/10 transition-all flex items-center justify-center gap-2"
+                                    >
+                                        <Phone size={16} /> LIGAR
+                                    </a>
+                                    <a
+                                        href={`https://wa.me/${selectedLead.phone.replace(/\D/g, '')}?text=${encodeURIComponent(getWhatsAppMessage(selectedLead, 'initial'))}`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="py-4 rounded-[2rem] bg-emerald-600 text-white text-[10px] font-black shadow-xl shadow-emerald-500/20 hover:bg-emerald-500 transition-all flex items-center justify-center gap-2"
+                                    >
+                                        <MessageSquare size={16} /> WHATSAPP
+                                    </a>
+                                </div>
                             </footer>
                         </motion.div>
                     </div>
@@ -2190,6 +2233,19 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                                         </div>
                                                     )}
                                                 </div>
+
+                                                {/* Previous Consultant Alert */}
+                                                {actionLead.dados_brutos && (actionLead.dados_brutos as any).previous_consultant_id && (
+                                                    <div className="mt-4 bg-amber-500/10 border border-amber-500/20 px-6 py-4 rounded-3xl flex items-center gap-4 animate-in slide-in-from-left-4 max-w-2xl">
+                                                        <ShieldAlert size={22} className="text-amber-500 shrink-0" />
+                                                        <p className="text-xs font-black uppercase tracking-[0.1em] text-amber-500/80 leading-none">
+                                                            Este lead já teve atendimento anterior pelo consultor: <span className="text-amber-500 font-black">{
+                                                                consultants.find(c => c.id === (actionLead.dados_brutos as any).previous_consultant_id || c.name === (actionLead.dados_brutos as any).previous_consultant_id)?.name || 'Outro Consultor'
+                                                            }</span>
+                                                        </p>
+                                                    </div>
+                                                )}
+
                                                 <p className="text-[10px] font-black text-white/30 uppercase tracking-[0.2em]">Operação Direta: {actionLead?.name}</p>
                                                 {actionLead?.primeiro_vendedor && (
                                                     <div className="mt-1 flex items-center gap-2">
@@ -2477,109 +2533,54 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                     </div>
                                 ) : modalTab === 'flow-up' ? (
                                     <div className="flex-1 space-y-8 animate-in fade-in slide-in-from-right-4 duration-500 overflow-y-auto custom-scrollbar pr-4 pb-10">
-                                        <div className="w-full grid grid-cols-1 lg:grid-cols-2 gap-10">
-                                            <div className="glass-card rounded-[2.5rem] p-8 bg-indigo-500/5 border-indigo-500/10 space-y-6">
+                                        <div className="w-full max-w-2xl mx-auto">
+                                            <div className="glass-card rounded-[2.5rem] p-8 bg-indigo-500/5 border-indigo-500/10 space-y-8">
                                                 <div className="flex items-center gap-4">
                                                     <div className="h-14 w-14 rounded-2xl bg-indigo-600 flex items-center justify-center text-white shadow-xl shadow-indigo-600/20">
-                                                        <Zap size={28} />
+                                                        <MessageSquare size={28} />
                                                     </div>
                                                     <div>
-                                                        <h4 className="text-xs font-black uppercase tracking-widest text-indigo-500 mb-1">Reativação com IA</h4>
-                                                        <p className="text-sm font-bold text-white tracking-tight">Recupere leads que pararam de responder</p>
+                                                        <h4 className="text-xs font-black uppercase tracking-widest text-indigo-500 mb-1">Canais de Flow-up</h4>
+                                                        <p className="text-sm font-bold text-white tracking-tight">Abordagem Direta via WhatsApp</p>
                                                     </div>
                                                 </div>
 
-                                                <div className="space-y-4">
-                                                    <div className="space-y-2">
-                                                        <label className="text-[10px] font-black uppercase text-white/30 tracking-widest pl-2">Onde a conversa parou?</label>
-                                                        <textarea
-                                                            placeholder="Ex: Mandei o preço e ele não visualizou mais..."
-                                                            value={followupContext}
-                                                            onChange={(e) => setFollowupContext(e.target.value)}
-                                                            onPaste={handlePaste}
-                                                            className="w-full h-32 bg-white/5 border border-white/10 rounded-2xl p-4 text-xs text-white/80 focus:ring-1 focus:ring-indigo-500/50 resize-none italic"
-                                                            title="Dica: Você pode colar (Ctrl+V) o print da conversa diretamente aqui!"
-                                                        />
-                                                    </div>
-
-                                                    {pastedImage && (
-                                                        <div className="relative group w-fit">
-                                                            <div className="h-20 w-32 rounded-xl overflow-hidden border border-white/10 shadow-lg">
-                                                                <img src={pastedImage} alt="Print Colado" className="w-full h-full object-cover" />
-                                                            </div>
-                                                            <button
-                                                                onClick={() => setPastedImage(null)}
-                                                                className="absolute -top-2 -right-2 h-6 w-6 rounded-full bg-red-600 text-white flex items-center justify-center shadow-lg hover:bg-red-500 transition-colors"
-                                                            >
-                                                                ×
-                                                            </button>
-                                                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center rounded-xl">
-                                                                <span className="text-[8px] font-black text-white uppercase tracking-widest">Remover</span>
-                                                            </div>
+                                                <div className="space-y-6">
+                                                    <div className="p-8 rounded-[2rem] bg-black/40 border border-white/5 space-y-6">
+                                                        <div className="flex items-center justify-between">
+                                                            <p className="text-[10px] font-black uppercase text-indigo-500 tracking-widest">Sugestão de Contato</p>
                                                         </div>
-                                                    )}
 
+                                                        <div className="text-sm text-white/80 leading-relaxed italic whitespace-pre-wrap py-2">
+                                                            {getWhatsAppMessage(actionLead, 'flowup')}
+                                                        </div>
 
-                                                    <div className="flex items-center justify-between px-2">
-                                                        <p className="text-[10px] font-black text-white/20 uppercase tracking-widest pl-1">
-                                                            {pastedImage ? 'Print identificado!' : 'Cole o print da conversa acima (Ctrl+V)'}
-                                                        </p>
+                                                        <div className="flex gap-4 pt-4 border-t border-white/5">
+                                                            <button
+                                                                onClick={() => {
+                                                                    navigator.clipboard.writeText(getWhatsAppMessage(actionLead, 'flowup'));
+                                                                    showToast("Mensagem copiada!", "success");
+                                                                }}
+                                                                className="flex-1 py-4 rounded-2xl bg-white/5 border border-white/10 text-[9px] font-black text-white hover:bg-white/10 transition-all uppercase tracking-widest"
+                                                            >
+                                                                Copiar Texto
+                                                            </button>
+                                                            <a
+                                                                href={`https://wa.me/${actionLead.phone.replace(/\D/g, '')}?text=${encodeURIComponent(getWhatsAppMessage(actionLead, 'flowup'))}`}
+                                                                target="_blank"
+                                                                rel="noopener noreferrer"
+                                                                className="flex-[2] py-4 rounded-2xl bg-emerald-600 text-white text-[9px] font-black hover:bg-emerald-500 transition-all uppercase tracking-widest flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20"
+                                                            >
+                                                                <MessageSquare size={14} /> Enviar WhatsApp
+                                                            </a>
+                                                        </div>
                                                     </div>
-
-
-                                                    <button
-                                                        onClick={handleGenerateFollowup}
-                                                        disabled={isGeneratingFollowup || (!followupContext && !pastedImage)}
-                                                        className={`w-full py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-all ${isGeneratingFollowup || (!followupContext && !pastedImage) ? 'bg-white/5 text-white/20' : 'bg-indigo-600 text-white hover:bg-indigo-500 shadow-xl shadow-indigo-600/20'}`}
-                                                    >
-                                                        {isGeneratingFollowup ? <><RefreshCcw size={16} className="animate-spin" /> Gerando...</> : <><Sparkles size={16} /> Gerar Mensagem Estratégica</>}
-                                                    </button>
                                                 </div>
                                             </div>
-
-                                            {generatedFollowup && (
-                                                <motion.div
-                                                    initial={{ opacity: 0, y: 20 }}
-                                                    animate={{ opacity: 1, y: 0 }}
-                                                    className="glass-card rounded-[2.5rem] p-8 bg-emerald-500/5 border-emerald-500/10 space-y-6"
-                                                >
-                                                    <div className="flex items-center justify-between">
-                                                        <p className="text-[10px] font-black uppercase text-emerald-500 tracking-widest">Sugestão de Reativação</p>
-                                                        <div className="flex items-center gap-2">
-                                                            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                                                            <span className="text-[8px] font-black text-emerald-500 uppercase">IA Sênior</span>
-                                                        </div>
-                                                    </div>
-
-                                                    <div className="p-6 rounded-3xl bg-black/40 border border-white/5 text-sm text-white/80 leading-relaxed italic whitespace-pre-wrap">
-                                                        {generatedFollowup}
-                                                    </div>
-
-                                                    <div className="flex gap-4">
-                                                        <button
-                                                            onClick={() => {
-                                                                navigator.clipboard.writeText(generatedFollowup);
-                                                                showToast("Mensagem copiada!", "success");
-                                                            }}
-                                                            className="flex-1 py-3 rounded-2xl bg-white/5 border border-white/10 text-[9px] font-black text-white hover:bg-white/10 transition-all uppercase tracking-widest"
-                                                        >
-                                                            Copiar Texto
-                                                        </button>
-                                                        <a
-                                                            href={`https://wa.me/${actionLead.phone.replace(/\D/g, '')}?text=${encodeURIComponent(getWhatsAppMessage(actionLead, 'flowup'))}`}
-                                                            target="_blank"
-                                                            rel="noopener noreferrer"
-                                                            className="flex-[2] py-3 rounded-2xl bg-emerald-600 text-white text-[9px] font-black hover:bg-emerald-500 transition-all uppercase tracking-widest flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20"
-                                                        >
-                                                            <MessageSquare size={14} /> Enviar WhatsApp
-                                                        </a>
-                                                    </div>
-                                                </motion.div>
-                                            )}
                                         </div>
                                     </div>
                                 ) : modalTab === 'karbam' ? (
-                                    <div className="flex-1 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                                    <div className="flex-1 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 overflow-y-auto custom-scrollbar pr-4 pb-10">
                                         <section className="space-y-4">
                                             <div className="flex items-center gap-2">
                                                 <BadgeCheck size={18} className="text-amber-500" />

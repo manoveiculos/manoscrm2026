@@ -29,7 +29,7 @@ export default function MarketingPage() {
     const [dailyReport, setDailyReport] = useState<MarketingReport | null>(null);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
-    const [dateFilter, setDateFilter] = useState('today');
+    const [dateFilter, setDateFilter] = useState('maximum');
     const [isSyncing, setIsSyncing] = useState(false);
     const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
     const [analyzingId, setAnalyzingId] = useState<string | null>(null);

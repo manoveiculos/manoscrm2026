@@ -120,6 +120,7 @@ export interface Lead {
   resumo_consultor?: string;
   proxima_acao?: string;
   primeiro_vendedor?: string;
+  lead_id?: string;
 }
 
 export interface InventoryItem {
@@ -200,4 +201,7 @@ export interface DistributedLead {
   resumo_consultor?: string;
   proxima_acao?: string;
   atualizado_em?: string;
+  assigned_consultant_id?: string;
+  primeiro_vendedor?: string;
+  vendedor_anterior?: string;
 }

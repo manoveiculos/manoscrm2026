@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { OpenAI } from 'openai';
+import { dataService } from '@/lib/dataService';
 
 const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
@@ -75,20 +76,14 @@ export async function POST(req: NextRequest) {
                 const leadgenId = change.value?.leadgen_id;
                 if (!leadgenId) continue;
 
-                // Check if already imported
-                const { data: existingCheck } = await supabase
-                    .from('leads_distribuicao_crm_26')
-                    .select('id')
-                    .eq('id_meta', leadgenId)
-                    .maybeSingle();
-
-                if (existingCheck) continue; // Already imported
-
                 // Fetch lead details from Graph API
                 const leadUrl = `https://graph.facebook.com/v19.0/${leadgenId}?fields=id,created_time,field_data,campaign_id,ad_id,form_id&access_token=${META_TOKEN}`;
-                const leadRes = await fetch(leadUrl);
-                if (!leadRes.ok) {
-                    console.error('Failed to fetch lead from Meta:', await leadRes.text());
+                const leadRes = await fetch(leadUrl).catch(err => {
+                    console.error('Network error fetching lead from Meta:', err);
+                    return null;
+                });
+                if (!leadRes || !leadRes.ok) {
+                    if (leadRes) console.error('Failed to fetch lead from Meta:', await leadRes.text());
                     continue;
                 }
 
@@ -114,7 +109,6 @@ export async function POST(req: NextRequest) {
                 }
 
                 const cleanPhone = phone.replace(/\D/g, '');
-
                 if (!cleanPhone || cleanPhone.length < 8) continue;
 
                 // Get campaign name if possible
@@ -156,27 +150,25 @@ export async function POST(req: NextRequest) {
                     }
                 }
 
-                // Insert into CRM
-                const { error: insertError } = await supabase
-                    .from('leads_distribuicao_crm_26')
-                    .insert({
-                        nome: name || 'Lead Meta Form',
-                        telefone: cleanPhone,
-                        origem: campaignName,
-                        interesse: summarizedInterest,
-                        cidade: city || '',
+                // Insert into CRM using unified logic (Deduplication & Reactivation)
+                try {
+                    await dataService.createLead({
+                        name: name || 'Lead Meta Form',
+                        phone: cleanPhone,
+                        source: campaignName,
+                        vehicle_interest: summarizedInterest,
+                        region: city || '',
                         status: 'received',
-                        criado_em: leadData.created_time || new Date().toISOString(),
-                        vendedor: null,
-                        enviado: false,
+                        created_at: leadData.created_time || new Date().toISOString(),
                         id_meta: leadData.id,
-                        resumo: aiResumo,
-                        ai_classification: aiClassification,
-                        resumo_consultor: aiResumo
+                        id_formulario: leadData.form_id,
+                        ai_summary: aiResumo,
+                        ai_classification: aiClassification as any,
+                        ai_reason: aiResumo,
+                        origem: campaignName
                     });
-
-                if (insertError) {
-                    console.error('Error inserting webhook lead:', insertError.message);
+                } catch (insertError: any) {
+                    console.error('Error processing Facebook lead:', insertError.message);
                 }
             }
         }

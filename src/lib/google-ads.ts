@@ -6,6 +6,7 @@ export interface GoogleAdsCredentials {
     clientSecret: string;
     refreshToken: string;
     customerId: string;
+    loginCustomerId?: string;
 }
 
 export async function getGoogleAdsAccessToken(creds: GoogleAdsCredentials): Promise<string> {
@@ -32,7 +33,6 @@ export async function getGoogleAdsAccessToken(creds: GoogleAdsCredentials): Prom
     if (!response.ok) {
         console.error("❌ [GOOGLE OAUTH ERROR]:", JSON.stringify(data, null, 2));
 
-        // Specific check for common oauth errors
         if (data.error === 'invalid_grant') {
             throw new Error("Erro Google OAuth: Refresh Token inválido ou expirado. Por favor, gere um novo token.");
         }
@@ -43,68 +43,122 @@ export async function getGoogleAdsAccessToken(creds: GoogleAdsCredentials): Prom
     return data.access_token;
 }
 
-export async function fetchGoogleAdsCampaigns(creds: GoogleAdsCredentials) {
+export async function listAccessibleCustomers(creds: GoogleAdsCredentials): Promise<string[]> {
     const accessToken = await getGoogleAdsAccessToken(creds);
-    const customerId = creds.customerId.replace(/-/g, '');
-
-    // GAQL Query to fetch campaign metrics
-    const query = `
-        SELECT
-            campaign.id,
-            campaign.name,
-            campaign.status,
-            metrics.cost_micros,
-            metrics.clicks,
-            metrics.impressions,
-            metrics.ctr,
-            metrics.average_cpc,
-            metrics.conversions
-        FROM campaign
-        WHERE campaign.status IN ('ENABLED', 'PAUSED')
-    `;
-
     const response = await fetch(
-        `https://googleads.googleapis.com/v23/customers/${customerId}/googleAds:search`,
+        'https://googleads.googleapis.com/v19/customers:listAccessibleCustomers',
         {
-            method: 'POST',
+            method: 'GET',
             headers: {
                 'Authorization': `Bearer ${accessToken}`,
                 'developer-token': creds.developerToken,
-                'Content-Type': 'application/json',
-                'Accept': 'application/json',
             },
-            body: JSON.stringify({ query }),
         }
     );
 
     const text = await response.text();
-    let data;
+    if (!response.ok) {
+        throw new Error(`Erro ao listar contas acessíveis: ${text}`);
+    }
+
+    const data = JSON.parse(text);
+    return data.resourceNames || [];
+}
+
+export async function fetchGoogleAdsCampaigns(creds: GoogleAdsCredentials) {
+    const accessToken = await getGoogleAdsAccessToken(creds);
+    const customerId = creds.customerId.replace(/-/g, '');
+    const loginId = (creds.loginCustomerId || customerId).replace(/-/g, '');
+
+    // PRE-FLIGHT TEST: Verificar se a API base está respondendo e quais contas o token vê
     try {
-        data = JSON.parse(text);
-    } catch (e) {
-        console.error("❌ [GOOGLE ADS API JSON ERROR]:", text);
-        throw new Error(`Resposta inválida da API Google Ads: ${text.substring(0, 100)}`);
+        const accessible = await listAccessibleCustomers(creds);
+        console.log(`[GOOGLE ADS DEBUG] Pre-flight success. Contas visíveis:`, accessible);
+
+        if (accessible.length === 0) {
+            console.warn(`[GOOGLE ADS DEBUG] AVISO: O Token está funcionando, mas não tem acesso a NENHUMA conta.`);
+        } else if (!accessible.some(acc => acc.includes(loginId) || acc.includes(customerId))) {
+            console.warn(`[GOOGLE ADS DEBUG] AVISO: O Token não enxerga os IDs configurados (${loginId} ou ${customerId}).`);
+        }
+    } catch (e: any) {
+        console.error(`[GOOGLE ADS DEBUG] Pre-flight FALHOU. Isso indica um problema grave na permissão ou token:`, e.message);
+        throw new Error(`O Google Ads recusou a conexão básica. Motivo técnico: ${e.message}. Verifique se a 'Google Ads API' está 100% ativada no Google Cloud e se o Token de Desenvolvedor está aprovado para "Acesso Básico".`);
+    }
+
+    // Query simplificada e em uma única linha para evitar problemas de formatação
+    const query = "SELECT campaign.id, campaign.name, campaign.status, metrics.cost_micros, metrics.clicks, metrics.impressions, metrics.ctr, metrics.average_cpc, metrics.conversions FROM campaign WHERE campaign.status IN ('ENABLED', 'PAUSED')";
+
+    const makeRequest = async (useLoginId: boolean) => {
+        const headers: any = {
+            'Authorization': `Bearer ${accessToken}`,
+            'developer-token': creds.developerToken,
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+        };
+
+        if (useLoginId) {
+            headers['login-customer-id'] = loginId;
+        }
+
+        console.log(`[GOOGLE ADS DEBUG] Request: useLoginId=${useLoginId}, customerId=${customerId}, loginId=${loginId}`);
+
+        return fetch(
+            `https://googleads.googleapis.com/v19/customers/${customerId}/googleAds:search`,
+            {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({ query }),
+            }
+        );
+    };
+
+    // Tenta com login-customer-id primeiro
+    let response = await makeRequest(true);
+    let text = await response.text();
+    console.log(`[GOOGLE ADS DEBUG] Response 1 (MCC Mode): ${response.status}`);
+
+    if (!response.ok) {
+        // Tenta sem login-customer-id como fallback
+        response = await makeRequest(false);
+        text = await response.text();
+        console.log(`[GOOGLE ADS DEBUG] Response 2 (Direct Mode): ${response.status}`);
     }
 
     if (!response.ok) {
-        console.error("❌ [GOOGLE ADS API ERROR]:", JSON.stringify(data, null, 2));
-
-        const googleError = data.error?.details?.[0]?.errors?.[0];
-        if (googleError?.errorCode?.authorizationError === 'DEVELOPER_TOKEN_NOT_APPROVED') {
-            throw new Error("Erro na API Google Ads: Token de Desenvolvedor não aprovado para contas de produção. Use uma conta de teste ou solicite upgrade para acesso 'Basic'.");
+        let data;
+        try {
+            data = JSON.parse(text);
+        } catch (e) {
+            const accessible = await listAccessibleCustomers(creds).catch(() => []);
+            console.log(`[GOOGLE ADS DEBUG] Accessible Accounts: ${JSON.stringify(accessible)}`);
+            throw new Error(`Erro Crítico Google (HTTP ${response.status}). Suas contas acessíveis: ${accessible.join(', ') || 'Nenhuma detected'}. Verifique se o ID ${customerId} está ativo e vinculado.`);
         }
 
-        if (googleError?.errorCode?.authorizationError === 'USER_PERMISSION_DENIED') {
-            throw new Error("Erro na API Google Ads: O usuário não tem permissão para acessar esta conta de cliente.");
+        const details = data.error?.details?.[0]?.errors?.[0] || data.error;
+        const msg = data.error?.message || JSON.stringify(details);
+
+        // Mapeamento de erros comuns para mensagens amigáveis
+        if (msg.includes('DEVELOPER_TOKEN_NOT_APPROVED')) {
+            throw new Error("Google Ads: Token de desenvolvedor ainda em revisão ou não aprovado para produção.");
+        }
+        if (msg.includes('NOT_ADS_USER')) {
+            throw new Error("Google Ads: O usuário do token não tem acesso à conta de anúncios configurada.");
+        }
+        if (msg.includes('Internal error encountered')) {
+            const debugPayload = `[useLoginId: true/false trial] | loginId=${loginId} | customerId=${customerId} | msg=${msg} | rawError=${text.substring(0, 300)}`;
+            throw new Error(`Google Ads Erro Interno (500) DETALHADO: ${debugPayload}`);
         }
 
-        throw new Error(`Erro na API Google Ads: ${data.error?.message || JSON.stringify(data.error)}`);
+        throw new Error(`Google Ads API: ${msg}`);
     }
 
-    // Transform GAQL result to our internal format
-    return (data.results || []).map((row: any) => {
+    console.log(`[GOOGLE ADS DEBUG] Success! Data length: ${text.length}`);
+    const data = JSON.parse(text);
+    const results = data.results || [];
+
+    return results.map((row: any) => {
         const c = row.campaign;
-        const m = row.metrics;
+        const m = row.metrics || {};
 
         return {
             id: c.id,
@@ -116,7 +170,7 @@ export async function fetchGoogleAdsCampaigns(creds: GoogleAdsCredentials) {
             impressions: Number(m.impressions || 0),
             ctr: (Number(m.ctr || 0) * 100),
             cpc: Number(m.averageCpc || 0) / 1_000_000,
-            reach: 0, // Google Ads doesn't have a direct "reach" metric like Meta, often synonymous with impressions in some report levels
+            reach: 0,
             frequency: 0,
             conversions: Number(m.conversions || 0)
         };

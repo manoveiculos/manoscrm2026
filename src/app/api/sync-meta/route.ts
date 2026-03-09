@@ -2,11 +2,11 @@ import { dataService } from '@/lib/dataService';
 import { NextResponse } from 'next/server';
 
 export async function POST(req: Request) {
+    const token = process.env.META_ACCESS_TOKEN || process.env.NEXT_PUBLIC_META_ACCESS_TOKEN;
+    const adAccountId = process.env.META_AD_ACCOUNT_ID || process.env.NEXT_PUBLIC_META_AD_ACCOUNT_ID;
+
     try {
         const { fullClear } = await req.json().catch(() => ({ fullClear: true }));
-
-        const token = process.env.META_ACCESS_TOKEN || process.env.NEXT_PUBLIC_META_ACCESS_TOKEN;
-        const adAccountId = process.env.META_AD_ACCOUNT_ID || process.env.NEXT_PUBLIC_META_AD_ACCOUNT_ID;
 
         if (!token || !adAccountId) {
             return NextResponse.json(
@@ -38,7 +38,9 @@ export async function POST(req: Request) {
         return NextResponse.json({
             success: false,
             error: 'Falha na sincronização com o Meta',
-            details: err.message
+            details: err.message,
+            token_present: !!token,
+            ad_account_id_present: !!adAccountId
         }, { status: 500 });
     }
 }
