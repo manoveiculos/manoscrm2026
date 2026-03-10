@@ -1,8 +1,8 @@
 {
     "manifest_version": 3,
     "name": "Manos CRM - WhatsApp Integration",
-    "version": "1.0",
-    "description": "Integração oficial Manos CRM com WhatsApp Web",
+    "version": "2.0",
+    "description": "Integração oficial Manos CRM com WhatsApp Web (Versão Modular)",
     "permissions": [
         "storage",
         "activeTab"
@@ -10,7 +10,8 @@
     "host_permissions": [
         "https://web.whatsapp.com/*",
         "http://localhost:3000/*",
-        "https://crm-manos.vercel.app/*"
+        "https://manoscrm.com.br/*",
+        "http://manoscrm.com.br/*"
     ],
     "action": {
         "default_popup": "popup.html",
@@ -23,15 +24,25 @@
             ],
             "js": [
                 "content.js"
-            ],
-            "css": [
-                "styles.css"
             ]
         }
     ],
     "background": {
-        "service_worker": "background.js"
+        "service_worker": "background.js",
+        "type": "module"
     },
+    "web_accessible_resources": [
+        {
+            "resources": [
+                "icons/icon128.png",
+                "content/*.js",
+                "styles/sidebar.css"
+            ],
+            "matches": [
+                "https://web.whatsapp.com/*"
+            ]
+        }
+    ],
     "icons": {
         "128": "icons/icon128.png"
     }

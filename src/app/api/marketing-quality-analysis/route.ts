@@ -79,7 +79,7 @@ export async function POST(req: Request) {
 
         let messagesQuery = supabaseAdmin
             .from('whatsapp_messages')
-            .select('lead_id, direction, message_text, created_at');
+            .select('lead_id, direction, message_text, created_at')
 
         const filters: string[] = [];
         if (mainLeadIds.length > 0) {

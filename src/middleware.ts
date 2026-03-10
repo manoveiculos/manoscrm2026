@@ -37,7 +37,7 @@ export async function middleware(request: NextRequest) {
 
     const path = request.nextUrl.pathname;
     const isLoginPage = path === '/login';
-    const isPublicApi = path.startsWith('/api/auth') || path.startsWith('/api/webhook') || path.startsWith('/api/health');
+    const isPublicApi = path.startsWith('/api/auth') || path.startsWith('/api/webhook') || path.startsWith('/api/health') || path.startsWith('/api/extension');
     const isStaticAsset = path.includes('.') || path.startsWith('/_next');
 
     // Se for um asset estático ou API pública, ignoramos
@@ -73,6 +73,6 @@ export const config = {
          * Corresponde a todos os caminhos, exceto arquivos estáticos conhecidos.
          * Usamos uma lógica mais abrangente para garantir segurança total.
          */
-        '/((?!api/auth|api/webhook|api/health|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+        '/((?!api/auth|api/webhook|api/health|api/extension|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
     ],
 };

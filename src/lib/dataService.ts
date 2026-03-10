@@ -410,6 +410,7 @@ export const dataService = {
         return (data || []).map(item => ({
             ...item,
             id: `main_${item.id}`,
+            origem: item.source || 'Contato Direto WhatsApp',
             consultants_manos_crm: allConsultants?.find(c => c.id === item.assigned_consultant_id) || { name: 'Pendente' }
         })) as unknown as Lead[];
     },

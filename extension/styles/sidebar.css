@@ -1,0 +1,285 @@
+/* Sidebar Manos CRM - Encapsulated Styles */
+:host {
+    all: initial;
+    /* Reset everything inside Shadow DOM */
+    font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+
+#manos-sidebar-container {
+    position: fixed;
+    top: 0;
+    right: -350px;
+    width: 320px;
+    height: 100vh;
+    background: #0c0c0e;
+    border-left: 1px solid rgba(255, 255, 255, 0.05);
+    z-index: 9999;
+    transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: -10px 0 30px rgba(0, 0, 0, 0.5);
+    display: flex;
+    flex-direction: column;
+    color: white;
+}
+
+#manos-sidebar-container.active {
+    right: 0;
+}
+
+.header {
+    padding: 16px 20px;
+    background: linear-gradient(to bottom, rgba(220, 38, 38, 0.15), transparent);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.header-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.logo {
+    font-weight: 900;
+    letter-spacing: -1px;
+    font-size: 18px;
+    text-transform: uppercase;
+}
+
+.logo span {
+    color: #dc2626;
+}
+
+.minimize {
+    cursor: pointer;
+    font-size: 20px;
+    color: rgba(255, 255, 255, 0.5);
+    transition: color 0.2s;
+    padding: 5px;
+}
+
+.minimize:hover {
+    color: #dc2626;
+}
+
+.content {
+    padding: 20px;
+    flex: 1;
+    overflow-y: auto;
+}
+
+.lead-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 16px;
+    padding: 16px;
+    margin-bottom: 20px;
+}
+
+.lead-name {
+    font-weight: 800;
+    font-size: 16px;
+    margin-bottom: 4px;
+    text-transform: uppercase;
+}
+
+.status-badge {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 10px;
+    font-weight: 900;
+    text-transform: uppercase;
+    background: #dc2626;
+    color: white;
+    margin-bottom: 12px;
+}
+
+.info-item {
+    margin-bottom: 12px;
+}
+
+.info-label {
+    font-size: 9px;
+    font-weight: 800;
+    color: rgba(255, 255, 255, 0.3);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 2px;
+}
+
+.info-value {
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.btn-sync {
+    width: 100%;
+    padding: 12px;
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    color: white;
+    font-weight: 800;
+    font-size: 11px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.btn-sync:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: #dc2626;
+}
+
+.status-select {
+    width: 100%;
+    padding: 10px;
+    background: #1a1a1c;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    color: white;
+    font-size: 11px;
+    font-weight: 700;
+    margin-top: 10px;
+}
+
+#manos-sidebar-container.kanban-mode {
+    width: 90vw;
+}
+
+.tabs {
+    display: flex;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.tab {
+    flex: 1;
+    padding: 12px;
+    text-align: center;
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+    cursor: pointer;
+    opacity: 0.4;
+    transition: opacity 0.2s;
+}
+
+.tab.active {
+    opacity: 1;
+    border-bottom: 2px solid #dc2626;
+}
+
+/* Kanban Board */
+.kanban-board {
+    display: flex;
+    gap: 15px;
+    padding: 20px;
+    overflow-x: auto;
+    height: calc(100vh - 120px);
+}
+
+.kanban-column {
+    flex: 0 0 260px;
+    display: flex;
+    flex-direction: column;
+}
+
+.column-header {
+    font-size: 10px;
+    font-weight: 900;
+    text-transform: uppercase;
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    margin-bottom: 15px;
+    display: flex;
+    justify-content: space-between;
+}
+
+.column-count {
+    color: #dc2626;
+}
+
+.kanban-list {
+    flex: 1;
+    overflow-y: auto;
+}
+
+.mini-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    padding: 12px;
+    margin-bottom: 10px;
+    cursor: pointer;
+    transition: transform 0.1s;
+}
+
+.mini-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
+.mini-card-name {
+    font-size: 12px;
+    font-weight: 700;
+    margin-bottom: 4px;
+}
+
+.mini-card-info {
+    font-size: 9px;
+    opacity: 0.5;
+}
+
+/* FAB - Outside Shadow DOM usually for better positioning but can be inside too */
+#manos-fab {
+    position: fixed;
+    bottom: 80px;
+    /* Subido para não atrapalhar a barra de envio */
+    right: 20px;
+    width: 56px;
+    height: 56px;
+    background: #dc2626;
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 900;
+    font-size: 24px;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    z-index: 10000;
+    transition: transform 0.2s, background 0.2s;
+    user-select: none;
+}
+
+#manos-fab.alert {
+    animation: pulse-red 1.5s infinite;
+}
+
+@keyframes pulse-red {
+    0% {
+        transform: scale(0.95);
+        box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.7);
+    }
+
+    70% {
+        transform: scale(1);
+        box-shadow: 0 0 0 15px rgba(220, 38, 38, 0);
+    }
+
+    100% {
+        transform: scale(0.95);
+        box-shadow: 0 0 0 0 rgba(220, 38, 38, 0);
+    }
+}
+
+#manos-fab:hover {
+    transform: scale(1.1);
+}

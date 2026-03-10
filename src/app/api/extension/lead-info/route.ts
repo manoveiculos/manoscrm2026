@@ -15,26 +15,31 @@ export async function GET(req: NextRequest) {
             return NextResponse.json({ error: 'Telefone não fornecido' }, { status: 400 });
         }
 
-        // Limpar o telefone para busca (manter apenas números)
         const cleanPhone = phone.replace(/\D/g, '');
+        console.log(`[Extension API] Buscando phone: ${cleanPhone}`);
+
         // Tentar buscar com e sem o prefixo 55
         const phoneVariants = [
             cleanPhone,
             cleanPhone.startsWith('55') ? cleanPhone.substring(2) : `55${cleanPhone}`
-        ];
+        ].filter(p => p.length >= 8);
 
         // 1. Buscar na leads_manos_crm
-        let { data: leadMain, error: errorMain } = await supabaseAdmin
+        let { data: leadsMain, error: errorMain } = await supabaseAdmin
             .from('leads_manos_crm')
             .select(`
                 id, name, phone, status, ai_score, ai_classification, vehicle_interest, 
                 assigned_consultant_id,
                 consultants_manos_crm (name)
             `)
-            .or(`phone.ilike.%${cleanPhone}%,phone.ilike.%${phoneVariants[0]}%,phone.ilike.%${phoneVariants[1]}%`)
-            .maybeSingle();
+            .or(`phone.ilike.%${cleanPhone}%,phone.ilike.%${phoneVariants.join('%,phone.ilike.%')}%`)
+            .order('created_at', { ascending: false })
+            .limit(1);
 
-        if (leadMain) {
+        if (errorMain) console.error("Error Main Table:", errorMain);
+
+        if (leadsMain && leadsMain.length > 0) {
+            const leadMain = leadsMain[0];
             return NextResponse.json({
                 success: true,
                 source: 'main',
@@ -51,16 +56,20 @@ export async function GET(req: NextRequest) {
         }
 
         // 2. Buscar na leads_distribuicao_crm_26
-        let { data: leadCrm26, error: errorCrm26 } = await supabaseAdmin
+        let { data: leadsCrm26, error: errorCrm26 } = await supabaseAdmin
             .from('leads_distribuicao_crm_26')
             .select(`
                 id, nome, telefone, status, ai_score, ai_classification, interesse, 
                 vendedor
             `)
-            .or(`telefone.ilike.%${cleanPhone}%,telefone.ilike.%${phoneVariants[0]}%,telefone.ilike.%${phoneVariants[1]}%`)
-            .maybeSingle();
+            .or(`telefone.ilike.%${cleanPhone}%,telefone.ilike.%${phoneVariants.join('%,telefone.ilike.%')}%`)
+            .order('created_at', { ascending: false })
+            .limit(1);
 
-        if (leadCrm26) {
+        if (errorCrm26) console.error("Error CRM26 Table:", errorCrm26);
+
+        if (leadsCrm26 && leadsCrm26.length > 0) {
+            const leadCrm26 = leadsCrm26[0];
             return NextResponse.json({
                 success: true,
                 source: 'crm26',

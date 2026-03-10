@@ -3474,7 +3474,6 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                                     const newLead = await dataService.createLead({
                                                         ...newLeadData,
                                                         source: userName ? `Registro ${userName}` : 'Registro Manual',
-                                                        origem: userName ? `Adicionado por ${userName}` : 'Adicionado Manualmente',
                                                         ai_classification: 'warm',
                                                         ai_score: 0,
                                                         status: 'attempt',

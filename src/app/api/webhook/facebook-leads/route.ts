@@ -164,8 +164,7 @@ export async function POST(req: NextRequest) {
                         id_formulario: leadData.form_id,
                         ai_summary: aiResumo,
                         ai_classification: aiClassification as any,
-                        ai_reason: aiResumo,
-                        origem: campaignName
+                        ai_reason: aiResumo
                     });
                 } catch (insertError: any) {
                     console.error('Error processing Facebook lead:', insertError.message);
