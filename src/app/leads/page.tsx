@@ -3493,9 +3493,9 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                                             setActionLead(newLead as Lead);
                                                         }, 300);
                                                     }
-                                                } catch (err) {
+                                                } catch (err: any) {
                                                     console.error("Error creating lead:", err);
-                                                    showToast("Erro ao criar lead.", "error");
+                                                    showToast(`Erro ao criar lead: ${err.message || 'Falha desconhecida'}`, "error");
                                                 }
                                             }}
                                             className="w-full py-5 rounded-3xl bg-red-600 text-white text-xs font-black uppercase tracking-[0.3em] hover:bg-red-500 hover:scale-[1.02] active:scale-95 transition-all shadow-xl shadow-red-600/20"

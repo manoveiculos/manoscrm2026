@@ -67,40 +67,95 @@ export function QualityIntelligence({ isAdmin, consultantName }: { isAdmin: bool
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
-    const [filterType, setFilterType] = useState<'all' | 'hot' | 'warm' | 'cold' | 'lost'>('all');
+    const [filterType, setFilterType] = useState<'all' | 'hot' | 'warm' | 'cold' | 'lost' | 'initial'>('all');
 
     const loadLatestReport = async () => {
         setLoading(true);
         try {
-            const { data: latest } = await supabase
-                .from('marketing_quality_reports')
+            // 1. Carregar Relatório Mais Recente (Nova Tabela Primeiro)
+            const { data: latestNew, error: newError } = await supabase
+                .from('marketing_daily_reports_manos_crm')
                 .select('*')
                 .order('report_date', { ascending: false })
                 .limit(1)
                 .maybeSingle();
 
-            if (latest) setReport(latest);
+            if (latestNew) {
+                const metrics = latestNew.performance_metrics || {};
+                setReport({
+                    id: latestNew.id,
+                    report_date: latestNew.report_date,
+                    total_leads: metrics.total_leads || 0,
+                    quentes: metrics.counts?.quentes || 0,
+                    mornos: metrics.counts?.mornos || 0,
+                    frios: metrics.counts?.frios || 0,
+                    desqualificados: metrics.counts?.desqualificados || 0,
+                    perda_total: metrics.counts?.perda_total || 0,
+                    quality_average: metrics.quality_average || 0,
+                    overall_score: metrics.overall_score || 0,
+                    insights: [latestNew.summary],
+                    recommendations: latestNew.recommendations || []
+                });
+            } else {
+                // Fallback para tabela antiga
+                const { data: latestLegacy } = await supabase
+                    .from('marketing_quality_reports')
+                    .select('*')
+                    .order('report_date', { ascending: false })
+                    .limit(1)
+                    .maybeSingle();
 
-            let leadsQuery = supabase
-                .from('leads_distribuicao_crm_26')
-                .select('*')
-                .not('ai_classification', 'is', null)
-                .order('probability_of_sale', { ascending: false })
-                .order('ai_score', { ascending: false });
-
-            if (!isAdmin && consultantName) {
-                const firstName = consultantName.split(' ')[0];
-                leadsQuery = leadsQuery.or(`vendedor.ilike.%${firstName}%,vendedor.is.null`);
+                if (latestLegacy) setReport(latestLegacy);
             }
 
-            const { data: leads } = await leadsQuery.limit(100);
-            if (leads) setAnalyzedLeads(leads as any);
+            // 2. Carregar Leads Analisados de AMBAS as tabelas
+            const [mainLeads, crm26Leads] = await Promise.all([
+                supabase
+                    .from('leads_manos_crm')
+                    .select('*')
+                    .not('ai_classification', 'is', null)
+                    .order('probability_of_sale', { ascending: false })
+                    .limit(100),
+                supabase
+                    .from('leads_distribuicao_crm_26')
+                    .select('*')
+                    .not('ai_classification', 'is', null)
+                    .order('probability_of_sale', { ascending: false })
+                    .limit(100)
+            ]);
+
+            // Normalizar e unificar
+            const unifiedLeads: LeadResult[] = [
+                ...(mainLeads.data || []).map(l => ({
+                    ...l,
+                    id: l.id, // UUID
+                    nome: l.name || l.nome,
+                    vendedor: l.vendedor,
+                    interesse: l.vehicle_interest || l.interesse,
+                    _is_crm26: false
+                })),
+                ...(crm26Leads.data || []).map(l => ({
+                    ...l,
+                    id: l.id, // Integer
+                    nome: l.nome,
+                    vendedor: l.vendedor,
+                    interesse: l.interesse,
+                    _is_crm26: true
+                }))
+            ];
+
+            // Ordenar por probabilidade e score
+            unifiedLeads.sort((a, b) => (b.probability_of_sale || 0) - (a.probability_of_sale || 0) || (b.ai_score || 0) - (a.ai_score || 0));
+
+            setAnalyzedLeads(unifiedLeads.slice(0, 100));
+
         } catch (err) {
             console.error("Error loading quality report:", err);
         } finally {
             setLoading(false);
         }
     };
+
 
     useEffect(() => { loadLatestReport(); }, []);
 
@@ -149,12 +204,13 @@ export function QualityIntelligence({ isAdmin, consultantName }: { isAdmin: bool
         if (filterType === 'warm') return classification.includes('MORNO');
         if (filterType === 'cold') return classification.includes('FRIO');
         if (filterType === 'lost') return classification.includes('DESQUALIFICADO') || classification.includes('PERDA');
+        if (filterType === 'initial') return classification.includes('INICIAL');
         return true;
     });
 
     const highPriorityLeads = filteredLeads.filter(l => (l.probability_of_sale || 0) >= 50 || (l.ai_classification || '').toUpperCase().includes('QUENTE'));
-    const mediumLeads = filteredLeads.filter(l => (l.probability_of_sale || 0) < 50 && (l.probability_of_sale || 0) >= 20 && !(l.ai_classification || '').toUpperCase().includes('DESQUALIFICADO'));
-    const lowLeads = filteredLeads.filter(l => (l.ai_classification || '').toUpperCase().includes('DESQUALIFICADO') || (l.ai_classification || '').toUpperCase().includes('PERDA') || (l.probability_of_sale || 0) < 20);
+    const mediumLeads = filteredLeads.filter(l => (l.probability_of_sale || 0) < 50 && (l.probability_of_sale || 0) >= 20 && !((l.ai_classification || '').toUpperCase().includes('DESQUALIFICADO') || (l.ai_classification || '').toUpperCase().includes('INICIAL')));
+    const lowLeads = filteredLeads.filter(l => (l.ai_classification || '').toUpperCase().includes('DESQUALIFICADO') || (l.ai_classification || '').toUpperCase().includes('PERDA') || (l.ai_classification || '').toUpperCase().includes('INICIAL') || (l.probability_of_sale || 0) < 20);
 
     const dynamicSummary = report ?
         `Sua operação capturou ${report.total_leads} leads no período. Destes, ${report.quentes} são de alta temperatura. Fidelidade de público em ${report.quality_average.toFixed(0)}%.` :
@@ -248,12 +304,15 @@ export function QualityIntelligence({ isAdmin, consultantName }: { isAdmin: bool
                             <p className="text-2xl md:text-3xl text-white leading-tight italic font-bold tracking-tight opacity-90">&ldquo;{dynamicSummary}&rdquo;</p>
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            {report?.recommendations?.slice(0, 2).map((rec, i) => (
+                            {report?.recommendations?.slice(0, 2).map((rec: any, i) => (
                                 <div key={i} className="p-6 rounded-2xl bg-white/5 border border-white/5 hover:border-red-600/30 transition-all flex gap-5 group/item">
                                     <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-red-600/10 text-red-600 flex items-center justify-center font-black text-xs group-hover/item:bg-red-600 group-hover/item:text-white transition-all">{i + 1}</div>
-                                    <div>
-                                        <p className="text-[9px] font-black text-white/30 uppercase mb-1 tracking-[0.2em]">Prioridade IA</p>
-                                        <p className="text-sm font-bold text-white leading-snug uppercase">{rec}</p>
+                                    <div className="flex-1">
+                                        <p className="text-[9px] font-black text-white/30 uppercase mb-1 tracking-[0.2em]">{typeof rec === 'object' ? rec.title : 'Prioridade IA'}</p>
+                                        <p className="text-sm font-bold text-white leading-snug uppercase">{typeof rec === 'object' ? rec.action : rec}</p>
+                                        {typeof rec === 'object' && rec.reason && (
+                                            <p className="text-[10px] text-white/40 mt-1 lowercase first-letter:uppercase">{rec.reason}</p>
+                                        )}
                                     </div>
                                 </div>
                             ))}
@@ -302,8 +361,18 @@ export function QualityIntelligence({ isAdmin, consultantName }: { isAdmin: bool
 
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                         {highPriorityLeads.map((lead, i) => (
-                            <LeadCard key={lead.id} lead={lead} variant="hot" index={i} onClick={(id) => router.push(`/leads?id=crm26_${id}&tab=timeline`)} />
+                            <LeadCard
+                                key={lead.id}
+                                lead={lead}
+                                variant="hot"
+                                index={i}
+                                onClick={(id) => {
+                                    const finalId = (lead as any)._is_crm26 ? `crm26_${id}` : id;
+                                    router.push(`/leads?id=${finalId}&tab=timeline`);
+                                }}
+                            />
                         ))}
+
                         {highPriorityLeads.length === 0 && (
                             <div className="col-span-full py-24 text-center rounded-[3rem] border-2 border-dashed border-white/5 bg-[#0c0c0e]/50">
                                 <Search size={48} className="mx-auto mb-6 text-white/10" />
@@ -324,8 +393,18 @@ export function QualityIntelligence({ isAdmin, consultantName }: { isAdmin: bool
 
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                         {mediumLeads.map((lead, i) => (
-                            <LeadCard key={lead.id} lead={lead} variant="medium" index={i} onClick={(id) => router.push(`/leads?id=crm26_${id}&tab=timeline`)} />
+                            <LeadCard
+                                key={lead.id}
+                                lead={lead}
+                                variant="medium"
+                                index={i}
+                                onClick={(id) => {
+                                    const finalId = (lead as any)._is_crm26 ? `crm26_${id}` : id;
+                                    router.push(`/leads?id=${finalId}&tab=timeline`);
+                                }}
+                            />
                         ))}
+
                     </div>
                 </div>
 
@@ -340,8 +419,18 @@ export function QualityIntelligence({ isAdmin, consultantName }: { isAdmin: bool
 
                     <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
                         {lowLeads.map((lead, i) => (
-                            <LeadCard key={lead.id} lead={lead} variant="low" index={i} onClick={(id) => router.push(`/leads?id=crm26_${id}&tab=timeline`)} />
+                            <LeadCard
+                                key={lead.id}
+                                lead={lead}
+                                variant="low"
+                                index={i}
+                                onClick={(id) => {
+                                    const finalId = (lead as any)._is_crm26 ? `crm26_${id}` : id;
+                                    router.push(`/leads?id=${finalId}&tab=timeline`);
+                                }}
+                            />
                         ))}
+
                     </div>
                 </div>
             </div>

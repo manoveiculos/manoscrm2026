@@ -1,4 +1,4 @@
-export type LeadStatus = 'new' | 'received' | 'attempt' | 'contacted' | 'confirmed' | 'scheduled' | 'visited' | 'test_drive' | 'proposed' | 'negotiation' | 'closed' | 'post_sale' | 'lost' | 'lost_redistributed' | 'comprado';
+export type LeadStatus = 'new' | 'received' | 'attempt' | 'contacted' | 'confirmed' | 'scheduled' | 'visited' | 'test_drive' | 'proposed' | 'negotiation' | 'closed' | 'post_sale' | 'lost' | 'lost_redistributed' | 'comprado' | 'desqualificado' | 'reativacao' | 'perda total' | 'sem contato' | 'lixo' | 'duplicado';
 export type AIClassification = 'hot' | 'warm' | 'cold';
 export type Platform = 'facebook' | 'google' | 'instagram' | 'whatsapp' | 'site';
 
@@ -61,15 +61,15 @@ export interface Lead {
   id: string;
   name: string;
   phone: string;
-  email: string;
+  email?: string;
   source: string;
   origem?: string;
   campaign_id?: string;
   creative_id?: string;
   vehicle_interest: string;
-  region: string;
-  estimated_ticket: number;
-  ai_score: number;
+  region?: string;
+  estimated_ticket?: number;
+  ai_score?: number;
   motivo_perda?: string;
   resumo_fechamento?: string;
   ai_classification: AIClassification;

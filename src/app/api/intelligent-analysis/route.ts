@@ -86,17 +86,18 @@ IMPORTANTE:
 
 REQUISITOS DO JSON:
 {
-  "opportunities_of_the_day": "Texto executivo direto e impactante. Identifique padrões de demanda e sugira ações de marketing ou vendas para girar o estoque parado.",
+  "opportunities_of_the_day": "Texto executivo ácido e direto. Identifique gargalos na operação, falta de velocidade no retorno e oportunidades de girar o estoque parado.",
   "recommended_actions": [
-    { "task": "Ação específica e acionável", "reason": "Justificativa comercial baseada em dados", "lead_id": "ID do lead se a ação for para um lead específico, caso contrário use null" }
+    { "task": "Ação de Resgate ou Fechamento", "reason": "Justificativa comercial agressiva baseada em dados reais", "lead_id": "ID do lead se a ação for para um lead específico, caso contrário use null" }
   ],
   "team_alerts": [
-    "Alertas críticos sobre leads parados, falta de agressividade comercial ou oportunidades de ouro sendo perdidas."
+    "Alertas sobre leads negligenciados (>24h sem contato) ou perda de temperatura em negociações avançadas."
   ],
   "closing_probabilities": [
     { "consultant_name": "Nome", "probability": number }
   ]
 }`;
+
 
     const globalResponse = await openai.chat.completions.create({
       model: 'gpt-4o',
@@ -137,12 +138,13 @@ REGRAS DE OURO:
 1. CHAME O CLIENTE PELO NOME.
 2. MENCIONE O MODELO DO CARRO.
 3. IDENTIFIQUE "OPORTUNIDADES REAIS DE FECHAMENTO" se o cliente:
-   - Pediu financiamento
-   - Pediu preço ou proposta
-   - Pediu visita ou test drive
-   - Demonstrou interesse específico em um modelo do estoque
-   - Conversou mais de uma vez recentemente
+   - Pediu financiamento ou enviou documentos
+   - Pediu preço, proposta ou avaliação de troca
+   - Pediu visita ou test drive confirmados
+   - Cliente respondendo rápido e com perguntas específicas
+   - Evoluiu de Curioso para Interessado na linha do tempo
 
+SE OS LEADS TIVEREM POUCO HISTÓRICO, classifique-os como "FASE INICIAL DE ATENDIMENTO" e não dê score alto.
 SEUS LEADS PRIORITÁRIOS PARA HOJE (${consultantLeads.length}):
 ${consultantLeads.map((l: any) => `- Lead [ID: ${l.id}] ${l.name}: ${l.vehicle_interest} | Status: ${statusMap[l.status] || l.status} | Histórico: ${l.resumo_consultor || 'Novo'} | Último Passo: ${l.proxima_acao || 'Ag'}`).join('\n')}
 
@@ -156,14 +158,15 @@ DIRETRIZES:
 
 REQUISITOS DO JSON:
 {
-  "daily_guide": "Texto motivador de gerente. Ex: '${consultant.name.split(' ')[0]}, hoje o dia é de fechamento! Temos leads quentes querendo assinar. Foco total em [Nome] e [Nome].'",
+  "daily_guide": "Texto motivador de gerente. Ex: '${consultant.name.split(' ')[0]}, hoje o dia é de fechamento! Temos leads quentes querendo comprar. Foco total em [Nome] e [Nome].'",
   "recommended_actions": [
     { 
-      "task": "Ligar para [Nome] agora sobre o [Carro]", 
-      "reason": "Explique o gatilho comercial (ex: ele quer financiar e temos as melhores taxas).",
-      "lead_id": "ID do lead extraído da lista acima"
+      "task": "Ação Imediata (ex: Ligar para [Nome] agora)", 
+      "reason": "Gatilho comercial real (ex: ele parou de responder sobre a troca, resgate agora!).",
+      "lead_id": "ID do lead"
     }
   ],
+
   "leads_analysis": [
     {
       "lead_id": "...",

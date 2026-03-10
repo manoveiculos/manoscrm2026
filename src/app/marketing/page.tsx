@@ -214,7 +214,16 @@ export default function MarketingPage() {
         ? `Sua operação de marketing gerou ${totalImpressions.toLocaleString()} visualizações. Destas, ${totalClicks.toLocaleString()} pessoas se engajaram e geraram ${totalLeads} leads reais no CRM. Eficiência de ${(clickToLeadRate).toFixed(1)}%, com custo de R$ ${avgCpl.toFixed(2)} por lead.`
         : "Aguardando sincronização de dados reais para iniciar análise estratégica completa.";
 
-    const recommendations = dailyReport?.recommendations || [
+    // Tratamento seguro das recomendações (pode vir como string do DB legado ou objeto do novo)
+    const rawRecs = dailyReport?.recommendations;
+    let parsedRecs = Array.isArray(rawRecs) ? rawRecs : [];
+
+    // Fallback se vier como string JSON (erro de dupla serialização anterior)
+    if (typeof rawRecs === 'string') {
+        try { parsedRecs = JSON.parse(rawRecs); } catch (e) { parsedRecs = []; }
+    }
+
+    const recommendations = (parsedRecs.length > 0 && typeof parsedRecs[0] === 'object') ? parsedRecs : [
         {
             title: ctr < 1 ? "⚠️ CRIATIVO SATURADO" : "✅ ATRAÇÃO SAUDÁVEL",
             action: ctr < 1 ? "TROCAR IMAGENS/VÍDEOS" : "MANTER ESTRATÉGIA",
@@ -230,6 +239,7 @@ export default function MarketingPage() {
                 : "O custo por lead está acima da média sugerida. Tente restringir o público alvo."
         }
     ];
+
 
     if (loading) {
         return (
@@ -320,13 +330,14 @@ export default function MarketingPage() {
                         <p className="text-lg text-[#c9d1d9] leading-relaxed italic">&quot;{dynamicAiSummary}&quot;</p>
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        {recommendations.slice(0, 3).map((rec, i) => (
+                        {(recommendations || []).slice(0, 3).map((rec: any, i: number) => (
                             <div key={i} className="p-5 rounded-xl bg-[#161b22] border border-[#30363d] hover:border-blue-500/50 transition-all">
-                                <p className="text-[10px] font-bold text-[#8b949e] uppercase mb-1">{rec.title}</p>
-                                <p className="text-sm font-bold text-white mb-2">{rec.action}</p>
-                                <p className="text-xs text-[#8b949e] leading-snug">{rec.reason}</p>
+                                <p className="text-[10px] font-bold text-[#8b949e] uppercase mb-1">{rec?.title || 'DICA IA'}</p>
+                                <p className="text-sm font-bold text-white mb-2">{rec?.action || rec?.toString()}</p>
+                                <p className="text-xs text-[#8b949e] leading-snug">{rec?.reason || ''}</p>
                             </div>
                         ))}
+
                     </div>
                 </div>
 

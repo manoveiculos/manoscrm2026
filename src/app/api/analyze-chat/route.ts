@@ -47,7 +47,28 @@ export async function POST(req: NextRequest) {
             );
         }
 
-        const { chatText, leadName, attachments } = await req.json();
+        const { chatText, leadName, attachments, leadId } = await req.json();
+
+        // 0. Recuperar histórico do lead se leadId estiver presente
+        let historicalContext = "";
+        if (leadId) {
+            const realId = leadId.replace(/crm26_|main_|dist_/, '');
+            const { data: lead } = await supabase
+                .from('leads_manos_crm')
+                .select('ai_summary, ai_reason, vehicle_interest')
+                .eq('id', realId)
+                .maybeSingle();
+
+            if (lead) {
+                historicalContext = `
+                HISTÓRICO PRÉVIO DO CRM:
+                Resumo Anterior: ${lead.ai_summary || 'Sem resumo prévio'}
+                Motivos Anteriores: ${lead.ai_reason || 'Nenhum'}
+                Interesse Registrado: ${lead.vehicle_interest || 'Nenhum'}
+                `;
+            }
+        }
+
 
         // 1. Verificação de Chave de API
         const openaiKey = process.env.OPENAI_API_KEY;
@@ -77,7 +98,9 @@ export async function POST(req: NextRequest) {
             try {
                 console.log("Roteando para Gemini 1.5 Flash (Audio/Video detectado)");
                 const { analyzeMultiModalChat } = await import('@/lib/gemini');
-                const aiData = await analyzeMultiModalChat(chatText, attachments || [], leadName);
+                const fullChatContext = historicalContext ? `${historicalContext}\n\nNOVA CONVERSA:\n${chatText}` : chatText;
+                const aiData = await analyzeMultiModalChat(fullChatContext, attachments || [], leadName);
+
 
                 return NextResponse.json({
                     success: true,
@@ -99,45 +122,43 @@ export async function POST(req: NextRequest) {
                 const messages: any[] = [
                     {
                         role: 'system',
-                        content: 'Você é um Analista Comercial Sênior especialista em conversas de concessionária de veículos. Sua análise deve ser baseada em TODO o histórico da conversa enviado, respeitando estritamente a ordem cronológica real baseada nas datas/horários. IMPORTANTE: A primeira mensagem no TOPO do texto é o INÍCIO da conversa (mais antiga). A última mensagem na PARTE INFERIOR é o FINAL (mais recente). NÃO inverta a lógica. Use as datas [DD/MM/AAAA HH:MM:SS] para se orientar.'
+                        content: 'Você é um Analista Comercial Sênior da Manos Veículos. Sua análise é ácida, direta e focada em fechamento (Sales Copilot). Você deve priorizar a LINHA DO TEMPO de interações. Analise se o lead está evoluindo ou esfriando.'
                     },
                     {
                         role: 'user',
                         content: [
                             {
                                 type: "text",
-                                text: `Analise profundamente TODO o histórico da seguinte conversa entre o vendedor e o cliente ${leadName || 'Interessado'}, seguindo a cronologia EXATA (do topo para baixo).
+                                text: `Analise o histórico e a nova conversa do cliente ${leadName || 'Interessado'}.
                 
-                HISTÓRICO COMPLETO (ORDEM CRONOLÓGICA):
+                ${historicalContext}
+
+                NOVA CONVERSA PARA ANÁLISE (ORDEM CRONOLÓGICA):
                 ${chatText || 'Nenhum texto de chat fornecido. Analise os anexos se disponíveis.'}
                     
-                    DIRETRIZES DE PONTUAÇÃO (SEJA RIGOROSO):
-                    - O score vai de 0 a 100. NÃO use valores padrão (como 50). Seja preciso.
-                    - 0-20: Descuriosidade, erro de contato, ou "descadastre-me".
-                    - 21-45: Curiosidade vaga, sem intenção de visita ou prazo definido.
-                    - 46-70: Interesse real, perguntou sobre preço/condições, mas sem pressa imediata.
-                    - 71-90: Interesse alto, aceitou simulação, agendou ou demonstrou interesse em visitar.
-                    - 91-100: Intenção imediata, pronto para fechar, documentos enviados ou vindo à loja hoje.
-                    
-                    CRITÉRIOS DE RIGOR:
-                    - Urgência (Quer o carro para quando?)
-                    - Poder de Compra (Tem entrada? Tem carro na troca?)
-                    - Engajamento (Responde rápido? Faz perguntas específicas?)
-                    - Intenção de Visita (Aceita vir à loja?)
-                    
-                    EXTRAIA E RESPONDA EM JSON:
+                    REGRAS DE CLASSIFICAÇÃO:
+                    1. FASE INICIAL DE ATENDIMENTO: Se houver pouco histórico (menos de 5 interações reais) ou apenas saudação inicial, classifique como "FASE INICIAL DE ATENDIMENTO".
+                    2. PONTUAÇÃO (RIGOROSA 0-100): 
+                       - 0-30: FASE INICIAL ou desinteresse. 
+                       - 31-60: Interesse vago/frio. 
+                       - 61-85: Interesse real, perguntas técnicas, financiamento ou visita. 
+                       - 86-100: FECHAMENTO HOJE, documentos enviados ou vindo agora.
+
+                    3. PADRÕES: Identifique se o lead está NEGLIGENCIADO (>24h sem resposta do vendedor) ou em RISCO DE PERDA.
+
+                    EXTRAIA E RESPONDA EXCLUSIVAMENTE EM JSON:
                     {
-                      "classificacao": "HOT" | "WARM" | "COLD",
+                      "classificacao": "HOT" | "WARM" | "COLD" | "FASE INICIAL DE ATENDIMENTO",
                       "score": number,
                       "estagio_funil": "Qualificação" | "Apresentação" | "Negociação" | "Fechamento",
                       "proxima_acao": string,
                       "probabilidade_fechamento": number,
-                      "resumo_estrategico": string,
-                      "resumo_detalhado": string,
+                      "resumo_estrategico": "Relatório ácido para o consultor.",
+                      "resumo_detalhado": "Análise da linha do tempo e comportamento.",
                       "intencao_compra": string,
                       "estagio_negociacao": string,
-                      "objecoes": string,
-                      "recomendacao_abordagem": string,
+                      "objecoes": "O que está impedindo a venda?",
+                      "recomendacao_abordagem": "O que o consultor deve falar AGORA?",
                       "extracted_name": string | null,
                       "vehicle_interest": string | null,
                       "valor_investimento": string | null,
@@ -146,9 +167,11 @@ export async function POST(req: NextRequest) {
                       "prazo_troca": string | null,
                       "behavioral_profile": {
                         "perfil": string,
-                        "temperatura_emocional": string
+                        "temperatura_emocional": string,
+                        "urgencia": "Alta" | "Média" | "Baixa"
                       }
                     }`
+
                             }
                         ]
                     }
@@ -191,7 +214,9 @@ export async function POST(req: NextRequest) {
         // FALLBACK GERAL PARA GEMINI
         if (googleKey) {
             const { analyzeMultiModalChat } = await import('@/lib/gemini');
-            const aiData = await analyzeMultiModalChat(chatText, attachments || [], leadName);
+            const fullChatContext = historicalContext ? `${historicalContext}\n\nNOVA CONVERSA:\n${chatText}` : chatText;
+            const aiData = await analyzeMultiModalChat(fullChatContext, attachments || [], leadName);
+
 
             return NextResponse.json({
                 success: true,

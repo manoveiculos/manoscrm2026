@@ -1442,14 +1442,22 @@ export const dataService = {
             .insert([{
                 ...leadData,
                 phone: cleanPhone,
-                status: 'received',
+                status: leadData.status || 'received',
                 created_at: new Date().toISOString(),
                 updated_at: new Date().toISOString()
             }])
             .select()
             .single();
 
-        if (error) throw error;
+        if (error) {
+            console.error("SUPABASE ERROR (createLead):", {
+                code: error.code,
+                message: error.message,
+                details: error.details,
+                hint: error.hint
+            });
+            throw new Error(`Erro no Banco: ${error.message} (${error.code})`);
+        }
 
         // 4. Automatic Distribution (Round Robin) - Only if not already assigned
         if (newLead) {

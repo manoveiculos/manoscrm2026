@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { width: 300px; padding: 15px; background: #0c0c0e; color: white; font-family: sans-serif; }
+    .logo { font-weight: 900; color: #dc2626; margin-bottom: 15px; }
+    label { font-size: 10px; text-transform: uppercase; color: #666; display: block; margin-bottom: 5px; }
+    input { width: 100%; padding: 8px; background: #1a1a1c; border: 1px solid #333; color: white; border-radius: 4px; box-sizing: border-box; }
+    button { width: 100%; margin-top: 15px; padding: 10px; background: #dc2626; border: none; color: white; border-radius: 4px; font-weight: bold; cursor: pointer; }
+    .status { font-size: 11px; margin-top: 10px; text-align: center; color: #4ade80; display: none; }
+  </style>
+</head>
+<body>
+  <div class="logo">MANOS CRM</div>
+  <label>URL do seu CRM</label>
+  <input type="text" id="crm-url" placeholder="https://seu-crm.vercel.app">
+  <button id="save-btn">Salvar Configuração</button>
+  <div class="status" id="status-msg">Configuração salva!</div>
+  <script src="popup.js"></script>
+</body>
+</html>
