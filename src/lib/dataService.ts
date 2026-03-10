@@ -1438,10 +1438,11 @@ export const dataService = {
         }
 
         // 3. Insert New Lead (Normal flow)
+        const { origem, ...dataWithoutOrigem } = leadData;
         const { data: newLead, error } = await supabase
             .from('leads_manos_crm')
             .insert([{
-                ...leadData,
+                ...dataWithoutOrigem,
                 phone: cleanPhone,
                 status: leadData.status || 'received',
                 created_at: new Date().toISOString(),
