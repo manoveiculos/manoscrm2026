@@ -1,4 +1,4 @@
-﻿import { supabase } from './supabase';
+import { supabase } from './supabase';
 import { Lead, Campaign, Sale, Purchase, InventoryItem, LeadStatus, AIClassification } from './types';
 import { sendMetaConversion } from './meta-service';
 
@@ -84,8 +84,9 @@ export const dataService = {
         const lastDist = cacheGet<number>(distKey);
         if (!lastDist) {
             cacheSet(distKey, Date.now(), 30_000);
-            this.autoDistributePendingCRM26().catch(err => console.error("Distribute Error:", err));
-            this.autoRedistributeLeads().catch(err => console.error("Redistribute Error:", err));
+            // DESATIVADO: Para impedir que "fantasmas" peguem leads sem consultor ou roubem leads:
+            // this.autoDistributePendingCRM26().catch(err => console.error("Distribute Error:", err));
+            // this.autoRedistributeLeads().catch(err => console.error("Redistribute Error:", err));
         }
 
         // PERF: Cache the consultant name lookup
@@ -252,7 +253,8 @@ export const dataService = {
 
     async getLeadsCRM26(consultantName?: string, includeSent: boolean = false, showRedistributed: boolean = false, leadId?: string) {
         // Trigger auto-distribution for any unassigned leads in the background
-        this.autoDistributePendingCRM26().catch(console.error);
+        // DESATIVADO: Impedindo rodízio automático fantasma de leads novos.
+        // this.autoDistributePendingCRM26().catch(console.error);
 
         let query = supabase
             .from('leads_distribuicao_crm_26')
@@ -432,6 +434,9 @@ export const dataService = {
     },
 
     async autoRedistributeLeads() {
+        // DESATIVADO (Fantasma da Redistribuição): Não roubar ou realocar leads magicamente.
+        return;
+        
         if (isRedistributingLeads) return;
         isRedistributingLeads = true;
 
@@ -507,6 +512,9 @@ export const dataService = {
     },
 
     async autoDistributePendingCRM26() {
+        // DESATIVADO (Fantasma da Distribuição): Não rodar round-robin automático.
+        return;
+        
         if (isDistributingLeads) return;
         isDistributingLeads = true;
 
