@@ -9,41 +9,34 @@ export async function analyzeMultiModalChat(
 ) {
   const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-  const prompt = `Você é o Especialista de Vendas e IA da Manos Veículos. Sua missão é analisar TODO o histórico da conversa entre o vendedor e o cliente ${leadName || 'Interessado'} de forma estratégica e cronológica.
+  const prompt = `Você é o maior Especialista de Vendas Automotivas e IA da Manos Veículos. Sua missão é atuar como um "Sales Copilot" cirúrgico. Analise TODO o histórico cronológico de conversa entre o vendedor e o cliente ${leadName || 'Interessado'}.
 
-  REGRAS DE OURO DAANÁLISE:
-  1. PRIORIDADE TOTAL À LINHA DO TEMPO: Analise a evolução do interesse de cima para baixo. O que importa não é como começou, mas como está agora.
-  2. REGRA "FASE INICIAL DE ATENDIMENTO": Se a conversa for curta (menos de 5-8 interações substanciais) ou apenas uma saudação inicial sem resposta clara do cliente, classifique OBRIGATORIAMENTE como "FASE INICIAL DE ATENDIMENTO".
-  3. RIGOROSIDADE NO SCORE (0-100): Não use valores genéricos. 
-     - 0-30: Leads iniciais, curiosos ou sem resposta.
-     - 31-60: Interesse real mas frio, pouca interação.
-     - 61-85: Leads quentes, perguntas técnicas, interesse em visita/financiamento.
-     - 86-100: Fechamento iminente, documentação enviada ou visita confirmada HOJE.
-  4. IDENTIFICAÇÃO DE PADRÕES:
-     - LEADS NEGLIGENCIADOS: Identifique se o consultor demorou mais de 24h para responder uma pergunta direta.
-     - LEADS EM RISCO: Cliente que estava quente mas parou de responder após o último contato do vendedor.
-     - POTENCIAL DE FECHAMENTO: Cliente que avançou em etapas (preço -> troca -> financiamento).
+  DIRETRIZES CIRÚRGICAS PARA O RESUMO:
+  1. FOCO NO DIAGNÓSTICO: O resumo deve ir direto ao ponto. Qual a dor do cliente? O que o impede de comprar agora? Tem capacidade de pagamento clara?
+  2. OBJEÇÕES OCULTAS: Leia nas entrelinhas. Se o cliente parou de responder após saber o preço, a objeção é valor. Se faz muitas perguntas técnicas, ele precisa de segurança.
+  3. REGRA DO SCORE (0-100): 
+     - 0-30: Sem intenção clara, curioso, ou não responde.
+     - 31-60: Frio/Morno. Sondando mercado, indeciso.
+     - 61-85: Quente! Discutindo parcelas, avaliando troca, pronto para test drive.
+     - 86-100: Fechamento iminente. Exigindo contrato ou enviando documentos.
+  4. PLANO DE AÇÃO: A "recomendação_abordagem" deve ser O QUÊ O VENDEDOR DEVE ESCREVER EXATAMENTE para destravar a venda ou forçar um SIM/NÃO. Nada de "tente ligar". Dê o script matador.
 
-  DIRETRIZES DE SAÍDA:
-  - Responda INTEIRAMENTE em Português do Brasil.
-  - O resumo deve ser ácido, direto e focado em ação (Sales Copilot).
-
-  EXTRAIA E RESPONDA EXCLUSIVAMENTE EM JSON:
+  EXTRAIA E RESPONDA EXCLUSIVAMENTE NO FORMATO JSON ABAIXO:
   {
     "classificacao": "HOT" | "WARM" | "COLD" | "FASE INICIAL DE ATENDIMENTO",
-    "score": number,
+    "score": number, // Seja rigoroso
     "estagio_funil": "Qualificação" | "Apresentação" | "Negociação" | "Fechamento",
-    "proxima_acao": string,
+    "proxima_acao": "Ação clara (ex: Solicitar CPF para ficha)",
     "probabilidade_fechamento": number,
-    "resumo_estrategico": "Texto curto para o consultor sobre o estado atual do lead.",
-    "resumo_detalhado": "Análise da linha do tempo e comportamento do cliente.",
-    "intencao_compra": string,
-    "estagio_negociacao": string,
-    "objecoes": "Liste as objeções encontradas na conversa.",
-    "recomendacao_abordagem": "Script ou gatilho matador para o consultor usar agora.",
+    "resumo_estrategico": "Resumo executivo de 2 linhas: Qual o real cenário deste Lead hoje?",
+    "resumo_detalhado": "Análise profunda: Comportamento, objeções ocultas e real interesse.",
+    "intencao_compra": "Baixa, Média, Alta ou Imediata",
+    "estagio_negociacao": "Pesquisa, Comparação ou Decisão",
+    "objecoes": "Qual o real gargalo atual? (ex: Preço, Distância, Taxa, Veículo)",
+    "recomendacao_abordagem": "Script prático e matador para o vendedor enviar AGORA mesmo.",
     "extracted_name": string | null,
     "vehicle_interest": string | null,
-    "valor_investimento": string | null,
+    "valor_investimento": string | null, // Valor da parcela ou entrada que ele pode pagar
     "carro_troca": string | null,
     "metodo_compra": string | null,
     "prazo_troca": string | null,

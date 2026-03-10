@@ -9,6 +9,7 @@ import { Scraper } from './scraper.js';
 const App = {
     API_BASE: "http://localhost:3000/api/extension",
     currentPhone: null,
+    currentLeadId: null, // ID numérico do banco
     currentMode: 'chat', // 'chat' or 'kanban'
 
     async init() {
@@ -34,14 +35,42 @@ const App = {
             }
         });
 
-        // Evento manual (pode ser ativado pelo FAB pulse ou outro gatilho)
+        // 4. Lógica de Hover (Abrir/Fechar Sidebar)
+        this.initHoverLogic();
+
+        // Evento manual
         window.addEventListener('manos-crm-refresh', () => {
-            this.currentPhone = null; // Reset para forçar re-fetch
+            this.currentPhone = null;
             this.handleChatChange();
         });
 
         // Execução inicial
         this.handleChatChange();
+    },
+
+    initHoverLogic() {
+        let closeTimeout;
+
+        // Borda direita para abrir (40px)
+        document.addEventListener('mousemove', (e) => {
+            const edgeWidth = 40;
+            if (window.innerWidth - e.clientX <= edgeWidth) {
+                UI.toggleSidebar(true);
+            }
+        });
+
+        // Monitorar Shadow Root Host
+        const host = document.getElementById('manos-crm-root');
+        if (host) {
+            host.onmouseenter = () => {
+                clearTimeout(closeTimeout);
+            };
+            host.onmouseleave = () => {
+                closeTimeout = setTimeout(() => {
+                    UI.toggleSidebar(false);
+                }, 500);
+            };
+        }
     },
 
     async fetchKanban() {
@@ -51,20 +80,33 @@ const App = {
     async handleChatChange() {
         console.log("Manos CRM: handleChatChange trigger 🔄");
         const phone = Scraper.getPhone();
-        console.log("Manos CRM: Telefone detectado no DOM ->", phone);
+        console.log("Manos CRM: [DEBUG] Scraper retornou ->", phone);
 
-        if (phone && phone !== this.currentPhone) {
-            this.currentPhone = phone;
-            console.log("Manos CRM: Mudança de chat confirmada ->", phone);
+        if (phone) {
+            // Filtro de Segurança do tamanho de telefone do Brasil (max 13: 55 + ddd + 9 digitos)
+            if (phone.length > 13 || !phone.startsWith('55')) {
+                console.error("Manos CRM: [BLOQUEIO] ID inválido na camada controladora ->", phone);
+                return;
+            }
+            if (phone !== this.currentPhone) {
+                this.currentPhone = phone;
+                this.currentLeadId = null; // Limpa o ID do lead anterior
+                console.log("Manos CRM: Mudança de chat confirmada ->", phone);
 
-            UI.setLoading();
-            await this.fetchLead(phone);
+                UI.setLoading();
+                await this.fetchLead(phone);
+            }
+        } else {
+            console.log("Manos CRM: Fora de conversa ativa.");
+            this.currentPhone = null;
+            this.currentLeadId = null;
         }
     },
 
     async fetchLead(phone) {
         try {
             console.log("Manos CRM: Chamando Proxy para ->", phone);
+            const name = Scraper.getName(); // Pega o nome do header para pre-fill
             const url = `${this.API_BASE}/lead-info?phone=${phone}`;
 
             chrome.runtime.sendMessage({
@@ -74,19 +116,49 @@ const App = {
                 console.log("Manos CRM Proxy Response:", response);
 
                 if (response && response.success && response.data.success) {
-                    UI.renderLead(response.data.lead,
+                    const lead = response.data.lead;
+                    this.currentLeadId = lead.id; // Salva o ID do banco
+
+                    UI.renderLead(lead,
                         (id, status) => this.updateStatus(id, status),
                         (id) => this.syncChat(id)
                     );
                     UI.setAlert(true); // Piscar o botão para avisar o consultor
                 } else {
                     console.warn("Manos CRM: Lead não encontrado ou erro no Proxy", phone);
-                    UI.renderNotFound(phone);
+                    UI.renderNotFound(phone, () => this.createLead(phone, name));
                 }
             });
         } catch (err) {
             console.error("Manos CRM: Erro ao buscar lead via Proxy", err);
-            UI.renderNotFound(phone + " (Erro de Proxy)");
+            UI.renderNotFound(phone + " (Erro de Proxy)", () => { });
+        }
+    },
+
+    async createLead(phone, name) {
+        UI.setLoading();
+        try {
+            const url = `${this.API_BASE}/create-lead`;
+            chrome.runtime.sendMessage({
+                type: 'FETCH_DATA',
+                url: url,
+                options: {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ phone, name })
+                }
+            }, (response) => {
+                if (response && response.success && response.data.success) {
+                    alert("Lead criado com sucesso!");
+                    this.fetchLead(phone);
+                } else {
+                    const error = response?.data?.error || "Erro desconhecido";
+                    alert(`Falha ao criar lead: ${error}`);
+                    this.fetchLead(phone);
+                }
+            });
+        } catch (err) {
+            console.error("Manos CRM: Erro ao criar lead via Proxy", err);
         }
     },
 
@@ -114,24 +186,50 @@ const App = {
     },
 
     async syncChat(leadId) {
-        const messages = Scraper.getMessages();
+        const messages = await Scraper.getFullMessages(20); // Limite de 20 scrolls (aprox 30-50 dias de conversa)
+        const leadName = Scraper.getName();
+        const chatText = messages.map(m => `[${m.direction === 'outbound' ? 'Vendedor' : 'Cliente'}]: ${m.text}`).join('\n');
+
+        // Hardening do ID: Prioridade ao ID numérico salvo do banco
+        let rawId = this.currentLeadId || leadId;
+        let cleanId = rawId.toString().replace(/crm26_|main_|dist_/, '');
+
+        // Se o cleanId ainda contém letras ou traços (UUID), usamos o telefone como ID numérico (BigInt seguro)
+        if (/[a-zA-Z-]/.test(cleanId)) {
+            console.warn("Manos CRM: ID é UUID. Usando telefone limpo para compatibilidade BigInt.");
+            cleanId = this.currentPhone.replace(/\D/g, '');
+        }
+
+        console.log("Manos CRM: ID enviado para Sync ->", cleanId);
+
         try {
-            const url = `${this.API_BASE}/sync-messages`;
-            chrome.runtime.sendMessage({
-                type: 'FETCH_DATA',
-                url: url,
-                options: {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ leadId, messages })
-                }
-            }, (response) => {
-                if (response && response.success && response.data.success) {
-                    alert("Conversa sincronizada com sucesso!");
-                }
+            // 1. Sincronizar mensagens brutas
+            const syncUrl = `${this.API_BASE}/sync-messages`;
+            const syncRes = await new Promise((resolve) => {
+                chrome.runtime.sendMessage({
+                    type: 'FETCH_DATA',
+                    url: syncUrl,
+                    options: {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ leadId: cleanId, messages })
+                    }
+                }, resolve);
             });
+
+            if (!syncRes || !syncRes.success || !syncRes.data?.success) {
+                const error = syncRes?.data?.error || syncRes?.error || "Erro na API de Mensagens";
+                throw new Error(error);
+            }
+
+            // Removido a geração automática de Resumo IA a pedido do usuário.
+            // O resumo agora será gerado apenas na aba "Laboratório de IA" dentro do CRM.
+            alert("Conversa importada com sucesso para o Laboratório de IA!");
+            this.fetchLead(this.currentPhone); // Atualizar UI da extensão
+
         } catch (err) {
             console.error("Manos CRM: Erro ao sincronizar via Proxy", err);
+            alert("Erro na sincronização: " + err.message);
         }
     }
 };

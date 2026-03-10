@@ -15,9 +15,22 @@ export async function POST(req: NextRequest) {
         }
 
         // Preparar mensagens para inserção
-        // Formato esperado: { text: string, direction: 'inbound' | 'outbound', timestamp: string }
+        const isNumeric = (str: string) => /^\d+$/.test(str);
+
+        // Identificar se o leadId é compatível com BIGINT
+        const cleanId = leadId.replace('crm26_', '');
+
+        if (!isNumeric(cleanId)) {
+            console.error(`[Sync API] Lead ID ${leadId} não é numérico (BigInt). Abortando inserção em whatsapp_messages.`);
+            // Se o seu banco usa UUID para a tabela principal, você deve alterar o campo lead_id para TEXT ou UUID.
+            return NextResponse.json({
+                success: false,
+                error: `O Lead ${leadId} usa UUID, mas o banco espera BigInt. Altere o campo lead_id para TEXT.`
+            }, { status: 400 });
+        }
+
         const messagesToInsert = messages.map((m: any) => ({
-            lead_id: leadId.replace('crm26_', ''), // Remover prefixo se for da tabela crm26
+            lead_id: parseInt(cleanId),
             message_text: m.text,
             direction: m.direction,
             created_at: m.timestamp || new Date().toISOString()

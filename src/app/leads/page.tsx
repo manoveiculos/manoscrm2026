@@ -105,6 +105,7 @@ function LeadsContent() {
     const [urlFilter, setUrlFilter] = useState<string | null>(searchParams.get('filter'));
 
     const [isAnalyzing, setIsAnalyzing] = useState(false);
+    const [pendingAutoAnalysis, setPendingAutoAnalysis] = useState<string | null>(null);
     const [chatText, setChatText] = useState('');
     const [activeMoveMenu, setActiveMoveMenu] = useState<string | null>(null);
     const [scrollProgress, setScrollProgress] = useState(0);
@@ -219,8 +220,41 @@ function LeadsContent() {
                 ai_summary: actionLead.ai_summary || '',
                 ai_reason: actionLead.ai_reason || ''
             });
+
+            // Auto-load synced WhatsApp messages for AI Lab
+            if (actionLead.id) {
+                dataService.getLeadMessages(actionLead.id).then(messages => {
+                    if (messages && messages.length > 0) {
+                        const chatLog = messages.map((m: any) =>
+                            `[${m.direction === 'outbound' ? 'Vendedor' : 'Cliente'}]: ${m.message_text}`
+                        ).join('\n');
+                        setChatText(chatLog);
+
+                        // Trigger auto-analysis se o lead ainda não tem resumo gerado
+                        // Apenas fazemos isso automaticamente se ele for "virgem" de resumo 
+                        // para não gastar tokens atoa em leads que já tem linha do tempo.
+                        if (!actionLead.ai_summary || actionLead.ai_summary.trim() === '') {
+                            console.log("Auto-initiating AI Analysis for freshly synced chat...");
+                            setPendingAutoAnalysis(chatLog);
+                        }
+                    } else {
+                        setChatText('');
+                    }
+                }).catch(err => {
+                    console.error("Erro ao carregar mensagens sincronizadas", err);
+                    setChatText('');
+                });
+            }
         }
     }, [actionLead]);
+
+    // Executa a auto-análise quando a flag é ativada
+    useEffect(() => {
+        if (pendingAutoAnalysis) {
+            analyzeConversation(pendingAutoAnalysis);
+            setPendingAutoAnalysis(null);
+        }
+    }, [pendingAutoAnalysis]);
 
     const handleSaveDetails = async () => {
         if (!actionLead) return;
@@ -1050,7 +1084,13 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
 
                 // Append to historical summary with timestamp
                 const timestamp = new Date().toLocaleString('pt-BR');
-                const historicalNote = `[${timestamp}] ANALISE DE ENTRADA:\n${aiResult.resumo_detalhado || aiResult.resumo_estrategico || aiResult.ai_reason || 'Nova conversa importada.'}\n\n`;
+                const historicalNote = `[${timestamp}] ANÁLISE DE ENTRADA (IA):\n` +
+                    `🎯 Intenção: ${aiResult.intencao_compra || 'Não avaliada'}\n` +
+                    `📊 Estágio: ${aiResult.estagio_negociacao || 'Não avaliado'}\n` +
+                    `⚠️ Objeções: ${aiResult.objecoes || 'Nenhuma detectada'}\n` +
+                    `⚡ Ação (Script): ${aiResult.recomendacao_abordagem || 'Continuar atendimento'}\n` +
+                    `📌 Resumo Executivo: ${aiResult.resumo_estrategico || aiResult.ai_reason || 'N/A'}\n` +
+                    `🔎 Detalhes: ${aiResult.resumo_detalhado || 'N/A'}\n\n`;
 
                 const finalLead: Lead = {
                     ...(newLead as Lead),
@@ -1140,7 +1180,14 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                 // Append to historical summary with timestamp
                 const timestamp = new Date().toLocaleString('pt-BR');
                 const currentHistory = leadToAnalyze.ai_summary || '';
-                const newNote = `[${timestamp}] REANALISE:\n${aiResult.resumo_detalhado || aiResult.resumo_estrategico || aiResult.ai_reason}\n\n`;
+
+                const newNote = `[${timestamp}] ANÁLISE CIRÚRGICA DE IA:\n` +
+                    `🎯 Intenção: ${aiResult.intencao_compra || 'Não avaliada'}\n` +
+                    `📊 Estágio: ${aiResult.estagio_negociacao || 'Não avaliado'}\n` +
+                    `⚠️ Objeções: ${aiResult.objecoes || 'Nenhuma detectada'}\n` +
+                    `⚡ Ação (Script): ${aiResult.recomendacao_abordagem || 'Continuar atendimento'}\n` +
+                    `📌 Resumo Executivo: ${aiResult.resumo_estrategico || aiResult.ai_reason || 'N/A'}\n` +
+                    `🔎 Detalhes: ${aiResult.resumo_detalhado || 'N/A'}\n\n`;
 
                 // Prepare details with behavioral data and auto-filled fields
                 const updatedFields = {
@@ -2226,10 +2273,10 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                             <div>
                                                 <div className="flex items-center gap-4">
                                                     <h2 className="text-3xl font-black tracking-tighter text-white font-outfit uppercase">Centro de Gestão</h2>
-                                                    {actionLead && (actionLead.ai_score || 0) > 0 && (
+                                                    {actionLead && ((actionLead.ai_score ?? 0) || 0) > 0 && (
                                                         <div className="px-3 py-1.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-[10px] font-black flex items-center gap-2 shadow-lg shadow-emerald-500/5 animate-in zoom-in duration-500">
                                                             <Sparkles size={12} className="animate-pulse" />
-                                                            SCORE IA: {actionLead.ai_score}%
+                                                            SCORE IA: {(actionLead.ai_score ?? 0)}%
                                                         </div>
                                                     )}
                                                 </div>
@@ -2401,7 +2448,7 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                                     <h4 className="text-[10px] font-black uppercase tracking-widest text-white/40">Probabilidade</h4>
                                                 </div>
                                                 <div className="text-2xl font-black text-emerald-500 italic tracking-tighter">
-                                                    {actionLead.behavioral_profile?.closing_probability || actionLead.ai_score || 0}%
+                                                    {actionLead.behavioral_profile?.closing_probability || (actionLead.ai_score ?? 0) || 0}%
                                                 </div>
                                             </div>
 
@@ -2793,9 +2840,9 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                                                     <p className="text-xs text-white/50 font-bold tracking-wide leading-none mt-1">{formatPhoneBR(actionLead.phone)}</p>
                                                                 </div>
                                                             </div>
-                                                            <div className={`px-4 py-2 rounded-2xl border flex flex-col items-center justify-center ${actionLead.ai_score >= 70 ? 'bg-emerald-500/10 border-emerald-500/20' : actionLead.ai_score >= 40 ? 'bg-amber-500/10 border-amber-500/20' : 'bg-red-500/10 border-red-500/20'}`}>
+                                                            <div className={`px-4 py-2 rounded-2xl border flex flex-col items-center justify-center ${(actionLead.ai_score ?? 0) >= 70 ? 'bg-emerald-500/10 border-emerald-500/20' : (actionLead.ai_score ?? 0) >= 40 ? 'bg-amber-500/10 border-amber-500/20' : 'bg-red-500/10 border-red-500/20'}`}>
                                                                 <p className="text-[7px] font-black opacity-40 uppercase tracking-[0.2em] leading-none mb-1">Score</p>
-                                                                <p className={`text-xl font-black leading-none ${actionLead.ai_score >= 70 ? 'text-emerald-500' : actionLead.ai_score >= 40 ? 'text-amber-500' : 'text-red-500'}`}>{actionLead.ai_score || 0}</p>
+                                                                <p className={`text-xl font-black leading-none ${(actionLead.ai_score ?? 0) >= 70 ? 'text-emerald-500' : (actionLead.ai_score ?? 0) >= 40 ? 'text-amber-500' : 'text-red-500'}`}>{(actionLead.ai_score ?? 0) || 0}</p>
                                                             </div>
                                                         </div>
 
@@ -3063,8 +3110,8 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                                                     <div className="p-6 rounded-[2.5rem] bg-gradient-to-br from-white/5 to-transparent border border-white/10 flex items-center justify-between group overflow-hidden relative">
                                                                         <div className="absolute top-0 right-0 w-32 h-32 bg-red-600/5 rounded-full blur-3xl -mr-16 -mt-16 transition-all group-hover:bg-red-600/10" />
                                                                         <div className="flex items-center gap-5 relative z-10">
-                                                                            <div className={`w-16 h-16 rounded-[1.5rem] border-2 flex items-center justify-center shadow-2xl ${actionLead.ai_score >= 70 ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-500 shadow-emerald-500/10' : actionLead.ai_score >= 40 ? 'border-amber-500/30 bg-amber-500/5 text-amber-500 shadow-amber-500/10' : 'border-red-500/30 bg-red-500/5 text-red-500 shadow-red-500/10'}`}>
-                                                                                <span className="text-2xl font-black">{actionLead.ai_score || 0}</span>
+                                                                            <div className={`w-16 h-16 rounded-[1.5rem] border-2 flex items-center justify-center shadow-2xl ${(actionLead.ai_score ?? 0) >= 70 ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-500 shadow-emerald-500/10' : (actionLead.ai_score ?? 0) >= 40 ? 'border-amber-500/30 bg-amber-500/5 text-amber-500 shadow-amber-500/10' : 'border-red-500/30 bg-red-500/5 text-red-500 shadow-red-500/10'}`}>
+                                                                                <span className="text-2xl font-black">{(actionLead.ai_score ?? 0) || 0}</span>
                                                                             </div>
                                                                             <div>
                                                                                 <p className="text-[9px] font-black text-white/20 uppercase tracking-[0.2em] leading-none mb-1.5">Temperatura</p>

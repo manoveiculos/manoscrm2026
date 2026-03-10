@@ -62,6 +62,22 @@ export const dataService = {
     },
 
     // Leads
+    async getLeadMessages(leadId: string) {
+        try {
+            const cleanId = leadId.replace('crm26_', '');
+            const { data, error } = await supabase
+                .from('whatsapp_messages')
+                .select('*')
+                .eq('lead_id', cleanId)
+                .order('created_at', { ascending: true });
+            if (error) throw error;
+            return data || [];
+        } catch (err) {
+            console.error("Erro ao buscar mensagens do lead:", err);
+            return [];
+        }
+    },
+
     async getLeads(consultantId?: string, leadId?: string) {
         // PERF: Rate-limit auto-distribution to once per 30s
         const distKey = 'auto_dist_last';

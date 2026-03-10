@@ -136,29 +136,29 @@ export async function POST(req: NextRequest) {
                 NOVA CONVERSA PARA ANÁLISE (ORDEM CRONOLÓGICA):
                 ${chatText || 'Nenhum texto de chat fornecido. Analise os anexos se disponíveis.'}
                     
-                    REGRAS DE CLASSIFICAÇÃO:
-                    1. FASE INICIAL DE ATENDIMENTO: Se houver pouco histórico (menos de 5 interações reais) ou apenas saudação inicial, classifique como "FASE INICIAL DE ATENDIMENTO".
-                    2. PONTUAÇÃO (RIGOROSA 0-100): 
-                       - 0-30: FASE INICIAL ou desinteresse. 
-                       - 31-60: Interesse vago/frio. 
-                       - 61-85: Interesse real, perguntas técnicas, financiamento ou visita. 
-                       - 86-100: FECHAMENTO HOJE, documentos enviados ou vindo agora.
+                    DIRETRIZES CIRÚRGICAS PARA O RESUMO:
+                    1. FOCO NO DIAGNÓSTICO: O resumo deve ir direto ao ponto. Qual a dor do cliente? O que o impede de comprar agora? Tem capacidade de pagamento clara?
+                    2. OBJEÇÕES OCULTAS: Leia nas entrelinhas. Se o cliente parou de responder após saber o preço, a objeção é valor. Se faz muitas perguntas técnicas, ele precisa de segurança.
+                    3. REGRA DO SCORE (0-100): 
+                       - 0-30: Sem intenção clara, curioso, ou não responde.
+                       - 31-60: Frio/Morno. Sondando mercado, indeciso.
+                       - 61-85: Quente! Discutindo parcelas, avaliando troca, pronto para test drive.
+                       - 86-100: Fechamento iminente. Exigindo contrato ou enviando documentos.
+                    4. PLANO DE AÇÃO: A "recomendação_abordagem" deve ser O QUÊ O VENDEDOR DEVE ESCREVER EXATAMENTE para destravar a venda ou forçar um SIM/NÃO. Nada de "tente ligar". Dê o script matador.
 
-                    3. PADRÕES: Identifique se o lead está NEGLIGENCIADO (>24h sem resposta do vendedor) ou em RISCO DE PERDA.
-
-                    EXTRAIA E RESPONDA EXCLUSIVAMENTE EM JSON:
+                    EXTRAIA E RESPONDA EXCLUSIVAMENTE NO FORMATO JSON ABAIXO:
                     {
                       "classificacao": "HOT" | "WARM" | "COLD" | "FASE INICIAL DE ATENDIMENTO",
                       "score": number,
                       "estagio_funil": "Qualificação" | "Apresentação" | "Negociação" | "Fechamento",
-                      "proxima_acao": string,
+                      "proxima_acao": "Ação clara (ex: Solicitar CPF para ficha)",
                       "probabilidade_fechamento": number,
-                      "resumo_estrategico": "Relatório ácido para o consultor.",
-                      "resumo_detalhado": "Análise da linha do tempo e comportamento.",
-                      "intencao_compra": string,
-                      "estagio_negociacao": string,
-                      "objecoes": "O que está impedindo a venda?",
-                      "recomendacao_abordagem": "O que o consultor deve falar AGORA?",
+                      "resumo_estrategico": "Resumo executivo de 2 linhas: Qual o real cenário deste Lead hoje?",
+                      "resumo_detalhado": "Análise profunda: Comportamento, objeções ocultas e real interesse.",
+                      "intencao_compra": "Baixa, Média, Alta ou Imediata",
+                      "estagio_negociacao": "Pesquisa, Comparação ou Decisão",
+                      "objecoes": "Qual o real gargalo atual? (ex: Preço, Distância, Taxa, Veículo)",
+                      "recomendacao_abordagem": "Script prático e matador para o vendedor enviar AGORA mesmo.",
                       "extracted_name": string | null,
                       "vehicle_interest": string | null,
                       "valor_investimento": string | null,
@@ -166,9 +166,9 @@ export async function POST(req: NextRequest) {
                       "metodo_compra": string | null,
                       "prazo_troca": string | null,
                       "behavioral_profile": {
-                        "perfil": string,
-                        "temperatura_emocional": string,
-                        "urgencia": "Alta" | "Média" | "Baixa"
+                        "perfil": "Analítico, Pragmático, Expressivo ou Afetivo",
+                        "temperatura_emocional": "Alta, Média ou Baixa",
+                        "urgencia": "Alta, Média ou Baixa"
                       }
                     }`
 

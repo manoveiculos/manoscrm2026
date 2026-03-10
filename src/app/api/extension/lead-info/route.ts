@@ -18,10 +18,12 @@ export async function GET(req: NextRequest) {
         const cleanPhone = phone.replace(/\D/g, '');
         console.log(`[Extension API] Buscando phone: ${cleanPhone}`);
 
-        // Tentar buscar com e sem o prefixo 55
+        // Tentar buscar com variantes (55, sem 55, e últimos 8 dígitos)
+        const last8 = cleanPhone.length >= 8 ? cleanPhone.substring(cleanPhone.length - 8) : cleanPhone;
         const phoneVariants = [
             cleanPhone,
-            cleanPhone.startsWith('55') ? cleanPhone.substring(2) : `55${cleanPhone}`
+            cleanPhone.startsWith('55') ? cleanPhone.substring(2) : `55${cleanPhone}`,
+            last8
         ].filter(p => p.length >= 8);
 
         // 1. Buscar na leads_manos_crm
@@ -46,6 +48,7 @@ export async function GET(req: NextRequest) {
                 lead: {
                     id: leadMain.id,
                     name: leadMain.name,
+                    phone: leadMain.phone,
                     status: leadMain.status,
                     classification: leadMain.ai_classification,
                     score: leadMain.ai_score,
@@ -76,6 +79,7 @@ export async function GET(req: NextRequest) {
                 lead: {
                     id: `crm26_${leadCrm26.id}`,
                     name: leadCrm26.nome,
+                    phone: leadCrm26.telefone,
                     status: leadCrm26.status,
                     classification: leadCrm26.ai_classification,
                     score: leadCrm26.ai_score,

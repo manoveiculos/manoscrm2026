@@ -11,19 +11,28 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         fetch(request.url, request.options || {})
             .then(async response => {
                 if (!response.ok) {
-                    // Se for 404, retornamos sucesso falso mas com o status, para não gerar erro no log do Chrome
-                    if (response.status === 404) {
-                        console.log("Manos CRM Background: Recurso não encontrado (404) -", request.url);
-                        return sendResponse({ success: false, error: '404' });
+                    let errorDetails = `HTTP ${response.status}`;
+                    try {
+                        const errorJson = await response.json();
+                        errorDetails = errorJson.error || errorJson.message || errorDetails;
+                    } catch (e) {
+                        // Não é JSON
                     }
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    console.error("Manos CRM Background: Erro na API -", errorDetails);
+                    if (request.options && request.options.body) {
+                        console.log("Manos CRM Background: Request Body Enviado ->", request.options.body);
+
+                        if (errorDetails.toLowerCase().includes('bigint')) {
+                            console.warn("Manos CRM Background: ERRO DE BIGINT! Verifique o campo leadId no body acima.");
+                        }
+                    }
+                    return sendResponse({ success: false, error: errorDetails });
                 }
                 const data = await response.json();
                 sendResponse({ success: true, data });
             })
             .catch(error => {
-                // Apenas logamos como erro real se não for 404
-                console.error("Manos CRM Background: Erro na requisição", request.url, error);
+                console.error("Manos CRM Background: Erro de Rede/Script", error);
                 sendResponse({ success: false, error: error.message });
             });
         return true; // Keep channel open

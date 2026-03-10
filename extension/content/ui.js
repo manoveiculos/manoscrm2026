@@ -103,9 +103,10 @@ export const UI = {
         const content = this.shadowRoot.getElementById('manos-content');
         content.innerHTML = `
             <div class="lead-card">
-                <div class="lead-name">${lead.name}</div>
+                <div class="lead-name">${lead.name || 'Sem Nome'}</div>
+                ${lead.phone ? `<div class="lead-phone" style="font-size: 11px; opacity: 0.6; margin-bottom: 8px;">${lead.phone}</div>` : ''}
                 <div class="status-badge" style="background: ${this.getStatusColor(lead.status)}">
-                    ${this.getStatusLabel(lead.status)}
+                    ESTÁGIO: ${this.getStatusLabel(lead.status)}
                 </div>
                 
                 <div class="info-item">
@@ -144,7 +145,36 @@ export const UI = {
         `;
 
         this.shadowRoot.getElementById('status-update').onchange = (e) => onStatusChange(lead.id, e.target.value);
-        this.shadowRoot.getElementById('sync-chat').onclick = () => onSync(lead.id);
+        this.shadowRoot.getElementById('sync-chat').onclick = (e) => {
+            const btn = e.target;
+            const originalText = btn.innerText;
+            btn.disabled = true;
+            btn.innerText = "Extraindo Histórico...";
+            onSync(lead.id).finally(() => {
+                btn.disabled = false;
+                btn.innerText = originalText;
+            });
+        };
+
+        // Remove old click-outside handler if exists
+        document.removeEventListener('mousedown', this._clickOutsideHandler);
+
+        // Hover listener to open
+        this.fab.onmouseenter = () => this.toggleSidebar(true);
+
+        // Click outside to close (excluding FAB and sidebar)
+        const handleClickOutside = (e) => {
+            const host = document.getElementById('manos-crm-root');
+            const path = e.composedPath();
+            const isInside = path.some(el => el === this.sidebar || el === this.fab || el === host);
+
+            if (!isInside && this.sidebar.classList.contains('active')) {
+                this.toggleSidebar(false);
+            }
+        };
+
+        this._clickOutsideHandler = handleClickOutside;
+        document.addEventListener('mousedown', this._clickOutsideHandler);
     },
 
     getClassificationLabel(classification) {
@@ -187,16 +217,13 @@ export const UI = {
         // Kanban removido a pedido do usuário
     },
 
-    renderNotFound(phone) {
+    renderNotFound(phone, onCreate) {
         const content = this.shadowRoot.getElementById('manos-content');
         content.innerHTML = `
             <div style="text-align:center; padding: 40px 20px;">
                 <div style="font-size: 40px; margin-bottom: 10px;">👤❓</div>
                 <div style="font-weight: 800; margin-bottom: 5px;">LEAD NÃO ENCONTRADO</div>
                 <div style="font-size: 12px; opacity: 0.6; margin-bottom: 20px;">${phone}</div>
-                <button class="btn-sync" id="create-lead" style="background: #dc2626; border: none;">
-                    CRIAR LEAD AGORA
-                </button>
             </div>
         `;
     }
