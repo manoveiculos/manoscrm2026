@@ -114,7 +114,13 @@ export async function POST(req: Request) {
                 leadMetrics[m.lead_id] = { sellerResponded: false, messages: [] };
             }
             leadMetrics[m.lead_id].messages.push(m);
-            if (m.direction === 'outbound') {
+            if (m.direction === 'outbound' && !leadMetrics[m.lead_id].sellerResponded) {
+                const inboundMessages = leadMetrics[m.lead_id].messages.filter(msg => msg.direction === 'inbound');
+                if (inboundMessages.length > 0) {
+                    const firstInbound = new Date(inboundMessages[0].created_at).getTime();
+                    const firstOutbound = new Date(m.created_at).getTime();
+                    leadMetrics[m.lead_id].firstResponseTime = Math.round((firstOutbound - firstInbound) / 60000); // minutes
+                }
                 leadMetrics[m.lead_id].sellerResponded = true;
             }
         });
@@ -142,6 +148,7 @@ export async function POST(req: Request) {
                 status_crm: l.status || 'received',
                 vendedor_atribuido: l.vendedor || 'Não atribuído',
                 seller_responded: metrics.sellerResponded ? 'SIM' : 'NÃO',
+                tempo_primeira_resposta_minutos: metrics.firstResponseTime || 'Não respondeu',
                 interesse: l.interesse || l.vehicle_interest || 'Aguardando Perfil',
                 conversao_venda: soldLeadIds.has(l.id) ? 'FECHAMENTO CONFIRMADO' : 'Em aberto',
                 resumo_vendedor: l.resumo_fechamento || '',
@@ -153,29 +160,21 @@ export async function POST(req: Request) {
 
         // 2. PASSO 2 — CRUZAMENTO COM O CRM (Vendas e Status)
         // 3. PASSO 3, 4 e 5 — ANÁLISE IA
-        const prompt = `Sua missão é ser um ANALISTA CIRÚRGICO DE PROBABILIDADE. Você não dá "notas bonitas", você avalia a chance REAL de fechamento baseando-se em evidências frias.
+        const prompt = `Sua missão é ser um ANALISTA CIRÚRGICO DE PROBABILIDADE e AUDITOR DE VENDAS. Você está avaliando o motivo de uma taxa de 0% de conversão (200 leads = 0 vendas).
 
-DIRETRIZES DE ANÁLISE RIGOROSA:
-1. QUALIDADE DO LEAD (0-100):
-   - 90-100: Lead agendou visita, enviou dados de troca ou pediu simulação.
-   - 60-89: Lead responde rápido, faz perguntas técnicas sobre o carro (KM, pneus, opcionais).
-   - 30-59: Lead "curioso", pergunta preço (mesmo estando no anúncio) ou demora 24h+ para responder.
-   - 0-29: Lead frio, ignora o vendedor após a primeira resposta ou não tem perfil de compra.
+DIRETRIZES DE ANÁLISE CIRÚRGICA (FOCO ZERO CONVERSÕES):
+1. RASTREIO DA ORIGEM VS COMPORTAMENTO:
+   - Identifique quais campanhas e anúncios trouxeram leads que travam nas mesmas etapas (ex: ignoram o vendedor após o preço).
+   - Verifique se anúncios específicos atraem perfis idênticos que não convertem.
 
-2. PROBABILIDADE DE VENDA (CRÍTICA):
-   - Seja pessimista por padrão. Só aumente a probabilidade se houver GATILHOS (Troca, Visita, Ficha).
-   - Leads que apenas "deram oi" e sumiram = Probabilidade < 5%.
+2. QUALIFICAÇÃO E TEMPO DE RESPOSTA:
+   - Avalie o 'tempo_primeira_resposta_minutos'. O lead está esfriando porque a equipe demora? (Demora > 15 minutos é crítico).
+   - Analise os motivos reais de perda ('Loss Reasons') ocultos no chat. O que o lead alega? "Muito caro", "Só estava olhando", "Desaparece"?
 
-3. CLASSIFICAÇÃO CIRÚRGICA:
-   - "LEAD QUENTE": Somente com intenção de fechamento clara.
-   - "LEAD MORNO": Em conversação ativa sobre detalhes técnicos.
-   - "LEAD FRIO": Respostas monossilábicas ou vácuo.
-   - "LEAD DESQUALIFICADO": Perfil errado, mora muito longe sem intenção de vir, ou sem margem.
-   - "FASE INICIAL": Lead acabou de chegar, aguardando primeira resposta significativa.
-
-4. DIAGNÓSTICO ESTRATÉGICO:
-   - Aponte sem filtros se o criativo está atraindo "gente sem dinheiro" ou "curioso de preço".
-   - Identifique se o vendedor está sendo passivo demais no chat (não faz chamadas para ação).
+3. AUDITORIA DO PERFIL DO LEAD:
+   - Os anúncios estão atraindo compradores ou apenas curiosos sem capacidade de pagamento?
+   - Procure padrões demográficos/comportamentais (ex: perguntas básicas que indicam que não leram o anúncio).
+   - O vendedor é passivo demais ou tenta forçar compromisso muito cedo?
 
 DADOS PARA ANÁLISE:
 ${JSON.stringify(leadsDataForAI.slice(0, 80))}
@@ -186,10 +185,11 @@ FORMATO DO JSON DE SAÍDA:
     { 
       "id": "string", 
       "score": 0, 
-      "classification": "LEAD QUENTE", 
-      "reason": "Explicar evidência real encontrada no chat", 
+      "classification": "LEAD QUENTE | MORNO | FRIO | DESQUALIFICADO",
+      "reason": "Evidência real no chat / Motivo real da perda", 
       "probability": 0, 
-      "recommendation": "Ação direta" 
+      "recommendation": "Ação direta para o lead individual",
+      "time_to_respond_mins": 0
     }
   ],
   "global_report": {
@@ -197,14 +197,20 @@ FORMATO DO JSON DE SAÍDA:
     "counts": { "quentes": 0, "mornos": 0, "frios": 0, "desqualificados": 0, "perda_total": 0 },
     "quality_average": 0,
     "overall_score": 0, 
-    "insights": ["insight 1"],
+    "insights": ["insight 1 auditando campanhas vs travamentos"],
     "strategic_recommendations": [ 
       { "title": "⚠️ TÍTULO", "action": "AÇÃO", "reason": "MOTIVO" }
     ],
     "diagnosis": {
-      "marketing_issue": "string",
-      "sales_issue": "string",
-      "creative_issue": "string"
+      "marketing_issue": "O que há de errado nas campanhas",
+      "sales_issue": "O que há de errado no atendimento",
+      "creative_issue": "Por que o criativo atrai curiosos"
+    },
+    "audit_findings": {
+      "response_time_impact": "Análise do impacto do tempo de resposta nas 0 vendas",
+      "common_loss_reasons": ["Motivo oculto 1", "Motivo oculto 2"],
+      "ad_stage_correlation": "Como os anúncios se relacionam com as etapas onde os leads travam",
+      "lead_profile_analysis": "Padrão de curioso vs comprador identificado"
     }
   }
 }`;
@@ -263,7 +269,8 @@ FORMATO DO JSON DE SAÍDA:
                     counts: result.global_report.counts,
                     quality_average: result.global_report.quality_average,
                     overall_score: result.global_report.overall_score,
-                    diagnosis: result.global_report.diagnosis
+                    diagnosis: result.global_report.diagnosis,
+                    audit_findings: result.global_report.audit_findings
                 },
                 created_at: new Date().toISOString()
             }])

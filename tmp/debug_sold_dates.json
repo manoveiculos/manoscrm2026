@@ -1,0 +1,17 @@
+{
+  "summary": {
+    "total": 1,
+    "thisMonthCreated": 1,
+    "thisMonthUpdated": 1,
+    "startOfMonth": "2026-03-01T03:00:00.000Z"
+  },
+  "data": [
+    {
+      "nome": "Jorge",
+      "status": "comprado",
+      "criado_em": "2026-03-02T20:00:55.42382+00:00",
+      "atualizado_em": "2026-03-09T13:20:32.853",
+      "vendedor": "Felipe Ledra"
+    }
+  ]
+}

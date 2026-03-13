@@ -1336,7 +1336,8 @@ export const dataService = {
             if (details.ai_reason !== undefined) updateObj.ai_reason = details.ai_reason;
             if (details.ai_summary !== undefined) updateObj.ai_summary = details.ai_summary;
             if (details.scheduled_at !== undefined) updateObj.scheduled_at = details.scheduled_at;
-            if (details.lead_id !== undefined) updateObj.lead_id = details.lead_id;
+            if (details.lead_id !== undefined) updateObj.lead_id = details.lead_id?.replace(/main_|crm26_|dist_/, '');
+            if (details.assigned_consultant_id !== undefined) updateObj.assigned_consultant_id = details.assigned_consultant_id?.replace(/main_|crm26_|dist_/, '');
 
             updateObj.updated_at = new Date().toISOString();
         }
@@ -1372,9 +1373,7 @@ export const dataService = {
             return;
         }
 
-        const client = this.getClient();
-
-        const { error } = await client
+        const { error } = await this.getClient()
             .from('interactions_manos_crm')
             .insert([{
                 lead_id: realId,
@@ -1394,8 +1393,16 @@ export const dataService = {
         const cleanPhone = (leadData.phone || '').replace(/\D/g, '');
         if (!cleanPhone) throw new Error("Telefone é obrigatório para criar um lead.");
 
+        // Aggressive Santization: Ensure IDs never have prefixes when entering the DB
+        if (leadData.assigned_consultant_id) {
+            leadData.assigned_consultant_id = leadData.assigned_consultant_id.replace(/main_|crm26_|dist_/, '');
+        }
+        if (leadData.lead_id) {
+            leadData.lead_id = leadData.lead_id.replace(/main_|crm26_|dist_/, '');
+        }
+
         // 1. Detection (No time limit, full database check)
-        const { data: existingLead } = await supabase
+        const { data: existingLead } = await this.getClient()
             .from('leads_manos_crm')
             .select('*, consultants_manos_crm(name)')
             .eq('phone', cleanPhone)
@@ -1404,6 +1411,7 @@ export const dataService = {
             .maybeSingle();
 
         if (existingLead) {
+            console.log("DEBUG: Found existing lead, updating/reactivating:", existingLead.id);
             // 2. Reactivation & Update Logic (Supports labels for robustness)
             const currentStatus = (existingLead.status || '').toLowerCase();
             const inactiveStatuses = ['lost', 'post_sale', 'lost_redistributed', 'desqualificado', 'reativacao', 'perda total', 'sem contato'];
@@ -1413,6 +1421,8 @@ export const dataService = {
 
             const updatePayload: any = {
                 updated_at: now,
+                // Ensure assigned_consultant_id is clean if passed
+                ...(leadData.assigned_consultant_id ? { assigned_consultant_id: leadData.assigned_consultant_id } : {}),
                 // Append new summary/interest to existing one
                 ai_summary: `${existingLead.ai_summary || ''}\n\n[NOVO CONTATO - ${new Date().toLocaleDateString('pt-BR')}] Origem: ${leadData.origem || leadData.source || 'Não especificada'}. Interesse: ${leadData.vehicle_interest || 'Não especificado'}.`.trim()
             };
@@ -1422,25 +1432,11 @@ export const dataService = {
                 updatePayload.status = 'received';
                 updatePayload.created_at = now; // Reactivation moves to top of list
                 updatePayload.motivo_perda = null; // Clear loss reason on reactivation
-
-                // REDISTRIBUTION ON REACTIVATION
-                const excludedId = existingLead.assigned_consultant_id;
-                const excludedName = (existingLead.consultants_manos_crm as any)?.name;
-                const nextConsultant = await this.pickNextConsultant(leadData.name || existingLead.name, excludedId, undefined, excludedName);
-
-                if (nextConsultant) {
-                    updatePayload.assigned_consultant_id = nextConsultant.id;
-                    updatePayload.vendedor_anterior = excludedName || existingLead.vendedor_anterior || 'Desconhecido';
-
-                    // Update consultant last assigned timestamp
-                    await supabase
-                        .from('consultants_manos_crm')
-                        .update({ last_lead_assigned_at: now })
-                        .eq('id', nextConsultant.id);
-                }
             }
 
-            const { data: updatedLead, error: updateError } = await supabase
+            console.log("DEBUG: Updating lead with payload:", updatePayload);
+
+            const { data: updatedLead, error: updateError } = await this.getClient()
                 .from('leads_manos_crm')
                 .update(updatePayload)
                 .eq('id', existingLead.id)
@@ -1448,30 +1444,39 @@ export const dataService = {
                 .single();
 
             if (updateError) throw updateError;
-
-            // Log history of reactivation/new contact
-            await this.logHistory(
-                updatedLead.id,
-                updatedLead.status,
-                existingLead.status,
-                `🔔 [${isInactive ? 'REATIVADO' : 'NOVO CONTATO'}] Recebido via ${leadData.origem || leadData.source || 'Sistema'}.` +
-                (isInactive && updatePayload.assigned_consultant_id ? ` Reatribuído para ${updatePayload.vendedor_anterior ? 'a partir de ' + updatePayload.vendedor_anterior : 'novo consultor'}.` : '')
-            );
-
+            console.log("DEBUG: Lead updated successfully:", updatedLead.id);
             return { ...updatedLead, id: `main_${updatedLead.id}` };
         }
 
         // 3. Insert New Lead (Normal flow)
-        const { origem, ...dataWithoutOrigem } = leadData;
-        const { data: newLead, error } = await supabase
+        console.log("DEBUG: No existing lead found, inserting new lead...");
+        // CRITICAL: Strictly whitelist fields to avoid "column not found" / schema cache errors
+        const ld = leadData as any;
+        const payload: any = {
+            name: (ld.name || ld.nome || 'Sem Nome').trim(),
+            phone: cleanPhone,
+            email: ld.email || null,
+            source: ld.source || ld.origem || 'Não especificada',
+            vehicle_interest: ld.vehicle_interest || ld.interesse || '',
+            carro_troca: ld.carro_troca || ld.troca || '',
+            valor_investimento: ld.valor_investimento || '',
+            status: ld.status || 'received',
+            ai_score: ld.ai_score || 0,
+            ai_classification: ld.ai_classification || 'warm',
+            ai_reason: ld.ai_reason || '',
+            ai_summary: ld.ai_summary || ld.resumo || '',
+            scheduled_at: ld.scheduled_at || null,
+            assigned_consultant_id: ld.assigned_consultant_id?.replace(/main_|crm26_|dist_/, '') || null,
+            lead_id: ld.lead_id?.replace(/main_|crm26_|dist_/, '') || null,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+        };
+
+        console.log("DEBUG: Insert payload:", payload);
+
+        const { data: newLead, error } = await this.getClient()
             .from('leads_manos_crm')
-            .insert([{
-                ...dataWithoutOrigem,
-                phone: cleanPhone,
-                status: leadData.status || 'received',
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString()
-            }])
+            .insert([payload])
             .select()
             .single();
 
@@ -1535,54 +1540,85 @@ export const dataService = {
     },
 
     // ROI & Financials
-    async getFinancialMetrics(period: string = 'this_month') {
-        const cacheKey = `metrics_${period}`;
+    // ROI & Financials
+    async getFinancialMetrics(period: string = 'this_month', customRange?: { start: string, end: string }) {
+        const cacheKey = customRange ? `metrics_${customRange.start}_${customRange.end}` : `metrics_${period}`;
         const cached = cacheGet<any>(cacheKey);
         if (cached) return cached;
 
         const now = new Date();
         let startDate: string;
+        let endDate: string | undefined = undefined;
 
-        switch (period) {
-            case 'today':
-                startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-                break;
-            case 'yesterday':
-                const yesterday = new Date(now);
-                yesterday.setDate(yesterday.getDate() - 1);
-                startDate = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate()).toISOString();
-                break;
-            case 'this_week':
-                const day = now.getDay();
-                const diff = now.getDate() - day + (day === 0 ? -6 : 1); // Monday
-                startDate = new Date(now.setDate(diff)).toISOString();
-                break;
-            case 'this_month':
-            default:
-                startDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-                break;
+        if (customRange) {
+            startDate = customRange.start;
+            endDate = customRange.end;
+        } else {
+            switch (period) {
+                case 'today':
+                    startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+                    break;
+                case 'yesterday':
+                    const yesterday = new Date(now);
+                    yesterday.setDate(yesterday.getDate() - 1);
+                    startDate = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate()).toISOString();
+                    endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+                    break;
+                case 'this_week':
+                    const day = now.getDay();
+                    const diff = now.getDate() - day + (day === 0 ? -6 : 1); // Monday
+                    startDate = new Date(now.getFullYear(), now.getMonth(), diff).toISOString();
+                    break;
+                case 'this_month':
+                default:
+                    startDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+                    break;
+            }
         }
 
         // PERF: Fetch all 3 data sources in parallel
-        const [campaignsRes, salesRes, leadsCountRes] = await Promise.all([
+        const soldStatuses = ['closed', 'comprado', 'venda', 'fechado'];
+        let leadsQuery = supabase.from('leads_distribuicao_crm_26').select('*', { count: 'exact', head: true }).gte('criado_em', startDate);
+        let sales26Query = supabase.from('leads_distribuicao_crm_26').select('valor_investimento').in('status', soldStatuses).gte('atualizado_em', startDate);
+        let salesMainQuery = supabase.from('leads_manos_crm').select('valor_investimento').in('status', soldStatuses).gte('updated_at', startDate);
+
+        if (endDate) {
+            leadsQuery = leadsQuery.lte('criado_em', endDate);
+            sales26Query = sales26Query.lte('atualizado_em', endDate);
+            salesMainQuery = salesMainQuery.lte('updated_at', endDate);
+        }
+
+        const [campaignsRes, leadsCountRes, sales26Res, salesMainRes] = await Promise.all([
             supabase.from('campaigns_manos_crm').select('total_spend'),
-            supabase.from('sales_manos_crm').select('sale_value, profit_margin').gte('created_at', startDate),
-            supabase.from('leads_distribuicao_crm_26').select('*', { count: 'exact', head: true }).gte('criado_em', startDate)
+            leadsQuery,
+            sales26Query,
+            salesMainQuery
         ]);
 
         const campaigns = campaignsRes.data;
-        const salesPeriod = salesRes.data;
         const totalLeadsPeriod = leadsCountRes.count;
+        const sales26 = sales26Res.data || [];
+        const salesMain = salesMainRes.data || [];
+        const combinedSales = [...sales26, ...salesMain];
 
         // Calculate metrics
         const totalSpend = (campaigns as any[])?.reduce((acc: number, c: any) => acc + (Number(c.total_spend) || 0), 0) || 0;
-        const totalRevenue = (salesPeriod as any[])?.reduce((acc: number, s: any) => acc + (Number(s.sale_value) || 0), 0) || 0;
-        const totalProfit = (salesPeriod as any[])?.reduce((acc: number, s: any) => acc + (Number(s.profit_margin) || 0), 0) || 0;
+        
+        const totalRevenue = combinedSales.reduce((acc: number, s: any) => {
+            const val = typeof s.valor_investimento === 'string' 
+                ? parseFloat(s.valor_investimento.replace(/[^\d.,]/g, '').replace(',', '.')) 
+                : (Number(s.valor_investimento) || 0);
+            return acc + val;
+        }, 0);
+        
+        const totalProfit = 0; // profit_margin column not found in schema
 
-        const salesCount = salesPeriod?.length || 0;
+        const salesCount = combinedSales.length;
         const cac = salesCount > 0 ? totalSpend / salesCount : 0;
         const cpl = (totalLeadsPeriod || 0) > 0 ? totalSpend / (totalLeadsPeriod || 1) : 0;
-        const roi = totalSpend > 0 ? (totalRevenue / totalSpend) : 0;
+        
+        // ROI as conversion percentage: (Sales / Leads) * 100
+        const roi = (totalLeadsPeriod && totalLeadsPeriod > 0) ? (salesCount / totalLeadsPeriod) * 100 : 0;
 
         const result = {
             totalSpend,
@@ -1600,6 +1636,101 @@ export const dataService = {
         };
         cacheSet(cacheKey, result, TTL.METRICS);
         return result;
+    },
+    
+    async getSalesRanking(startDate: string, endDate?: string) {
+        try {
+            const soldStatuses = ['closed', 'comprado', 'venda', 'fechado'];
+            // Fetch sold leads from both sources
+            let q26 = supabase.from('leads_distribuicao_crm_26').select('vendedor').in('status', soldStatuses).gte('atualizado_em', startDate);
+            let qMain = supabase.from('leads_manos_crm').select('assigned_consultant_id').in('status', soldStatuses).gte('updated_at', startDate);
+            
+            if (endDate) {
+                q26 = q26.lte('atualizado_em', endDate);
+                qMain = qMain.lte('updated_at', endDate);
+            }
+
+            const [res26, resMain, resConsultants] = await Promise.all([
+                q26,
+                qMain,
+                supabase.from('consultants_manos_crm').select('id, name')
+            ]);
+
+            const rankingMap = new Map<string, { name: string, count: number }>();
+            const consultants = resConsultants.data || [];
+
+            // Add sales from CRM 26
+            res26.data?.forEach(l => {
+                const name = l.vendedor || 'Pendente';
+                if (rankingMap.has(name)) {
+                    rankingMap.get(name)!.count++;
+                } else {
+                    rankingMap.set(name, { name, count: 1 });
+                }
+            });
+
+            // Add sales from Main CRM
+            resMain.data?.forEach(l => {
+                const con = consultants.find(c => c.id === l.assigned_consultant_id);
+                const name = con?.name || 'Vendedor Externo';
+                if (rankingMap.has(name)) {
+                    rankingMap.get(name)!.count++;
+                } else {
+                    rankingMap.set(name, { name, count: 1 });
+                }
+            });
+
+            return Array.from(rankingMap.values())
+                .sort((a, b) => b.count - a.count);
+        } catch (err) {
+            console.error("Error in getSalesRanking:", err);
+            return [];
+        }
+    },
+
+    async getRecentSales(limit: number = 5) {
+        try {
+            const soldStatuses = ['closed', 'comprado', 'venda', 'fechado'];
+            // Fetch from both tables
+            const [res26, resMain] = await Promise.all([
+                supabase.from('leads_distribuicao_crm_26').select('id, nome, vendedor, criado_em, atualizado_em, valor_investimento, vehicle_interest').in('status', soldStatuses).order('atualizado_em', { ascending: false }).limit(limit),
+                supabase.from('leads_manos_crm').select('id, name, assigned_consultant_id, created_at, updated_at, valor_investimento, vehicle_interest').in('status', soldStatuses).order('updated_at', { ascending: false }).limit(limit)
+            ]);
+
+            const { data: consultants } = await supabase.from('consultants_manos_crm').select('id, name');
+
+            const sales26 = (res26.data || []).map(l => ({
+                id: l.id,
+                lead: { name: l.nome },
+                consultant: { name: l.vendedor || 'Pendente' },
+                sale_value: typeof l.valor_investimento === 'string' 
+                    ? parseFloat(l.valor_investimento.replace(/[^\d.,]/g, '').replace(',', '.') || '0')
+                    : (Number(l.valor_investimento) || 0),
+                created_at: l.atualizado_em || l.criado_em,
+                vehicle_interest: l.vehicle_interest
+            }));
+
+            const salesMain = (resMain.data || []).map(l => {
+                const con = consultants?.find(c => c.id === l.assigned_consultant_id);
+                return {
+                    id: l.id,
+                    lead: { name: l.name },
+                    consultant: { name: con?.name || 'Equipe' },
+                    sale_value: typeof l.valor_investimento === 'string'
+                        ? parseFloat(l.valor_investimento.replace(/[^\d.,]/g, '').replace(',', '.') || '0')
+                        : (Number(l.valor_investimento) || 0),
+                    created_at: l.updated_at || l.created_at,
+                    vehicle_interest: l.vehicle_interest
+                };
+            });
+
+            return [...sales26, ...salesMain]
+                .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+                .slice(0, limit);
+        } catch (err) {
+            console.error("Error in getRecentSales manual fetch:", err);
+            return [];
+        }
     },
 
     // Consultant Performance
@@ -2168,12 +2299,19 @@ export const dataService = {
 
     // Sales Recording
     async recordSale(saleData: Partial<Sale>) {
+        const sanitizedData = {
+            ...saleData,
+            lead_id: saleData.lead_id?.replace(/main_|crm26_|dist_/, ''),
+            consultant_id: saleData.consultant_id?.replace(/main_|crm26_|dist_/, ''),
+            inventory_id: null, // Explicitly null as we are not using inventory selection for now
+            created_at: new Date().toISOString()
+        };
+
+        console.log("DEBUG: Recording sale with data:", sanitizedData);
+
         const { data, error } = await supabase
             .from('sales_manos_crm')
-            .insert([{
-                ...saleData,
-                created_at: new Date().toISOString()
-            }])
+            .insert([sanitizedData])
             .select()
             .single();
 
@@ -2183,12 +2321,16 @@ export const dataService = {
     },
 
     async recordPurchase(purchaseData: Partial<Purchase>) {
+        const sanitizedData = {
+            ...purchaseData,
+            lead_id: purchaseData.lead_id?.replace(/main_|crm26_|dist_/, ''),
+            consultant_id: purchaseData.consultant_id?.replace(/main_|crm26_|dist_/, ''),
+            created_at: new Date().toISOString()
+        };
+
         const { data, error } = await supabase
             .from('purchases_manos_crm')
-            .insert([{
-                ...purchaseData,
-                created_at: new Date().toISOString()
-            }])
+            .insert([sanitizedData])
             .select()
             .single();
 

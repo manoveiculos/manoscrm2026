@@ -31,9 +31,9 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { useSearchParams } from 'next/navigation';
 import { dataService } from '@/lib/dataService';
-import { updateLeadStatusAction } from '@/app/actions/leads';
+import { updateLeadStatusAction, recordSaleAction, recordPurchaseAction } from '@/app/actions/leads';
 import { supabase } from '@/lib/supabase';
-import { Lead, LeadStatus, Consultant, InventoryItem, AIClassification } from '@/lib/types';
+import { Lead, LeadStatus, Consultant, InventoryItem, AIClassification, Sale, Purchase } from '@/lib/types';
 
 const SourceIcon = ({ source, name, className }: { source?: string, name: string, className?: string }) => {
     const s = source?.toLowerCase() || '';
@@ -122,8 +122,7 @@ function LeadsContent() {
     const [isAddingLead, setIsAddingLead] = useState(false);
     const [isRecordingSale, setIsRecordingSale] = useState(false);
     const [saleData, setSaleData] = useState({
-        sale_value: '',
-        profit_margin: ''
+        vehicle_details: ''
     });
     const [isRecordingPurchase, setIsRecordingPurchase] = useState(false);
     const [purchaseData, setPurchaseData] = useState({
@@ -498,23 +497,44 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
 
     const handleRecordSale = async () => {
         if (!actionLead) return;
-        if (!saleData.sale_value || !saleData.profit_margin) {
-            alert("Por favor, preencha o valor da venda e a margem.");
+        if (!saleData.vehicle_details || saleData.vehicle_details.trim() === '') {
+            alert("Por favor, preencha os detalhes do veículo.");
             return;
         }
 
         try {
-            await dataService.recordSale({
-                lead_id: actionLead.id,
-                consultant_id: currentConsultantId || actionLead.assigned_consultant_id,
-                sale_value: parseFloat(saleData.sale_value.replace(/\D/g, '')) / 100,
-                profit_margin: parseFloat(saleData.profit_margin.replace(/\D/g, '')) / 100,
-                sale_date: new Date().toISOString()
+            console.log("DEBUG handleRecordSale (UI): ", {
+                actionLeadId: actionLead.id,
+                actionLeadConsultantId: actionLead.assigned_consultant_id,
+                currentConsultantId: currentConsultantId,
+                saleDataVehicle: saleData.vehicle_details
             });
+
+            // Call Server Action to handle promotion and sale recording in one robust step
+            const result = await recordSaleAction(
+                {
+                    ...actionLead,
+                    vehicle_interest: saleData.vehicle_details || actionLead.vehicle_interest,
+                    status: 'closed'
+                },
+                {
+                    consultant_id: currentConsultantId || actionLead.assigned_consultant_id,
+                    sale_value: 0,
+                    profit_margin: 0
+                }
+            );
+
+            if (!result.success) throw new Error(result.error || "Falha ao registrar venda no servidor.");
+
+            // Update local state with the promoted lead data if needed
+            if (result.lead) {
+                setLeads(prev => prev.map(l => l.id === actionLead.id ? result.lead! : l));
+            }
 
             await handleCloseLead('closed');
             setIsRecordingSale(false);
-            setSaleData({ sale_value: '', profit_margin: '' });
+            setSaleData({ vehicle_details: '' });
+            showToast("Venda registrada com sucesso!", "success");
         } catch (err: any) {
             console.error("Error recording sale:", err);
             alert(`Erro ao registrar venda: ${err.message}`);
@@ -529,17 +549,33 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
         }
 
         try {
-            await dataService.recordPurchase({
-                lead_id: actionLead.id,
-                consultant_id: currentConsultantId || actionLead.assigned_consultant_id,
-                vehicle_details: purchaseData.vehicle_details,
-                purchase_value: parseFloat(purchaseData.purchase_value.replace(/\D/g, '')) / 100,
-                purchase_date: new Date().toISOString()
-            });
+            const purchase_value_num = parseFloat(purchaseData.purchase_value.replace(/\D/g, '')) / 100;
+
+            // Call Server Action to handle promotion and purchase recording
+            const result = await recordPurchaseAction(
+                {
+                    ...actionLead,
+                    vehicle_interest: purchaseData.vehicle_details || actionLead.vehicle_interest,
+                    status: 'comprado'
+                },
+                {
+                    consultant_id: currentConsultantId || actionLead.assigned_consultant_id,
+                    vehicle_details: purchaseData.vehicle_details,
+                    purchase_value: purchase_value_num
+                }
+            );
+
+            if (!result.success) throw new Error(result.error || "Falha ao registrar compra no servidor.");
+
+            // Update local state
+            if (result.lead) {
+                setLeads(prev => prev.map(l => l.id === actionLead.id ? result.lead! : l));
+            }
 
             await handleCloseLead('comprado');
             setIsRecordingPurchase(false);
             setPurchaseData({ vehicle_details: '', purchase_value: '' });
+            showToast("Compra registrada com sucesso!", "success");
         } catch (err: any) {
             console.error("Error recording purchase:", err);
             alert(`Erro ao registrar compra: ${err.message}`);
@@ -771,8 +807,7 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
         if (newStatus === 'closed') {
             setActionLead(lead);
             setIsRecordingSale(true);
-            const defaultVal = lead.valor_investimento || '';
-            setSaleData({ sale_value: defaultVal, profit_margin: '' });
+            setSaleData({ vehicle_details: lead.vehicle_interest || '' });
             return;
         }
 
@@ -1436,15 +1471,13 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                     className="bg-white/5 border border-white/10 rounded-xl px-3 md:px-4 py-2.5 text-[10px] md:text-xs text-white/70 focus:outline-none focus:ring-1 focus:ring-red-500/50 hover:bg-white/10 transition-colors cursor-pointer appearance-none pr-7 md:pr-8 relative bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20width%3D%2224%22%20height%3D%2224%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20fill%3D%22none%22%20stroke%3D%22%23ffffff40%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%2F%3E%3C%2Fsvg%3E')] bg-[length:14px] bg-[right_10px_center] bg-no-repeat w-[calc(50%-0.5rem)] sm:w-auto"
                 >
                     <option value="all" className="bg-[#0a0a0a]">Estágio (Todos)</option>
-                    <option value="received" className="bg-[#0a0a0a]">Aguardando</option>
-                    <option value="attempt" className="bg-[#0a0a0a]">Em Atendimento</option>
+                    <option value="new" className="bg-[#0a0a0a]">Aguardando</option>
+                    <option value="contacted" className="bg-[#0a0a0a]">Em Atendimento</option>
                     <option value="scheduled" className="bg-[#0a0a0a]">Agendamento</option>
-                    <option value="visited" className="bg-[#0a0a0a]">Visita / Test Drive</option>
-                    <option value="negotiation" className="bg-[#0a0a0a]">Em Negociação</option>
+                    <option value="visited" className="bg-[#0a0a0a]">Visita e Test Drive</option>
+                    <option value="proposed" className="bg-[#0a0a0a]">Negociação</option>
                     <option value="closed" className="bg-[#0a0a0a]">Vendido</option>
-                    <option value="comprado" className="bg-[#0a0a0a]">Comprado</option>
-                    <option value="post_sale" className="bg-[#0a0a0a]">Sem Contato</option>
-                    <option value="lost" className="bg-[#0a0a0a]">Perda Total</option>
+                    <option value="lost" className="bg-[#0a0a0a]">Perda / Sem Contato</option>
                 </select>
 
                 <select
@@ -2311,19 +2344,12 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                                     className="bg-[#0d1117] border border-white/10 rounded-xl px-4 py-2 text-[10px] font-black uppercase text-white tracking-widest focus:outline-none focus:border-red-500 transition-colors cursor-pointer shadow-lg"
                                                 >
                                                     <option value="new">Aguardando</option>
-                                                    <option value="received">Recebido</option>
-                                                    <option value="attempt">Tentativa de Contato</option>
                                                     <option value="contacted">Em Atendimento</option>
-                                                    <option value="confirmed">Confirmado</option>
-                                                    <option value="scheduled">Agendamento Realizado</option>
-                                                    <option value="visited">Visitou a Loja</option>
-                                                    <option value="test_drive">Test Drive Realizado</option>
-                                                    <option value="proposed">Proposta Enviada</option>
-                                                    <option value="negotiation">Em Negociação</option>
-                                                    <option value="post_sale">Sem Contato / Pós-Venda</option>
+                                                    <option value="scheduled">Agendamento</option>
+                                                    <option value="visited">Visita e Test Drive</option>
+                                                    <option value="proposed">Negociação</option>
                                                     <option value="closed">Vendido</option>
-                                                    <option value="lost">Perdido / Descarte</option>
-                                                    <option value="comprado">Compra Realizada</option>
+                                                    <option value="lost">Perda / Sem Contato</option>
                                                 </select>
                                             </div>
                                             <button onClick={() => {
@@ -3297,22 +3323,12 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
 
                                                 <div className="space-y-4">
                                                     <div className="space-y-2">
-                                                        <label className="text-[10px] font-black text-white/30 uppercase tracking-[0.2em] ml-1">Valor Total da Venda</label>
+                                                        <label className="text-[10px] font-black text-white/30 uppercase tracking-[0.2em] ml-1">Detalhes do Veículo Vendido</label>
                                                         <input
                                                             type="text"
-                                                            placeholder="R$ 0,00"
-                                                            value={saleData.sale_value}
-                                                            onChange={(e) => setSaleData({ ...saleData, sale_value: formatCurrencyInput(e.target.value) })}
-                                                            className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-sm text-white focus:outline-none focus:ring-1 focus:ring-emerald-500/50"
-                                                        />
-                                                    </div>
-                                                    <div className="space-y-2">
-                                                        <label className="text-[10px] font-black text-white/30 uppercase tracking-[0.2em] ml-1">Margem de Lucro Bruta</label>
-                                                        <input
-                                                            type="text"
-                                                            placeholder="R$ 0,00"
-                                                            value={saleData.profit_margin}
-                                                            onChange={(e) => setSaleData({ ...saleData, profit_margin: formatCurrencyInput(e.target.value) })}
+                                                            placeholder="Ex: Honda Civic 2020 LXR"
+                                                            value={saleData.vehicle_details}
+                                                            onChange={(e) => setSaleData({ ...saleData, vehicle_details: e.target.value })}
                                                             className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-sm text-white focus:outline-none focus:ring-1 focus:ring-emerald-500/50"
                                                         />
                                                     </div>
