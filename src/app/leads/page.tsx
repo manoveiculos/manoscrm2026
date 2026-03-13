@@ -1497,9 +1497,10 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                     className="bg-white/5 border border-white/10 rounded-xl px-3 md:px-4 py-2.5 text-[10px] md:text-xs text-white/70 focus:outline-none focus:ring-1 focus:ring-blue-500/50 hover:bg-white/10 transition-colors cursor-pointer appearance-none pr-7 md:pr-8 relative bg-[url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20width%3D%2224%22%20height%3D%2224%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20fill%3D%22none%22%20stroke%3D%22%23ffffff40%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%2F%3E%3C%2Fsvg%3E')] bg-[length:14px] bg-[right_10px_center] bg-no-repeat w-[calc(50%-0.5rem)] sm:w-auto"
                 >
                     <option value="all" className="bg-[#0a0a0a]">Origem (Todas)</option>
-                    {Array.from(new Set(leads.map(l => l.origem).filter(Boolean))).sort().map(origin => (
-                        <option key={origin} value={origin} className="bg-[#0a0a0a]">{origin}</option>
-                    ))}
+                    <option value="Facebook" className="bg-[#0a0a0a]">Facebook</option>
+                    <option value="Instagram" className="bg-[#0a0a0a]">Instagram</option>
+                    <option value="WhatsApp" className="bg-[#0a0a0a]">WhatsApp</option>
+                    <option value="Google" className="bg-[#0a0a0a]">Google</option>
                 </select>
 
                 <select

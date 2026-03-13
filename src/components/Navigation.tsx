@@ -22,6 +22,8 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
+import { UserProfileModal } from './UserProfileModal';
+
 
 interface NavItem {
     label: string;
@@ -57,6 +59,8 @@ export const Navigation = () => {
     const [user, setUser] = useState<NavUser | null>(null);
     const [role, setRole] = useState<string | null>(null);
     const [mobileOpen, setMobileOpen] = useState(false);
+    const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+
 
     const handleLogoClick = () => {
         window.location.reload();
@@ -183,15 +187,19 @@ export const Navigation = () => {
             {/* Bottom Profile / Logout */}
             <div className="mt-auto w-full px-3 md:px-4 pt-4 md:pt-6 border-t border-white/5 bg-[#03060b]/80 backdrop-blur-md pb-4 md:pb-6 space-y-4">
                 <div className="flex items-center justify-between px-2">
-                    <div className="flex items-center gap-3 overflow-hidden">
+                    <div 
+                        className="flex items-center gap-3 overflow-hidden cursor-pointer hover:bg-white/5 p-1 rounded-xl transition-colors group"
+                        onClick={() => setIsProfileModalOpen(true)}
+                        title="Configurações de Perfil"
+                    >
                         <div className="relative shrink-0">
-                            <div className="w-9 h-9 md:w-10 md:h-10 rounded-xl bg-gradient-to-br from-red-600 to-red-900 border border-white/10 flex items-center justify-center shadow-lg text-white font-black uppercase text-sm">
+                            <div className="w-9 h-9 md:w-10 md:h-10 rounded-xl bg-gradient-to-br from-red-600 to-red-900 border border-white/10 flex items-center justify-center shadow-lg text-white font-black uppercase text-sm group-hover:shadow-red-500/20 transition-all">
                                 {user?.email ? user.email[0] : 'U'}
                                 <div className="absolute -bottom-1 -right-1 w-3 h-3 md:w-3.5 md:h-3.5 rounded-full bg-emerald-500 border-2 border-[#03060b]" />
                             </div>
                         </div>
                         <div className="overflow-hidden">
-                            <p className="text-[11px] font-black text-white truncate leading-tight">
+                            <p className="text-[11px] font-black text-white truncate leading-tight group-hover:text-red-500 transition-colors">
                                 {(user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Usuário').split(' ')[0]}
                             </p>
                             <p className="text-[8px] text-white/30 font-bold uppercase tracking-widest truncate">
@@ -199,6 +207,7 @@ export const Navigation = () => {
                             </p>
                         </div>
                     </div>
+
 
                     <button
                         onClick={handleLogout}
@@ -265,6 +274,14 @@ export const Navigation = () => {
                     </>
                 )}
             </AnimatePresence>
+
+            <UserProfileModal 
+                isOpen={isProfileModalOpen} 
+                onClose={() => setIsProfileModalOpen(false)} 
+                user={user}
+                role={role}
+            />
         </>
     );
 };
+
