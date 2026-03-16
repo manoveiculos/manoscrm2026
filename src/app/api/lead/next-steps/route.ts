@@ -42,6 +42,38 @@ export async function POST(req: NextRequest) {
             proximosPasos = ["Realizar ligação ativa", "Enviar mensagem de saudação personalizada", "Tentar contato em horário comercial"];
         }
 
+        // --- PERSISTENCE LOGIC ---
+        if (leadId) {
+            const cleanId = leadId.replace(/main_|crm26_|dist_/, '');
+            const isCRM26 = leadId.startsWith('crm26_');
+            const table = isCRM26 ? 'leads_distribuicao_crm_26' : 'leads_manos_crm';
+            
+            const timestamp = new Date().toLocaleString('pt-BR');
+            const timelineNote = `[${timestamp}] 🤖 IA - LABORATÓRIO DE IA:\n${diagnostico}\n\nPassos sugeridos:\n${proximosPasos.map(s => `• ${s}`).join('\n')}\n\n`;
+
+            const updateData: any = {
+                [isCRM26 ? 'resumo_consultor' : 'ai_reason']: diagnostico,
+                [isCRM26 ? 'resumo' : 'ai_summary']: timelineNote + (lead?.ai_summary || lead?.resumo || '')
+            };
+
+            // Mapping for specific fields
+            if (isCRM26) {
+                updateData.proxima_acao = proximosPasos.join(' | ');
+                updateData.next_step = proximosPasos[0] || '';
+            } else {
+                updateData.next_step = proximosPasos[0] || '';
+                // If the table has proxima_acao, update it too
+                updateData.proxima_acao = proximosPasos.join(' | ');
+            }
+
+            await supabaseAdmin
+                .from(table)
+                .update(updateData)
+                .eq('id', cleanId);
+            
+            console.log(`[NextSteps API] Persisted analysis for lead ${leadId} in ${table} (AI Lab Flow)`);
+        }
+
         return NextResponse.json({
             success: true,
             diagnostico,

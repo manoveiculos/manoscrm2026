@@ -10,6 +10,7 @@ const App = {
     API_BASE: "http://localhost:3000/api/extension",
     currentPhone: null,
     currentLeadId: null, // ID numérico do banco
+    currentNextSteps: null, // Persiste os próximos passos da IA
     currentMode: 'chat', // 'chat' or 'kanban'
     isSyncing: false,
     isFetching: false,
@@ -45,6 +46,7 @@ const App = {
         // Evento manual
         window.addEventListener('manos-crm-refresh', () => {
             this.currentPhone = null;
+            this.currentNextSteps = null; // Reset de IA ao refresh
             this.handleChatChange();
         });
 
@@ -93,12 +95,14 @@ const App = {
             if (phone !== this.currentPhone && !this.isFetching) {
                 this.currentPhone = phone;
                 this.currentLeadId = null;
+                this.currentNextSteps = null; // Reset de IA ao trocar de chat
                 UI.setLoading();
                 await this.fetchLead(phone);
             }
         } else {
             this.currentPhone = null;
             this.currentLeadId = null;
+            this.currentNextSteps = null; // Reset de IA ao não encontrar telefone
         }
 
     },
@@ -122,13 +126,29 @@ const App = {
 
                 if (response && response.success && response.data.success) {
                     const lead = response.data.lead;
-                    this.currentLeadId = lead.id; // Salva o ID do banco
+                    if (lead) {
+                        this.currentLeadId = lead.id; // Salva o ID do banco
 
-                    UI.renderLead(lead, this.baseUrl,
-                        (id, status) => this.updateStatus(id, status),
-                        (id) => this.syncChat(id)
-                    );
-                    UI.setAlert(true); // Piscar o botão para avisar o consultor
+                        // Restaurar Próximos Passos se existirem no banco e não tivermos no estado atual da sessão
+                        if (lead.diagnosis && lead.nextSteps && !this.currentNextSteps) {
+                            this.currentNextSteps = {
+                                diagnostico: lead.diagnosis,
+                                proximos_passos: typeof lead.nextSteps === 'string' ? lead.nextSteps.split(' | ') : lead.nextSteps
+                            };
+                        }
+
+                        UI.renderLead(
+                            lead,
+                            this.baseUrl,
+                            (id, status) => this.updateStatus(id, status),
+                            (id) => this.syncChat(id),
+                            this.currentNextSteps // Passa o estado persistido (da sessão ou do banco)
+                        );
+                        UI.setAlert(true); // Piscar o botão para avisar o consultor
+                    } else {
+                        console.warn("Manos CRM: Lead não encontrado no retorno da API", phone);
+                        UI.renderNotFound(phone, () => this.createLead(phone, name));
+                    }
                 } else {
                     console.warn("Manos CRM: Lead não encontrado ou erro no Proxy", phone);
                     UI.renderNotFound(phone, () => this.createLead(phone, name));
@@ -136,7 +156,11 @@ const App = {
             });
         } catch (err) {
             console.error("Manos CRM: Erro ao buscar lead via Proxy", err);
-            UI.renderNotFound(phone + " (Erro de Proxy)", () => { });
+            const isContextInvalid = err.message?.includes('Extension context invalidated');
+            const errorLabel = isContextInvalid ? "CONTEXTO INVÁLIDO (Recarregue a página)" : "Erro de Proxy";
+            UI.renderNotFound(`${phone} (${errorLabel})`, () => { 
+                if (isContextInvalid) window.location.reload();
+            });
         }
     },
 
@@ -199,23 +223,22 @@ const App = {
         }
 
         this.isSyncing = true;
-        const messages = await Scraper.getFullMessages(20);
+        const messages = await Scraper.getFullMessages(25);
         const leadName = Scraper.getName();
 
-        const chatText = messages.map(m => `[${m.direction === 'outbound' ? 'Vendedor' : 'Cliente'}]: ${m.text}`).join('\n');
+        console.log(`Manos CRM: [SYNC] Extraídas ${messages?.length || 0} mensagens.`);
+        if (!messages || messages.length === 0) {
+            console.error("Manos CRM: [ERROR] Nenhuma mensagem encontrada no DOM.");
+            alert("Erro: Não foi possível extrair mensagens do chat. Se a conversa for nova, tente enviar um 'Oi' primeiro.");
+            this.isSyncing = false;
+            return;
+        }
 
         // Hardening do ID: Prioridade ao ID numérico salvo do banco
         let rawId = this.currentLeadId || leadId;
         let cleanId = rawId.toString().replace(/crm26_|main_|dist_/, '');
 
-        // Se o cleanId ainda contém letras ou traços (UUID), usamos o telefone como ID numérico (BigInt seguro)
-        if (/[a-zA-Z-]/.test(cleanId)) {
-            console.warn("Manos CRM: ID é UUID. Usando telefone limpo para compatibilidade BigInt.");
-            cleanId = this.currentPhone.replace(/\D/g, '');
-        }
-
-        console.log("Manos CRM: ID enviado para Sync ->", cleanId);
-
+        console.log("Manos CRM: [SYNC] Iniciando envio para o CRM...", { id: cleanId, phone: this.currentPhone, count: messages.length });
         try {
             // 1. Sincronizar mensagens brutas
             const syncUrl = `${this.API_BASE}/sync-messages`;
@@ -226,39 +249,37 @@ const App = {
                     options: {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ leadId: cleanId, messages })
+                        body: JSON.stringify({ 
+                            leadId: cleanId, 
+                            messages,
+                            phone: this.currentPhone,
+                            name: leadName 
+                        })
                     }
                 }, resolve);
             });
 
-            if (!syncRes || !syncRes.success || !syncRes.data?.success) {
+            if (syncRes && syncRes.success && syncRes.data?.success) {
+                const aiResult = syncRes.data.aiAnalysis;
+                if (aiResult) {
+                    this.currentNextSteps = {
+                        diagnostico: aiResult.resumo_estrategico,
+                        proximos_passos: (aiResult.proxima_acao || aiResult.next_step || '').split(' | ')
+                    };
+                    UI.renderNextSteps(this.currentNextSteps);
+                }
+                
+                alert(`Sincronizado! ${syncRes.data?.count || 0} novas mensagens.\nDados e análise atualizados com o CRM.`);
+                this.fetchLead(this.currentPhone);
+            } else {
                 const error = syncRes?.data?.error || syncRes?.error || "Erro na API de Mensagens";
                 throw new Error(error);
             }
 
-
-            // 2. Buscar Próximos Passos
-            const nextStepsUrl = `${this.baseUrl}/api/lead/next-steps`;
-            chrome.runtime.sendMessage({
-                type: 'FETCH_DATA',
-                url: nextStepsUrl,
-                options: {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ leadId: cleanId, messages })
-                }
-            }, (res) => {
-                if (res && res.success && res.data?.success) {
-                    UI.renderNextSteps(res.data);
-                }
-            });
-
-            alert("Conversa importada com sucesso para o Laboratório de IA!");
-            this.fetchLead(this.currentPhone);
-
         } catch (err) {
             console.error("Manos CRM: Erro ao sincronizar via Proxy", err);
-            alert("Erro na sincronização: " + err.message);
+            const errorMsg = err.message || "Erro desconhecido";
+            alert(`Erro na sincronização: ${errorMsg}\n\nSe o erro persistir, verifique o console do desenvolvedor.`);
         } finally {
             this.isSyncing = false;
         }

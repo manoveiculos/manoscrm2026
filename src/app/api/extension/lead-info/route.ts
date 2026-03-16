@@ -29,19 +29,15 @@ export async function GET(req: NextRequest) {
         // 1. Buscar na leads_manos_crm
         let { data: leadsMain, error: errorMain } = await supabaseAdmin
             .from('leads_manos_crm')
-            .select(`
-                id, name, phone, status, ai_score, ai_classification, vehicle_interest, 
-                assigned_consultant_id,
-                consultants_manos_crm (name)
-            `)
+            .select(`*`)
             .or(`phone.ilike.%${cleanPhone}%,phone.ilike.%${phoneVariants.join('%,phone.ilike.%')}%`)
             .order('created_at', { ascending: false })
             .limit(1);
 
-        if (errorMain) console.error("Error Main Table:", errorMain);
-
         if (leadsMain && leadsMain.length > 0) {
             const leadMain = leadsMain[0];
+            console.log("[Extension API] Lead found in Main Table:", leadMain.id);
+            
             return NextResponse.json({
                 success: true,
                 source: 'main',
@@ -53,7 +49,9 @@ export async function GET(req: NextRequest) {
                     classification: leadMain.ai_classification,
                     score: leadMain.ai_score,
                     vehicle: leadMain.vehicle_interest,
-                    vendedor: (leadMain as any).consultants_manos_crm?.name || (Array.isArray((leadMain as any).consultants_manos_crm) ? (leadMain as any).consultants_manos_crm[0]?.name : 'Não atribuído')
+                    vendedor: leadMain.assigned_consultant_id ? 'Consultor Atribuído' : 'Não atribuído',
+                    diagnosis: leadMain.ai_reason || leadMain.ai_summary,
+                    nextSteps: leadMain.next_step || leadMain.proxima_acao
                 }
             });
         }
@@ -61,18 +59,15 @@ export async function GET(req: NextRequest) {
         // 2. Buscar na leads_distribuicao_crm_26
         let { data: leadsCrm26, error: errorCrm26 } = await supabaseAdmin
             .from('leads_distribuicao_crm_26')
-            .select(`
-                id, nome, telefone, status, ai_score, ai_classification, interesse, 
-                vendedor
-            `)
+            .select(`*`)
             .or(`telefone.ilike.%${cleanPhone}%,telefone.ilike.%${phoneVariants.join('%,telefone.ilike.%')}%`)
             .order('created_at', { ascending: false })
             .limit(1);
 
-        if (errorCrm26) console.error("Error CRM26 Table:", errorCrm26);
-
         if (leadsCrm26 && leadsCrm26.length > 0) {
             const leadCrm26 = leadsCrm26[0];
+            console.log("[Extension API] Lead found in CRM26 Table:", leadCrm26.id);
+
             return NextResponse.json({
                 success: true,
                 source: 'crm26',
@@ -84,9 +79,20 @@ export async function GET(req: NextRequest) {
                     classification: leadCrm26.ai_classification,
                     score: leadCrm26.ai_score,
                     vehicle: leadCrm26.interesse,
-                    vendedor: leadCrm26.vendedor || 'Não atribuído'
+                    vendedor: leadCrm26.vendedor || 'Não atribuído',
+                    diagnosis: leadCrm26.resumo_consultor || leadCrm26.ai_reason,
+                    nextSteps: leadCrm26.proxima_acao || leadCrm26.next_step
                 }
             });
+        }
+
+        if (errorMain || errorCrm26) {
+            console.error("DB Error:", errorMain || errorCrm26);
+            return NextResponse.json({ 
+                success: false, 
+                message: 'Erro no Banco de Dados', 
+                details: (errorMain || errorCrm26)?.message 
+            }, { status: 500 });
         }
 
         return NextResponse.json({ success: false, message: 'Lead não encontrado' });

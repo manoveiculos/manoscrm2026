@@ -3,82 +3,96 @@
  */
 
 export const Scraper = {
-    VERSION: "2.6.STRICT",
+    VERSION: "2.9.STABLE",
 
     _isValidPhone(phone) {
         if (!phone) return false;
-        if (phone.length > 13) return false; // Bloqueia JID interno WhatsApp longo (como 30726363869235)
-        if (!phone.startsWith('55')) return false; // Exige padrão Brasil para segurança
-        if (phone.length < 12) return false; // 55 + 2 DDD + 8 ou 9 digitos
+        const clean = phone.replace(/\D/g, '');
+        if (clean.length > 15) return false; 
+        if (clean.length < 8) return false; 
         return true;
+    },
+
+    _normalizePhone(phone) {
+        if (!phone) return null;
+        let clean = phone.replace(/\D/g, '');
+        // Se for número brasileiro sem o 55 (10 ou 11 dígitos), adiciona o 55
+        if (clean.length === 10 || clean.length === 11) {
+            if (!clean.startsWith('55')) {
+                clean = '55' + clean;
+            }
+        }
+        return clean;
     },
 
 
     getPhone() {
         try {
-            console.log(`Manos CRM: [DEBUG] Iniciando getPhone v${this.VERSION}...`);
+            console.log(`Manos CRM: [DEBUG] Iniciando getPhone v${this.VERSION} Agressivo...`);
 
-            // 1. Verificar Header da Conversa (#main header)
+            // FUNÇÃO HELPER: Extrair de data-id de forma segura
+            const findFromDataId = (selector) => {
+                const el = document.querySelector(selector);
+                const id = el?.getAttribute('data-id') || el?.closest('[data-id]')?.getAttribute('data-id');
+                if (id && (id.includes('@c.us') || id.includes('@s.whatsapp.net'))) {
+                    const phone = id.split('@')[0].split('_').pop().replace(/\D/g, '');
+                    if (this._isValidPhone(phone)) return this._normalizePhone(phone);
+                }
+                return null;
+            };
+
+            // 1. Header do Chat (Prioridade Máxima)
+            const phoneFromHeader = findFromDataId('#main header') 
+                || findFromDataId('[data-testid="conversation-panel-wrapper"] [data-id]')
+                || findFromDataId('[data-testid="chat-header"]');
+            
+            if (phoneFromHeader) {
+                console.log("Manos CRM: [REFINADO] Telefone via Header Data-ID ->", phoneFromHeader);
+                return phoneFromHeader;
+            }
+
+            // 2. Título do Header (Regex Agressiva)
             const mainHeader = document.querySelector('#main header');
             if (mainHeader) {
-                // Tenta pegar do título (pode ser o número ou nome)
-                const titleElem = mainHeader.querySelector('[data-testid="conversation-info-header-chat-title"]')
-                    || mainHeader.querySelector('span[title]')
-                    || mainHeader.querySelector('div[role="button"]');
-                
-                const titleText = titleElem ? (titleElem.innerText || titleElem.getAttribute('title') || "") : "";
-                const cleanTitle = titleText.replace(/\D/g, '');
-                
-                if (this._isValidPhone(cleanTitle)) {
-                    console.log("Manos CRM: [REFINADO] Telefone encontrado no título ->", cleanTitle);
-                    return cleanTitle;
-                }
-
-                // Tenta pegar o data-id do Header (mais robusto)
-                const headerDataId = mainHeader.closest('[data-id]')?.getAttribute('data-id')
-                    || mainHeader.querySelector('[data-id]')?.getAttribute('data-id')
-                    || document.querySelector('[data-testid="conversation-panel-wrapper"] [data-id]')?.getAttribute('data-id');
-
-                if (headerDataId && headerDataId.includes('@c.us')) {
-                    const phone = headerDataId.split('@')[0].replace(/\D/g, '');
-                    if (this._isValidPhone(phone)) {
-                        console.log("Manos CRM: [REFINADO] Telefone via data-id Header ->", phone);
-                        return phone;
+                const text = mainHeader.innerText || "";
+                const matches = text.match(/\+?\d[\d\s\-\(\)]{8,15}\d/g);
+                if (matches) {
+                    for (let m of matches) {
+                        const clean = m.replace(/\D/g, '');
+                        if (this._isValidPhone(clean)) {
+                            console.log("Manos CRM: [REFINADO] Telefone via Regex Header ->", clean);
+                            return this._normalizePhone(clean);
+                        }
                     }
                 }
             }
 
-            // 2. Painel Lateral (Item Selecionado)
-            const selectedChat = document.querySelector('div[aria-selected="true"]') 
-                || document.querySelector('div[data-testid="list-item"][aria-selected="true"]');
+            // 3. Item Selecionado no Pane Side
+            const selectedPhone = findFromDataId('#pane-side [aria-selected="true"]')
+                || findFromDataId('#pane-side [data-testid="list-item"][aria-selected="true"]');
             
-            if (selectedChat) {
-                const dataId = selectedChat.getAttribute('data-id') 
-                    || selectedChat.closest('[data-id]')?.getAttribute('data-id');
-                
-                if (dataId && dataId.includes('@c.us')) {
-                    const phone = dataId.split('@')[0].replace(/\D/g, '');
-                    if (this._isValidPhone(phone)) {
-                        console.log("Manos CRM: [REFINADO] Telefone via Painel Lateral ->", phone);
-                        return phone;
+            if (selectedPhone) {
+                console.log("Manos CRM: [REFINADO] Telefone via Pane Side ->", selectedPhone);
+                return selectedPhone;
+            }
+
+            // 4. Elemento de "Informações do Contato" se estiver aberto
+            const drawerDetails = findFromDataId('[data-testid="contact-info-drawer"]')
+                || findFromDataId('section[role="region"]');
+            if (drawerDetails) return drawerDetails;
+
+            // 5. Brute Force em todos os spans do header
+            if (mainHeader) {
+                const spans = mainHeader.querySelectorAll('span, div');
+                for (let s of spans) {
+                    const t = s.innerText.replace(/\D/g, '');
+                    if (t.length >= 10 && t.length <= 13 && this._isValidPhone(t)) {
+                        return this._normalizePhone(t);
                     }
                 }
             }
 
-            // 3. Brute Force Fallback (Qualquer elemento visível com data-id que pareça um chat individual)
-            const allPossible = document.querySelectorAll('#main [data-id], #pane-side [aria-selected="true"] [data-id]');
-            for (let el of allPossible) {
-                const id = el.getAttribute('data-id');
-                if (id && id.includes('@c.us') && !id.includes('-')) {
-                    const phone = id.split('@')[0].replace(/\D/g, '');
-                    if (this._isValidPhone(phone)) {
-                        console.log("Manos CRM: [FALLBACK] Telefone encontrado em elemento ->", phone);
-                        return phone;
-                    }
-                }
-            }
-
-            console.error(`Manos CRM: [DETECTOR v${this.VERSION}] Todos os caminhos retornaram NULL`);
+            console.error(`Manos CRM: [DETECTOR v${this.VERSION}] NENHUM TELEFONE IDENTIFICADO.`);
 
         } catch (e) {
             console.error("Manos CRM: Erro catastrófico no Scraper", e);
@@ -129,73 +143,91 @@ export const Scraper = {
         return "";
     },
 
-    // Extrai as mensagens que já estão no DOM atual
+    /**
+     * Extrai as mensagens visíveis com extrema robustez
+     */
     extractMessagesData() {
-        const messageElems = document.querySelectorAll('.message-in, .message-out');
-        return Array.from(messageElems).map(el => {
-            const isOut = el.classList.contains('message-out');
+        console.log("Manos CRM Scraper: Iniciando extração de mensagens...");
+        const messages = [];
+        
+        // Estratégia de Precisão: Seletores específicos de mensagens do WA Web
+        const msgNodes = document.querySelectorAll('.message-in, .message-out, [data-testid="msg-container"], div[data-id^="true_"], div[data-id^="false_"]');
+        
+        console.log(`Manos CRM Scraper: Encontrados ${msgNodes.length} nós de mensagem.`);
 
-            // Tenta seletores comuns do WhatsApp Web
-            const textElem = el.querySelector('.selectable-text span')
-                || el.querySelector('.copyable-text span')
-                || el.querySelector('span.selectable-text');
+        msgNodes.forEach(node => {
+            try {
+                const dataId = node.getAttribute('data-id') || "";
+                if (dataId && !dataId.includes('_')) return;
 
-            let text = "";
-            if (textElem) {
-                text = textElem.innerText;
-            } else {
-                const spans = el.querySelectorAll('span');
-                for (let s of spans) {
-                    if (s.innerText.length > 1 && !s.classList.contains('copyable-text')) {
-                        text = s.innerText;
-                        break;
+                const isOut = node.classList.contains('message-out') || 
+                             node.closest('.message-out') !== null ||
+                             (dataId && dataId.startsWith('true_'));
+
+                let text = "";
+                const textNode = node.querySelector('.selectable-text, span.copyable-text');
+                
+                if (textNode) {
+                    text = textNode.innerText || textNode.textContent || "";
+                } else {
+                    const spans = node.querySelectorAll('span');
+                    const textParts = [];
+                    spans.forEach(s => {
+                        const t = s.innerText?.trim();
+                        // Ignora se for o horário (ex: 10:15)
+                        if (t && t.length > 0 && !t.match(/^\d{1,2}:\d{2}(\s?[APap][Mm])?$/)) {
+                            textParts.push(t);
+                        }
+                    });
+                    text = textParts.join(" ");
+                }
+
+                if (!text || text.trim() === '') {
+                    const labelElem = node.querySelector('[aria-label]');
+                    if (labelElem) text = `[Mídia: ${labelElem.getAttribute('aria-label')}]`;
+                }
+
+                text = text?.trim();
+
+                if (text && text.length > 0) {
+                    const cleanText = text
+                        .replace(/[\u0000-\u001F\u007F-\u009F]/g, "")
+                        .replace(/\s+/g, " ");
+                        
+                    console.log(`Manos CRM Scraper: Mensagem extraída: [${isOut ? 'OUT' : 'IN'}] ${cleanText.substring(0, 30)}...`);
+
+                    messages.push({
+                        text: cleanText,
+                        direction: isOut ? 'outbound' : 'inbound',
+                        timestamp: new Date().toISOString(),
+                        _rawId: `${cleanText}|${isOut ? 'O' : 'I'}`
+                    });
+                }
+            } catch (e) {
+                console.error("Manos CRM Scraper: Erro ao processar nó de mensagem", e);
+            }
+        });
+
+        if (messages.length === 0) {
+            console.warn("Manos CRM Scraper: Nenhuma mensagem estruturada encontrada. Tentando Brute Force...");
+            const chatMain = document.querySelector('#main');
+            if (chatMain) {
+                const spans = chatMain.querySelectorAll('span.copyable-text, .selectable-text span');
+                spans.forEach(span => {
+                    const text = span.innerText?.trim();
+                    if (text && text.length > 2) {
+                        messages.push({
+                            text: text,
+                            direction: 'inbound',
+                            timestamp: new Date().toISOString(),
+                            _rawId: `${text}|I`
+                        });
                     }
-                }
+                });
             }
+        }
 
-            // Fallback para evitar vazios se possível
-            if (text.trim() === '') {
-                // Tenta pegar imagem/audio label
-                const labelElem = el.querySelector('[aria-label]');
-                if (labelElem) text = `[Mídia: ${labelElem.getAttribute('aria-label')}]`;
-            }
-
-
-            // Tenta capturar o timestamp real do atributo do WhatsApp (mais robusto para deduplicação)
-            let timestamp = new Date().toISOString();
-            const timeContainer = el.closest('[data-pre-plain-text]') || el.querySelector('[data-pre-plain-text]');
-            if (timeContainer) {
-                const rawText = timeContainer.getAttribute('data-pre-plain-text');
-                const match = rawText.match(/\[(\d{2}:\d{2}), (\d{2}\/\d{2}\/\d{4})\]/);
-                if (match) {
-                    const [_, time, date] = match;
-                    const [day, month, year] = date.split('/');
-                    timestamp = new Date(`${year}-${month}-${day}T${time}:00`).toISOString();
-                }
-            } else {
-                // Fallback: Busca em elemento de texto de hora
-                const timeElem = el.querySelector('[data-testid="msg-meta"]') || el.querySelector('.copyable-text');
-                const timeText = timeElem?.innerText?.match(/\d{2}:\d{2}/)?.[0];
-                if (timeText) {
-                    const [hours, minutes] = timeText.split(':');
-                    const d = new Date();
-                    d.setHours(parseInt(hours), parseInt(minutes), 0, 0);
-                    timestamp = d.toISOString();
-                }
-            }
-
-            // Remove caracteres de controle invisíveis
-            let cleanText = text.trim().replace(/[\u0000-\u001F\u007F-\u009F]/g, "");
-
-            // ID único robusto baseado no texto, direção e timestamp real
-            return {
-                text: cleanText,
-                direction: isOut ? 'outbound' : 'inbound',
-                timestamp: timestamp,
-                _rawId: `${cleanText}|${isOut ? 'O' : 'I'}|${timestamp}`
-            };
-
-        }).filter(m => m.text && m.text.length > 0);
+        return messages;
     },
 
     // Rola para cima repetidamente para carregar o histórico completo
@@ -240,7 +272,7 @@ export const Scraper = {
             console.log(`Manos CRM: Scroll ${currentScrolls}/${maxScrolls}...`);
 
             // Aguarda o WhatsApp carregar mais mensagens (geralmente dispara spinner)
-            await new Promise(r => setTimeout(r, 800)); // 800ms é o ideal para o WA Web reagir
+            await new Promise(r => setTimeout(r, 1200)); // 1200ms para garantir carregamento
 
             extractAndMerge();
 

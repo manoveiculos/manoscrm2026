@@ -14,6 +14,7 @@ import {
   Trophy,
   History
 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { StatsCard } from '@/components/StatsCard';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
@@ -38,6 +39,7 @@ const item = {
 };
 
 export default function Dashboard() {
+  const router = useRouter();
   const [metrics, setMetrics] = useState<FinancialMetrics | null>(null);
   const [recentLeads, setRecentLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
@@ -61,7 +63,7 @@ export default function Dashboard() {
         const session = authResponse.data?.session;
 
         if (!session?.user) {
-          window.location.href = '/login';
+          router.push('/login');
           return;
         }
 

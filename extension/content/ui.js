@@ -99,7 +99,7 @@ export const UI = {
         `;
     },
 
-    renderLead(lead, crmUrl, onStatusChange, onSync) {
+    renderLead(lead, crmUrl, onStatusChange, onSync, nextSteps = null) {
         const content = this.shadowRoot.getElementById('manos-content');
         const crmLink = `${crmUrl}/leads?id=${lead.id}`;
         
@@ -114,55 +114,76 @@ export const UI = {
                     </div>
                 </div>
                 ${lead.phone ? `<div class="lead-phone" style="font-size: 11px; opacity: 0.6; margin-bottom: 8px;">${lead.phone}</div>` : ''}
-                <div class="status-badge" style="background: ${this.getStatusColor(lead.status)}">
+                <div class="status-badge" id="status-badge-trigger" style="background: ${this.getStatusColor(lead.status)}; cursor: pointer; transition: transform 0.2s;" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
                     ESTÁGIO: ${this.getStatusLabel(lead.status)}
                 </div>
-                
-                <div class="info-item">
-                    <div class="info-label">INTERESSE</div>
-                    <div class="info-value">${lead.vehicle || 'Não informado'}</div>
-                </div>
- 
-                <div class="info-item">
-                    <div class="info-label">CLASSIFICAÇÃO IA</div>
-                    <div class="info-value" style="color: ${lead.classification === 'hot' ? '#ef4444' : '#fbbf24'}">
-                        ${this.getClassificationLabel(lead.classification)}
-                    </div>
-                </div>
- 
+
                 <div class="info-item">
                     <div class="info-label">VENDEDOR</div>
                     <div class="info-value">${lead.vendedor}</div>
                 </div>
             </div>
 
-            <div class="info-label">Atualizar Estágio</div>
-            <select class="status-select" id="status-update">
-                <option value="">Selecione...</option>
-                <option value="received">AGUARDANDO</option>
-                <option value="contacted">EM ATENDIMENTO</option>
-                <option value="scheduled">AGENDAMENTO</option>
-                <option value="visited">VISITA E TEST DRIVE</option>
-                <option value="negotiation">NEGOCIAÇÃO</option>
-                <option value="closed">VENDIDO ✅</option>
-                <option value="lost">PERDA / SEM CONTATO ❌</option>
-            </select>
+            <div style="display: none;">
+                <select class="status-select" id="status-update">
+                    <option value="">Selecione...</option>
+                    <option value="received">AGUARDANDO</option>
+                    <option value="contacted">EM ATENDIMENTO</option>
+                    <option value="scheduled">AGENDAMENTO</option>
+                    <option value="visited">VISITA E TEST DRIVE</option>
+                    <option value="negotiation">NEGOCIAÇÃO</option>
+                    <option value="closed">VENDIDO ✅</option>
+                    <option value="lost">PERDA / SEM CONTATO ❌</option>
+                </select>
+            </div>
 
+            <button class="btn-sync" id="sync-chat">
+                Sincronizar Conversa
+            </button>
 
-                <button class="btn-sync" id="sync-chat">
-                    Sincronizar Conversa
-                </button>
+            <button class="btn-sync" id="copy-manual" style="background: rgba(255,255,255,0.05); margin-top: 8px; border: 1px dashed rgba(255,255,255,0.2);">
+                Copiar Conversa (Manual)
+            </button>
 
-                <!-- Seção de Próximos Passos -->
-                <div id="next-steps-container" style="display:none; margin-top: 20px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px;">
-                    <div class="info-label" style="color: #10b981; font-weight: 800; margin-bottom: 10px;">PRÓXIMOS PASSOS DA GESTÃO</div>
-                    <div id="diagnostico-ia" style="font-size: 12px; margin-bottom: 10px; line-height: 1.4; opacity: 0.9;"></div>
-                    <div id="steps-list" style="display: flex; flex-direction: column; gap: 5px;"></div>
+            <!-- Seção de Próximos Passos (Reposicionada) -->
+            <div id="next-steps-container" style="display:none; margin-top: 15px; background: rgba(255,255,255,0.03); border-radius: 12px; padding: 15px; border: 1px solid rgba(255,255,255,0.05);">
+                <div class="info-label" style="color: #10b981; font-weight: 800; margin-bottom: 10px; display: flex; align-items: center; gap: 5px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                    PRÓXIMOS PASSOS DA GESTÃO
                 </div>
+                <div id="diagnostico-ia" style="font-size: 11px; margin-bottom: 12px; line-height: 1.5; opacity: 0.8; font-style: italic;"></div>
+                <div id="steps-list" style="display: flex; flex-direction: column; gap: 6px;"></div>
+            </div>
         `;
 
+        if (nextSteps) {
+            this.renderNextSteps(nextSteps);
+        }
 
-        this.shadowRoot.getElementById('status-update').onchange = (e) => onStatusChange(lead.id, e.target.value);
+        // Listeners
+        const selector = this.shadowRoot.getElementById('status-update');
+        const badgeTrigger = this.shadowRoot.getElementById('status-badge-trigger');
+
+        badgeTrigger.onclick = () => {
+            selector.parentElement.style.display = 'block'; // Show the parent div
+            selector.focus();
+            selector.click(); // Try to open it
+        };
+
+        selector.onchange = (e) => {
+            if (e.target.value) {
+                onStatusChange(lead.id, e.target.value);
+                selector.parentElement.style.display = 'none'; // Hide the parent div
+            }
+        };
+
+        // Close selector if blurred
+        selector.onblur = () => {
+            setTimeout(() => {
+                selector.parentElement.style.display = 'none'; // Hide the parent div
+            }, 200);
+        };
+
         this.shadowRoot.getElementById('sync-chat').onclick = (e) => {
             const btn = e.target;
             const originalText = btn.innerText;
@@ -172,6 +193,40 @@ export const UI = {
                 btn.disabled = false;
                 btn.innerText = originalText;
             });
+        };
+
+        this.shadowRoot.getElementById('copy-manual').onclick = async (e) => {
+            const btn = e.target;
+            const originalText = btn.innerText;
+            btn.disabled = true;
+            btn.innerText = "Copiando...";
+            
+            try {
+                // Usa a mesma lógica de extração mas joga pro clipboard
+                const { Scraper } = await import('./scraper.js');
+                const messages = Scraper.extractMessagesData();
+                
+                if (messages.length === 0) {
+                    alert("Não foi possível detectar mensagens automáticas. Tente selecionar o texto manualmente.");
+                } else {
+                    const textToCopy = messages.map(m => {
+                        const sender = m.direction === 'inbound' ? 'CLIENTE' : 'VOCÊ';
+                        const text = m.text || m.content || ""; // Fallback para content se necessário
+                        return `${sender}: ${text}`;
+                    }).join('\n\n');
+                    
+                    await navigator.clipboard.writeText(textToCopy);
+                    btn.innerText = "Copiado! ✅";
+                    setTimeout(() => { btn.innerText = originalText; btn.disabled = false; }, 2000);
+                    return;
+                }
+            } catch (err) {
+                console.error("Erro na cópia manual:", err);
+                alert("Erro ao copiar conversa.");
+            }
+            
+            btn.disabled = false;
+            btn.innerText = originalText;
         };
 
         // Remove old click-outside handler if exists
@@ -259,7 +314,13 @@ export const UI = {
         if (!container || !data) return;
 
         diagElem.innerText = data.diagnostico || "";
-        listElem.innerHTML = (data.proximos_passos || []).map(step => `
+        
+        let steps = data.proximos_passos || [];
+        if (typeof steps === 'string') {
+            steps = steps.split(' | ').filter(Boolean);
+        }
+
+        listElem.innerHTML = steps.map(step => `
             <div style="background: rgba(16, 185, 129, 0.1); border-left: 3px solid #10b981; padding: 8px; font-size: 11px; border-radius: 4px;">
                 ${step}
             </div>

@@ -63,7 +63,7 @@ export const Navigation = () => {
 
 
     const handleLogoClick = () => {
-        window.location.reload();
+        router.push('/');
     };
 
     // Close mobile menu on route change

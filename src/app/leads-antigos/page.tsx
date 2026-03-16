@@ -38,6 +38,16 @@ export default function OldLeadsPage() {
     const [leads, setLeads] = useState<DistributedLead[]>([]);
     const [loading, setLoading] = useState(true);
     const [activeCategory, setActiveCategory] = useState<Category>('all');
+    const [isMobile, setIsMobile] = useState(false);
+
+    useEffect(() => {
+        const checkMobile = () => {
+            setIsMobile(window.innerWidth < 768);
+        };
+        checkMobile();
+        window.addEventListener('resize', checkMobile);
+        return () => window.removeEventListener('resize', checkMobile);
+    }, []);
     const [isClassifying, setIsClassifying] = useState(false);
     const [isDistributing, setIsDistributing] = useState(false);
     const [role, setRole] = useState<string | null>(null);
@@ -521,7 +531,7 @@ export default function OldLeadsPage() {
                         </span>
                         {activeCategory === cat.id && (
                             <motion.div
-                                layoutId="active-tab"
+                                layoutId={isMobile ? undefined : "active-tab"}
                                 className="absolute inset-0 bg-white/5 border-b-2 border-red-500"
                                 transition={{ type: 'spring', stiffness: 400, damping: 30 }}
                             />
@@ -535,11 +545,11 @@ export default function OldLeadsPage() {
                     {filteredLeads.map((lead) => (
                         <motion.div
                             key={lead.id}
-                            layout
+                            layout={isMobile ? false : true}
                             initial={{ opacity: 0, y: 10 }}
                             animate={{ opacity: 1, y: 0 }}
                             exit={{ opacity: 0, scale: 0.95 }}
-                            className="glass-card rounded-2xl md:rounded-3xl border border-white/5 overflow-hidden hover:border-red-500/40 transition-all group relative bg-[#050608]/60 backdrop-blur-xl hover:shadow-[0_0_30px_rgba(239,68,68,0.05)]"
+                            className={`glass-card rounded-2xl md:rounded-3xl border border-white/5 overflow-hidden hover:border-red-500/40 transition-all group relative bg-[#050608]/60 ${isMobile ? 'backdrop-blur-md' : 'backdrop-blur-xl'} hover:shadow-[0_0_30px_rgba(239,68,68,0.05)]`}
                         >
                             <div className="flex flex-col md:flex-row items-stretch">
                                 {/* Status Strip (Left Border) */}
