@@ -290,10 +290,10 @@ export async function POST(req: NextRequest) {
                 console.log(`[SyncMessages] Conversation history saved to interactions for lead ${uuidId}`);
             }
         }
-        } catch (aiErr: any) {
-            console.error("[Sync API] AI Analysis failed:", aiErr);
-            aiError = aiErr.message || String(aiErr);
-        }
+    } catch (aiErr: any) {
+        console.error("[Sync API] AI Analysis failed:", aiErr);
+        aiError = aiErr.message || String(aiErr);
+    }
 
         return NextResponse.json({ 
             success: true, 

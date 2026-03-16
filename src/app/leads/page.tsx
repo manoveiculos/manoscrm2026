@@ -128,6 +128,7 @@ function LeadsContent() {
     const whatsappFolderInputRef = useRef<HTMLInputElement>(null);
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const clickTimerRef = useRef<NodeJS.Timeout | null>(null);
+    const analysisLockRef = useRef<string | null>(null); // Prevents circular IA analysis loops
 
     const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info'; visible: boolean }>({
         message: '',
@@ -197,10 +198,8 @@ function LeadsContent() {
                         ).join('\n');
                         setChatText(chatLog);
 
-                        // Trigger auto-analysis se o lead ainda não tem resumo gerado
-                        // Apenas fazemos isso automaticamente se ele for "virgem" de resumo 
-                        // para não gastar tokens atoa em leads que já tem linha do tempo.
-                        if (!actionLead.ai_summary || actionLead.ai_summary.trim() === '') {
+                        // Trigger auto-analysis only if lead is "virgin" AND not already being analyzed
+                        if ((!actionLead.ai_summary || actionLead.ai_summary.trim() === '') && analysisLockRef.current !== actionLead.id) {
                             console.log("Auto-initiating AI Analysis for freshly synced chat...");
                             setPendingAutoAnalysis(chatLog);
                         }
@@ -213,7 +212,7 @@ function LeadsContent() {
                 });
             }
         }
-    }, [actionLead]);
+    }, [actionLead?.id]); // Depend only on actionLead.id to avoid loops when other fields change
 
     // Executa a auto-análise quando a flag é ativada
     useEffect(() => {
@@ -352,6 +351,8 @@ function LeadsContent() {
         } catch (err: any) {
             console.error("Follow-up error:", err);
             showToast("Erro ao gerar reativação automática.", "error");
+            // Set a dummy value to prevent automatic re-triggering this session
+            setGeneratedFollowup("FAILED_TO_GENERATE");
         } finally {
             setIsGeneratingFollowup(false);
         }
@@ -1112,6 +1113,8 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
         }
 
         setIsAnalyzing(true);
+        analysisLockRef.current = leadToAnalyze.id; // Lock this lead to prevent re-triggering analysis
+
         try {
             const response = await fetch('/api/analyze-chat', {
                 method: 'POST',
@@ -1177,7 +1180,7 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                 if (actionLead?.id === leadToAnalyze.id) setActionLead(updatedLead);
                 if (selectedLead?.id === leadToAnalyze.id) setSelectedLead(updatedLead);
 
-                // Store structured analysis for UI display
+                // Structured analysis UI display
                 setStructuredAnalysis({
                     intencao_compra: aiResult.intencao_compra,
                     estagio_negociacao: aiResult.estagio_negociacao,
@@ -1196,103 +1199,107 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
             alert(`Falha na conexão com o servidor de IA.\n\nDetalhes: ${error.message}`);
         } finally {
             setIsAnalyzing(false);
+            analysisLockRef.current = null;
         }
     };
 
-    const filteredLeads = leads.filter(lead => {
-        // 1. Text Search Filter
-        const matchesSearch = lead.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            lead.phone?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            lead.vehicle_interest?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            lead.source?.toLowerCase().includes(searchTerm.toLowerCase());
+    // Use useMemo for filtering leads - critical for performance on mobile
+    const filteredLeads = React.useMemo(() => {
+        return leads.filter(lead => {
+            // 1. Text Search Filter
+            const matchesSearch = lead.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                lead.phone?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                lead.vehicle_interest?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                lead.source?.toLowerCase().includes(searchTerm.toLowerCase());
 
-        if (!matchesSearch) return false;
+            if (!matchesSearch) return false;
 
-        // 2. Date Filter
-        if (filterDate !== 'all') {
-            const leadDate = new Date(lead.created_at);
+            // 2. Date Filter
+            if (filterDate !== 'all') {
+                const leadDate = new Date(lead.created_at);
 
-            if (filterDate === 'custom') {
-                if (customStartDate) {
-                    const start = new Date(customStartDate);
-                    start.setHours(0, 0, 0, 0);
-                    if (leadDate < start) return false;
+                if (filterDate === 'custom') {
+                    if (customStartDate) {
+                        const start = new Date(customStartDate);
+                        start.setHours(0, 0, 0, 0);
+                        if (leadDate < start) return false;
+                    }
+                    if (customEndDate) {
+                        const end = new Date(customEndDate);
+                        end.setHours(23, 59, 59, 999);
+                        if (leadDate > end) return false;
+                    }
+                } else {
+                    const now = new Date();
+                    const diffTime = Math.abs(now.getTime() - leadDate.getTime());
+                    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+                    if (filterDate === 'today' && diffDays > 1) return false;
+                    if (filterDate === '7d' && diffDays > 7) return false;
+                    if (filterDate === '30d' && diffDays > 30) return false;
                 }
-                if (customEndDate) {
-                    const end = new Date(customEndDate);
-                    end.setHours(23, 59, 59, 999);
-                    if (leadDate > end) return false;
+            }
+
+            // 3. Consultant Filter
+            if (filterConsultant !== 'all') {
+                if (filterConsultant === 'unassigned') {
+                    if (lead.assigned_consultant_id) return false;
+                } else if (lead.assigned_consultant_id !== filterConsultant) {
+                    return false;
                 }
-            } else {
-                const now = new Date();
-                const diffTime = Math.abs(now.getTime() - leadDate.getTime());
-                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-                if (filterDate === 'today' && diffDays > 1) return false;
-                if (filterDate === '7d' && diffDays > 7) return false;
-                if (filterDate === '30d' && diffDays > 30) return false;
             }
-        }
 
-        // 3. Consultant Filter
-        if (filterConsultant !== 'all') {
-            if (filterConsultant === 'unassigned') {
-                if (lead.assigned_consultant_id) return false;
-            } else if (lead.assigned_consultant_id !== filterConsultant) {
-                return false;
+            // 4. Kanban Stage Filter
+            if (filterStage !== 'all') {
+                if (filterStage === 'lost' && lead.status === 'lost_redistributed') {
+                    // Keep it
+                } else if (lead.status !== filterStage) {
+                    return false;
+                }
             }
-        }
 
-        // 4. Kanban Stage Filter
-        if (filterStage !== 'all') {
-            if (filterStage === 'lost' && lead.status === 'lost_redistributed') {
-                // Keep it
-            } else if (lead.status !== filterStage) {
-                return false;
+            // 5. Interest Filter (AI Classification)
+            if (filterInterest !== 'all') {
+                if (lead.ai_classification !== filterInterest) return false;
             }
-        }
 
-        // 5. Interest Filter (AI Classification)
-        if (filterInterest !== 'all') {
-            if (lead.ai_classification !== filterInterest) return false;
-        }
-
-        // 6. Score Filter
-        if (filterScore !== 'all') {
-            const score = lead.ai_score || 0;
-            if (filterScore === 'high' && score < 80) return false;
-            if (filterScore === 'medium' && (score < 50 || score >= 80)) return false;
-            if (filterScore === 'low' && score >= 50) return false;
-        }
-
-        // 7. Origin Filter
-        if (filterOrigin !== 'all') {
-            if (lead.origem !== filterOrigin) return false;
-        }
-
-        // 8. Brain URL Shortcuts
-        if (urlFilter) {
-            const diffHours = (new Date().getTime() - new Date(lead.updated_at || lead.created_at).getTime()) / (1000 * 60 * 60);
-
-            if (urlFilter === 'hot') {
-                if (!((lead.behavioral_profile?.closing_probability || 0) > 70 || (lead.ai_score || 0) > 80)) return false;
+            // 6. Score Filter
+            if (filterScore !== 'all') {
+                const score = lead.ai_score || 0;
+                if (filterScore === 'high' && score < 80) return false;
+                if (filterScore === 'medium' && (score < 50 || score >= 80)) return false;
+                if (filterScore === 'low' && score >= 50) return false;
             }
-            if (urlFilter === 'neglected') {
-                if (diffHours <= 48) return false;
-            }
-            if (urlFilter === 'trade-in') {
-                if (!lead.carro_troca || lead.carro_troca.toLowerCase() === 'não' || lead.carro_troca.toLowerCase() === 'não informado') return false;
-            }
-            if (urlFilter === 'financing') {
-                if (!((lead.ai_summary || '').toLowerCase().includes('financia') || (lead.resumo_consultor || '').toLowerCase().includes('financia'))) return false;
-            }
-            if (urlFilter === 'recent') {
-                if (diffHours > 24) return false;
-            }
-        }
 
-        return true;
-    });
+            // 7. Origin Filter
+            if (filterOrigin !== 'all') {
+                if (lead.origem !== filterOrigin) return false;
+            }
+
+            // 8. Brain URL Shortcuts
+            if (urlFilter) {
+                const diffHours = (new Date().getTime() - new Date(lead.updated_at || lead.created_at).getTime()) / (1000 * 60 * 60);
+
+                if (urlFilter === 'hot') {
+                    if (!((lead.behavioral_profile?.closing_probability || 0) > 70 || (lead.ai_score || 0) > 80)) return false;
+                }
+                if (urlFilter === 'neglected') {
+                    if (diffHours <= 48) return false;
+                }
+                if (urlFilter === 'trade-in') {
+                    if (!lead.carro_troca || lead.carro_troca.toLowerCase() === 'não' || lead.carro_troca.toLowerCase() === 'não informado') return false;
+                }
+                if (urlFilter === 'financing') {
+                    if (!((lead.ai_summary || '').toLowerCase().includes('financia') || (lead.resumo_consultor || '').toLowerCase().includes('financia'))) return false;
+                }
+                if (urlFilter === 'recent') {
+                    if (diffHours > 24) return false;
+                }
+            }
+
+            return true;
+        });
+    }, [leads, searchTerm, filterDate, customStartDate, customEndDate, filterConsultant, filterStage, filterInterest, filterScore, filterOrigin, urlFilter]);
 
     if (loading) {
         return (

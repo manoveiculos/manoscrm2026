@@ -3,7 +3,7 @@
  */
 
 export const Scraper = {
-    VERSION: "2.9.STABLE",
+    VERSION: "3.0.ULTRA",
 
     _isValidPhone(phone) {
         if (!phone) return false;
@@ -88,6 +88,23 @@ export const Scraper = {
                     const t = s.innerText.replace(/\D/g, '');
                     if (t.length >= 10 && t.length <= 13 && this._isValidPhone(t)) {
                         return this._normalizePhone(t);
+                    }
+                }
+            }
+
+            // 6. GLOBAL SCAN: Busca qualquer data-id dentro de #main (ULTRA FALLBACK)
+            const mainEl = document.querySelector('#main');
+            if (mainEl) {
+                const allWithId = mainEl.querySelectorAll('[data-id]');
+                for (let el of allWithId) {
+                    const id = el.getAttribute('data-id');
+                    if (id && (id.includes('@c.us') || id.includes('@s.whatsapp.net'))) {
+                        const parts = id.split('@')[0].split('_');
+                        const phone = parts[parts.length - 1].replace(/\D/g, '');
+                        if (this._isValidPhone(phone)) {
+                            console.log("Manos CRM: [ULTRA] Telefone via Global Scan ->", phone);
+                            return this._normalizePhone(phone);
+                        }
                     }
                 }
             }
