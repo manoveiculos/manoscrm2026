@@ -77,7 +77,7 @@ export async function POST(req: NextRequest) {
                 if (!leadgenId) continue;
 
                 // Fetch lead details from Graph API
-                const leadUrl = `https://graph.facebook.com/v19.0/${leadgenId}?fields=id,created_time,field_data,campaign_id,ad_id,form_id&access_token=${META_TOKEN}`;
+                const leadUrl = `https://graph.facebook.com/v19.0/${leadgenId}?fields=id,created_time,field_data,campaign_id,ad_id,form_id,platform&access_token=${META_TOKEN}`;
                 const leadRes = await fetch(leadUrl).catch(err => {
                     console.error('Network error fetching lead from Meta:', err);
                     return null;
@@ -123,9 +123,13 @@ export async function POST(req: NextRequest) {
                     } catch { }
                 }
 
+                // Determine platform correctly
+                const platform = leadData.platform || 'facebook';
+                const finalSource = platform.toLowerCase() === 'instagram' ? 'Instagram' : campaignName;
+
                 // Enriquecer com IA se possível
                 let aiClassification = 'warm';
-                let aiResumo = `[LEAD FB] Real-time | Campanha: ${campaignName}`;
+                let aiResumo = `[LEAD ${platform.toUpperCase()}] Real-time | Campanha: ${campaignName}`;
                 let summarizedInterest = interest || campaignName;
 
                 if (process.env.OPENAI_API_KEY) {
@@ -155,13 +159,14 @@ export async function POST(req: NextRequest) {
                     await dataService.createLead({
                         name: name || 'Lead Meta Form',
                         phone: cleanPhone,
-                        source: campaignName,
+                        source: finalSource,
                         vehicle_interest: summarizedInterest,
                         region: city || '',
                         status: 'received',
                         created_at: leadData.created_time || new Date().toISOString(),
                         id_meta: leadData.id,
                         id_formulario: leadData.form_id,
+                        plataforma_meta: platform,
                         ai_summary: aiResumo,
                         ai_classification: aiClassification as any,
                         ai_reason: aiResumo

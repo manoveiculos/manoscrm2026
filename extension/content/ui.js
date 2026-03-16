@@ -99,11 +99,20 @@ export const UI = {
         `;
     },
 
-    renderLead(lead, onStatusChange, onSync) {
+    renderLead(lead, crmUrl, onStatusChange, onSync) {
         const content = this.shadowRoot.getElementById('manos-content');
+        const crmLink = `${crmUrl}/leads?id=${lead.id}`;
+        
         content.innerHTML = `
             <div class="lead-card">
-                <div class="lead-name">${lead.name || 'Sem Nome'}</div>
+                <div class="lead-header">
+                    <div class="lead-name-container">
+                        <div class="lead-name">${lead.name || 'Sem Nome'}</div>
+                        <a href="${crmLink}" target="_blank" class="crm-link" title="Ver no CRM">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+                        </a>
+                    </div>
+                </div>
                 ${lead.phone ? `<div class="lead-phone" style="font-size: 11px; opacity: 0.6; margin-bottom: 8px;">${lead.phone}</div>` : ''}
                 <div class="status-badge" style="background: ${this.getStatusColor(lead.status)}">
                     ESTÁGIO: ${this.getStatusLabel(lead.status)}
@@ -139,10 +148,19 @@ export const UI = {
                 <option value="lost">PERDA / SEM CONTATO ❌</option>
             </select>
 
-            <button class="btn-sync" id="sync-chat">
-                Sincronizar Conversa
-            </button>
+
+                <button class="btn-sync" id="sync-chat">
+                    Sincronizar Conversa
+                </button>
+
+                <!-- Seção de Próximos Passos -->
+                <div id="next-steps-container" style="display:none; margin-top: 20px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px;">
+                    <div class="info-label" style="color: #10b981; font-weight: 800; margin-bottom: 10px;">PRÓXIMOS PASSOS DA GESTÃO</div>
+                    <div id="diagnostico-ia" style="font-size: 12px; margin-bottom: 10px; line-height: 1.4; opacity: 0.9;"></div>
+                    <div id="steps-list" style="display: flex; flex-direction: column; gap: 5px;"></div>
+                </div>
         `;
+
 
         this.shadowRoot.getElementById('status-update').onchange = (e) => onStatusChange(lead.id, e.target.value);
         this.shadowRoot.getElementById('sync-chat').onclick = (e) => {
@@ -217,6 +235,8 @@ export const UI = {
         // Kanban removido a pedido do usuário
     },
 
+
+
     renderNotFound(phone, onCreate) {
         const content = this.shadowRoot.getElementById('manos-content');
         content.innerHTML = `
@@ -224,7 +244,28 @@ export const UI = {
                 <div style="font-size: 40px; margin-bottom: 10px;">👤❓</div>
                 <div style="font-weight: 800; margin-bottom: 5px;">LEAD NÃO ENCONTRADO</div>
                 <div style="font-size: 12px; opacity: 0.6; margin-bottom: 20px;">${phone}</div>
+                <button id="create-lead-btn" class="btn-sync" style="background: #10b981;">Cadastrar no CRM</button>
             </div>
         `;
+        this.shadowRoot.getElementById('create-lead-btn').onclick = onCreate;
+    },
+
+
+    renderNextSteps(data) {
+        const container = this.shadowRoot.getElementById('next-steps-container');
+        const diagElem = this.shadowRoot.getElementById('diagnostico-ia');
+        const listElem = this.shadowRoot.getElementById('steps-list');
+
+        if (!container || !data) return;
+
+        diagElem.innerText = data.diagnostico || "";
+        listElem.innerHTML = (data.proximos_passos || []).map(step => `
+            <div style="background: rgba(16, 185, 129, 0.1); border-left: 3px solid #10b981; padding: 8px; font-size: 11px; border-radius: 4px;">
+                ${step}
+            </div>
+        `).join('');
+
+        container.style.display = 'block';
     }
 };
+

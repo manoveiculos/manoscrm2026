@@ -47,9 +47,15 @@ export const Observers = {
         watchSidePane();
         watchMainChat();
 
-        // 4. Heartbeat: Failsafe a cada 2s
-        setInterval(() => callback(), 2000);
+
+        // 4. Heartbeat: Failsafe a cada 5s (apenas se a aba estiver ativa)
+        setInterval(() => {
+            if (document.visibilityState === 'visible') {
+                callback();
+            }
+        }, 5000);
     },
+
 
     stop() {
         if (this.chatObserver) this.chatObserver.disconnect();

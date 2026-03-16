@@ -47,6 +47,8 @@ export default function OldLeadsPage() {
     const [isMatching, setIsMatching] = useState<string | null>(null);
     const [matchResults, setMatchResults] = useState<Record<string, any>>({});
     const [selectedMatch, setSelectedMatch] = useState<DistributedLead | null>(null);
+    const [allConsultants, setAllConsultants] = useState<any[]>([]);
+    const [isReassigning, setIsReassigning] = useState<string | null>(null);
 
     // Advanced Filtering State
     const [sortBy, setSortBy] = useState('recent');
@@ -86,6 +88,12 @@ export default function OldLeadsPage() {
                 // Load Leads
                 const data = await dataService.getDistributedLeads(consultantFilter) as unknown as DistributedLead[];
                 setLeads(data || []);
+
+                // Load all consultants for admin reassignment
+                if (currentRole === 'admin' || currentRole === 'manager') {
+                    const consultantsList = await dataService.getConsultants();
+                    setAllConsultants(consultantsList || []);
+                }
             } catch (err) {
                 console.error("Error initializing page:", err);
             } finally {
@@ -120,7 +128,8 @@ export default function OldLeadsPage() {
             const matchesSearch =
                 lead.nome?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                 lead.interesse?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                lead.vendedor?.toLowerCase().includes(searchTerm.toLowerCase());
+                lead.vendedor?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                lead.telefone?.toLowerCase().includes(searchTerm.toLowerCase());
 
             if (!matchesSearch) return false;
 
@@ -318,6 +327,28 @@ export default function OldLeadsPage() {
         }
     };
 
+    const handleReassign = async (leadId: string | number, newVendedor: string) => {
+        if (!newVendedor || isReassigning) return;
+        
+        const confirmResult = confirm(`Deseja alterar o vendedor para ${newVendedor}?`);
+        if (!confirmResult) return;
+
+        setIsReassigning(String(leadId));
+        try {
+            await dataService.reassignDistributedLead(leadId, newVendedor);
+            
+            // Update local state
+            setLeads(prev => prev.map(l => l.id === leadId ? { ...l, vendedor: newVendedor } : l));
+            
+            alert("Vendedor alterado com sucesso!");
+        } catch (err: any) {
+            console.error(err);
+            alert(`Erro ao reatribuir: ${err.message}`);
+        } finally {
+            setIsReassigning(null);
+        }
+    };
+
     if (loading) {
         return (
             <div className="flex h-[60vh] items-center justify-center">
@@ -400,7 +431,7 @@ export default function OldLeadsPage() {
                         <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20 group-focus-within:text-red-500 transition-colors" size={18} />
                         <input
                             type="text"
-                            placeholder="Buscar no arquivo..."
+                            placeholder="Buscar por nome ou telefone..."
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                             className="bg-white/5 border border-white/10 rounded-2xl py-3.5 pl-12 pr-6 text-sm text-white focus:outline-none focus:ring-2 focus:ring-red-500/50 focus:bg-white/10 transition-all w-full md:w-80 font-medium"
@@ -617,7 +648,31 @@ export default function OldLeadsPage() {
                                     <div className="space-y-4 w-full">
                                         <div>
                                             <div className="text-[8px] font-black text-white/10 uppercase tracking-widest mb-1">Vendedor</div>
-                                            <p className="text-xs font-black text-white/40 truncate w-full">{lead.vendedor?.split(' ')[0] || 'Padrão'}</p>
+                                            {(role === 'admin' || role === 'manager') ? (
+                                                <div className="relative">
+                                                    <select
+                                                        value={lead.vendedor || ''}
+                                                        disabled={isReassigning === String(lead.id)}
+                                                        onChange={(e) => handleReassign(lead.id, e.target.value)}
+                                                        className="w-full bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-[10px] font-black text-white/60 focus:outline-none focus:ring-1 focus:ring-red-500/50 appearance-none cursor-pointer hover:bg-white/10 transition-all"
+                                                    >
+                                                        <option value="" disabled className="bg-[#0f0f0f]">Selecionar...</option>
+                                                        {allConsultants
+                                                            .filter(c => c.is_active || c.name === lead.vendedor)
+                                                            .map(c => (
+                                                                <option key={c.id} value={c.name} className="bg-[#0f0f0f]">{c.name}</option>
+                                                            ))
+                                                        }
+                                                    </select>
+                                                    {isReassigning === String(lead.id) && (
+                                                        <div className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-lg">
+                                                            <div className="h-3 w-3 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ) : (
+                                                <p className="text-xs font-black text-white/40 truncate w-full">{lead.vendedor?.split(' ')[0] || 'Padrão'}</p>
+                                            )}
                                         </div>
                                         {lead.vendedor_anterior && (
                                             <div className="pt-4 border-t border-white/5">

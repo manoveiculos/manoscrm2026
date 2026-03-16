@@ -11,6 +11,9 @@ const App = {
     currentPhone: null,
     currentLeadId: null, // ID numérico do banco
     currentMode: 'chat', // 'chat' or 'kanban'
+    isSyncing: false,
+    isFetching: false,
+
 
     async init() {
         console.log("Manos CRM: Iniciando App...");
@@ -21,6 +24,7 @@ const App = {
 
         // Remover trailing slash e garantir /api/extension
         baseUrl = baseUrl.replace(/\/$/, "");
+        this.baseUrl = baseUrl;
         this.API_BASE = `${baseUrl}/api/extension`;
 
         console.log("Manos CRM: API Base configurada para ->", this.API_BASE);
@@ -83,43 +87,44 @@ const App = {
         console.log("Manos CRM: [DEBUG] Scraper retornou ->", phone);
 
         if (phone) {
-            // Filtro de Segurança do tamanho de telefone do Brasil (max 13: 55 + ddd + 9 digitos)
-            if (phone.length > 13 || !phone.startsWith('55')) {
-                console.error("Manos CRM: [BLOQUEIO] ID inválido na camada controladora ->", phone);
-                return;
-            }
-            if (phone !== this.currentPhone) {
-                this.currentPhone = phone;
-                this.currentLeadId = null; // Limpa o ID do lead anterior
-                console.log("Manos CRM: Mudança de chat confirmada ->", phone);
+            // Filtro de Segurança
+            if (phone.length > 13 || !phone.startsWith('55')) return;
 
+            if (phone !== this.currentPhone && !this.isFetching) {
+                this.currentPhone = phone;
+                this.currentLeadId = null;
                 UI.setLoading();
                 await this.fetchLead(phone);
             }
         } else {
-            console.log("Manos CRM: Fora de conversa ativa.");
             this.currentPhone = null;
             this.currentLeadId = null;
         }
+
     },
 
     async fetchLead(phone) {
+        if (this.isFetching) return;
+        this.isFetching = true;
+
         try {
             console.log("Manos CRM: Chamando Proxy para ->", phone);
-            const name = Scraper.getName(); // Pega o nome do header para pre-fill
+            const name = Scraper.getName();
             const url = `${this.API_BASE}/lead-info?phone=${phone}`;
 
             chrome.runtime.sendMessage({
                 type: 'FETCH_DATA',
                 url: url
             }, (response) => {
+                this.isFetching = false;
                 console.log("Manos CRM Proxy Response:", response);
+
 
                 if (response && response.success && response.data.success) {
                     const lead = response.data.lead;
                     this.currentLeadId = lead.id; // Salva o ID do banco
 
-                    UI.renderLead(lead,
+                    UI.renderLead(lead, this.baseUrl,
                         (id, status) => this.updateStatus(id, status),
                         (id) => this.syncChat(id)
                     );
@@ -186,8 +191,17 @@ const App = {
     },
 
     async syncChat(leadId) {
-        const messages = await Scraper.getFullMessages(20); // Limite de 20 scrolls (aprox 30-50 dias de conversa)
+        if (this.isSyncing) return;
+        
+        if (!this.currentLeadId && !this.currentPhone) {
+            alert("Erro: Lead não identificado. Tente atualizar a página.");
+            return;
+        }
+
+        this.isSyncing = true;
+        const messages = await Scraper.getFullMessages(20);
         const leadName = Scraper.getName();
+
         const chatText = messages.map(m => `[${m.direction === 'outbound' ? 'Vendedor' : 'Cliente'}]: ${m.text}`).join('\n');
 
         // Hardening do ID: Prioridade ao ID numérico salvo do banco
@@ -222,17 +236,36 @@ const App = {
                 throw new Error(error);
             }
 
-            // Removido a geração automática de Resumo IA a pedido do usuário.
-            // O resumo agora será gerado apenas na aba "Laboratório de IA" dentro do CRM.
+
+            // 2. Buscar Próximos Passos
+            const nextStepsUrl = `${this.baseUrl}/api/lead/next-steps`;
+            chrome.runtime.sendMessage({
+                type: 'FETCH_DATA',
+                url: nextStepsUrl,
+                options: {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ leadId: cleanId, messages })
+                }
+            }, (res) => {
+                if (res && res.success && res.data?.success) {
+                    UI.renderNextSteps(res.data);
+                }
+            });
+
             alert("Conversa importada com sucesso para o Laboratório de IA!");
-            this.fetchLead(this.currentPhone); // Atualizar UI da extensão
+            this.fetchLead(this.currentPhone);
 
         } catch (err) {
             console.error("Manos CRM: Erro ao sincronizar via Proxy", err);
             alert("Erro na sincronização: " + err.message);
+        } finally {
+            this.isSyncing = false;
         }
     }
 };
+
+
 
 // Start
 App.init();

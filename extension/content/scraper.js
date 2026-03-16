@@ -13,85 +13,67 @@ export const Scraper = {
         return true;
     },
 
+
     getPhone() {
         try {
             console.log(`Manos CRM: [DEBUG] Iniciando getPhone v${this.VERSION}...`);
 
-            // Caminho A: Número puro no título (Header)
-            const name = this.getName();
-            console.log("Manos CRM: [DEBUG] Nome capturado no Header ->", `"${name}"`);
-
-            if (name) {
-                // Tenta limpar e verificar diretamente se o texto contém o número
-                const cleanName = name.replace(/\D/g, '');
-                if (this._isValidPhone(cleanName)) {
-                    console.log("Manos CRM: [CAMINHO A] Sucesso direto do texto ->", cleanName);
-                    return cleanName;
+            // 1. Verificar Header da Conversa (#main header)
+            const mainHeader = document.querySelector('#main header');
+            if (mainHeader) {
+                // Tenta pegar do título (pode ser o número ou nome)
+                const titleElem = mainHeader.querySelector('[data-testid="conversation-info-header-chat-title"]')
+                    || mainHeader.querySelector('span[title]')
+                    || mainHeader.querySelector('div[role="button"]');
+                
+                const titleText = titleElem ? (titleElem.innerText || titleElem.getAttribute('title') || "") : "";
+                const cleanTitle = titleText.replace(/\D/g, '');
+                
+                if (this._isValidPhone(cleanTitle)) {
+                    console.log("Manos CRM: [REFINADO] Telefone encontrado no título ->", cleanTitle);
+                    return cleanTitle;
                 }
-            }
 
-            // Caminho B: Atributo de Sistema no Painel de Conversa (#main)
-            const mainPanel = document.getElementById('main') || document.querySelector('[data-testid="conversation-panel-wrapper"]');
-            if (mainPanel) {
-                let dataId = mainPanel.getAttribute('data-id')
-                    || mainPanel.querySelector('[data-id]')?.getAttribute('data-id')
-                    || mainPanel.querySelector('[data-testid="conversation-info-header"]')?.getAttribute('data-id');
+                // Tenta pegar o data-id do Header (mais robusto)
+                const headerDataId = mainHeader.closest('[data-id]')?.getAttribute('data-id')
+                    || mainHeader.querySelector('[data-id]')?.getAttribute('data-id')
+                    || document.querySelector('[data-testid="conversation-panel-wrapper"] [data-id]')?.getAttribute('data-id');
 
-                if (dataId) {
-                    const phoneB = dataId.split('@')[0].replace(/\D/g, '');
-                    if (this._isValidPhone(phoneB)) {
-                        console.log("Manos CRM: [CAMINHO B] Sucesso ->", phoneB);
-                        return phoneB;
-                    } else {
-                        console.log("Manos CRM: [CAMINHO B] Bloqueado pela validação ->", phoneB);
+                if (headerDataId && headerDataId.includes('@c.us')) {
+                    const phone = headerDataId.split('@')[0].replace(/\D/g, '');
+                    if (this._isValidPhone(phone)) {
+                        console.log("Manos CRM: [REFINADO] Telefone via data-id Header ->", phone);
+                        return phone;
                     }
                 }
             }
 
-            // Caminho C: Painel Lateral (Item selecionado)
-            const selectedChat = document.querySelector('div[aria-selected="true"]');
+            // 2. Painel Lateral (Item Selecionado)
+            const selectedChat = document.querySelector('div[aria-selected="true"]') 
+                || document.querySelector('div[data-testid="list-item"][aria-selected="true"]');
+            
             if (selectedChat) {
-                let dataId = selectedChat.getAttribute('data-id')
-                    || selectedChat.closest('[data-id]')?.getAttribute('data-id')
-                    || selectedChat.querySelector('[data-id]')?.getAttribute('data-id');
-
-                if (dataId) {
-                    const phoneC = dataId.split('@')[0].replace(/\D/g, '');
-                    if (this._isValidPhone(phoneC)) {
-                        console.log("Manos CRM: [CAMINHO C] Sucesso ->", phoneC);
-                        return phoneC;
+                const dataId = selectedChat.getAttribute('data-id') 
+                    || selectedChat.closest('[data-id]')?.getAttribute('data-id');
+                
+                if (dataId && dataId.includes('@c.us')) {
+                    const phone = dataId.split('@')[0].replace(/\D/g, '');
+                    if (this._isValidPhone(phone)) {
+                        console.log("Manos CRM: [REFINADO] Telefone via Painel Lateral ->", phone);
+                        return phone;
                     }
                 }
             }
 
-            // Caminho D: Header Fallback
-            const header = document.querySelector('header');
-            if (header) {
-                const headerDataId = header.closest('[data-id]')?.getAttribute('data-id')
-                    || header.querySelector('[data-id]')?.getAttribute('data-id');
-
-                if (headerDataId) {
-                    const phoneD = headerDataId.split('@')[0].replace(/\D/g, '');
-                    if (this._isValidPhone(phoneD)) {
-                        console.log("Manos CRM: [CAMINHO D] Sucesso ->", phoneD);
-                        return phoneD;
-                    }
-                }
-            }
-
-            // Caminho E: Brute Force (Busca em qualquer elemento com JID)
-            console.log("Manos CRM: [DEBUG] Acionando Brute Force (Caminho E)...");
-            const allWithJid = document.querySelectorAll('[data-id*="@c.us"], [data-id*="@s.whatsapp.net"]');
-            for (let el of allWithJid) {
-                const jid = el.getAttribute('data-id');
-                if (jid && !jid.includes('-')) { // Ignora grupos
-                    const phoneE = jid.split('@')[0].replace(/\D/g, '');
-                    if (this._isValidPhone(phoneE)) {
-                        // Se estiver no #main ou no chat selecionado, é quase certeza
-                        if (el.closest('#main') || el.closest('div[aria-selected="true"]') || el.closest('#pane-side')) {
-                            console.log("Manos CRM: [CAMINHO E] Sucesso via Brute Force ->", phoneE);
-                            return phoneE;
-                        }
+            // 3. Brute Force Fallback (Qualquer elemento visível com data-id que pareça um chat individual)
+            const allPossible = document.querySelectorAll('#main [data-id], #pane-side [aria-selected="true"] [data-id]');
+            for (let el of allPossible) {
+                const id = el.getAttribute('data-id');
+                if (id && id.includes('@c.us') && !id.includes('-')) {
+                    const phone = id.split('@')[0].replace(/\D/g, '');
+                    if (this._isValidPhone(phone)) {
+                        console.log("Manos CRM: [FALLBACK] Telefone encontrado em elemento ->", phone);
+                        return phone;
                     }
                 }
             }
@@ -103,6 +85,7 @@ export const Scraper = {
         }
         return null;
     },
+
 
     // Auxiliar para garantir limpeza total
     _cleanPhone(phone) {
@@ -177,16 +160,41 @@ export const Scraper = {
                 if (labelElem) text = `[Mídia: ${labelElem.getAttribute('aria-label')}]`;
             }
 
+
+            // Tenta capturar o timestamp real do atributo do WhatsApp (mais robusto para deduplicação)
+            let timestamp = new Date().toISOString();
+            const timeContainer = el.closest('[data-pre-plain-text]') || el.querySelector('[data-pre-plain-text]');
+            if (timeContainer) {
+                const rawText = timeContainer.getAttribute('data-pre-plain-text');
+                const match = rawText.match(/\[(\d{2}:\d{2}), (\d{2}\/\d{2}\/\d{4})\]/);
+                if (match) {
+                    const [_, time, date] = match;
+                    const [day, month, year] = date.split('/');
+                    timestamp = new Date(`${year}-${month}-${day}T${time}:00`).toISOString();
+                }
+            } else {
+                // Fallback: Busca em elemento de texto de hora
+                const timeElem = el.querySelector('[data-testid="msg-meta"]') || el.querySelector('.copyable-text');
+                const timeText = timeElem?.innerText?.match(/\d{2}:\d{2}/)?.[0];
+                if (timeText) {
+                    const [hours, minutes] = timeText.split(':');
+                    const d = new Date();
+                    d.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+                    timestamp = d.toISOString();
+                }
+            }
+
             // Remove caracteres de controle invisíveis
             let cleanText = text.trim().replace(/[\u0000-\u001F\u007F-\u009F]/g, "");
 
-            // ID único simples baseado no texto e posição para evitar duplicações no Set
+            // ID único robusto baseado no texto, direção e timestamp real
             return {
                 text: cleanText,
                 direction: isOut ? 'outbound' : 'inbound',
-                timestamp: new Date().toISOString(), // Fallback
-                _rawId: cleanText + (isOut ? 'O' : 'I')
+                timestamp: timestamp,
+                _rawId: `${cleanText}|${isOut ? 'O' : 'I'}|${timestamp}`
             };
+
         }).filter(m => m.text && m.text.length > 0);
     },
 

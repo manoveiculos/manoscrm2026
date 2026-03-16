@@ -75,11 +75,33 @@
     margin-bottom: 20px;
 }
 
+.lead-name-container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+}
+
 .lead-name {
     font-weight: 800;
     font-size: 16px;
-    margin-bottom: 4px;
     text-transform: uppercase;
+}
+
+.crm-link {
+    color: rgba(255, 255, 255, 0.4);
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    padding: 6px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.crm-link:hover {
+    color: #ef4444;
+    background: rgba(239, 68, 68, 0.1);
+    transform: scale(1.1);
 }
 
 .status-badge {

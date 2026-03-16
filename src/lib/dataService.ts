@@ -64,16 +64,24 @@ export const dataService = {
     // Leads
     async getLeadMessages(leadId: string) {
         try {
-            const cleanId = leadId.replace('crm26_', '');
+            const cleanId = leadId.replace('crm26_', '').replace('main_', '').replace('dist_', '');
+            
+            // Se o ID não for numérico (ex: UUID do CRM Main), não buscamos nesta tabela 
+            // pois whatsapp_messages.lead_id é BIGINT.
+            if (!/^\d+$/.test(cleanId)) {
+                return [];
+            }
+
             const { data, error } = await supabase
                 .from('whatsapp_messages')
                 .select('*')
-                .eq('lead_id', cleanId)
+                .eq('lead_id', parseInt(cleanId))
                 .order('created_at', { ascending: true });
+            
             if (error) throw error;
             return data || [];
-        } catch (err) {
-            console.error("Erro ao buscar mensagens do lead:", err);
+        } catch (err: any) {
+            console.error("Erro ao buscar mensagens do lead:", err.message || err);
             return [];
         }
     },
@@ -216,13 +224,20 @@ export const dataService = {
         if (!cleanPhone) return;
 
         // Mapping fields to match Lead type
+        const platformMatch = (sourceLead.plataforma_meta || '').toLowerCase();
+        let finalSource = sourceLead.origem || sourceLead.source || (source === 'crm26' ? 'WhatsApp' : 'Facebook Leads');
+        
+        if (platformMatch.includes('instagram')) finalSource = 'Instagram';
+        else if (platformMatch.includes('facebook')) finalSource = 'Facebook Leads';
+
         const leadData: Partial<Lead> = {
             name: sourceLead.nome || sourceLead.name || 'Lead Importado',
             phone: cleanPhone,
             vehicle_interest: sourceLead.interesse || sourceLead.vehicle_interest || '',
             region: sourceLead.cidade || sourceLead.region || '',
             assigned_consultant_id: consultantId,
-            source: sourceLead.origem || sourceLead.source || (source === 'crm26' ? 'WhatsApp' : 'Facebook Leads'),
+            source: finalSource,
+            plataforma_meta: sourceLead.plataforma_meta || null,
             ai_score: sourceLead.ai_score || 0,
             ai_classification: sourceLead.ai_classification || 'warm',
             ai_reason: sourceLead.ai_reason || sourceLead.resumo_consultor || '',
@@ -363,8 +378,8 @@ export const dataService = {
                     status: leadStatus,
                     created_at: item.criado_em,
                     updated_at: item.atualizado_em || item.criado_em,
-                    source: item.origem && item.origem.toLowerCase().includes('facebook') ? 'Facebook Leads' :
-                        item.origem && item.origem.toLowerCase().includes('meta') ? 'Facebook Leads' :
+                    source: item.plataforma_meta && item.plataforma_meta.toLowerCase().includes('instagram') ? 'Instagram' :
+                        (item.origem && item.origem.toLowerCase().includes('facebook')) || (item.origem && item.origem.toLowerCase().includes('meta')) ? 'Facebook Leads' :
                             'WhatsApp',
                     consultants_manos_crm: { name: item.vendedor || 'Pendente' },
                     assigned_consultant_id: assignedConsultantId,
@@ -2147,7 +2162,7 @@ export const dataService = {
                     // 3. Para cada ad, buscar leads gerados
                     for (const ad of ads) {
                         try {
-                            const leadsUrl = `https://graph.facebook.com/v19.0/${ad.id}/leads?fields=id,created_time,field_data,campaign_id,ad_id,form_id&limit=500&access_token=${token}`;
+                            const leadsUrl = `https://graph.facebook.com/v19.0/${ad.id}/leads?fields=id,created_time,field_data,campaign_id,ad_id,form_id,platform&limit=500&access_token=${token}`;
                             const leadsRes = await fetch(leadsUrl);
                             if (!leadsRes.ok) continue;
 
@@ -2203,10 +2218,15 @@ export const dataService = {
                                     // Limpar telefone
                                     const cleanPhone = phone.replace(/\D/g, '');
 
+                                    // Platform logic
+                                    const platform = ml.platform || 'facebook';
+                                    const finalOrigem = platform.toLowerCase() === 'instagram' ? 'Instagram' : 'Leads Facebook';
+
                                     return {
                                         nome: name || 'Lead Meta Form',
                                         telefone: cleanPhone,
-                                        origem: 'Leads Facebook',
+                                        origem: finalOrigem,
+                                        plataforma_meta: platform,
                                         interesse: specificInterest,
                                         cidade: city || '',
                                         status: 'received',
@@ -2215,7 +2235,7 @@ export const dataService = {
                                         enviado: false,
                                         id_meta: ml.id,
                                         lead_id: ml.id,
-                                        resumo: `[LEAD FB] Capturado via formulário | Campanha: ${campaign.name} | Ad: ${ad.name}`
+                                        resumo: `[LEAD ${platform.toUpperCase()}] Capturado via formulário | Campanha: ${campaign.name} | Ad: ${ad.name}`
                                     };
                                 })
                                 .filter((l: any) => l.telefone && l.telefone.length >= 8);
@@ -2439,5 +2459,58 @@ export const dataService = {
             console.error("Error fetching consultant analysis:", err.message || err);
             return null;
         }
+    },
+
+    async reassignDistributedLead(leadId: string | number, newVendedorName: string) {
+        const timestamp = new Date().toISOString();
+        const { data: allConsultants } = await supabase.from('consultants_manos_crm').select('id, name');
+
+        let table = 'leads_distribuicao';
+        let realId: any = leadId;
+
+        if (typeof leadId === 'string') {
+            if (leadId.startsWith('crm26_')) {
+                table = 'leads_distribuicao_crm_26';
+                realId = leadId.replace('crm26_', '');
+            } else if (leadId.startsWith('main_')) {
+                table = 'leads_manos_crm';
+                realId = leadId.replace('main_', '');
+            } else if (leadId.startsWith('dist_')) {
+                table = 'leads_distribuicao';
+                realId = leadId.replace('dist_', '');
+            }
+        }
+
+        const updatePayload: any = {
+            vendedor: newVendedorName,
+            atualizado_em: timestamp
+        };
+
+        if (table === 'leads_manos_crm') {
+            updatePayload.updated_at = timestamp;
+            const firstName = newVendedorName.toLowerCase().split(' ')[0];
+            const consultant = allConsultants?.find(c => c.name.toLowerCase().includes(firstName));
+            if (consultant) {
+                updatePayload.assigned_consultant_id = consultant.id;
+                // Mantém o status atual ou define como recebido se estiver em reativação
+                // Por segurança na reativação, marcamos como recebido para reaparecer no topo do novo consultor
+                updatePayload.status = 'received';
+            }
+        }
+
+        const { error } = await supabase.from(table).update(updatePayload).eq('id', realId);
+
+        if (error) {
+            // Retrocompatibilidade se a coluna atualizado_em não existir em alguma tabela antiga
+            if (error.code === '42703' || (error.message && error.message.toLowerCase().includes('atualizado_em'))) {
+                delete updatePayload.atualizado_em;
+                const { error: retryError } = await supabase.from(table).update(updatePayload).eq('id', realId);
+                if (retryError) throw retryError;
+            } else {
+                throw error;
+            }
+        }
+
+        return true;
     }
 };

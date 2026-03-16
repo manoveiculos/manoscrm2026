@@ -1,67 +1,47 @@
 
-const https = require('https');
-const fs = require('fs');
-const path = require('path');
+import { createClient } from '@supabase/supabase-js';
+import dotenv from 'dotenv';
+import path from 'path';
 
-// Read .env.local manually
-const envPath = path.resolve(process.cwd(), '.env.local');
-const envContent = fs.readFileSync(envPath, 'utf8');
-const env = {};
-envContent.split('\n').forEach(line => {
-    const match = line.match(/^\s*([\w.-]+)\s*=\s*(.*)?\s*$/);
-    if (match) {
-        let value = match[2] || '';
-        if (value.startsWith('"') && value.endsWith('"')) value = value.slice(1, -1);
-        env[match[1]] = value;
-    }
-});
+dotenv.config({ path: '.env.local' });
 
-const supabaseUrl = env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseKey = env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-const url = new URL(supabaseUrl);
-const hostname = url.hostname;
-
-function request(method, path) {
-    return new Promise((resolve, reject) => {
-        const options = {
-            hostname: hostname,
-            path: path,
-            method: method,
-            headers: {
-                'apikey': supabaseKey,
-                'Authorization': `Bearer ${supabaseKey}`
-            }
-        };
-
-        const req = https.request(options, (res) => {
-            let data = '';
-            res.on('data', (chunk) => data += chunk);
-            res.on('end', () => {
-                try {
-                    resolve(JSON.parse(data));
-                } catch (e) {
-                    resolve(data);
-                }
-            });
-        });
-        req.on('error', (e) => reject(e));
-        req.end();
-    });
+if (!supabaseUrl || !supabaseServiceKey) {
+  console.error('Missing Supabase credentials');
+  process.exit(1);
 }
 
-async function run() {
-    console.log("Fetching all tables from OpenAPI...");
-    const spec = await request('GET', '/rest/v1/');
-    if (spec && spec.definitions) {
-        const tables = Object.keys(spec.definitions);
-        console.log("Tables found:", tables.join(', '));
-        
-        const salesTables = tables.filter(t => t.toLowerCase().includes('sale'));
-        console.log("\nPotential sales tables:", salesTables);
+const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+async function listTables() {
+  const { data, error } = await supabase
+    .rpc('get_tables'); // Check if a custom RPC exists first, or use a query
+
+  if (error) {
+    // If RPC fails, try querying public.tables
+    const { data: tables, error: tableError } = await supabase
+      .from('pg_tables') // This might not work via standard API due to schema permissions
+      .select('tablename')
+      .eq('schemaname', 'public');
+    
+    if (tableError) {
+      // Last resort: query common table names
+      console.log('Could not list tables automatically. Trying common names...');
+      const commonTables = ['profiles', 'users', 'admins', 'consultants', 'leads', 'vendedores'];
+      for (const table of commonTables) {
+        const { error: checkError } = await supabase.from(table).select('count').limit(0);
+        if (!checkError) {
+          console.log(`Table exists: ${table}`);
+        }
+      }
     } else {
-        console.log("Could not fetch OpenAPI spec.");
+      console.log('Tables:', tables.map(t => t.tablename));
     }
+  } else {
+    console.log('Tables:', data);
+  }
 }
 
-run();
+listTables();

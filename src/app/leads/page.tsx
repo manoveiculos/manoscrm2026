@@ -35,26 +35,20 @@ import { updateLeadStatusAction, recordSaleAction, recordPurchaseAction } from '
 import { supabase } from '@/lib/supabase';
 import { Lead, LeadStatus, Consultant, InventoryItem, AIClassification, Sale, Purchase } from '@/lib/types';
 
-const SourceIcon = ({ source, name, className }: { source?: string, name: string, className?: string }) => {
+const SourceIcon = ({ source, name, className, plataforma_meta }: { source?: string, name: string, className?: string, plataforma_meta?: string }) => {
     const s = source?.toLowerCase() || '';
+    const p = plataforma_meta?.toLowerCase() || '';
     const iconSize = 22;
 
-    // Facebook Logo
-    if (s.includes('facebook') || s.includes('meta')) return (
-        <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="#1877F2" className="group-hover:scale-110 transition-transform">
-            <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
-        </svg>
-    );
-
     // WhatsApp Logo
-    if (s.includes('whatsapp')) return (
+    if (s.includes('whatsapp') || p.includes('whatsapp')) return (
         <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="#25D366" className="group-hover:scale-110 transition-transform">
             <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.067 2.877 1.215 3.076.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z" />
         </svg>
     );
 
     // Instagram Logo
-    if (s.includes('instagram')) return (
+    if (s.includes('instagram') || p.includes('instagram')) return (
         <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[#E4405F] group-hover:scale-110 transition-transform">
             <rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect>
             <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path>
@@ -62,13 +56,20 @@ const SourceIcon = ({ source, name, className }: { source?: string, name: string
         </svg>
     );
 
+    // Facebook Logo
+    if (s.includes('facebook') || s.includes('meta') || p.includes('facebook')) return (
+        <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="#1877F2" className="group-hover:scale-110 transition-transform">
+            <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+        </svg>
+    );
+
     // Google Logo (G)
-    if (s.includes('google')) return (
+    if (s.includes('google') || s.includes('gads') || s.includes('gclid')) return (
         <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" className="group-hover:scale-110 transition-transform">
             <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
             <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
             <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
-            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
         </svg>
     );
 
@@ -733,21 +734,26 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                 setInventory(inventoryData || []);
 
                 if (leadIdFromUrl && data) {
-                    const lead = data.find((l: Lead) => l.id === leadIdFromUrl);
+                    // Try to find by prefixed ID first, then by raw ID
+                    const lead = data.find((l: Lead) => 
+                        l.id === leadIdFromUrl || 
+                        l.id === `main_${leadIdFromUrl}` || 
+                        l.id === `crm26_${leadIdFromUrl}`
+                    );
                     if (lead) {
                         if (tabFromUrl) {
                             // Ensure it's a valid tab
                             const validTabs = ['details', 'karbam', 'analysis', 'timeline', 'next_steps', 'flow-up', 'forms'];
                             if (validTabs.includes(tabFromUrl)) {
                                 setModalTab(tabFromUrl as any);
-                                setActionLead(lead);
-                                window.scrollTo({ top: 0, behavior: 'smooth' });
                             } else {
-                                setSelectedLead(lead);
+                                setModalTab('details');
                             }
                         } else {
-                            setSelectedLead(lead);
+                            setModalTab('details');
                         }
+                        setActionLead(lead);
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
                     }
                 }
             } catch (err) {
@@ -1287,6 +1293,7 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
     const filteredLeads = leads.filter(lead => {
         // 1. Text Search Filter
         const matchesSearch = lead.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            lead.phone?.toLowerCase().includes(searchTerm.toLowerCase()) ||
             lead.vehicle_interest?.toLowerCase().includes(searchTerm.toLowerCase()) ||
             lead.source?.toLowerCase().includes(searchTerm.toLowerCase());
 
@@ -1402,7 +1409,7 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                         <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20 group-focus-within:text-red-500 transition-colors" size={18} />
                         <input
                             type="text"
-                            placeholder="Buscar por nome, carro ou canal..."
+                            placeholder="Buscar por nome, telefone, carro ou canal..."
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                             className="bg-white/5 border border-white/10 rounded-2xl py-3.5 pl-12 pr-6 text-sm text-white focus:outline-none focus:ring-2 focus:ring-red-500/50 focus:bg-white/10 transition-all w-full md:w-80 font-medium"
@@ -1538,57 +1545,6 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                 )}
             </div>
 
-            {/* Team Performance Summary (Admin Only) */}
-            {userRole === 'admin' && consultants.length > 0 && (
-                <div className="flex flex-wrap gap-4 pt-10 border-t border-white/5 animate-in fade-in slide-in-from-top-4 duration-1000">
-                    <div className="w-full flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-3">
-                            <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-                            <h3 className="text-[10px] font-black text-white/40 uppercase tracking-[0.3em]">Performance em Tempo Real</h3>
-                        </div>
-                        <span className="text-[9px] font-bold text-white/20 italic">Dados sincronizados com CRM Main e WhatsApp</span>
-                    </div>
-                    {/* Unassigned Leads Card */}
-                    {leads.filter(l => !l.assigned_consultant_id && l.status !== 'closed' && l.status !== 'lost').length > 0 && (
-                        <div className="glass-card px-6 py-4 rounded-[1.8rem] border border-red-500/30 bg-red-600/5 flex items-center gap-4 hover:bg-red-600/10 transition-all group cursor-pointer shadow-xl shadow-red-600/5">
-                            <div className="w-10 h-10 rounded-2xl bg-red-600/20 flex items-center justify-center text-red-500 font-black text-sm uppercase shadow-lg group-hover:scale-110 transition-transform">
-                                <Users size={18} />
-                            </div>
-                            <div className="flex flex-col">
-                                <p className="text-[9px] font-black text-red-500 uppercase tracking-[0.2em] leading-none mb-1.5">RECEBIDOS</p>
-                                <div className="flex items-center gap-2">
-                                    <span className="text-sm font-black tracking-tighter text-white">
-                                        {leads.filter(l => !l.assigned_consultant_id && l.status !== 'closed' && l.status !== 'lost').length} Novos Leads
-                                    </span>
-                                    <div className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
-                                </div>
-                            </div>
-                        </div>
-                    )}
-                    {consultants.map(c => {
-                        const count = leads.filter(l =>
-                            l.assigned_consultant_id === c.id ||
-                            (l.consultants_manos_crm?.name === c.name)
-                        ).length;
-                        return (
-                            <div key={c.id} className="glass-card px-5 py-4 rounded-[1.8rem] border border-white/5 bg-white/[0.02] flex items-center gap-4 hover:border-red-500/30 hover:bg-red-500/[0.02] transition-all group group cursor-pointer shadow-2xl">
-                                <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-white/10 to-transparent border border-white/10 flex items-center justify-center text-white font-black text-sm uppercase group-hover:from-red-600 group-hover:to-red-900 group-hover:border-red-500 transition-all shadow-lg">
-                                    {c.name[0]}
-                                </div>
-                                <div className="flex flex-col">
-                                    <p className="text-[9px] font-black text-white/30 uppercase tracking-[0.2em] leading-none mb-1.5">{c.name.split(' ')[0]}</p>
-                                    <div className="flex items-center gap-2">
-                                        <span className={`text-sm font-black tracking-tighter ${count > 0 ? 'text-white' : 'text-white/10'}`}>
-                                            {count} {count === 1 ? 'Lead' : 'Leads'}
-                                        </span>
-                                        {count > 0 && <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]" />}
-                                    </div>
-                                </div>
-                            </div>
-                        );
-                    })}
-                </div>
-            )}
 
             {/* Unified Control Bar */}
             <div className="flex flex-wrap items-center justify-between gap-4 py-3 bg-white/5 px-6 rounded-3xl border border-white/10 shadow-2xl animate-in fade-in slide-in-from-top-4 duration-700">
@@ -1941,7 +1897,7 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
 
                                                         <div className="flex items-center gap-3 mb-2">
                                                             <div className="h-7 w-7 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center shrink-0">
-                                                                <SourceIcon source={lead.source} name={lead.name} className="text-[10px] font-black text-white/40" />
+                                                                <SourceIcon source={lead.source} name={lead.name} plataforma_meta={lead.plataforma_meta} className="text-[10px] font-black text-white/40" />
                                                             </div>
                                                             <h4 className="text-sm font-black text-white tracking-tight leading-tight truncate">{lead.name}</h4>
                                                         </div>
@@ -2020,7 +1976,7 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                                 lead.ai_classification === 'warm' ? 'border-amber-500/20' :
                                                     'border-white/10'
                                                 }`}>
-                                                <SourceIcon source={lead.source} name={lead.name} />
+                                                <SourceIcon source={lead.source} name={lead.name} plataforma_meta={lead.plataforma_meta} />
                                             </div>
                                             <div className="overflow-hidden">
                                                 <h3 className="font-black text-white text-[15px] tracking-tight leading-none mb-1 group-hover:text-red-400 transition-colors truncate uppercase font-outfit">
