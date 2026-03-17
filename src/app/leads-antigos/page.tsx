@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, Suspense } from 'react';
+import { useIsMobile } from '../leads/hooks/useIsMobile';
 import {
     Search,
     History,
@@ -33,21 +34,12 @@ import { Filter, Calendar, ChevronDown, ListFilter, SortDesc } from 'lucide-reac
 
 type Category = 'all' | 'hot' | 'warm' | 'cold';
 
-export default function OldLeadsPage() {
+export function OldLeadsContent() {
     const [searchTerm, setSearchTerm] = useState('');
     const [leads, setLeads] = useState<DistributedLead[]>([]);
     const [loading, setLoading] = useState(true);
     const [activeCategory, setActiveCategory] = useState<Category>('all');
-    const [isMobile, setIsMobile] = useState(false);
-
-    useEffect(() => {
-        const checkMobile = () => {
-            setIsMobile(window.innerWidth < 768);
-        };
-        checkMobile();
-        window.addEventListener('resize', checkMobile);
-        return () => window.removeEventListener('resize', checkMobile);
-    }, []);
+    const isMobile = useIsMobile();
     const [isClassifying, setIsClassifying] = useState(false);
     const [isDistributing, setIsDistributing] = useState(false);
     const [role, setRole] = useState<string | null>(null);
@@ -818,5 +810,17 @@ export default function OldLeadsPage() {
                 )}
             </AnimatePresence>
         </div>
+    );
+}
+
+export default function OldLeadsPage() {
+    return (
+        <Suspense key="old-leads-page-suspense" fallback={
+            <div className="flex h-[60vh] items-center justify-center">
+                <div className="h-12 w-12 border-4 border-red-500 border-t-transparent rounded-full animate-spin" />
+            </div>
+        }>
+            <OldLeadsContent />
+        </Suspense>
     );
 }

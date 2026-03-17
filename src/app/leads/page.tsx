@@ -685,7 +685,7 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
         if (addMode === 'true') {
             setIsAddingLead(true);
         }
-    }, [searchParams]);
+    }, [searchParams.get('add')]); // Depende apenas do parâmetro 'add'
 
     const handleAssignConsultant = async (leadId: string, consultantId: string) => {
         try {
@@ -3187,7 +3187,7 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
 
 export default function LeadsPage() {
     return (
-        <Suspense fallback={
+        <Suspense key="leads-page-suspense" fallback={
             <div className="flex h-[60vh] items-center justify-center">
                 <div className="h-12 w-12 border-4 border-red-500 border-t-transparent rounded-full animate-spin" />
             </div>
