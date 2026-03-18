@@ -170,14 +170,14 @@ export async function POST(req: NextRequest) {
                             {
                                 role: 'user',
                                 content: `Analise a conversa do lead ${nameToUse}:\n\n${chatTextForAI}\n\nResponda em JSON:\n{
-                                    "classificacao": "HOT" | "WARM" | "COLD",
-                                    "score": number,
+                                    "classificacao": "HOT" | "WARM" | "COLD" | "FASE INICIAL DE ATENDIMENTO",
+                                    "score": number, // 0-100
                                     "resumo_estrategico": "string",
-                                    "proxima_acao": "string",
+                                    "novo_status_sugerido": "attempt" | "contacted" | "negotiation" | "proposed" | "manter", // Se o vendedor mandou a primeira msg, é "attempt" ou "contacted". Se tão falando de preço, é "negotiation". Só mude se tiver certeza do avanço. Se não souber, "manter".
                                     "intencao_compra": "string",
                                     "estagio_negociacao": "string",
                                     "objecoes": "string",
-                                    "recomendacao_abordagem": "string"
+                                    "recomendacao_abordagem": "Apenas o SCRIPT MATADOR EXATO para o vendedor copiar e colar agora."
                                 }`
                             }
                         ],
@@ -211,12 +211,30 @@ export async function POST(req: NextRequest) {
             if (leadType === 'main' && uuidId) {
                 // Update leads_manos_crm
                 const currentSummary = leadFound.ai_summary || '';
+                
+                // HYPER-AI V2: Auto-Pipeline Status Move
+                const currentStatus = leadFound.status;
+                const aiSuggestedStatus = aiResult.novo_status_sugerido;
+                let finalStatus = currentStatus;
+                
+                if (aiSuggestedStatus && aiSuggestedStatus !== 'manter' && currentStatus !== 'closed' && currentStatus !== 'lost' && currentStatus !== 'comprado') {
+                     // Move forward in pipeline safely
+                     const pipelineOrder = ['received', 'new', 'attempt', 'contacted', 'negotiation', 'proposed'];
+                     const currentIndex = pipelineOrder.indexOf(currentStatus);
+                     const suggestedIndex = pipelineOrder.indexOf(aiSuggestedStatus);
+                     if (suggestedIndex > currentIndex) {
+                         finalStatus = aiSuggestedStatus;
+                         console.log(`[Hyper-AI] Moving lead ${uuidId} from ${currentStatus} to ${finalStatus}`);
+                     }
+                }
+
                 await supabaseAdmin
                     .from('leads_manos_crm')
                     .update({
+                        status: finalStatus,
                         ai_score: aiResult.score,
                         ai_classification: aiResult.classificacao?.toLowerCase(),
-                        ai_reason: aiResult.resumo_estrategico,
+                        ai_reason: aiResult.recomendacao_abordagem || aiResult.resumo_estrategico, // V2 1-Click CTA replaces reason
                         ai_summary: newNote + currentSummary,
                         next_step: aiResult.proxima_acao,
                         proxima_acao: aiResult.proxima_acao,
@@ -230,7 +248,7 @@ export async function POST(req: NextRequest) {
                     .insert([{
                         lead_id: uuidId,
                         notes: newNote,
-                        new_status: leadFound.status,
+                        new_status: finalStatus,
                         created_at: new Date().toISOString()
                     }]);
 
@@ -244,11 +262,25 @@ export async function POST(req: NextRequest) {
                     cleanResumo = currentResumoFull.split('||IA_DATA||')[0].trim();
                 }
 
+                // HYPER-AI V2: Auto-Pipeline Status Move (CRM26 sync)
+                const currentStatus = leadFound.status;
+                const aiSuggestedStatus = aiResult.novo_status_sugerido;
+                let finalStatus = currentStatus;
+                
+                if (aiSuggestedStatus && aiSuggestedStatus !== 'manter' && currentStatus !== 'closed' && currentStatus !== 'lost' && currentStatus !== 'comprado') {
+                     const pipelineOrder = ['received', 'new', 'attempt', 'contacted', 'negotiation', 'proposed'];
+                     const currentIndex = pipelineOrder.indexOf(currentStatus);
+                     const suggestedIndex = pipelineOrder.indexOf(aiSuggestedStatus);
+                     if (suggestedIndex > currentIndex) {
+                         finalStatus = aiSuggestedStatus;
+                     }
+                }
+
                 // Prepare the JSON metadata that the Dashboard expects
                 const iaMetadataStr = JSON.stringify({
                     classification: aiResult.classificacao,
                     score: aiResult.score,
-                    reason: aiResult.resumo_estrategico,
+                    reason: aiResult.recomendacao_abordagem || aiResult.resumo_estrategico, // V2 CTA
                     proxima_acao: aiResult.proxima_acao || aiResult.next_step
                 });
 
@@ -258,9 +290,10 @@ export async function POST(req: NextRequest) {
                 await supabaseAdmin
                     .from('leads_distribuicao_crm_26')
                     .update({
+                        status: finalStatus,
                         ai_score: aiResult.score,
                         ai_classification: aiResult.classificacao,
-                        ai_reason: aiResult.resumo_estrategico,
+                        ai_reason: aiResult.recomendacao_abordagem || aiResult.resumo_estrategico, // V2 CTA
                         resumo_consultor: aiResult.resumo_estrategico,
                         proxima_acao: aiResult.proxima_acao || aiResult.next_step,
                         next_step: aiResult.proxima_acao || aiResult.next_step,

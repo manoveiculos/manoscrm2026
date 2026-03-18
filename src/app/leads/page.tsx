@@ -57,6 +57,10 @@ function LeadsContent() {
     const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
     const [actionLead, setActionLead] = useState<Lead | null>(null);
     const [viewMode, setViewMode] = useState<'list' | 'kanban'>(viewFromUrl === 'kanban' ? 'kanban' : 'list');
+    
+    // Pagination State
+    const [visibleCount, setVisibleCount] = useState(20);
+    const observerTarget = useRef<HTMLDivElement>(null);
 
     // Filters State
     const [filterDate, setFilterDate] = useState<string>('all');
@@ -1301,6 +1305,38 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
         });
     }, [leads, searchTerm, filterDate, customStartDate, customEndDate, filterConsultant, filterStage, filterInterest, filterScore, filterOrigin, urlFilter]);
 
+    // Intersection Observer for Infinite Scroll
+    useEffect(() => {
+        const observer = new IntersectionObserver(
+            entries => {
+                if (entries[0].isIntersecting) {
+                    setVisibleCount(prev => prev + 20);
+                }
+            },
+            { threshold: 0.1, rootMargin: '100px' }
+        );
+
+        if (observerTarget.current) {
+            observer.observe(observerTarget.current);
+        }
+
+        return () => {
+            if (observerTarget.current) {
+                observer.unobserve(observerTarget.current);
+            }
+        };
+    }, [filteredLeads.length]);
+
+    // Reset visible count when filters change
+    useEffect(() => {
+        setVisibleCount(20);
+    }, [searchTerm, filterDate, customStartDate, customEndDate, filterConsultant, filterStage, filterInterest, filterScore, filterOrigin, urlFilter]);
+
+    // Slice to visible elements
+    const visibleLeads = React.useMemo(() => {
+        return filteredLeads.slice(0, visibleCount);
+    }, [filteredLeads, visibleCount]);
+
     if (loading) {
         return (
             <div className="flex h-[60vh] items-center justify-center">
@@ -1640,7 +1676,8 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                         { id: 'venda', title: 'Vendido', statuses: ['closed', 'comprado'], color: 'bg-emerald-500' },
                                         { id: 'perda', title: 'Perda / Sem Contato', statuses: ['lost', 'lost_redistributed', 'post_sale', 'trash'], color: 'bg-white/10' }
                                     ] as const).map((col) => {
-                                        const colLeads = filteredLeads.filter(l => (col.statuses as unknown as LeadStatus[]).includes(l.status));
+                                        const allColLeads = filteredLeads.filter(l => (col.statuses as unknown as LeadStatus[]).includes(l.status));
+                                        const visibleColLeads = allColLeads.slice(0, visibleCount);
                                         return (
                                             <div
                                                 key={`cards-${col.id}`}
@@ -1665,7 +1702,7 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                                     setDraggingLeadId(null);
                                                 }}
                                             >
-                                                {colLeads.map((lead) => (
+                                                {visibleColLeads.map((lead) => (
                                                     <KanbanCard
                                                         key={lead.id}
                                                         lead={lead}
@@ -1680,7 +1717,13 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                                     />
                                                 ))}
 
-                                                {colLeads.length === 0 && (
+                                                {allColLeads.length > visibleCount && (
+                                                    <div className="py-2 flex items-center justify-center">
+                                                        <div className="h-1.5 w-1.5 rounded-full bg-white/20 animate-pulse" />
+                                                    </div>
+                                                )}
+
+                                                {allColLeads.length === 0 && (
                                                     <div className="h-32 rounded-2xl border-2 border-dashed border-white/5 flex items-center justify-center">
                                                         <p className="text-[10px] font-black text-white/10 uppercase tracking-widest">Vazio</p>
                                                     </div>
@@ -1710,7 +1753,7 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                         </div>
 
                         <div className="flex flex-col gap-3 pb-20">
-                            {filteredLeads.map((lead, index) => (
+                            {visibleLeads.map((lead, index) => (
                                 <ListRow
                                     key={lead.id}
                                     lead={lead}
@@ -1722,6 +1765,18 @@ ${lossSummary ? `Resumo/Contexto: ${lossSummary}` : ''}`.trim();
                                     setActionLead={setActionLead}
                                 />
                             ))}
+                            
+                            {/* Observer Target */}
+                            {visibleCount < filteredLeads.length && (
+                                <div ref={observerTarget} className="w-full py-8 flex items-center justify-center">
+                                    <div className="flex flex-col items-center gap-3">
+                                        <div className="h-8 w-8 border-2 border-red-500 border-t-transparent rounded-full animate-spin" />
+                                        <p className="text-[10px] font-black text-white/30 uppercase tracking-widest animate-pulse">
+                                            Carregando mais leads...
+                                        </p>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     </motion.div>
                 )}
