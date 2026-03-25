@@ -81,10 +81,32 @@ const CarImage = ({ car, className = '' }: { car: InventoryItem; className?: str
 };
 
 // ── Simulation Panel (slide from right) ──────────────────────
-const SimulationPanel = ({ car, onClose }: { car: InventoryItem; onClose: () => void }) => {
+const SimulationPanel = ({ car, onClose, onSold }: { car: InventoryItem; onClose: () => void; onSold?: () => void }) => {
     const [downPayment, setDownPayment] = useState(() => Math.round(cleanPrice(car.preco) * 0.3));
     const [mounted, setMounted] = useState(false);
+    const [markingState, setMarkingState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
     useEffect(() => { setMounted(true); return () => setMounted(false); }, []);
+
+    const handleMarkSold = async () => {
+        if (markingState !== 'idle') return;
+        setMarkingState('loading');
+        try {
+            const res = await fetch('/api/v2/inventory/sold-notify', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    vehicleId: car.id,
+                    vehicleName: `${car.marca} ${car.modelo}`,
+                    vehicleModel: car.modelo,
+                }),
+            });
+            if (!res.ok) throw new Error('Erro ao marcar como vendido');
+            setMarkingState('done');
+            onSold?.();
+        } catch {
+            setMarkingState('error');
+        }
+    };
 
     const totalPrice = cleanPrice(car.preco);
     const financed = Math.max(0, totalPrice - downPayment);
@@ -248,6 +270,36 @@ const SimulationPanel = ({ car, onClose }: { car: InventoryItem; onClose: () => 
                                 })}
                             </div>
                         </div>
+
+                        {/* Marcar Vendido */}
+                        {car.status !== 'sold' && (
+                            <div className="border-t border-white/[0.06] pt-4">
+                                <p className="text-[9px] font-black text-white/25 uppercase tracking-[0.2em] mb-2">Gestão do Veículo</p>
+                                <button
+                                    onClick={handleMarkSold}
+                                    disabled={markingState !== 'idle'}
+                                    className={`w-full py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all border flex items-center justify-center gap-2 ${
+                                        markingState === 'done'
+                                            ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400 cursor-default'
+                                            : markingState === 'error'
+                                            ? 'bg-red-500/15 border-red-500/30 text-red-400 cursor-default'
+                                            : markingState === 'loading'
+                                            ? 'bg-white/5 border-white/10 text-white/30 cursor-wait'
+                                            : 'bg-red-600/10 border-red-600/25 text-red-400 hover:bg-red-600/20 hover:border-red-500/40'
+                                    }`}
+                                >
+                                    {markingState === 'loading' && (
+                                        <span className="h-3.5 w-3.5 border-2 border-t-transparent border-current rounded-full animate-spin" />
+                                    )}
+                                    {markingState === 'done' ? 'Vendido — Consultores Notificados' : markingState === 'error' ? 'Erro — Tente Novamente' : 'Marcar como Vendido'}
+                                </button>
+                                {markingState === 'done' && (
+                                    <p className="text-[8px] text-emerald-400/60 text-center mt-1.5 font-medium">
+                                        Alertas criados no Cowork IA para consultores com leads interessados.
+                                    </p>
+                                )}
+                            </div>
+                        )}
 
                         {/* Disclaimer */}
                         <div className="bg-white/[0.02] border border-white/[0.04] rounded-xl p-3 text-center">
@@ -627,7 +679,13 @@ export default function InventoryV2() {
             {/* ── Simulation Panel ──────────────────────────────── */}
             <AnimatePresence>
                 {selectedCar && (
-                    <SimulationPanel car={selectedCar} onClose={() => setSelectedCar(null)} />
+                    <SimulationPanel
+                        car={selectedCar}
+                        onClose={() => setSelectedCar(null)}
+                        onSold={() => {
+                            setInventory(prev => prev.map(c => c.id === selectedCar.id ? { ...c, status: 'sold' } : c));
+                        }}
+                    />
                 )}
             </AnimatePresence>
         </div>

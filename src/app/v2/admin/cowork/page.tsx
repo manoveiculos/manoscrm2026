@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
     Bot, Plus, AlertTriangle, CheckCircle, MessageSquare,
     Activity, RefreshCcw, Send, Bell, Users, FileText, TrendingUp, Play,
+    Copy, Merge, Trash2, Phone,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
@@ -58,7 +59,7 @@ const PRIORITY_BADGE: Record<number, string> = {
 };
 const PRIORITY_LABEL: Record<number, string> = { 1: 'CRÍTICO', 2: 'ATENÇÃO', 3: 'AVISO' };
 
-type Tab = 'ativos' | 'criar' | 'cientes' | 'contestacoes' | 'relatorios';
+type Tab = 'ativos' | 'criar' | 'cientes' | 'contestacoes' | 'relatorios' | 'duplicatas';
 
 const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
     { id: 'ativos',        label: 'Ativos',        icon: Bell },
@@ -66,6 +67,7 @@ const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
     { id: 'cientes',       label: 'Cientes',       icon: CheckCircle },
     { id: 'contestacoes',  label: 'Contestações',  icon: MessageSquare },
     { id: 'relatorios',    label: 'Relatórios IA', icon: FileText },
+    { id: 'duplicatas',    label: 'Duplicatas',    icon: Copy },
 ];
 
 /* ─── Componente ─────────────────────────────────────────────── */
@@ -79,6 +81,9 @@ export default function CoworkPage() {
     const [submitting, setSubmitting] = useState(false);
     const [runningCron, setRunningCron] = useState(false);
     const [cronResult, setCronResult]   = useState<{ ok: boolean; msg: string; log?: string[] } | null>(null);
+    const [duplicates, setDuplicates]   = useState<any[]>([]);
+    const [loadingDupes, setLoadingDupes] = useState(false);
+    const [mergingId, setMergingId]     = useState<string | null>(null);
 
     // Form
     const [form, setForm] = useState({
@@ -597,6 +602,96 @@ export default function CoworkPage() {
                                     );
                                 })
                             )}
+                        </motion.div>
+                    )}
+
+                    {/* ── DUPLICATAS ── */}
+                    {activeTab === 'duplicatas' && (
+                        <motion.div key="duplicatas" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-4">
+
+                            <div className="flex items-center justify-between p-4 rounded-xl bg-white/[0.02] border border-white/[0.06]">
+                                <div>
+                                    <p className="text-sm font-black text-white">Detector de Duplicatas</p>
+                                    <p className="text-[10px] text-white/30 mt-0.5">Leads com mesmo telefone detectados automaticamente</p>
+                                </div>
+                                <button
+                                    onClick={async () => {
+                                        setLoadingDupes(true);
+                                        const res = await fetch('/api/v2/leads-dedup');
+                                        const data = await res.json();
+                                        if (data.success) setDuplicates(data.duplicates || []);
+                                        setLoadingDupes(false);
+                                    }}
+                                    disabled={loadingDupes}
+                                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-600/80 hover:bg-amber-500 text-white font-black text-[10px] uppercase tracking-widest transition-all disabled:opacity-50"
+                                >
+                                    {loadingDupes
+                                        ? <><RefreshCcw size={13} className="animate-spin" /> Buscando...</>
+                                        : <><Copy size={13} /> Verificar Agora</>
+                                    }
+                                </button>
+                            </div>
+
+                            {duplicates.length === 0 && !loadingDupes && (
+                                <div className="py-16 text-center text-white/20">
+                                    <Copy size={32} className="mx-auto mb-3 opacity-20" />
+                                    <p className="text-sm font-bold">Clique em "Verificar Agora" para escanear</p>
+                                </div>
+                            )}
+
+                            {duplicates.map((group, gi) => (
+                                <div key={gi} className="p-4 rounded-xl bg-amber-500/5 border border-amber-500/15 space-y-3">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-2">
+                                            <Phone size={12} className="text-amber-400" />
+                                            <span className="text-xs font-black text-amber-400">{group.phone}</span>
+                                            <span className="text-[9px] text-white/30 font-bold">{group.count} leads</span>
+                                        </div>
+                                        <button
+                                            onClick={async () => {
+                                                const dupIds = group.leads
+                                                    .filter((l: any) => l.id !== group.suggestedMaster.id)
+                                                    .map((l: any) => l.id);
+                                                setMergingId(group.phone);
+                                                await fetch('/api/v2/leads-dedup', {
+                                                    method: 'POST',
+                                                    headers: { 'Content-Type': 'application/json' },
+                                                    body: JSON.stringify({ masterId: group.suggestedMaster.id, duplicateIds: dupIds }),
+                                                });
+                                                setDuplicates(prev => prev.filter((_, i) => i !== gi));
+                                                setMergingId(null);
+                                            }}
+                                            disabled={mergingId === group.phone}
+                                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/25 text-emerald-400 text-[9px] font-black uppercase tracking-widest transition-all disabled:opacity-40"
+                                        >
+                                            {mergingId === group.phone
+                                                ? <RefreshCcw size={11} className="animate-spin" />
+                                                : <Merge size={11} />
+                                            }
+                                            Mesclar
+                                        </button>
+                                    </div>
+
+                                    <div className="space-y-1.5">
+                                        {group.leads.map((lead: any, li: number) => (
+                                            <div key={lead.id}
+                                                className={`flex items-center justify-between p-2.5 rounded-lg border ${lead.id === group.suggestedMaster.id ? 'bg-emerald-500/8 border-emerald-500/20' : 'bg-white/[0.02] border-white/[0.05]'}`}>
+                                                <div className="flex items-center gap-2 min-w-0">
+                                                    {lead.id === group.suggestedMaster.id && (
+                                                        <span className="text-[7px] font-black text-emerald-400 bg-emerald-500/15 border border-emerald-500/25 px-1.5 py-0.5 rounded-full uppercase tracking-widest shrink-0">MASTER</span>
+                                                    )}
+                                                    <p className="text-xs font-bold text-white truncate">{lead.name}</p>
+                                                    <span className="text-[9px] text-white/25 shrink-0">{lead.status}</span>
+                                                    <span className="text-[9px] text-white/20 shrink-0">{lead.source}</span>
+                                                </div>
+                                                <p className="text-[9px] text-white/20 shrink-0">
+                                                    {new Date(lead.created_at).toLocaleDateString('pt-BR')}
+                                                </p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            ))}
                         </motion.div>
                     )}
 

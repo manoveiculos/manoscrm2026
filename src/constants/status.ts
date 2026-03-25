@@ -1,37 +1,49 @@
 // src/constants/status.ts — FONTE ÚNICA DE VERDADE PARA STATUS
 
+// SLA em horas por etapa — excedido dispara Cowork IA alert
+export const STAGE_SLA_HOURS: Record<string, number> = {
+    entrada:    2,   // Lead novo: contato obrigatório em 2h
+    triagem:    24,  // Qualificação: 1 dia
+    ataque:     48,  // Em conversa: 2 dias sem avançar
+    fechamento: 72,  // Negociação: 3 dias sem fechar
+};
+
 export const PIPELINE_STAGES = [
   {
     id: 'entrada',
     label: 'ENTRADA',
     sublabel: 'Novos Alvos',
-    color: '#3b82f6',    // azul
+    color: '#3b82f6',
     icon: '⚡',
     order: 1,
+    slaHours: 2,
   },
   {
     id: 'triagem',
     label: 'TRIAGEM',
     sublabel: 'Qualificação',
-    color: '#eab308',    // amarelo
+    color: '#eab308',
     icon: '📋',
     order: 2,
+    slaHours: 24,
   },
   {
     id: 'ataque',
     label: 'ATAQUE',
     sublabel: 'Em Conversa',
-    color: '#dc2626',    // vermelho
+    color: '#dc2626',
     icon: '🎯',
     order: 3,
+    slaHours: 48,
   },
   {
     id: 'fechamento',
     label: 'FECHAMENTO',
     sublabel: 'Negociação',
-    color: '#22c55e',    // verde
+    color: '#22c55e',
     icon: '🤝',
     order: 4,
+    slaHours: 72,
   },
 ] as const;
 

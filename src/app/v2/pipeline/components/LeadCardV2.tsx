@@ -6,7 +6,7 @@ import { motion } from 'framer-motion';
 import { CarFront, Zap, Activity, Target, ArrowRight } from 'lucide-react';
 import { formatPhoneBR } from '@/app/leads/utils/helpers';
 import { extractWhatsAppScript } from '@/lib/aiParser';
-import { normalizeStatus } from '@/constants/status';
+import { normalizeStatus, STAGE_SLA_HOURS } from '@/constants/status';
 import { calculateLeadScore, getScoreLabel } from '@/utils/calculateScore';
 import { SourceIcon } from '@/app/leads/components/SourceIcon';
 import { MoveMenu } from '@/app/leads/components/MoveMenu';
@@ -117,8 +117,33 @@ export const LeadCardV2: React.FC<LeadCardV2Props> = ({
 
     // Score dot color
     const scoreDotColor = scoreVal >= 70 ? '#E31E24' : scoreVal >= 40 ? '#F59E0B' : '#55555F';
-    // Left accent border based on urgency
-    const accentBorder = isEmergency ? 'border-l-red-500' : isHot ? 'border-l-amber-500/60' : 'border-l-transparent';
+
+    // ── SLA do estágio atual ──────────────────────────────────
+    function normalizeToStageId(status: string): string {
+        const s = (status || '').toLowerCase();
+        if (['new','received','entrada','novo'].includes(s))                   return 'entrada';
+        if (['attempt','contacted','triagem'].includes(s))                     return 'triagem';
+        if (['confirmed','scheduled','visited','ataque'].includes(s))          return 'ataque';
+        if (['test_drive','proposed','negotiation','fechamento'].includes(s))  return 'fechamento';
+        return '';
+    }
+    const stageId   = normalizeToStageId(lead.status);
+    const slaHours  = STAGE_SLA_HOURS[stageId] ?? null;
+    // usa updated_at como referência de quando entrou na etapa
+    const updatedAt = new Date(lead.updated_at || lead.created_at);
+    const hoursInStage = (now.getTime() - updatedAt.getTime()) / 3_600_000;
+    const slaBreached = slaHours !== null && hoursInStage >= slaHours;
+    const slaPct      = slaHours !== null ? Math.min(100, (hoursInStage / slaHours) * 100) : 0;
+    const slaColor    = slaPct >= 100 ? '#ef4444'
+                      : slaPct >= 75  ? '#f97316'
+                      : slaPct >= 50  ? '#f59e0b'
+                      : '#22c55e';
+
+    // Left accent border based on urgency / SLA
+    const accentBorder = slaBreached ? 'border-l-red-500'
+                       : isEmergency ? 'border-l-red-500'
+                       : isHot       ? 'border-l-amber-500/60'
+                       : 'border-l-transparent';
 
     return (
         <div
@@ -188,6 +213,26 @@ export const LeadCardV2: React.FC<LeadCardV2Props> = ({
                             {lead.vehicle_interest || 'Interesse não definido'}
                         </span>
                     </div>
+
+                    {/* SLA Bar */}
+                    {slaHours !== null && (
+                        <div className="space-y-0.5">
+                            <div className="flex items-center justify-between">
+                                <span className="text-[8px] font-black uppercase tracking-widest" style={{ color: slaColor }}>
+                                    {slaBreached ? '⚠ SLA EXCEDIDO' : `SLA ${stageId}`}
+                                </span>
+                                <span className="text-[8px] tabular-nums" style={{ color: slaColor }}>
+                                    {Math.round(hoursInStage)}h / {slaHours}h
+                                </span>
+                            </div>
+                            <div className="h-1 w-full bg-white/[0.06] rounded-full overflow-hidden">
+                                <div
+                                    className="h-full rounded-full transition-all duration-500"
+                                    style={{ width: `${slaPct}%`, backgroundColor: slaColor }}
+                                />
+                            </div>
+                        </div>
+                    )}
 
                     {/* Linha 3: Ações */}
                     <div className="flex items-center justify-between pt-1 border-t border-white/[0.05]">
