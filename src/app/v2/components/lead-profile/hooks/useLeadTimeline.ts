@@ -141,9 +141,7 @@ export function useLeadTimeline(leadId: string | null, leadPhone?: string) {
           });
         }
       });
-    } catch (e) {
-      console.log('[Timeline] Erro ao buscar concessionaria_mensagens:', e);
-    }
+    } catch (_e) { /* concessionaria_mensagens inacessível — tabela V1 opcional */ }
 
     // ══════════════════════════════════════
     // FONTE 4: tracking_leads (V1 — Análises da IA)
@@ -172,7 +170,7 @@ export function useLeadTimeline(leadId: string | null, leadPhone?: string) {
           }
         });
       }
-    } catch (e) { console.log('[Timeline] tracking_leads não acessível'); }
+    } catch (_e) { /* tracking_leads inacessível — tabela V1 opcional */ }
 
     // ══════════════════════════════════════
     // FONTE 5: follow_ups
@@ -232,7 +230,7 @@ export function useLeadTimeline(leadId: string | null, leadPhone?: string) {
           source: 'ai',
         });
       }
-    } catch (e) { console.log('[Timeline] ai_summary error'); }
+    } catch (_e) { /* ai_summary inacessível — campo opcional */ }
 
     // Ordenar e Deduplicar
     all.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());

@@ -1,4 +1,4 @@
-import { MessageSquare, Phone, History, LayoutDashboard, Car, CarFront, Flag, Trophy, Target, Bot, Zap, Sparkles, Check, X, Shield, Edit3, ArrowRight, Search, Activity, Calendar, Copy, Edit2 } from 'lucide-react';
+import { MessageSquare, Phone, History, CarFront, Flag, Trophy, Target, Bot, Zap, Check, X, Shield, Edit3, ArrowRight, Search, Activity, Calendar } from 'lucide-react';
 
 export const EVENT_CONFIG: Record<string, any> = {
     whatsapp_in: { icon: MessageSquare, color: '#25D366', label: 'WhatsApp (Cliente)' },
