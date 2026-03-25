@@ -40,9 +40,9 @@ export const MoveMenu = ({ isOpen, currentStatus, onStatusChange, onClose }: Mov
                         animate={{ opacity: 1, scale: 1, y: 0 }}
                         exit={{ opacity: 0, scale: 0.95, y: -10 }}
                         style={{
-                            top: 'calc(100% + 15px)',
+                            bottom: 'calc(100% + 10px)',
                         }}
-                        className="absolute right-0 w-64 bg-[#0a0a0a] border border-white/20 rounded-2xl shadow-[0_40px_120px_rgba(0,0,0,1),0_0_20px_rgba(220,38,38,0.15)] z-[210] py-4 overflow-hidden backdrop-blur-3xl border-red-500/50 origin-top-right"
+                        className="absolute right-0 w-64 bg-[#0a0a0a] border border-white/20 rounded-2xl shadow-[0_40px_120px_rgba(0,0,0,1),0_0_20px_rgba(220,38,38,0.15)] z-[999] py-4 overflow-hidden backdrop-blur-3xl border-red-500/50 origin-bottom-right"
                     >
                         <div className="absolute inset-0 bg-gradient-to-br from-red-600/10 to-transparent pointer-events-none" />
                         <div className="relative z-10">
