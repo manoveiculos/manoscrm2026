@@ -4,7 +4,6 @@ const nextConfig: NextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
-  allowedDevOrigins: ['192.168.1.13'],
   async headers() {
     return [
       // ── Security headers para todas as rotas ──────────────────

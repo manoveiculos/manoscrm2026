@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic';
 import React from 'react';
 import { createClient } from '@/lib/supabase/server';
 import { metricsService } from '@/lib/metricsService';

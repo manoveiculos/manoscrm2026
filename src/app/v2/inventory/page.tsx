@@ -5,11 +5,13 @@ import { createPortal } from 'react-dom';
 import {
     CarFront, Search, DollarSign, Fuel, TrendingUp, Calculator,
     Gauge, Filter, X, Sparkles, Tag, ChevronDown, ArrowRight,
-    Zap, LayoutGrid, List as ListIcon, Share2
+    Zap, LayoutGrid, List as ListIcon, Share2, RefreshCcw, Check
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { dataService } from '@/lib/dataService';
 import { InventoryItem } from '@/lib/types';
+import { toBlob } from 'html-to-image';
+import { SimulationProposal } from '@/components/SimulationProposal';
 
 // ── Animation Variants ────────────────────────────────────────
 const container = {
@@ -80,12 +82,21 @@ const CarImage = ({ car, className = '' }: { car: InventoryItem; className?: str
     );
 };
 
-// ── Simulation Panel (slide from right) ──────────────────────
+// ── Simulation Panel (MODAL CENTRAL V1 STYLE) ────────────────
 const SimulationPanel = ({ car, onClose, onSold }: { car: InventoryItem; onClose: () => void; onSold?: () => void }) => {
     const [downPayment, setDownPayment] = useState(() => Math.round(cleanPrice(car.preco) * 0.3));
     const [mounted, setMounted] = useState(false);
     const [markingState, setMarkingState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
+    const [isSharing, setIsSharing] = useState(false);
+    const [shareSuccess, setShareSuccess] = useState(false);
+    const proposalRef = React.useRef<HTMLDivElement>(null);
+
     useEffect(() => { setMounted(true); return () => setMounted(false); }, []);
+
+    const totalPrice = cleanPrice(car.preco);
+    const financed = Math.max(0, totalPrice - downPayment);
+    const pctEntry = totalPrice > 0 ? (downPayment / totalPrice) * 100 : 0;
+    const INSTALLMENTS = [12, 24, 36, 48, 60];
 
     const handleMarkSold = async () => {
         if (markingState !== 'idle') return;
@@ -108,209 +119,227 @@ const SimulationPanel = ({ car, onClose, onSold }: { car: InventoryItem; onClose
         }
     };
 
-    const totalPrice = cleanPrice(car.preco);
-    const financed = Math.max(0, totalPrice - downPayment);
-    const pctEntry = totalPrice > 0 ? (downPayment / totalPrice) * 100 : 0;
+    const handleShareSimulation = async () => {
+        if (!proposalRef.current) return;
+        try {
+            setIsSharing(true);
+            const element = proposalRef.current;
+            
+            // Capture process (html-to-image)
+            const blob = await toBlob(element, {
+                quality: 1,
+                pixelRatio: 2,
+                backgroundColor: '#000000',
+            });
 
-    const INSTALLMENTS = [12, 24, 36, 48, 60];
-
-    const gerarMensagem = (parcelas: number) => {
-        const inst = calcInstallment(totalPrice, downPayment, parcelas);
-        const msg = `🚗 *Simulação de Financiamento — Manos Veículos*\n\n` +
-            `*Veículo:* ${car.marca} ${car.modelo} ${car.ano}\n` +
-            `*Valor:* ${formatPrice(totalPrice)}\n` +
-            `*Entrada:* ${formatPrice(downPayment)} (${Math.round(pctEntry)}%)\n` +
-            `*Financiado:* ${formatPrice(financed)}\n` +
-            `*Parcelas:* ${parcelas}x de ${formatPrice(inst)}\n\n` +
-            `⚠️ _Simulação sujeita a aprovação de crédito. Taxa: ~2% a.m._\n\n` +
-            `Posso te ajudar com mais detalhes? 😊`;
-        return encodeURIComponent(msg);
+            if (blob) {
+                try {
+                    await navigator.clipboard.write([
+                        new ClipboardItem({ [blob.type]: blob })
+                    ]);
+                    setShareSuccess(true);
+                    setTimeout(() => setShareSuccess(false), 3000);
+                } catch {
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = `proposta-${car.modelo.toLowerCase().replace(/\s+/g, '-')}.png`;
+                    link.click();
+                }
+            }
+        } catch (error) {
+            console.error("Capture Error:", error);
+            alert("Erro ao gerar imagem.");
+        } finally {
+            setIsSharing(false);
+        }
     };
 
     const panel = (
-        <AnimatePresence>
-            <div className="fixed inset-0 z-[9998] flex justify-end">
-                {/* Backdrop */}
-                <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    onClick={onClose}
-                    className="fixed inset-0 bg-black/70 backdrop-blur-sm cursor-pointer"
-                />
-                {/* Panel */}
-                <motion.div
-                    initial={{ x: '100%' }}
-                    animate={{ x: 0 }}
-                    exit={{ x: '100%' }}
-                    transition={{ type: 'spring', damping: 28, stiffness: 220 }}
-                    className="fixed top-0 right-0 h-screen w-[460px] max-w-[95vw] bg-[#111114] border-l border-white/[0.07] shadow-2xl z-[9999] flex flex-col overflow-hidden"
-                >
-                    {/* Vehicle Hero */}
-                    <div className="relative h-56 shrink-0 overflow-hidden">
-                        <CarImage car={car} className="transition-transform duration-700" />
-                        <div className="absolute inset-0 bg-gradient-to-t from-[#111114] via-[#111114]/50 to-transparent" />
+        <>
+            <AnimatePresence>
+                <div key="simulation-modal-container" className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+                    {/* Backdrop */}
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        onClick={onClose}
+                        className="fixed inset-0 bg-black/80 backdrop-blur-md cursor-pointer"
+                    />
+                    
+                    {/* Modal Container */}
+                    <motion.div
+                        initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                        className="bg-[#111114] border border-white/10 w-full max-w-2xl rounded-[2.5rem] overflow-hidden shadow-2xl relative z-10 flex flex-col md:flex-row min-h-[500px]"
+                    >
+                        {/* Left: Car Hero (V1 layout) */}
+                        <div className="w-full md:w-5/12 bg-black relative">
+                            <CarImage car={car} className="w-full h-full object-cover transition-transform duration-700" />
+                            <div className="absolute inset-0 bg-gradient-to-t from-[#111114] via-transparent to-transparent" />
+                            
+                            {/* Close Mobile */}
+                            <button onClick={onClose} className="md:hidden absolute top-4 right-4 h-8 w-8 rounded-full bg-black/50 backdrop-blur-md border border-white/10 flex items-center justify-center text-white/50">
+                                <X size={14} />
+                            </button>
 
-                        {/* Close */}
-                        <button
-                            onClick={onClose}
-                            className="absolute top-4 right-4 h-8 w-8 rounded-full bg-black/50 backdrop-blur-md border border-white/10 flex items-center justify-center text-white/50 hover:text-white transition-all"
-                        >
-                            <X size={14} />
-                        </button>
-
-                        {/* Vehicle Info Overlay */}
-                        <div className="absolute bottom-4 left-5 right-5 flex items-end justify-between">
-                            <div>
+                            <div className="absolute bottom-6 left-6 right-6">
                                 <p className="text-red-500 text-[9px] font-black uppercase tracking-[0.3em]">{car.marca}</p>
-                                <h2 className="text-xl font-black text-white uppercase tracking-tight leading-tight">{car.modelo}</h2>
-                                <p className="text-white/40 text-[11px] font-medium mt-0.5">
-                                    {car.ano}{formatKM(car.km) ? ` • ${formatKM(car.km)}` : ''}{car.combustivel ? ` • ${car.combustivel}` : ''}
+                                <h2 className="text-2xl font-black text-white uppercase tracking-tight leading-tight">{car.modelo}</h2>
+                                <p className="text-white/40 text-[11px] font-medium mt-1">
+                                    {car.ano}{formatKM(car.km) ? ` • ${formatKM(car.km)}` : ''}
                                 </p>
-                            </div>
-                            <div className="bg-red-600 text-white px-4 py-2 rounded-xl font-black text-lg shadow-[0_8px_25px_rgba(220,38,38,0.4)]">
-                                {formatPrice(car.preco)}
+                                <div className="mt-4 bg-red-600 text-white px-4 py-2 rounded-xl font-black text-lg inline-block shadow-[0_8px_25px_rgba(220,38,38,0.4)]">
+                                    {formatPrice(car.preco)}
+                                </div>
                             </div>
                         </div>
-                    </div>
 
-                    {/* Calculator Body */}
-                    <div className="flex-1 overflow-y-auto p-5 space-y-5">
+                        {/* Right: Calculator Body */}
+                        <div className="flex-1 p-6 space-y-5 bg-[#111114] flex flex-col">
+                            {/* Close Desktop */}
+                            <button onClick={onClose} className="hidden md:flex absolute top-4 right-4 h-8 w-8 rounded-full bg-white/5 border border-white/10 items-center justify-center text-white/30 hover:text-white transition-all">
+                                <X size={14} />
+                            </button>
 
-                        {/* Header */}
-                        <div className="flex items-center gap-2">
-                            <div className="h-7 w-7 rounded-lg bg-red-600/15 border border-red-500/20 flex items-center justify-center">
-                                <Calculator size={13} className="text-red-400" />
+                            {/* Title Section */}
+                            <div className="text-center space-y-1">
+                                    <h2 className="text-red-500 font-black text-[10px] uppercase tracking-[0.4em] mb-1">Simulador de Financiamento</h2>
+                                    <p className="text-white/20 text-[8px] font-bold uppercase tracking-widest leading-none">Ajuste a entrada e gere sua proposta</p>
                             </div>
-                            <span className="text-[10px] font-black text-red-500 uppercase tracking-[0.3em]">Simulador de Financiamento</span>
-                        </div>
 
-                        {/* Entry Card */}
-                        <div className="bg-white/[0.04] rounded-2xl p-4 border border-white/[0.07] space-y-4">
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-1">
-                                    <p className="text-[9px] font-black text-red-500 uppercase tracking-[0.2em]">Entrada</p>
-                                    <div className="flex items-baseline gap-1">
-                                        <span className="text-white/25 font-black text-xs">R$</span>
-                                        <input
-                                            type="text"
-                                            value={downPayment.toLocaleString('pt-BR')}
-                                            onChange={(e) => {
-                                                const v = e.target.value.replace(/\D/g, '');
-                                                setDownPayment(Math.min(Number(v), totalPrice));
-                                            }}
-                                            className="bg-transparent text-white font-black text-xl focus:outline-none w-full tracking-tighter"
-                                        />
+                            {/* Entry Card */}
+                            <div className="bg-white/[0.04] rounded-2xl p-4 border border-white/[0.07] space-y-4 shadow-inner">
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-1">
+                                        <p className="text-[9px] font-black text-red-500 uppercase tracking-[0.2em]">Sua Entrada</p>
+                                        <div className="flex items-baseline gap-1">
+                                            <span className="text-white/25 font-black text-xs">R$</span>
+                                            <input
+                                                type="text"
+                                                value={downPayment.toLocaleString('pt-BR')}
+                                                onChange={(e) => {
+                                                    const v = e.target.value.replace(/\D/g, '');
+                                                    setDownPayment(Math.min(Number(v), totalPrice));
+                                                }}
+                                                className="bg-transparent text-white font-black text-xl focus:outline-none w-full tracking-tighter"
+                                            />
+                                        </div>
+                                        <p className="text-[9px] text-white/25 font-medium">{Math.round(pctEntry)}% do valor</p>
                                     </div>
-                                    <p className="text-[9px] text-white/25 font-medium">{Math.round(pctEntry)}% do valor</p>
+                                    <div className="space-y-1 text-right">
+                                        <p className="text-[9px] font-black text-white/30 uppercase tracking-[0.2em]">Financiado</p>
+                                        <p className="text-white font-black text-xl tracking-tighter">{formatPrice(financed)}</p>
+                                        <p className="text-[9px] text-white/25 font-medium">{Math.round(100 - pctEntry)}% do valor</p>
+                                    </div>
                                 </div>
-                                <div className="space-y-1 text-right">
-                                    <p className="text-[9px] font-black text-white/30 uppercase tracking-[0.2em]">Financiado</p>
-                                    <p className="text-white font-black text-xl tracking-tighter">{formatPrice(financed)}</p>
-                                    <p className="text-[9px] text-white/25 font-medium">{Math.round(100 - pctEntry)}% do valor</p>
-                                </div>
-                            </div>
 
-                            {/* Progress Bar */}
-                            <div className="space-y-1.5">
-                                <div className="relative h-2 w-full bg-white/[0.06] rounded-full overflow-hidden">
+                                {/* Range Slider */}
+                                <div className="relative h-1.5 w-full bg-white/[0.06] rounded-full overflow-hidden group">
                                     <div
-                                        className="absolute top-0 left-0 h-full bg-gradient-to-r from-red-700 via-red-500 to-red-400 rounded-full transition-all duration-200"
+                                        className="absolute top-0 left-0 h-full bg-gradient-to-r from-red-700 to-red-400 transition-all duration-300"
                                         style={{ width: `${Math.min(pctEntry, 100)}%` }}
                                     />
                                     <input type="range" min="0" max={totalPrice} step="500"
                                         value={downPayment}
                                         onChange={(e) => setDownPayment(Number(e.target.value))}
-                                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
                                     />
                                 </div>
-                                <p className="text-center text-white/15 text-[8px] font-black uppercase tracking-widest">arraste para ajustar</p>
                             </div>
-                        </div>
 
-                        {/* Installment Options */}
-                        <div className="space-y-2">
-                            <p className="text-[9px] font-black text-white/30 uppercase tracking-[0.2em]">Opções de Parcela</p>
-                            <div className="space-y-1.5">
+                            {/* Installment Options (Compact Table) */}
+                            <div className="flex-1 space-y-1.5 overflow-y-auto pr-2 custom-scrollbar max-h-[180px]">
                                 {INSTALLMENTS.map((m) => {
                                     const inst = calcInstallment(totalPrice, downPayment, m);
                                     const isPopular = m === 48;
                                     return (
-                                        <div key={m} className={`flex items-center justify-between px-4 py-3 rounded-xl border transition-all ${
+                                        <div key={m} className={`flex items-center justify-between px-4 py-2 rounded-xl border transition-all ${
                                             isPopular
-                                                ? 'bg-red-600/8 border-red-600/25'
+                                                ? 'bg-red-600/10 border-red-600/30'
                                                 : 'bg-white/[0.02] border-white/[0.05] hover:bg-white/[0.04]'
                                         }`}>
-                                            <div className="flex items-center gap-2">
-                                                <span className={`text-[11px] font-black uppercase tracking-widest ${isPopular ? 'text-red-400' : 'text-white/40'}`}>
-                                                    {m}x
-                                                </span>
-                                                {isPopular && (
-                                                    <span className="text-[7px] font-black bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded-full uppercase tracking-wider">Popular</span>
-                                                )}
-                                            </div>
-                                            <div className="flex items-center gap-2">
-                                                <span className={`text-[13px] font-black tracking-tight ${isPopular ? 'text-red-400' : 'text-white'}`}>
-                                                    {formatPrice(inst)}
-                                                </span>
-                                                {/* Enviar via WhatsApp */}
-                                                <a
-                                                    href={`https://wa.me/?text=${gerarMensagem(m)}`}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    onClick={(e) => e.stopPropagation()}
-                                                    title="Enviar simulação via WhatsApp"
-                                                    className="h-7 w-7 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 hover:bg-emerald-500/20 transition-all"
-                                                >
-                                                    <Share2 size={11} />
-                                                </a>
-                                            </div>
+                                            <span className={`text-[10px] font-black uppercase tracking-widest ${isPopular ? 'text-red-400' : 'text-white/40'}`}>
+                                                {m} Parcelas
+                                            </span>
+                                            <span className={`text-[14px] font-black tracking-tighter ${isPopular ? 'text-red-400' : 'text-white'}`}>
+                                                {formatPrice(inst)}
+                                            </span>
                                         </div>
                                     );
                                 })}
                             </div>
-                        </div>
 
-                        {/* Marcar Vendido */}
-                        {car.status !== 'sold' && (
-                            <div className="border-t border-white/[0.06] pt-4">
-                                <p className="text-[9px] font-black text-white/25 uppercase tracking-[0.2em] mb-2">Gestão do Veículo</p>
-                                <button
-                                    onClick={handleMarkSold}
-                                    disabled={markingState !== 'idle'}
-                                    className={`w-full py-3 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all border flex items-center justify-center gap-2 ${
-                                        markingState === 'done'
-                                            ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400 cursor-default'
-                                            : markingState === 'error'
-                                            ? 'bg-red-500/15 border-red-500/30 text-red-400 cursor-default'
-                                            : markingState === 'loading'
-                                            ? 'bg-white/5 border-white/10 text-white/30 cursor-wait'
-                                            : 'bg-red-600/10 border-red-600/25 text-red-400 hover:bg-red-600/20 hover:border-red-500/40'
-                                    }`}
-                                >
-                                    {markingState === 'loading' && (
-                                        <span className="h-3.5 w-3.5 border-2 border-t-transparent border-current rounded-full animate-spin" />
-                                    )}
-                                    {markingState === 'done' ? 'Vendido — Consultores Notificados' : markingState === 'error' ? 'Erro — Tente Novamente' : 'Marcar como Vendido'}
-                                </button>
-                                {markingState === 'done' && (
-                                    <p className="text-[8px] text-emerald-400/60 text-center mt-1.5 font-medium">
-                                        Alertas criados no Cowork IA para consultores com leads interessados.
-                                    </p>
-                                )}
+                            {/* Actions (V1 restoration) */}
+                            <div className="space-y-3 pt-4 border-t border-white/5">
+                                <div className="grid grid-cols-2 gap-3">
+                                    <button
+                                        onClick={handleShareSimulation}
+                                        disabled={isSharing}
+                                        className={`h-11 rounded-xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 transition-all border shadow-lg ${
+                                            shareSuccess 
+                                                ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400'
+                                                : 'bg-white text-black border-white hover:bg-white/90 active:scale-95'
+                                        }`}
+                                    >
+                                        {isSharing ? (
+                                            <RefreshCcw size={14} className="animate-spin" />
+                                        ) : shareSuccess ? (
+                                            <>
+                                                <Check size={14} />
+                                                Copiado!
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Share2 size={14} />
+                                                Gerar Proposta
+                                            </>
+                                        )}
+                                    </button>
+                                    
+                                    <button
+                                        onClick={handleMarkSold}
+                                        disabled={markingState !== 'idle' || car.status === 'sold'}
+                                        className={`h-11 rounded-xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 transition-all border ${
+                                            markingState === 'done'
+                                                ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                                                : 'bg-red-600/10 border-red-600/30 text-red-500 hover:bg-red-600 hover:text-white hover:border-red-600 active:scale-95'
+                                        }`}
+                                    >
+                                        {markingState === 'loading' ? (
+                                            <RefreshCcw size={14} className="animate-spin" />
+                                        ) : markingState === 'done' ? (
+                                            'Vendido!'
+                                        ) : (
+                                            'Vendido'
+                                        )}
+                                    </button>
+                                </div>
+                                
+                                <p className="text-[8px] font-bold text-white/20 uppercase tracking-[0.2em] text-center">
+                                    Aprovação sujeita a <span className="text-red-500/60 uppercase">score</span> e análise de crédito.
+                                </p>
                             </div>
-                        )}
-
-                        {/* Disclaimer */}
-                        <div className="bg-white/[0.02] border border-white/[0.04] rounded-xl p-3 text-center">
-                            <p className="text-[8px] font-bold text-white/20 uppercase tracking-widest leading-relaxed">
-                                Simulação sujeita a <span className="text-red-500/60">aprovação de crédito</span> e análise de <span className="text-red-500/60">score</span>. Taxa: ~2% a.m.
-                            </p>
                         </div>
-                    </div>
-                </motion.div>
+                    </motion.div>
+                </div>
+            </AnimatePresence>
+
+            {/* Hidden Element for Image Generation */}
+            <div className="fixed top-0 left-0 -z-50 pointer-events-none opacity-0 overflow-hidden" 
+                 style={{ width: '1080px', height: '1920px', left: '-2000px' }}>
+                <SimulationProposal
+                    ref={proposalRef}
+                    car={car}
+                    downPayment={downPayment}
+                    financedAmount={totalPrice - downPayment}
+                    installmentsCount={48}
+                    installmentValue={calcInstallment(totalPrice, downPayment, 48)}
+                />
             </div>
-        </AnimatePresence>
+        </>
     );
 
     if (mounted && typeof document !== 'undefined') {

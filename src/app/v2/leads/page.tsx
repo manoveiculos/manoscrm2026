@@ -210,7 +210,13 @@ function LeadsContent() {
         })
         .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
-    const interests = Array.from(new Set(leads.map(l => l.vehicle_interest).filter(Boolean)));
+    const interests = Array.from(new Set(leads.map(l => l.vehicle_interest).filter(Boolean)))
+        .filter(interest => {
+            const up = interest.toUpperCase();
+            const genericIntents = ['COMPRA', 'VENDA', 'TROCA', 'DUVIDA', 'FALAR COM CONSULTOR', '---', 'INTERESSE'];
+            return !genericIntents.some(g => up.includes(g)) && up.length > 2;
+        })
+        .sort();
     const origins = Array.from(new Set(leads.map(l => l.source).filter(Boolean)));
 
     return (

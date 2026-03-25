@@ -6,11 +6,11 @@
     },
     {
       "path": "/api/cron/anti-loss",
-      "schedule": "0 */2 * * *"
+      "schedule": "0 2 * * *"
     },
     {
       "path": "/api/cron/pipeline-sla",
-      "schedule": "0 */2 * * *"
+      "schedule": "0 3 * * *"
     }
   ]
 }
