@@ -17,10 +17,7 @@ export const maxDuration = 60;
  */
 export async function GET(request: Request) {
     const authHeader = request.headers.get('authorization');
-    if (
-        process.env.NODE_ENV === 'production' &&
-        authHeader !== `Bearer ${process.env.CRON_SECRET}`
-    ) {
+    if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
         return new NextResponse('Unauthorized', { status: 401 });
     }
 

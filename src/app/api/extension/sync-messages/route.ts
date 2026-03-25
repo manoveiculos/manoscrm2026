@@ -1,6 +1,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
+import { verifyExtensionToken } from '@/lib/extensionAuth';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -13,10 +14,15 @@ const openai = new OpenAI({
 
 
 export async function POST(req: NextRequest) {
+    const authError = verifyExtensionToken(req);
+    if (authError) return authError;
+
     try {
         const body = await req.json();
-        const { leadId, messages, phone, name } = body;
-        console.log(`[Sync API] Recebido: leadId=${leadId}, phone=${phone}, name=${name}, msgs=${messages?.length}`);
+        const { leadId, messages, phone, name, consultantName } = body;
+        console.log(`[Sync API] Recebido: leadId=${leadId}, msgs=${messages?.length}`);
+
+        const consultor = consultantName || 'Consultor Especialista';
 
         if (!messages || !Array.isArray(messages)) {
             return NextResponse.json({ error: 'Mensagens inválidas' }, { status: 400 });
@@ -157,35 +163,54 @@ export async function POST(req: NextRequest) {
                 .map((m: any) => `[${m.direction === 'outbound' ? 'Vendedor' : 'Cliente'}]: ${m.text}`)
                 .join('\n');
 
-            // 1. Prioridade OpenAI (GPT-4o-mini) - Mesma lógica do Painel de Atendimento
+            // 1. OpenAI Elite Closer Protocol (V2)
             if (process.env.OPENAI_API_KEY) {
                 try {
+                    const prompt = `Você é o "Mano’s Elite Closer" – o maior fechador de carros do Brasil. Sua missão não é apenas analisar, é ENTREGAR A VENDA na mão do consultor ${consultor}.
+                    
+                    ### PERFIL DO LEAD (CONTEXTO CIRÚRGICO)
+                    - Nome: ${nameToUse}
+                    
+                    ### CONVERSA REAL (ESTUDE A DOR E O TOM):
+                    ${chatTextForAI}
+                    
+                    ### PROTOCOLO ELITE DE FECHAMENTO (Siga Rigorosamente):
+                    1. **PONTO DE CONTATO (HOOK)**: Nunca comece com "Oi, tudo bem?". Comece com algo real do chat ou uma oferta de valor.
+                    2. **GATILHOS PSICOLÓGICOS**:
+                       - **Escassez**: O carro está sendo muito procurado.
+                       - **Autoridade**: Você (Consultor) conseguiu uma condição única com a gerência.
+                    3. **ZERO ROBOTIZAÇÃO**: Banido 100% o uso de listas, tópicos ou verbos no infinitivo no script final.
+                    4. **BANIMENTO DE GERUNDISMO**: Não use "vou estar verificando". Use "vi aqui agora", "consegui pra você".
+                    5. **LINGUAGEM REGIONAL**: Seja humano, use gírias leves de vendas ("fera", "meu amigo", "opa").
+                    6. **SCORING CIRÚRGICO**: 90-100 é só pra quem vai fechar HOJE. 70-89 é interesse alto. Abaixo de 40 é gelado.
+                    
+                    ### JSON OBRIGATÓRIO (Elite Mode):
+                    {
+                      "diagnostico_do_mentor": "Sua análise psicológica curta (2 linhas).",
+                      "script_whatsapp_agora": "O texto EXATO: 1-2 frases CURTAS, IMPACTANTES, HUMANAS. SEM LISTAS. SEM INFINITIVO.",
+                      "por_que_este_script": "A técnica de fechamento usada.",
+                      "urgency_score": number,
+                      "temperature": "frio" | "morno" | "quente",
+                      "novo_status_sugerido": "attempt" | "contacted" | "negotiation" | "proposed" | "manter"
+                    }`;
+
                     const response = await openai.chat.completions.create({
-                        model: 'gpt-4o-mini',
+                        model: 'gpt-4o',
                         messages: [
-                            {
-                                role: 'system',
-                                content: 'Você é o Sales Copilot da Manos Veículos. Analise a conversa e extraia dados estruturados para o CRM.'
-                            },
-                            {
-                                role: 'user',
-                                content: `Analise a conversa do lead ${nameToUse}:\n\n${chatTextForAI}\n\nResponda em JSON:\n{
-                                    "classificacao": "HOT" | "WARM" | "COLD" | "FASE INICIAL DE ATENDIMENTO",
-                                    "score": number, // 0-100
-                                    "resumo_estrategico": "string",
-                                    "novo_status_sugerido": "attempt" | "contacted" | "negotiation" | "proposed" | "manter", // Se o vendedor mandou a primeira msg, é "attempt" ou "contacted". Se tão falando de preço, é "negotiation". Só mude se tiver certeza do avanço. Se não souber, "manter".
-                                    "intencao_compra": "string",
-                                    "estagio_negociacao": "string",
-                                    "objecoes": "string",
-                                    "recomendacao_abordagem": "Apenas o SCRIPT MATADOR EXATO para o vendedor copiar e colar agora."
-                                }`
-                            }
+                            { role: 'system', content: `Você é o Mano’s Elite Closer. Você é ambicioso e focado em fechar negócios. Use o nome do consultor (${consultor}).` },
+                            { role: 'user', content: prompt }
                         ],
-                        response_format: { type: "json_object" }
+                        response_format: { type: "json_object" },
+                        temperature: 0.7
                     });
                     
                     const result = JSON.parse(response.choices[0]?.message?.content || '{}');
-                    aiAnalysisResult = result;
+                    aiAnalysisResult = {
+                        ...result,
+                        diagnostico: result.diagnostico_do_mentor || result.diagnostico,
+                        script_whatsapp: result.script_whatsapp_agora,
+                        por_que: result.por_que_este_script || "Abordagem cirúrgica."
+                    };
                 } catch (openaiErr) {
                     console.warn("[Sync API] OpenAI failed, falling back to Gemini:", openaiErr);
                 }
@@ -201,12 +226,10 @@ export async function POST(req: NextRequest) {
                 const aiResult = aiAnalysisResult;
                 
                 const timestamp = new Date().toLocaleString('pt-BR');
-                const newNote = `[${timestamp}] 🤖 LABORATÓRIO DE IA (SYNC):\n` +
-                    `🎯 Intenção: ${aiResult.intencao_compra || 'N/A'}\n` +
-                    `📊 Estágio: ${aiResult.estagio_negociacao || 'N/A'}\n` +
-                    `⚠️ Objeções: ${aiResult.objecoes || 'Nenhuma detectada'}\n` +
-                    `⚡ Recomendaçăo: ${aiResult.recomendacao_abordagem || 'Continuar atendimento'}\n` +
-                    `📌 Resumo: ${aiResult.resumo_estrategico || 'N/A'}\n\n`;
+                const newNote = `[${timestamp}] 🤖 IA CIRÚRGICA V2 (SYNC):\n` +
+                    `🔥 Temperatura: ${aiResult.temperature || 'N/A'} (Score: ${aiResult.urgency_score || 0})\n` +
+                    `📌 Diagnóstico: ${aiResult.diagnostico || 'N/A'}\n` +
+                    `Estratégia: ${aiResult.por_que || 'Abordagem tática.'}\n\n`;
 
             if (leadType === 'main' && uuidId) {
                 // Update leads_manos_crm
@@ -232,12 +255,12 @@ export async function POST(req: NextRequest) {
                     .from('leads_manos_crm')
                     .update({
                         status: finalStatus,
-                        ai_score: aiResult.score,
-                        ai_classification: aiResult.classificacao?.toLowerCase(),
-                        ai_reason: aiResult.recomendacao_abordagem || aiResult.resumo_estrategico, // V2 1-Click CTA replaces reason
+                        ai_score: aiResult.urgency_score || 0,
+                        ai_classification: aiResult.temperature === 'quente' ? 'hot' : aiResult.temperature === 'morno' ? 'warm' : 'cold',
+                        ai_reason: aiResult.diagnostico,
                         ai_summary: newNote + currentSummary,
-                        next_step: aiResult.proxima_acao,
-                        proxima_acao: aiResult.proxima_acao,
+                        next_step: aiResult.script_whatsapp || '',
+                        proxima_acao: aiResult.script_whatsapp || '',
                         updated_at: new Date().toISOString()
                     })
                     .eq('id', uuidId);
@@ -278,10 +301,10 @@ export async function POST(req: NextRequest) {
 
                 // Prepare the JSON metadata that the Dashboard expects
                 const iaMetadataStr = JSON.stringify({
-                    classification: aiResult.classificacao,
-                    score: aiResult.score,
-                    reason: aiResult.recomendacao_abordagem || aiResult.resumo_estrategico, // V2 CTA
-                    proxima_acao: aiResult.proxima_acao || aiResult.next_step
+                    classification: aiResult.temperature === 'quente' ? 'hot' : aiResult.temperature === 'morno' ? 'warm' : 'cold',
+                    score: aiResult.urgency_score || 0,
+                    summary: aiResult.diagnostico,
+                    next_step: aiResult.script_whatsapp || ''
                 });
 
                 // Final string with the marker as required by dataService.getLeadsCRM26 parsing logic
@@ -291,12 +314,12 @@ export async function POST(req: NextRequest) {
                     .from('leads_distribuicao_crm_26')
                     .update({
                         status: finalStatus,
-                        ai_score: aiResult.score,
-                        ai_classification: aiResult.classificacao,
-                        ai_reason: aiResult.recomendacao_abordagem || aiResult.resumo_estrategico, // V2 CTA
-                        resumo_consultor: aiResult.resumo_estrategico,
-                        proxima_acao: aiResult.proxima_acao || aiResult.next_step,
-                        next_step: aiResult.proxima_acao || aiResult.next_step,
+                        ai_score: aiResult.urgency_score || 0,
+                        ai_classification: aiResult.temperature === 'quente' ? 'hot' : aiResult.temperature === 'morno' ? 'warm' : 'cold',
+                        ai_reason: aiResult.diagnostico,
+                        resumo_consultor: aiResult.diagnostico,
+                        proxima_acao: aiResult.script_whatsapp || '',
+                        next_step: aiResult.script_whatsapp || '',
                         resumo: finalResumo,
                         atualizado_em: new Date().toISOString()
                     })

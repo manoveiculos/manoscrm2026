@@ -20,7 +20,7 @@ export const maxDuration = 60; // Allows up to 60s execution
 export async function GET(request: Request) {
     // Basic security check for cron endpoints (if triggered via Vercel or external service)
     const authHeader = request.headers.get('authorization');
-    if (authHeader !== `Bearer ${process.env.CRON_SECRET}` && process.env.NODE_ENV === 'production') {
+    if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
         return new NextResponse('Unauthorized', { status: 401 });
     }
 

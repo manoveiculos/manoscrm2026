@@ -1,140 +1,99 @@
-
-import { OpenAI } from 'openai';
-import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { NextRequest, NextResponse } from 'next/server';
+import { OpenAI } from 'openai';
+import { verifyExtensionToken } from '@/lib/extensionAuth';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 
-let openaiInstance: OpenAI | null = null;
-
-function getOpenAI() {
-    if (!openaiInstance && process.env.OPENAI_API_KEY) {
-        openaiInstance = new OpenAI({
-            apiKey: process.env.OPENAI_API_KEY,
-        });
-    }
-    return openaiInstance;
-}
+const openai = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+});
 
 export async function POST(req: NextRequest) {
-    try {
-        const { chatText, leadName, leadId } = await req.json();
+    const authError = verifyExtensionToken(req);
+    if (authError) return authError;
 
-        if (!leadId) {
-            return NextResponse.json({ success: false, error: 'Lead ID é obrigatório' }, { status: 400 });
+    try {
+        const body = await req.json();
+        const { messages, leadId, consultantName } = body;
+
+        if (!messages || messages.length === 0) {
+            return NextResponse.json({ error: 'Nenhuma mensagem para analisar' }, { status: 400 });
         }
 
-        const realId = leadId.replace(/crm26_|main_|dist_/, '');
-        const isCrm26 = leadId.startsWith('crm26_');
-        const table = isCrm26 ? 'leads_distribuicao_crm_26' : 'leads_manos_crm';
+        const consultor = consultantName || 'Consultor Especialista';
+        const cleanId = leadId?.replace(/main_|crm26_|dist_/, '');
+        const isCRM26 = leadId?.startsWith('crm26_');
+        const table = isCRM26 ? 'leads_distribuicao_crm_26' : 'leads_manos_crm';
 
-        // 1. Recuperar contexto histórico
-        const { data: lead, error: fetchError } = await supabaseAdmin
+        // 1. Fetch Lead context for deeper logic
+        const { data: lead } = await supabaseAdmin
             .from(table)
             .select('*')
-            .eq('id', realId)
+            .eq('id', cleanId)
             .maybeSingle();
 
-        if (fetchError) {
-            console.error(`[AI Sync] Erro ao buscar lead ${realId} em ${table}:`, fetchError);
-        }
+        const chatText = messages.map((m: any) => `[${m.direction === 'inbound' ? 'CLIENTE' : 'VENDEDOR'}]: ${m.content}`).join('\n');
 
-        let historicalContext = "";
-        const leadData = lead as any;
-        if (leadData) {
-            historicalContext = `
-            HISTÓRICO PRÉVIO DO CRM:
-            Resumo Anterior: ${leadData.ai_summary || leadData.resumo || 'Sem resumo prévio'}
-            Motivos Anteriores: ${leadData.ai_reason || 'Nenhum'}
-            Interesse Registrado: ${leadData.vehicle_interest || leadData.interesse || 'Nenhum'}
-            `;
-        }
-
-        const openai = getOpenAI();
-        if (!openai) throw new Error("OpenAI API Key não configurada.");
-
-        console.log(`[AI Sync] Iniciando análise para: ${leadName} (${realId})`);
+        // 2. OpenAI Elite Closers Protocol (V2)
+        const prompt = `Você é o "Mano’s Elite Closer" – o maior fechador de carros do Brasil. Sua missão não é apenas analisar, é ENTREGAR A VENDA na mão do consultor ${consultor}.
+        
+        ### PERFIL DO LEAD (CONTEXTO CIRÚRGICO)
+        - Nome: ${lead?.nome || lead?.name || 'Desconhecido'}
+        - Status Atual: ${lead?.status || 'Novo'}
+        - Interesse: ${lead?.interesse || lead?.vehicle_interest || 'Não informado'}
+        
+        ### CONVERSA REAL (ESTUDE A DOR E O TOM):
+        ${chatText}
+        
+        ### PROTOCOLO ELITE DE FECHAMENTO (Siga Rigorosamente):
+        1. **PONTO DE CONTATO (HOOK)**: Nunca comece com "Oi, tudo bem?". Comece com algo real do chat ou uma oferta de valor.
+        2. **GATILHOS PSICOLÓGICOS**:
+           - **Escassez**: O carro está sendo muito procurado.
+           - **Autoridade**: Você (Consultor) conseguiu uma condição única com a gerência.
+           - **Alternativa**: Sempre dê duas opções (horário ou modelo).
+        3. **ZERO ROBOTIZAÇÃO**: Banido 100% o uso de listas, tópicos ou verbos no infinitivo no script final.
+        4. **BANIMENTO DE GERUNDISMO**: Não use "vou estar verificando". Use "vi aqui agora", "consegui pra você".
+        5. **LINGUAGEM REGIONAL**: Seja humano, use gírias leves de vendas ("fera", "meu amigo", "opa", "show"), mas mantenha o nível de autoridade.
+        6. **SCORING CIRÚRGICO**: 90-100 é só pra quem vai fechar HOJE. 70-89 é interesse alto. Abaixo de 40 é gelado.
+        7. **PROVA DE SCORE**: O campo "por_que_este_script" deve justificar o SCORE escolhido com base no guia.
+        
+        ### JSON OBRIGATÓRIO (Elite Mode):
+        {
+          "classificacao": "HOT" | "WARM" | "COLD",
+          "urgency_score": number, 
+          "diagnostico_do_mentor": "Sua análise psicológica curta (2 linhas) para o vendedor.",
+          "orientacao_tativa_vendedor": "INSTRUÇÃO CIRÚRGICA: O que o vendedor deve fazer AGORA.",
+          "script_whatsapp_agora": "O texto EXATO: 1-2 frases CURTAS, IMPACTANTES, HUMANAS. SEM LISTAS. SEM INFINITIVO.",
+          "por_que_este_script": "A técnica de fechamento usada."
+        }`;
 
         const response = await openai.chat.completions.create({
-            model: 'gpt-4o-mini',
+            model: 'gpt-4o',
             messages: [
-                {
-                    role: 'system',
-                    content: 'Você é um Analista Comercial Sênior da Manos Veículos. Sua análise é focada em fechamento e organização da linha do tempo.'
-                },
-                {
-                    role: 'user',
-                    content: `Analise a nova conversa do cliente ${leadName || 'Interessado'}.
-                
-                    ${historicalContext}
-
-                    NOVA CONVERSA PARA ANÁLISE:
-                    ${chatText}
-                        
-                    EXTRAIA E RESPONDA EXCLUSIVAMENTE EM JSON:
-                    {
-                      "classificacao": "HOT" | "WARM" | "COLD" | "FASE INICIAL DE ATENDIMENTO",
-                      "score": number,
-                      "resumo_detalhado": "Análise da linha do tempo e comportamento para fixar no CRM.",
-                      "proxima_acao": "O que o consultor deve fazer agora?"
-                    }`
-                }
+                { role: 'system', content: `Você é o Mano’s Elite Closer. Você é ambicioso, persuasivo e protetor do faturamento da empresa. Você não dá tarefas, você dá a tática de xeque-mate. Use o nome do consultor (${consultor}).` },
+                { role: 'user', content: prompt }
             ],
-            response_format: { type: "json_object" }
+            response_format: { type: "json_object" },
+            temperature: 0.7,
         });
 
-        const aiContent = response.choices[0]?.message?.content || '{}';
-        console.log("[AI Sync] Resposta OpenAI:", aiContent);
-        const aiData = JSON.parse(aiContent);
-
-        // 2. Atualizar o Lead com o novo resumo na linha do tempo
-        const now = new Date();
-        const timestamp = now.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-        const newSummaryEntry = `[SYNC ${timestamp}]: ${aiData.resumo_detalhado || 'Sem resumo detalhado'}`;
-
-        let finalSummary = "";
-        if (isCrm26) {
-            const currentResumo = leadData?.resumo || "";
-            finalSummary = `${newSummaryEntry}\n\n${currentResumo}`;
-        } else {
-            const currentSummary = leadData?.ai_summary || "";
-            finalSummary = `${newSummaryEntry}\n\n${currentSummary}`;
-        }
-
-        const updatePayload: any = {
-            ai_classification: aiData.classificacao || 'WARM',
-            ai_score: aiData.score || 50,
-            proxima_acao: aiData.proxima_acao || ''
-        };
-
-        if (isCrm26) {
-            updatePayload.resumo = finalSummary;
-        } else {
-            updatePayload.ai_summary = finalSummary;
-        }
-
-        console.log("[AI Sync] Atualizando lead com payload:", updatePayload);
-
-        const { error: updateError } = await supabaseAdmin
-            .from(table)
-            .update(updatePayload)
-            .eq('id', realId);
-
-        if (updateError) {
-            console.error("[AI Sync] Erro no update Supabase:", updateError);
-            throw updateError;
-        }
+        const result = JSON.parse(response.choices[0]?.message?.content || '{}');
 
         return NextResponse.json({
             success: true,
-            ai_summary: newSummaryEntry,
-            classification: aiData.classificacao
+            classificacao: result.classificacao || 'WARM',
+            urgency_score: result.urgency_score || 50,
+            diagnostico_360: result.diagnostico_do_mentor,
+            orientacao_tativa_vendedor: result.orientacao_tativa_vendedor,
+            script_whatsapp_agora: result.script_whatsapp_agora,
+            por_que_este_script: result.por_que_este_script
         });
 
     } catch (err: any) {
-        console.error("Extension Analyze AI Error:", err);
-        return NextResponse.json({ error: err.message }, { status: 500 });
+        console.error("Analyze Chat API Error:", err);
+        return NextResponse.json({ success: false, error: err.message }, { status: 500 });
     }
 }

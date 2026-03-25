@@ -36,8 +36,8 @@ export function hashData(data: string): string {
  * @param eventName Nome do evento (ex: 'Lead', 'Contact', 'Purchase')
  */
 export async function sendMetaConversion(leadData: any, eventName: string = 'Lead', extraCustomData?: Record<string, any>) {
-    const pixelId = process.env.NEXT_PUBLIC_META_PIXEL_ID;
-    const accessToken = process.env.NEXT_PUBLIC_META_ACCESS_TOKEN;
+    const pixelId = process.env.META_PIXEL_ID || process.env.NEXT_PUBLIC_META_PIXEL_ID;
+    const accessToken = process.env.META_ACCESS_TOKEN || process.env.NEXT_PUBLIC_META_ACCESS_TOKEN;
 
     if (!pixelId || !accessToken) {
         console.error('❌ Erro Meta: META_PIXEL_ID ou META_ACCESS_TOKEN não configurados no .env.local');
