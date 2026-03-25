@@ -73,15 +73,10 @@ export async function fetchGoogleAdsCampaigns(creds: GoogleAdsCredentials) {
     // PRE-FLIGHT TEST: Verificar se a API base está respondendo e quais contas o token vê
     try {
         const accessible = await listAccessibleCustomers(creds);
-        console.log(`[GOOGLE ADS DEBUG] Pre-flight success. Contas visíveis:`, accessible);
-
-        if (accessible.length === 0) {
-            console.warn(`[GOOGLE ADS DEBUG] AVISO: O Token está funcionando, mas não tem acesso a NENHUMA conta.`);
-        } else if (!accessible.some(acc => acc.includes(loginId) || acc.includes(customerId))) {
-            console.warn(`[GOOGLE ADS DEBUG] AVISO: O Token não enxerga os IDs configurados (${loginId} ou ${customerId}).`);
+        if (!accessible.some(acc => acc.includes(loginId) || acc.includes(customerId))) {
+            throw new Error(`Token não enxerga os IDs configurados (${loginId} ou ${customerId}). Contas visíveis: ${accessible.join(', ') || 'nenhuma'}.`);
         }
     } catch (e: any) {
-        console.error(`[GOOGLE ADS DEBUG] Pre-flight FALHOU. Isso indica um problema grave na permissão ou token:`, e.message);
         throw new Error(`O Google Ads recusou a conexão básica. Motivo técnico: ${e.message}. Verifique se a 'Google Ads API' está 100% ativada no Google Cloud e se o Token de Desenvolvedor está aprovado para "Acesso Básico".`);
     }
 

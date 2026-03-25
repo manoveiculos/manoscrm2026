@@ -6,7 +6,7 @@ export async function POST(req: Request) {
     const adAccountId = process.env.META_AD_ACCOUNT_ID || process.env.NEXT_PUBLIC_META_AD_ACCOUNT_ID;
 
     try {
-        const { fullClear } = await req.json().catch(() => ({ fullClear: true }));
+        const { fullClear = false } = await req.json().catch(() => ({ fullClear: false }));
 
         if (!token || !adAccountId) {
             return NextResponse.json(
@@ -15,9 +15,8 @@ export async function POST(req: Request) {
             );
         }
 
-        if (fullClear) {
-            await dataService.clearCampaigns();
-        }
+        // Removido clearCampaigns() para evitar erro de Foreign Key com leads existentes.
+        // O syncMetaCampaigns já realiza upsert por nome.
 
         // Sync campaigns (insights)
         const campaignCount = await dataService.syncMetaCampaigns(token, adAccountId);

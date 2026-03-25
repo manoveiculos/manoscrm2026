@@ -386,6 +386,32 @@ export function OldLeadsContent() {
         }
     };
 
+    const [isRestoring, setIsRestoring] = useState<string | null>(null);
+
+    const handleRestore = async (leadId: any, sourceTable: string) => {
+        if (isRestoring) return;
+        
+        const confirmResult = confirm("Deseja mover este lead de volta para a Central de Leads (Aguardando)?");
+        if (!confirmResult) return;
+
+        setIsRestoring(String(leadId));
+        try {
+            const success = await dataService.restaurarLead(leadId, sourceTable);
+            if (success) {
+                // Remove from local state
+                setLeads(prev => prev.filter(l => l.id !== leadId));
+                alert("Lead restaurado com sucesso! Ele aparecerá no topo da Central de Leads.");
+            } else {
+                alert("Falha ao restaurar lead.");
+            }
+        } catch (err: any) {
+            console.error(err);
+            alert(`Erro ao restaurar: ${err.message}`);
+        } finally {
+            setIsRestoring(null);
+        }
+    };
+
     if (loading) {
         return (
             <div className="flex h-[60vh] items-center justify-center">
@@ -675,6 +701,17 @@ export function OldLeadsContent() {
                                             className="h-8 px-4 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-white/40 hover:text-white flex items-center justify-center gap-2 transition-all font-black text-[8px] uppercase tracking-widest active:scale-95"
                                         >
                                             CONTATO DIRETO
+                                        </button>
+
+                                        <button
+                                            onClick={() => handleRestore(lead.real_id, lead.source_table || 'leads_manos_crm')}
+                                            disabled={isRestoring === String(lead.id)}
+                                            className="h-8 px-4 rounded-xl bg-blue-600/10 border border-blue-500/20 text-blue-500 hover:bg-blue-600 hover:text-white transition-all flex items-center justify-center gap-2 font-black text-[8px] uppercase tracking-widest active:scale-95 disabled:opacity-50"
+                                        >
+                                            {isRestoring === String(lead.id) ? (
+                                                <div className="h-3 w-3 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                                            ) : <RefreshCw size={10} />}
+                                            ESTORNAR PARA CENTRAL
                                         </button>
                                     </div>
                                 </div>

@@ -14,27 +14,41 @@ export async function POST(req: Request) {
                 ? `&date_preset=${date_preset}`
                 : '&date_preset=maximum';
 
-            const apiUrl = `https://graph.facebook.com/v19.0/act_${metaAdAccountId}/insights?level=campaign&fields=campaign_id,campaign_name,spend,inline_link_clicks,reach,impressions,cpc,ctr,cpm,frequency&limit=150&access_token=${metaToken}${presetQuery}`;
+            const apiUrl = `https://graph.facebook.com/v19.0/act_${metaAdAccountId}/insights?level=campaign&fields=campaign_id,campaign_name,spend,inline_link_clicks,reach,impressions,cpc,ctr,cpm,frequency,actions&limit=150&access_token=${metaToken}${presetQuery}`;
 
             try {
                 const response = await fetch(apiUrl);
                 if (response.ok) {
                     const result = await response.json();
                     const metaCampaigns = result.data || [];
-                    metaCampaignsData = metaCampaigns.map((c: any) => ({
-                        id: c.campaign_id,
-                        name: c.campaign_name || 'Sem Nome',
-                        platform: 'Meta Ads',
-                        status: 'active',
-                        total_spend: Number(c.spend || 0),
-                        link_clicks: Number(c.inline_link_clicks || 0),
-                        reach: Number(c.reach || 0),
-                        impressions: Number(c.impressions || 0),
-                        cpc: Number(c.cpc || 0),
-                        ctr: Number(c.ctr || 0),
-                        cpm: Number(c.cpm || 0),
-                        frequency: Number(c.frequency || 0),
-                    }));
+                    metaCampaignsData = metaCampaigns.map((c: any) => {
+                        const actions = c.actions || [];
+                        
+                        // Lógica Cirúrgica: Selecionar a métrica primária do Gestor
+                        const msgStarted = actions.find((a: any) => a.action_type === 'onsite_conversion.messaging_conversation_started_7d')?.value || 0;
+                        const leadsGrouped = actions.find((a: any) => a.action_type === 'onsite_conversion.lead_grouped')?.value || 0;
+                        const leadsDirect = actions.find((a: any) => a.action_type === 'lead')?.value || 0;
+
+                        // Prioridade: Maior entre WhatsApp e Leads Agrupados
+                        let metaResults = Math.max(Number(msgStarted), Number(leadsGrouped));
+                        if (metaResults === 0) metaResults = Number(leadsDirect);
+
+                        return {
+                            id: c.campaign_id,
+                            name: c.campaign_name || 'Sem Nome',
+                            platform: 'Meta Ads',
+                            status: 'active',
+                            total_spend: Number(c.spend || 0),
+                            link_clicks: Number(c.inline_link_clicks || 0),
+                            reach: Number(c.reach || 0),
+                            impressions: Number(c.impressions || 0),
+                            cpc: Number(c.cpc || 0),
+                            ctr: Number(c.ctr || 0),
+                            cpm: Number(c.cpm || 0),
+                            frequency: Number(c.frequency || 0),
+                            meta_results: metaResults
+                        };
+                    });
                 }
             } catch (e) {
                 console.error("Meta Insights Fetch Error:", e);

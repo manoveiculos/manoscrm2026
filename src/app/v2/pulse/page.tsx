@@ -68,7 +68,7 @@ const stagger: Variants = {
 };
 
 function SectionTitle({ icon: Icon, label, count, accent = '#ef4444' }: {
-    icon: any; label: string; count?: number; accent?: string;
+    icon: React.ElementType; label: string; count?: number; accent?: string;
 }) {
     return (
         <div className="flex items-center gap-3 mb-4">
@@ -129,7 +129,7 @@ export default function Pulse() {
                 ]);
 
                 setLeads(leadsResult.leads || []);
-                setMetrics(metricsResult as any);
+                setMetrics(metricsResult as FinancialMetrics);
             }
         } catch (err) {
             console.error(err);

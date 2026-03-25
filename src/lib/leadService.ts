@@ -71,7 +71,6 @@ export const leadService = {
             }
 
             const { data, count, error } = await query
-                .order('ai_score', { ascending: false })
                 .order('created_at', { ascending: false })
                 .range((page - 1) * limit, page * limit - 1);
 

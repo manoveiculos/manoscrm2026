@@ -20,27 +20,22 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'OpenAI API Key não configurada.' }, { status: 500 });
     }
     // 1. Get Consultants, Inventory and FRESH Leads using Admin client
+    // CRITICAL: use consultants_manos_crm (V1 table) — assigned_consultant_id in leads_manos_crm references these IDs
+    // use 'leads' unified VIEW to capture all leads (leads_manos_crm + leads_distribuicao_crm_26 + leads_master)
     const [{ data: consultants }, { data: inventory }, { data: dbLeads }] = await Promise.all([
       supabaseAdmin.from('consultants_manos_crm').select('*').eq('is_active', true),
-      supabaseAdmin.from('inventory_manos_crm').select('*'),
-      supabaseAdmin.from('leads_distribuicao_crm_26').select('*')
+      supabaseAdmin.from('estoque').select('id, marca, modelo, ano, preco, status').neq('status', 'sold').limit(30),
+      supabaseAdmin.from('leads').select('id, name, status, source, vehicle_interest, assigned_consultant_id, ai_score, created_at, response_time_seconds').order('created_at', { ascending: false }).limit(800)
     ]);
 
     if (!consultants || !inventory || !dbLeads) throw new Error("Falha ao carregar dados do banco.");
 
-    // Map leads to include the same metadata as dataService.getLeads
-    const allLeads = dbLeads.map(l => {
-      const firstName = l.vendedor?.trim().split(' ')[0].toLowerCase() || '';
-      const consultant = consultants.find(c => c.name.toLowerCase().includes(firstName));
-      return {
-        ...l,
-        assigned_consultant_id: consultant?.id,
-        vehicle_interest: l.interesse || '',
-        name: l.nome
-      };
-    });
+    const allLeads = dbLeads.map(l => ({
+      ...l,
+      vehicle_interest: l.vehicle_interest || '',
+    }));
 
-    const inventorySummary = inventory.slice(0, 20).map(i => `- ${i.marca} ${i.modelo} (${i.ano}) - R$ ${i.preco}`).join('\n');
+    const inventorySummary = (inventory || []).slice(0, 20).map(i => `- ${i.marca} ${i.modelo} (${i.ano}) - R$ ${i.preco}`).join('\n');
 
     // Status mapping for localized AI output
     const statusMap: Record<string, string> = {
@@ -59,49 +54,77 @@ export async function POST(req: Request) {
       'lost': 'Perda Total'
     };
 
-    // 2. Filter Leads (Exclude Lost/Total Loss and Sem Contato/New leads from tactical analysis)
+    // 2. Filter Leads — exclude definitively closed/lost for tactical analysis
     const activeLeads = allLeads.filter((l: any) =>
       l.status !== 'lost' &&
-      (l.status as any) !== 'Perca Total' &&
-      (l.status as any) !== 'sem_contato' &&
-      (l.status as any) !== 'Sem Contato' &&
-      (l as any).pipeline !== 'reativacao' &&
+      l.status !== 'lixo' &&
+      l.status !== 'duplicado' &&
+      l.status !== 'desqualificado' &&
       l.name && l.name.trim() !== ''
     );
 
+    // Aggregates for grounding the analysis and preventing hallucination
+    const now = new Date();
+    const last24h = activeLeads.filter((l: any) => {
+      const created = new Date(l.created_at);
+      return (now.getTime() - created.getTime()) < 24 * 60 * 60 * 1000;
+    });
+    const byStatus: Record<string, number> = {};
+    activeLeads.forEach((l: any) => { byStatus[statusMap[l.status] || l.status] = (byStatus[statusMap[l.status] || l.status] || 0) + 1; });
+    const statusSummary = Object.entries(byStatus).map(([s, c]) => `${s}: ${c}`).join(', ');
+
+    const consultantSummary = (consultants as any[]).map(c => {
+      const cLeads = activeLeads.filter((l: any) => l.assigned_consultant_id === c.id);
+      const hotLeads = cLeads.filter((l: any) => (l.ai_score || 0) >= 70);
+      return `${c.name}: ${cLeads.length} leads ativos, ${hotLeads.length} quentes`;
+    }).join('\n');
+
     // --- STEP 1: GLOBAL ANALYSIS (ADMIN) ---
-    const globalPrompt = `Você é o Diretor Comercial Sênior da Manos Veículos, com 20 anos de experiência em gestão de alto desempenho.
-Analise a operação completa abaixo e gere um relatório estratégico de alta precisão para o Administrador.
-Foque na eficiência da equipe e no giro do estoque.
+    const globalPrompt = `Você é o Diretor Comercial Sênior da Manos Veículos.
+Analise os dados REAIS abaixo e gere um relatório estratégico preciso para o Administrador.
+REGRA CRÍTICA: Use APENAS os dados fornecidos. Não invente nomes de clientes, IDs ou fatos que não estão nos dados. Se não tiver informação suficiente, diga "dados insuficientes no período".
 
-DADOS DA OPERAÇÃO:
-${activeLeads.map((l: any) => `- Lead [ID: ${l.id}]: ${l.name} | Consultor: ${l.vendedor || 'Pendente'} | Status: ${statusMap[l.status] || l.status} | Carro de Interesse: ${l.vehicle_interest}`).join('\n')}
+RESUMO DA OPERAÇÃO (${activeLeads.length} leads ativos):
+- Distribuição por status: ${statusSummary}
+- Novos nas últimas 24h: ${last24h.length}
+- Data da análise: ${new Date().toLocaleDateString('pt-BR')}
 
-ESTOQUE DESTAQUE:
+DESEMPENHO POR CONSULTOR:
+${consultantSummary}
+
+ESTOQUE DISPONÍVEL:
 ${inventorySummary}
 
-IMPORTANTE: 
-1. Responda INTEIRAMENTE em Português do Brasil.
-2. Ao citar status de leads, use EXCLUSIVAMENTE os nomes amigáveis em português: ${Object.values(statusMap).join(', ')}. NUNCA use termos técnicos em inglês como 'received', 'post_sale' ou 'new'.
+LEADS PRIORITÁRIOS (score >= 70):
+${activeLeads.filter((l: any) => (l.ai_score || 0) >= 70).slice(0, 15).map((l: any) => {
+  const consultant = (consultants as any[]).find(c => c.id === l.assigned_consultant_id);
+  return `- [${l.id}] ${l.name} | Score: ${l.ai_score} | Status: ${statusMap[l.status] || l.status} | Interesse: ${l.vehicle_interest || 'N/D'} | Consultor: ${consultant?.name || 'Sem consultor'}`;
+}).join('\n') || '- Nenhum lead com score alto no momento'}
 
-REQUISITOS DO JSON:
+INSTRUÇÕES:
+1. Responda INTEIRAMENTE em Português do Brasil.
+2. Base suas análises EXCLUSIVAMENTE nos dados acima. Zero alucinações.
+3. Para recommended_actions, use APENAS lead_ids que aparecem nos dados acima.
+4. Status em português: ${Object.values(statusMap).join(', ')}.
+
+RETORNE EXATAMENTE ESTE JSON:
 {
-  "opportunities_of_the_day": "Texto executivo ácido e direto. Identifique gargalos na operação, falta de velocidade no retorno e oportunidades de girar o estoque parado.",
+  "opportunities_of_the_day": "Análise executiva direta baseada nos dados: gargalos, oportunidades e estado da operação.",
   "recommended_actions": [
-    { "task": "Ação de Resgate ou Fechamento", "reason": "Justificativa comercial agressiva baseada em dados reais", "lead_id": "ID do lead se a ação for para um lead específico, caso contrário use null" }
+    { "task": "Ação específica e imediata", "reason": "Justificativa baseada em dado concreto do relatório", "lead_id": "ID real do lead ou null" }
   ],
   "team_alerts": [
-    "Alertas sobre leads negligenciados (>24h sem contato) ou perda de temperatura em negociações avançadas."
+    "Alerta específico baseado nos dados reais (ex: consultor X tem N leads quentes sem evolução)"
   ],
   "closing_probabilities": [
-    { "consultant_name": "Nome", "probability": number }
+    { "consultant_name": "Nome exato do consultor", "probability": 0 }
   ]
 }`;
 
 
     const globalResponse = await openai.chat.completions.create({
       model: 'gpt-4o',
-      messages: [{ role: 'system', content: 'Você é um Diretor Comercial experiente. Sua análise é ácida, direta e focada em resultados. Responda apenas com JSON.' }, { role: 'user', content: globalPrompt }],
+      messages: [{ role: 'system', content: 'Você é um Diretor Comercial Implacável. Sua análise é cirúrgica, focada em alto giro de estoque e lucro máximo. Você não aceita desculpas, apenas resultados. Responda apenas com JSON.' }, { role: 'user', content: globalPrompt }],
       response_format: { type: "json_object" },
       temperature: 0.3,
     });
@@ -122,70 +145,64 @@ REQUISITOS DO JSON:
     }]);
 
     // --- STEP 2: INDIVIDUAL ANALYSIS (PER CONSULTANT) ---
-    const individualAnalysesResults = await Promise.all(consultants.map(async (consultant) => {
-      const consultantLeads = activeLeads.filter((l: any) =>
-        l.assigned_consultant_id === consultant.id ||
-        (l.vendedor && l.vendedor.toLowerCase().includes(consultant.name.split(' ')[0].toLowerCase()))
-      );
+    const individualAnalysesResults = await Promise.all((consultants as any[]).map(async (consultant) => {
+      const consultantLeads = activeLeads.filter((l: any) => l.assigned_consultant_id === consultant.id);
 
       if (consultantLeads.length === 0) return null;
 
-      const individualPrompt = `Você é o Mentor de Vendas e Gerente de ${consultant.name.split(' ')[0]}. 
-Seu tom é motivador, mas extremamente exigente e focado em fechar negócio HOJE.
-NÃO seja neutro. Dê ordens claras.
+      const hotLeads = consultantLeads.filter((l: any) => (l.ai_score || 0) >= 70);
+      const warmLeads = consultantLeads.filter((l: any) => (l.ai_score || 0) >= 40 && (l.ai_score || 0) < 70);
+      const firstName = consultant.name.split(' ')[0];
 
-REGRAS DE OURO:
-1. CHAME O CLIENTE PELO NOME.
-2. MENCIONE O MODELO DO CARRO.
-3. IDENTIFIQUE "OPORTUNIDADES REAIS DE FECHAMENTO" se o cliente:
-   - Pediu financiamento ou enviou documentos
-   - Pediu preço, proposta ou avaliação de troca
-   - Pediu visita ou test drive confirmados
-   - Cliente respondendo rápido e com perguntas específicas
-   - Evoluiu de Curioso para Interessado na linha do tempo
+      const individualPrompt = `Você é o Mentor de Vendas de ${firstName} na Manos Veículos.
+REGRA CRÍTICA: Use APENAS os dados fornecidos. Não invente nomes, IDs ou fatos. Se um campo for "N/D", não especule.
 
-SE OS LEADS TIVEREM POUCO HISTÓRICO, classifique-os como "FASE INICIAL DE ATENDIMENTO" e não dê score alto.
-SEUS LEADS PRIORITÁRIOS PARA HOJE (${consultantLeads.length}):
-${consultantLeads.map((l: any) => `- Lead [ID: ${l.id}] ${l.name}: ${l.vehicle_interest} | Status: ${statusMap[l.status] || l.status} | Histórico: ${l.resumo_consultor || 'Novo'} | Último Passo: ${l.proxima_acao || 'Ag'}`).join('\n')}
+DADOS DO CONSULTOR ${firstName.toUpperCase()}:
+- Total de leads ativos: ${consultantLeads.length}
+- Leads quentes (score >= 70): ${hotLeads.length}
+- Leads mornos (score 40-69): ${warmLeads.length}
 
-ESTOQUE:
+LEADS PARA ANÁLISE:
+${consultantLeads.slice(0, 20).map((l: any) => `- [ID: ${l.id}] ${l.name} | Score: ${l.ai_score || 0} | Status: ${statusMap[l.status] || l.status} | Interesse: ${l.vehicle_interest || 'N/D'}`).join('\n')}
+
+ESTOQUE DISPONÍVEL:
 ${inventorySummary}
 
-DIRETRIZES:
-- Responda apenas em PT-BR.
-- Use apenas os nomes de status em português: ${Object.values(statusMap).join(', ')}.
-- NUNCA use termos como 'received', 'post_sale', 'scheduled' nas análises textuais.
+REGRAS:
+1. Responda apenas em PT-BR.
+2. Use APENAS IDs de leads listados acima em lead_id.
+3. Score (ai_score) só acima de 70 se o lead está em negociação/proposta com interesse explícito. Dados insuficientes = score máximo 50.
+4. Status em português: ${Object.values(statusMap).join(', ')}.
+5. Para leads com poucos dados, seja honesto: "histórico insuficiente para análise aprofundada".
 
-REQUISITOS DO JSON:
+RETORNE EXATAMENTE ESTE JSON:
 {
-  "daily_guide": "Texto motivador de gerente. Ex: '${consultant.name.split(' ')[0]}, hoje o dia é de fechamento! Temos leads quentes querendo comprar. Foco total em [Nome] e [Nome].'",
+  "daily_guide": "Mensagem direta para ${firstName} baseada nos dados reais: quantos leads quentes, quais são as prioridades do dia.",
   "recommended_actions": [
-    { 
-      "task": "Ação Imediata (ex: Ligar para [Nome] agora)", 
-      "reason": "Gatilho comercial real (ex: ele parou de responder sobre a troca, resgate agora!).",
-      "lead_id": "ID do lead"
-    }
+    { "task": "Ação concreta e imediata", "reason": "Baseada em dado real do lead", "lead_id": "ID real da lista acima" }
   ],
-
   "leads_analysis": [
     {
-      "lead_id": "...",
-      "is_closing_opportunity": boolean,
-      "closing_reason": "Por que é uma oportunidade de fechamento hoje?",
-      "closing_probability": number,
-      "behavioral_analysis": "Análise tática do perfil de [Nome]...",
-      "negotiation_strategy": "Script ou argumento matador para o [Carro]...",
-      "next_step": "AÇÃO IMEDIATA: Ligar, Mandar Proposta, etc.",
-      "ai_score": number
+      "lead_id": "ID real da lista",
+      "is_closing_opportunity": false,
+      "closing_reason": "Justificativa baseada em dados reais ou 'dados insuficientes'",
+      "closing_probability": 0,
+      "behavioral_analysis": "Análise baseada no score e status reais",
+      "negotiation_strategy": "Estratégia concreta para o veículo de interesse real",
+      "next_step": "Próxima ação específica",
+      "ai_score": 0
     }
   ]
 }`;
 
       const res = await openai.chat.completions.create({
         model: 'gpt-4o',
-        messages: [{ role: 'system', content: `Você orienta o consultor ${consultant.name.split(' ')[0]}. Seja tático e direto. Responda apenas com JSON.` }, { role: 'user', content: individualPrompt }],
+        messages: [
+          { role: 'system', content: `Você é o Mentor Elite do consultor ${firstName}. Analise com precisão cirúrgica usando APENAS os dados fornecidos. Zero alucinações — se não tem dado, admita. Responda apenas com JSON válido.` },
+          { role: 'user', content: individualPrompt }
+        ],
         response_format: { type: "json_object" },
-        temperature: 0.3,
+        temperature: 0.2,
       });
 
       const data = JSON.parse(res.choices[0]?.message?.content || '{}');

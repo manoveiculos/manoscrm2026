@@ -259,7 +259,6 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
                     .eq('id', targetId);
 
                 if (!error) {
-                    console.log(`[Save] Sucesso: ${table}.${column} = "${colValue}"`);
                     tableSaved = true;
                     
                     // Atualizar estado local para refletir a mudança imediatamente
@@ -487,7 +486,6 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
                                             lossReason={lossReason}
                                             setLossReason={setLossReason}
                                             handleSaveFinish={() => {
-                                                console.log('Encerrar missão', { finishType, vehicleDetails, lossReason });
                                                 setShowFinishing(false);
                                             }}
                                             isAnalyzing={isAnalyzing}

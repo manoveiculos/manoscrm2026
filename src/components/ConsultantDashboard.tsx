@@ -86,8 +86,8 @@ export function ConsultantDashboard({ consultantId, consultantName }: { consulta
         );
     }
 
-    const uncontactedCount = (metrics?.statusCounts['new'] || 0) + (metrics?.statusCounts['received'] || 0);
-    const inProgressCount = (metrics?.statusCounts['attempt'] || 0) + (metrics?.statusCounts['contacted'] || 0);
+    const uncontactedCount = (metrics?.statusCounts?.['new'] || 0) + (metrics?.statusCounts?.['received'] || 0);
+    const inProgressCount = (metrics?.statusCounts?.['attempt'] || 0) + (metrics?.statusCounts?.['contacted'] || 0);
     const allScheduledLeads = metrics?.scheduledLeads || [];
     const scheduledToday = allScheduledLeads.filter(l => {
         const d = new Date(l.scheduled_at!);
@@ -295,8 +295,8 @@ export function ConsultantDashboard({ consultantId, consultantName }: { consulta
                         </div>
 
                         <div className="space-y-3">
-                            {recentLeads.filter(l => l.ai_score >= 60).length > 0 ? (
-                                recentLeads.filter(l => l.ai_score >= 60).map((lead) => (
+                            {recentLeads.filter(l => (l.ai_score || 0) >= 60).length > 0 ? (
+                                recentLeads.filter(l => (l.ai_score || 0) >= 60).map((lead) => (
                                     <Link
                                         key={lead.id}
                                         href={`/leads?id=${lead.id}`}
@@ -364,7 +364,7 @@ export function ConsultantDashboard({ consultantId, consultantName }: { consulta
                             {[
                                 { label: 'Novos', value: uncontactedCount, total: metrics?.leadCount || 1, color: 'bg-blue-500' },
                                 { label: 'Em Negócio', value: inProgressCount, total: metrics?.leadCount || 1, color: 'bg-amber-500' },
-                                { label: 'Visitas', value: metrics?.statusCounts['visited'] || 0, total: metrics?.leadCount || 1, color: 'bg-red-500' },
+                                { label: 'Visitas', value: metrics?.statusCounts?.['visited'] || 0, total: metrics?.leadCount || 1, color: 'bg-red-500' },
                                 { label: 'Vendas', value: metrics?.salesCount || 0, total: metrics?.leadCount || 1, color: 'bg-emerald-500' },
                             ].map((stat, i) => (
                                 <div key={i} className="space-y-2">
