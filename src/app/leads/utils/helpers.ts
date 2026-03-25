@@ -61,3 +61,18 @@ export const formatValue = (val: string) => {
     if (!val) return '';
     return val.replace(/_/g, ' ').trim();
 };
+
+export function formatPreco(value: any): string {
+  if (!value || value === '0' || value === 0) return 'R$ 0';
+  const clean = String(value).replace(/\D/g, '');
+  const num = parseInt(clean);
+  if (isNaN(num)) return 'R$ 0';
+  return 'R$ ' + num.toLocaleString('pt-BR');
+}
+
+export function formatKM(value: any): string {
+  if (!value || value === '0' || value === 0) return 'N/I';
+  const num = typeof value === 'number' ? value : parseFloat(String(value).replace(/[^\d.,]/g, '').replace(',', '.'));
+  if (isNaN(num)) return 'N/I';
+  return num.toLocaleString('pt-BR') + ' km';
+}

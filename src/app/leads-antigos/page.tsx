@@ -58,6 +58,10 @@ export function OldLeadsContent() {
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
 
+    // Pagination State
+    const [visibleCount, setVisibleCount] = useState(50);
+    const observerTarget = React.useRef<HTMLDivElement>(null);
+
     useEffect(() => {
         async function initialize() {
             setLoading(true);
@@ -125,77 +129,108 @@ export function OldLeadsContent() {
         }
     };
 
-    const filteredLeads = leads
-        .filter(lead => {
-            const matchesSearch =
-                lead.nome?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                lead.interesse?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                lead.vendedor?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                lead.telefone?.toLowerCase().includes(searchTerm.toLowerCase());
+    const filteredLeads = React.useMemo(() => {
+        return leads
+            .filter(lead => {
+                const matchesSearch =
+                    lead.nome?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                    lead.interesse?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                    lead.vendedor?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                    lead.telefone?.toLowerCase().includes(searchTerm.toLowerCase());
 
-            if (!matchesSearch) return false;
+                if (!matchesSearch) return false;
 
-            // Category Filter
-            if (activeCategory !== 'all' && lead.ai_classification !== activeCategory) return false;
+                // Category Filter
+                if (activeCategory !== 'all' && lead.ai_classification !== activeCategory) return false;
 
-            // Period Filter
-            if (period !== 'all') {
-                const leadDate = parseISO(lead.criado_em);
-                const today = startOfDay(new Date());
+                // Period Filter
+                if (period !== 'all') {
+                    const leadDate = parseISO(lead.criado_em);
+                    const today = startOfDay(new Date());
 
-                if (period === 'today') {
-                    if (!isAfter(leadDate, today)) return false;
-                } else if (period === '7d') {
-                    if (!isAfter(leadDate, subDays(today, 7))) return false;
-                } else if (period === '15d') {
-                    if (!isAfter(leadDate, subDays(today, 15))) return false;
-                } else if (period === '30d') {
-                    if (!isAfter(leadDate, subDays(today, 30))) return false;
-                } else if (period === '90d') {
-                    if (!isAfter(leadDate, subDays(today, 90))) return false;
-                } else if (period === 'custom' && startDate && endDate) {
-                    const start = startOfDay(parseISO(startDate));
-                    const end = parseISO(endDate); // End of day would be better, but let's keep it simple
-                    if (isBefore(leadDate, start) || isAfter(leadDate, end)) return false;
+                    if (period === 'today') {
+                        if (!isAfter(leadDate, today)) return false;
+                    } else if (period === '7d') {
+                        if (!isAfter(leadDate, subDays(today, 7))) return false;
+                    } else if (period === '15d') {
+                        if (!isAfter(leadDate, subDays(today, 15))) return false;
+                    } else if (period === '30d') {
+                        if (!isAfter(leadDate, subDays(today, 30))) return false;
+                    } else if (period === '90d') {
+                        if (!isAfter(leadDate, subDays(today, 90))) return false;
+                    } else if (period === 'custom' && startDate && endDate) {
+                        const start = startOfDay(parseISO(startDate));
+                        const end = parseISO(endDate); // End of day would be better, but let's keep it simple
+                        if (isBefore(leadDate, start) || isAfter(leadDate, end)) return false;
+                    }
                 }
-            }
 
-            return true;
-        })
-        .sort((a, b) => {
-            if (sortBy === 'recent') return new Date(b.criado_em).getTime() - new Date(a.criado_em).getTime();
-            if (sortBy === 'oldest') return new Date(a.criado_em).getTime() - new Date(b.criado_em).getTime();
-            if (sortBy === 'probability') return (b.ai_score || 0) - (a.ai_score || 0);
+                return true;
+            })
+            .sort((a, b) => {
+                if (sortBy === 'recent') return new Date(b.criado_em).getTime() - new Date(a.criado_em).getTime();
+                if (sortBy === 'oldest') return new Date(a.criado_em).getTime() - new Date(b.criado_em).getTime();
+                if (sortBy === 'probability') return (b.ai_score || 0) - (a.ai_score || 0);
 
-            if (sortBy === 'hot') {
-                if (a.ai_classification === 'hot' && b.ai_classification !== 'hot') return -1;
-                if (a.ai_classification !== 'hot' && b.ai_classification === 'hot') return 1;
-                return new Date(b.criado_em).getTime() - new Date(a.criado_em).getTime();
-            }
-            if (sortBy === 'warm') {
-                if (a.ai_classification === 'warm' && b.ai_classification !== 'warm') return -1;
-                if (a.ai_classification !== 'warm' && b.ai_classification === 'warm') return 1;
-                return new Date(b.criado_em).getTime() - new Date(a.criado_em).getTime();
-            }
-            if (sortBy === 'cold') {
-                if (a.ai_classification === 'cold' && b.ai_classification !== 'cold') return -1;
-                if (a.ai_classification !== 'cold' && b.ai_classification === 'cold') return 1;
-                return new Date(b.criado_em).getTime() - new Date(a.criado_em).getTime();
-            }
+                if (sortBy === 'hot') {
+                    if (a.ai_classification === 'hot' && b.ai_classification !== 'hot') return -1;
+                    if (a.ai_classification !== 'hot' && b.ai_classification === 'hot') return 1;
+                    return new Date(b.criado_em).getTime() - new Date(a.criado_em).getTime();
+                }
+                if (sortBy === 'warm') {
+                    if (a.ai_classification === 'warm' && b.ai_classification !== 'warm') return -1;
+                    if (a.ai_classification !== 'warm' && b.ai_classification === 'warm') return 1;
+                    return new Date(b.criado_em).getTime() - new Date(a.criado_em).getTime();
+                }
+                if (sortBy === 'cold') {
+                    if (a.ai_classification === 'cold' && b.ai_classification !== 'cold') return -1;
+                    if (a.ai_classification !== 'cold' && b.ai_classification === 'cold') return 1;
+                    return new Date(b.criado_em).getTime() - new Date(a.criado_em).getTime();
+                }
 
-            if (sortBy === 'updated_recent') {
-                const da = a.atualizado_em || a.criado_em;
-                const db = b.atualizado_em || b.criado_em;
-                return new Date(db).getTime() - new Date(da).getTime();
-            }
-            if (sortBy === 'updated_oldest') {
-                const da = a.atualizado_em || a.criado_em;
-                const db = b.atualizado_em || b.criado_em;
-                return new Date(da).getTime() - new Date(db).getTime();
-            }
+                if (sortBy === 'updated_recent') {
+                    const da = a.atualizado_em || a.criado_em;
+                    const db = b.atualizado_em || b.criado_em;
+                    return new Date(db).getTime() - new Date(da).getTime();
+                }
+                if (sortBy === 'updated_oldest') {
+                    const da = a.atualizado_em || a.criado_em;
+                    const db = b.atualizado_em || b.criado_em;
+                    return new Date(da).getTime() - new Date(db).getTime();
+                }
 
-            return 0;
-        });
+                return 0;
+            });
+    }, [leads, searchTerm, activeCategory, period, sortBy, startDate, endDate]);
+
+    // Reset pagination when search or filters change
+    useEffect(() => {
+        setVisibleCount(50);
+    }, [filteredLeads]);
+
+    // Intersection Observer for Infinite Scroll Pagination
+    useEffect(() => {
+        const observer = new IntersectionObserver(
+            (entries) => {
+                if (entries[0].isIntersecting) {
+                    setVisibleCount((prev) => Math.min(prev + 50, filteredLeads.length));
+                }
+            },
+            { threshold: 0.1 }
+        );
+
+        if (observerTarget.current) {
+            observer.observe(observerTarget.current);
+        }
+
+        return () => {
+            if (observerTarget.current) {
+                observer.unobserve(observerTarget.current);
+            }
+        };
+    }, [filteredLeads.length]);
+
+    const visibleLeads = filteredLeads.slice(0, visibleCount);
 
     const counts = {
         all: leads.length,
@@ -534,7 +569,7 @@ export function OldLeadsContent() {
 
             <div className="flex flex-col gap-3">
                 <AnimatePresence mode="popLayout">
-                    {filteredLeads.map((lead) => (
+                    {visibleLeads.map((lead) => (
                         <motion.div
                             key={lead.id}
                             layout={isMobile ? false : true}
@@ -688,6 +723,15 @@ export function OldLeadsContent() {
                         </motion.div>
                     ))}
                 </AnimatePresence>
+
+                {visibleCount < filteredLeads.length && (
+                    <div ref={observerTarget} className="flex justify-center py-8">
+                        <div className="animate-pulse flex items-center gap-2 text-white/40 text-[10px] font-black uppercase tracking-widest">
+                            <div className="h-4 w-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                            Carregando mais...
+                        </div>
+                    </div>
+                )}
 
                 {filteredLeads.length === 0 && (
                     <motion.div

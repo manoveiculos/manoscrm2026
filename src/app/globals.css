@@ -1,52 +1,84 @@
 @import "tailwindcss";
 
 @theme {
-  --color-background: #000000;
-  --color-foreground: #f8fafc;
+  /* Background: quase-preto quente, não preto absoluto */
+  --color-background: #0C0C0F;
+  --color-foreground: #F1F1F3;
 
+  /* Vermelho primário — uso restrito e pontual */
   --color-primary: #E31E24;
+  --color-primary-muted: color-mix(in srgb, #E31E24 8%, transparent);
   --color-secondary: #ffffff;
   --color-accent: #E31E24;
+
+  /* Superfícies com profundidade */
+  --color-card-bg: #141418;
+  --color-card-border: rgba(255, 255, 255, 0.07);
+
+  /* Texto em 3 níveis */
+  --color-text-primary: #F1F1F3;
+  --color-text-secondary: #8A8A96;
+  --color-text-muted: #55555F;
 
   --radius-xl: 1rem;
   --radius-2xl: 1.5rem;
   --radius-3xl: 2rem;
 
-  @keyframes gradient {
-    0% {
-      background-position: 0% 50%;
-    }
+  @keyframes float {
+    0%, 100% { transform: translateY(0px); }
+    50% { transform: translateY(-10px); }
+  }
 
-    50% {
-      background-position: 100% 50%;
-    }
-
-    100% {
-      background-position: 0% 50%;
-    }
+  @keyframes pulse-glow {
+    0%, 100% { box-shadow: 0 0 10px rgba(227, 30, 36, 0.15); }
+    50% { box-shadow: 0 0 20px rgba(227, 30, 36, 0.3); }
   }
 }
 
 @layer base {
   body {
     @apply bg-background text-foreground antialiased;
+    background-color: #0C0C0F;
   }
 }
 
 @layer utilities {
+  /* Cartão padrão — sólido e legível */
+  .surface-card {
+    background: #141418;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  }
+
+  /* Cartão elevado — modais e popovers */
+  .surface-elevated {
+    background: #1A1A20;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  }
+
+  /* Legado — mantido para compatibilidade com componentes v1 */
   .glass-card {
-    background: radial-gradient(120% 120% at 0% 0%, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.01) 100%);
+    background: rgba(20, 20, 24, 0.95);
     backdrop-filter: blur(12px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.07);
     box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
   }
 
-  .gradient-text {
-    @apply bg-clip-text text-transparent bg-gradient-to-r from-red-500 via-white to-red-600;
+  .premium-glass {
+    background: #141418;
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
   }
 
-  .text-glow {
-    text-shadow: 0 0 20px rgba(227, 30, 36, 0.5);
+  /* Glow sutil — apenas em elementos de destaque */
+  .red-glow {
+    box-shadow: 0 0 12px -4px rgba(227, 30, 36, 0.35);
+  }
+
+  .text-glow-red {
+    text-shadow: 0 0 8px rgba(227, 30, 36, 0.5);
   }
 }
 
@@ -62,4 +94,14 @@
 ::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.1);
   border-radius: 10px;
+}
+
+/* Fix para dropdowns brancos em modo Dark (Chrome/Windows) */
+select {
+    color-scheme: dark;
+}
+
+option {
+    background-color: #141418;
+    color: #F1F1F3;
 }

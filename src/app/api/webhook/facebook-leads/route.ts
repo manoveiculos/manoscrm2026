@@ -127,21 +127,22 @@ export async function POST(req: NextRequest) {
                 const platform = leadData.platform || 'facebook';
                 const finalSource = platform.toLowerCase() === 'instagram' ? 'Instagram' : campaignName;
 
-                // Enriquecer com IA se possível
+                // Hyper-AI V2: CTA Pronto (1-Click Sell)
                 let aiClassification = 'warm';
                 let aiResumo = `[LEAD ${platform.toUpperCase()}] Real-time | Campanha: ${campaignName}`;
                 let summarizedInterest = interest || campaignName;
+                let recomendacaoCTA = `Olá ${name}, sou da Manos Veículos. Vi seu interesse no ${summarizedInterest}. Posso te ligar rapidinho pra te passar uma condição exclusiva?`;
 
                 if (process.env.OPENAI_API_KEY) {
                     try {
                         const aiResponse = await openai.chat.completions.create({
-                            model: 'gpt-4o',
+                            model: 'gpt-4o-mini',
                             messages: [{
                                 role: 'system',
-                                content: 'Você é um Analista comercial da Manos Veículos. Analise os dados do lead e retorne um JSON: { "classification": "hot" | "warm" | "cold", "summarized_interest": "1-2 palavras do carro", "short_strategy": "frase curta de como abordar" }'
+                                content: 'Você é um Analista Comercial Sênior da Manos Veículos. Analise este novo chumbo (lead) quente do Meta Ads e crie o SCRIPT MATADOR EXATO que o vendedor deve copiar e colar no WhatsApp.\nRetorne um JSON:\n{ "classification": "hot" | "warm" | "cold", "summarized_interest": "1-2 palavras sobre o veículo ou intenção", "short_strategy": "Resumo de 1 linha do perfil do lead", "recomendacao_abordagem": "O SCRIPT EXATO E MATADOR para o vendedor enviar AGORA mesmo. Nada de olá genérico. Ex: Fala [NOME], vi que curtiu o [CARRO]. Consegui segurar a taxa do feirão pra você hoje. Quando pode vir ver a nave?" }'
                             }, {
                                 role: 'user',
-                                content: `Lead: ${name}, Interesse: ${interest}, Origem: ${campaignName}, Cidade: ${city}`
+                                content: `Lead: ${name}\nInteresse Capturado (Público): ${interest}\nOrigem/Campanha: ${campaignName}\nCidade: ${city}`
                             }],
                             response_format: { type: 'json_object' }
                         });
@@ -149,6 +150,7 @@ export async function POST(req: NextRequest) {
                         if (aiData.classification) aiClassification = aiData.classification;
                         if (aiData.summarized_interest) summarizedInterest = aiData.summarized_interest;
                         if (aiData.short_strategy) aiResumo = aiData.short_strategy;
+                        if (aiData.recomendacao_abordagem) recomendacaoCTA = aiData.recomendacao_abordagem;
                     } catch (e) {
                         console.error("AI Enrichment error in webhook:", e);
                     }
@@ -167,9 +169,10 @@ export async function POST(req: NextRequest) {
                         id_meta: leadData.id,
                         id_formulario: leadData.form_id,
                         plataforma_meta: platform,
-                        ai_summary: aiResumo,
+                        ai_summary: `[${new Date().toLocaleString('pt-BR')}] 🤖 ENTRADA META ADS:\nEstratégia: ${aiResumo}\nScript Recomendado: ${recomendacaoCTA}\n`,
                         ai_classification: aiClassification as any,
-                        ai_reason: aiResumo
+                        ai_reason: recomendacaoCTA, // We hijack ai_reason to store the CTA so the Front-end can access it easily
+                        ai_score: aiClassification === 'hot' ? 85 : aiClassification === 'warm' ? 60 : 30
                     });
                 } catch (insertError: any) {
                     console.error('Error processing Facebook lead:', insertError.message);
