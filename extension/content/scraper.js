@@ -1,327 +1,161 @@
 /**
- * Manos CRM - DOM Scraper
+ * Manos CRM v2 - DOM Scraper
+ * Baseado no v1 funcional. Usa data-id @c.us para extrair telefone.
  */
-
-export const Scraper = {
-    VERSION: "3.0.ULTRA",
-
-    _isValidPhone(phone) {
-        if (!phone) return false;
-        const clean = phone.replace(/\D/g, '');
-        if (clean.length > 15) return false; 
-        if (clean.length < 8) return false; 
-        return true;
-    },
-
-    _normalizePhone(phone) {
-        if (!phone) return null;
-        let clean = phone.replace(/\D/g, '');
-        // Se for número brasileiro sem o 55 (10 ou 11 dígitos), adiciona o 55
-        if (clean.length === 10 || clean.length === 11) {
-            if (!clean.startsWith('55')) {
-                clean = '55' + clean;
-            }
-        }
-        return clean;
-    },
-
+const Scraper = {
+    _isValid(p) { if(!p) return false; const c=p.replace(/\D/g,''); return c.length>=8&&c.length<=15; },
+    _norm(p) { if(!p) return null; let c=p.replace(/\D/g,''); if((c.length===10||c.length===11)&&!c.startsWith('55')) c='55'+c; return c; },
 
     getPhone() {
         try {
-            console.log(`Manos CRM: [DEBUG] Iniciando getPhone v${this.VERSION} Agressivo...`);
-
-            // FUNÇÃO HELPER: Extrair de data-id de forma segura
-            const findFromDataId = (selector) => {
-                const el = document.querySelector(selector);
-                const id = el?.getAttribute('data-id') || el?.closest('[data-id]')?.getAttribute('data-id');
+            const fromDataId = (sel) => {
+                const el = document.querySelector(sel);
+                const d = el?.closest('[data-id]') || el?.querySelector('[data-id]') || el;
+                const id = d?.getAttribute?.('data-id');
                 if (id && (id.includes('@c.us') || id.includes('@s.whatsapp.net'))) {
-                    const phone = id.split('@')[0].split('_').pop().replace(/\D/g, '');
-                    if (this._isValidPhone(phone)) return this._normalizePhone(phone);
+                    const ph = id.split('@')[0].split('_').pop().replace(/\D/g, '');
+                    if (this._isValid(ph)) return this._norm(ph);
                 }
                 return null;
             };
 
-            // 1. Header do Chat (Prioridade Máxima)
-            const phoneFromHeader = findFromDataId('#main header') 
-                || findFromDataId('[data-testid="conversation-panel-wrapper"] [data-id]')
-                || findFromDataId('[data-testid="chat-header"]');
-            
-            if (phoneFromHeader) {
-                console.log("Manos CRM: [REFINADO] Telefone via Header Data-ID ->", phoneFromHeader);
-                return phoneFromHeader;
+            // 1. Header data-id
+            let r = fromDataId('#main header') || fromDataId('[data-testid="conversation-panel-wrapper"] [data-id]') || fromDataId('[data-testid="chat-header"]');
+            if (r) return r;
+
+            // 2. Header text regex
+            const hdr = document.querySelector('#main header');
+            if (hdr) {
+                const m = (hdr.innerText||'').match(/\+?\d[\d\s\-\(\)]{8,15}\d/g);
+                if (m) for (const x of m) { const c=x.replace(/\D/g,''); if(this._isValid(c)) return this._norm(c); }
             }
 
-            // 2. Título do Header (Regex Agressiva)
-            const mainHeader = document.querySelector('#main header');
-            if (mainHeader) {
-                const text = mainHeader.innerText || "";
-                const matches = text.match(/\+?\d[\d\s\-\(\)]{8,15}\d/g);
-                if (matches) {
-                    for (let m of matches) {
-                        const clean = m.replace(/\D/g, '');
-                        if (this._isValidPhone(clean)) {
-                            console.log("Manos CRM: [REFINADO] Telefone via Regex Header ->", clean);
-                            return this._normalizePhone(clean);
-                        }
-                    }
+            // 3. Pane side selected
+            r = fromDataId('#pane-side [aria-selected="true"]') || fromDataId('#pane-side [data-testid="list-item"][aria-selected="true"]');
+            if (r) return r;
+
+            // 4. Contact info drawer
+            r = fromDataId('[data-testid="contact-info-drawer"]') || fromDataId('section[role="region"]');
+            if (r) return r;
+
+            // 5. Brute force header spans
+            if (hdr) { for (const s of hdr.querySelectorAll('span,div')) { const t=(s.innerText||'').replace(/\D/g,''); if(t.length>=10&&t.length<=13&&this._isValid(t)) return this._norm(t); } }
+
+            // 6. Global scan #main data-id
+            const main = document.querySelector('#main');
+            if (main) for (const el of main.querySelectorAll('[data-id]')) {
+                const id=el.getAttribute('data-id');
+                if(id&&(id.includes('@c.us')||id.includes('@s.whatsapp.net'))) {
+                    const ph=id.split('@')[0].split('_').pop().replace(/\D/g,'');
+                    if(this._isValid(ph)) return this._norm(ph);
                 }
             }
-
-            // 3. Item Selecionado no Pane Side
-            const selectedPhone = findFromDataId('#pane-side [aria-selected="true"]')
-                || findFromDataId('#pane-side [data-testid="list-item"][aria-selected="true"]');
-            
-            if (selectedPhone) {
-                console.log("Manos CRM: [REFINADO] Telefone via Pane Side ->", selectedPhone);
-                return selectedPhone;
-            }
-
-            // 4. Elemento de "Informações do Contato" se estiver aberto
-            const drawerDetails = findFromDataId('[data-testid="contact-info-drawer"]')
-                || findFromDataId('section[role="region"]');
-            if (drawerDetails) return drawerDetails;
-
-            // 5. Brute Force em todos os spans do header
-            if (mainHeader) {
-                const spans = mainHeader.querySelectorAll('span, div');
-                for (let s of spans) {
-                    const t = s.innerText.replace(/\D/g, '');
-                    if (t.length >= 10 && t.length <= 13 && this._isValidPhone(t)) {
-                        return this._normalizePhone(t);
-                    }
-                }
-            }
-
-            // 6. GLOBAL SCAN: Busca qualquer data-id dentro de #main (ULTRA FALLBACK)
-            const mainEl = document.querySelector('#main');
-            if (mainEl) {
-                const allWithId = mainEl.querySelectorAll('[data-id]');
-                for (let el of allWithId) {
-                    const id = el.getAttribute('data-id');
-                    if (id && (id.includes('@c.us') || id.includes('@s.whatsapp.net'))) {
-                        const parts = id.split('@')[0].split('_');
-                        const phone = parts[parts.length - 1].replace(/\D/g, '');
-                        if (this._isValidPhone(phone)) {
-                            console.log("Manos CRM: [ULTRA] Telefone via Global Scan ->", phone);
-                            return this._normalizePhone(phone);
-                        }
-                    }
-                }
-            }
-
-            console.error(`Manos CRM: [DETECTOR v${this.VERSION}] NENHUM TELEFONE IDENTIFICADO.`);
-
-        } catch (e) {
-            console.error("Manos CRM: Erro catastrófico no Scraper", e);
-        }
+        } catch(e) { console.error("Scraper error",e); }
         return null;
-    },
-
-
-    // Auxiliar para garantir limpeza total
-    _cleanPhone(phone) {
-        if (!phone) return null;
-        const clean = phone.replace(/\D/g, '');
-        return clean.length >= 8 ? clean : null;
     },
 
     getName() {
         try {
-            // Focar no header da conversa ativa (#main)
-            const main = document.getElementById('main');
-            const header = main ? main.querySelector('header') : document.querySelector('header');
+            // Textos que indicam elemento errado (tooltip, subtítulo, status)
+            const BAD = [
+                'clique para mostrar', 'click to see', 'conta comercial',
+                'business account', 'online', 'digitando', 'typing',
+                'gravando', 'recording', 'visto por último', 'last seen',
+                'ausente', 'away'
+            ];
+            const clean = (txt) => {
+                if (!txt) return '';
+                txt = txt.trim();
+                // Descarta strings que contenham termos ruins
+                if (BAD.some(b => txt.toLowerCase().includes(b))) return '';
+                // Descarta se for só número (telefone)
+                if (/^\+?[\d\s\-\(\)]{8,}$/.test(txt)) return '';
+                // Descarta strings muito longas (provavelmente não é nome)
+                if (txt.length > 60) return '';
+                return txt;
+            };
 
-            if (!header) return "";
+            const hdr = document.querySelector('#main header');
 
-            // O titulo às vezes está em um dir="auto"
-            const titleElem = header.querySelector('[data-testid="conversation-info-header-chat-title"]')
-                || header.querySelector('span[title]')
-                || header.querySelector('div[role="button"] span')
-                || header.querySelector('h1, h2');
-
-            if (titleElem) {
-                // Captura agressiva de span interno ou do próprio elemento
-                let text = (titleElem.innerText || titleElem.getAttribute('title') || "").trim();
-                const pureTitle = titleElem.querySelector('span[dir="auto"]') || titleElem;
-                if (pureTitle && pureTitle.innerText) {
-                    text = pureTitle.innerText.trim();
-                }
-
-                // Fallback: junta todos os spans do header se ainda estiver vazio
-                if (!text && header.innerText) {
-                    return header.innerText.split('\n')[0].trim();
-                }
-
-                return text;
+            // 1. data-testid específico do título
+            const byTestId = hdr?.querySelector('[data-testid="conversation-info-header-chat-title"]');
+            if (byTestId) {
+                const txt = clean(byTestId.getAttribute('title') || byTestId.innerText);
+                if (txt) return txt;
             }
-        } catch (e) {
-            console.error("Manos CRM: Erro ao obter nome", e);
-        }
-        return "";
-    },
 
-    /**
-     * Extrai as mensagens visíveis com extrema robustez
-     */
-    extractMessagesData() {
-        console.log("Manos CRM Scraper: Iniciando extração de mensagens...");
-        const messages = [];
-        
-        // Estratégia de Precisão: Seletores específicos de mensagens do WA Web
-        const msgNodes = document.querySelectorAll('.message-in, .message-out, [data-testid="msg-container"], div[data-id^="true_"], div[data-id^="false_"]');
-        
-        console.log(`Manos CRM Scraper: Encontrados ${msgNodes.length} nós de mensagem.`);
-
-        msgNodes.forEach(node => {
-            try {
-                const dataId = node.getAttribute('data-id') || "";
-                if (dataId && !dataId.includes('_')) return;
-
-                const isOut = node.classList.contains('message-out') || 
-                             node.closest('.message-out') !== null ||
-                             (dataId && dataId.startsWith('true_'));
-
-                let text = "";
-                const textNode = node.querySelector('.selectable-text, span.copyable-text');
-                
-                if (textNode) {
-                    text = textNode.innerText || textNode.textContent || "";
-                } else {
-                    const spans = node.querySelectorAll('span');
-                    const textParts = [];
-                    spans.forEach(s => {
-                        const t = s.innerText?.trim();
-                        // Ignora se for o horário (ex: 10:15)
-                        if (t && t.length > 0 && !t.match(/^\d{1,2}:\d{2}(\s?[APap][Mm])?$/)) {
-                            textParts.push(t);
-                        }
-                    });
-                    text = textParts.join(" ");
+            // 2. Primeiro span[title] dentro do header que tenha valor de nome
+            if (hdr) {
+                for (const span of hdr.querySelectorAll('span[title]')) {
+                    const txt = clean(span.getAttribute('title'));
+                    if (txt && txt.length >= 2) return txt;
                 }
-
-                if (!text || text.trim() === '') {
-                    const labelElem = node.querySelector('[aria-label]');
-                    if (labelElem) text = `[Mídia: ${labelElem.getAttribute('aria-label')}]`;
-                }
-
-                text = text?.trim();
-
-                if (text && text.length > 0) {
-                    const cleanText = text
-                        .replace(/[\u0000-\u001F\u007F-\u009F]/g, "")
-                        .replace(/\s+/g, " ");
-                        
-                    console.log(`Manos CRM Scraper: Mensagem extraída: [${isOut ? 'OUT' : 'IN'}] ${cleanText.substring(0, 30)}...`);
-
-                    messages.push({
-                        text: cleanText,
-                        direction: isOut ? 'outbound' : 'inbound',
-                        timestamp: new Date().toISOString(),
-                        _rawId: `${cleanText}|${isOut ? 'O' : 'I'}`
-                    });
-                }
-            } catch (e) {
-                console.error("Manos CRM Scraper: Erro ao processar nó de mensagem", e);
             }
-        });
 
-        if (messages.length === 0) {
-            console.warn("Manos CRM Scraper: Nenhuma mensagem estruturada encontrada. Tentando Brute Force...");
-            const chatMain = document.querySelector('#main');
-            if (chatMain) {
-                const spans = chatMain.querySelectorAll('span.copyable-text, .selectable-text span');
-                spans.forEach(span => {
-                    const text = span.innerText?.trim();
-                    if (text && text.length > 2) {
-                        messages.push({
-                            text: text,
-                            direction: 'inbound',
-                            timestamp: new Date().toISOString(),
-                            _rawId: `${text}|I`
-                        });
+            // 3. span[dir="auto"] dentro do botão de cabeçalho (nome clicável)
+            if (hdr) {
+                const btn = hdr.querySelector('div[role="button"]') || hdr.querySelector('[tabindex]');
+                if (btn) {
+                    for (const span of btn.querySelectorAll('span[dir="auto"], span')) {
+                        const txt = clean(span.innerText);
+                        if (txt && txt.length >= 2) return txt;
                     }
-                });
+                }
             }
-        }
 
-        return messages;
+            // 4. Chat selecionado na lista lateral (nome exibido no painel)
+            const selected =
+                document.querySelector('#pane-side [aria-selected="true"]') ||
+                document.querySelector('#pane-side [data-testid="list-item"][aria-selected="true"]');
+            if (selected) {
+                const nameEl =
+                    selected.querySelector('[data-testid="cell-frame-title"] span') ||
+                    selected.querySelector('span[title]') ||
+                    selected.querySelector('span[dir="auto"]');
+                if (nameEl) {
+                    const txt = clean(nameEl.getAttribute('title') || nameEl.innerText);
+                    if (txt) return txt;
+                }
+            }
+
+            // 5. Fallback: innerText do header sem spans problemáticos
+            if (hdr) {
+                const firstLine = (hdr.innerText || '').split('\n')[0];
+                const txt = clean(firstLine);
+                if (txt && txt.length >= 2) return txt;
+            }
+        } catch(e) {}
+        return '';
     },
 
-    // Rola para cima repetidamente para carregar o histórico completo
-    async getFullMessages(maxScrolls = 15) {
-        console.log(`Manos CRM: Iniciando Auto-Scroll para histórico completo (Max ${maxScrolls} vezes)...`);
+    extractMessages() {
+        const msgs = [];
+        document.querySelectorAll('.message-in,.message-out,[data-testid="msg-container"],div[data-id^="true_"],div[data-id^="false_"]').forEach(n => {
+            try {
+                const did = n.getAttribute('data-id')||'';
+                if(did&&!did.includes('_')) return;
+                const isOut = n.classList.contains('message-out')||n.closest('.message-out')||(did&&did.startsWith('true_'));
+                let txt=''; const tn=n.querySelector('.selectable-text,span.copyable-text');
+                if(tn) txt=tn.innerText||'';
+                else { const ps=[]; n.querySelectorAll('span').forEach(s=>{const t=s.innerText?.trim();if(t&&t.length>0&&!/^\d{1,2}:\d{2}/.test(t))ps.push(t);}); txt=ps.join(' '); }
+                if(!txt?.trim()){const l=n.querySelector('[aria-label]');if(l)txt=`[Mídia: ${l.getAttribute('aria-label')}]`;}
+                txt=txt?.trim();
+                if(txt&&txt.length>0) msgs.push({text:txt.replace(/[\u0000-\u001F]/g,'').replace(/\s+/g,' '),direction:isOut?'outbound':'inbound',timestamp:new Date().toISOString(),_rawId:`${txt}|${isOut?'O':'I'}`});
+            } catch(e){}
+        });
+        if(!msgs.length){const m=document.querySelector('#main');if(m)m.querySelectorAll('span.copyable-text,.selectable-text span').forEach(s=>{const t=s.innerText?.trim();if(t&&t.length>2)msgs.push({text:t,direction:'inbound',timestamp:new Date().toISOString(),_rawId:`${t}|I`});});}
+        return msgs;
+    },
 
-        let allMessagesMap = new Map();
-
-        // Encontra o container rolável da conversa
-        // No WhatsApp Web, geralmente é o primeiro parente com overflow-y: auto ou scroll dentro do painel
-        const scrollContainer = document.querySelector('#main .copyable-area')?.parentElement
-            || document.querySelector('[data-testid="conversation-panel-messages"]')?.closest('div[tabindex]')
-            || Array.from(document.querySelectorAll('#main div')).find(el => {
-                const style = window.getComputedStyle(el);
-                return style.overflowY === 'scroll' || style.overflowY === 'auto';
-            });
-
-        if (!scrollContainer) {
-            console.warn("Manos CRM: Container de scroll não encontrado. Extraindo apenas visíveis.");
-            return this.extractMessagesData();
-        }
-
-        let currentScrolls = 0;
-        let lastHeight = scrollContainer.scrollHeight;
-
-        // Função para extrair e mesclar na coleção
-        const extractAndMerge = () => {
-            const msgs = this.extractMessagesData();
-            msgs.forEach(m => {
-                // Usa o texto+direção como chave única rudimentar para evitar duplicadas
-                allMessagesMap.set(m._rawId, m);
-            });
-        };
-
-        // Extrai a base (parte de baixo)
-        extractAndMerge();
-
-        while (currentScrolls < maxScrolls) {
-            // Rola para o topo do container
-            scrollContainer.scrollTop = 0;
-            currentScrolls++;
-            console.log(`Manos CRM: Scroll ${currentScrolls}/${maxScrolls}...`);
-
-            // Aguarda o WhatsApp carregar mais mensagens (geralmente dispara spinner)
-            await new Promise(r => setTimeout(r, 1200)); // 1200ms para garantir carregamento
-
-            extractAndMerge();
-
-            // Verifica se a altura mudou (se carregou mais mensagens)
-            const newHeight = scrollContainer.scrollHeight;
-            if (newHeight === lastHeight) {
-                // Se a altura não mudou após o scroll e o delay, provavelmente chegamos ao topo da conversa
-                console.log("Manos CRM: Topo da conversa alcançado ou limite de carregamento atingido.");
-                break;
-            }
-            lastHeight = newHeight;
-        }
-
-        console.log(`Manos CRM: Extração via Scroll finalizada. Total de blocos únicos: ${allMessagesMap.size}`);
-
-        // Retorna convertendo o Map de volta para Array
-        // As mensagens adicionadas primeiramente pelo topo podem desordenar o Map nativo, 
-        // mas o WA renderiza de cima para baixo na extração final. Apenas retornamos a lista única.
-        // O ideal é re-extrair tudo de uma vez no final para garantir ordem temporal correta no DOM:
-
-        // Volta para o rodapé para o usuário não se perder
-        scrollContainer.scrollTop = scrollContainer.scrollHeight;
-
-        // Extrai uma última vez para garantir
-        const finalExtract = this.extractMessagesData();
-        if (finalExtract.length > allMessagesMap.size) {
-            return finalExtract;
-        } else {
-            return Array.from(allMessagesMap.values()).map(m => {
-                delete m._rawId;
-                return m;
-            });
-        }
+    async getFullMessages(maxScrolls=25) {
+        const map=new Map();
+        const sc=document.querySelector('#main .copyable-area')?.parentElement||document.querySelector('[data-testid="conversation-panel-messages"]')?.closest('div[tabindex]')||Array.from(document.querySelectorAll('#main div')).find(el=>{const s=getComputedStyle(el);return s.overflowY==='scroll'||s.overflowY==='auto';});
+        if(!sc) return this.extractMessages();
+        const merge=()=>this.extractMessages().forEach(m=>map.set(m._rawId,m));
+        merge(); let lh=sc.scrollHeight;
+        for(let i=0;i<maxScrolls;i++){sc.scrollTop=0;await new Promise(r=>setTimeout(r,1200));merge();const nh=sc.scrollHeight;if(nh===lh)break;lh=nh;}
+        sc.scrollTop=sc.scrollHeight;
+        const f=this.extractMessages();
+        return f.length>map.size?f:Array.from(map.values()).map(m=>{delete m._rawId;return m;});
     }
 };

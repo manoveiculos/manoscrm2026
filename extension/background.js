@@ -14,11 +14,9 @@ chrome.alarms.create('poll-new-leads', { periodInMinutes: 1 });
 // ─── Alarm: Poll new leads every 60s ──────────────────
 chrome.alarms.onAlarm.addListener(async (alarm) => {
     if (alarm.name !== 'poll-new-leads') return;
-    const { crmUrl, crmToken } = await chrome.storage.local.get(['crmUrl', 'crmToken']);
-    if (!crmUrl) return;
+    const { crmToken } = await chrome.storage.local.get(['crmToken']);
 
-    const base = (() => { try { return new URL(crmUrl).origin; } catch { return crmUrl; } })();
-    const url = `${base}/api/extension/kanban`;
+    const url = 'https://manoscrm.com.br/api/extension/kanban';
     const headers = crmToken ? { 'Authorization': `Bearer ${crmToken}` } : {};
 
     try {
@@ -59,31 +57,32 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     try { const j = await res.json(); err = j.error || j.message || err; } catch (_) {}
                     return sendResponse({ success: false, error: err });
                 }
-                sendResponse({ success: true, data: await res.json() });
+                const data = await res.json();
+                sendResponse({ success: true, data });
             })
             .catch(e => {
                 clearTimeout(t);
+                console.error("Fetch background error:", e);
                 sendResponse({ success: false, error: e.name === 'AbortError' ? 'Timeout' : e.message });
             });
-        return true;
+        return true; 
     }
 
     // --- Open new tab for creating a lead in the CRM ---
     if (request.type === 'OPEN_CRM_CREATE') {
-        chrome.storage.local.get(['crmUrl'], ({ crmUrl }) => {
-            const base = (() => { try { return new URL(crmUrl || 'http://localhost:3000').origin; } catch { return 'http://localhost:3000'; } })();
-            chrome.tabs.create({ url: `${base}/leads?create=${request.phone}` });
-            sendResponse({ success: true });
-        });
-        return true;
+        chrome.tabs.create({ url: `https://manoscrm.com.br/v2/leads?create=${request.phone}` });
+        sendResponse({ success: true });
+        return false;
     }
 
     // --- Force poll immediately ---
     if (request.type === 'POLL_NOW') {
         chrome.alarms.get('poll-new-leads', (alarm) => {
             if (!alarm) chrome.alarms.create('poll-new-leads', { periodInMinutes: 1 });
+            sendResponse({ success: true });
         });
-        sendResponse({ success: true });
-        return false;
+        return true;
     }
+
+    return false;
 });

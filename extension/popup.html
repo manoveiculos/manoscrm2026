@@ -4,71 +4,113 @@
 <head>
   <meta charset="UTF-8">
   <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
     body {
       width: 300px;
-      padding: 15px;
-      background: #0c0c0e;
+      background: #0C0C0F;
       color: white;
-      font-family: sans-serif;
+      font-family: Inter, -apple-system, Helvetica, sans-serif;
+    }
+
+    .header {
+      padding: 16px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
     }
 
     .logo {
       font-weight: 900;
-      color: #dc2626;
-      margin-bottom: 15px;
+      font-size: 15px;
+      letter-spacing: -0.3px;
+      color: white;
+    }
+    .logo span { color: #dc2626; }
+
+    .subtitle {
+      font-size: 10px;
+      color: rgba(255,255,255,0.3);
+      margin-top: 2px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .form-body {
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
     }
 
     label {
-      font-size: 10px;
+      font-size: 9px;
+      font-weight: 700;
       text-transform: uppercase;
-      color: #666;
-      display: block;
-      margin-bottom: 5px;
+      letter-spacing: 0.8px;
+      color: rgba(255,255,255,0.3);
     }
 
     input {
       width: 100%;
-      padding: 8px;
-      background: #1a1a1c;
-      border: 1px solid #333;
+      padding: 9px 11px;
+      background: #141418;
+      border: 1px solid rgba(255,255,255,0.07);
       color: white;
-      border-radius: 4px;
-      box-sizing: border-box;
+      border-radius: 8px;
+      font-size: 12px;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.15s;
     }
+    input:focus { border-color: rgba(255,255,255,0.2); }
+    input::placeholder { color: rgba(255,255,255,0.18); }
 
     button {
       width: 100%;
-      margin-top: 15px;
       padding: 10px;
       background: #dc2626;
       border: none;
       color: white;
-      border-radius: 4px;
-      font-weight: bold;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 700;
       cursor: pointer;
+      transition: background 0.15s;
+      font-family: inherit;
     }
+    button:hover { background: #b91c1c; }
 
     .status {
       font-size: 11px;
-      margin-top: 10px;
       text-align: center;
       color: #4ade80;
       display: none;
+      padding-bottom: 4px;
     }
   </style>
 </head>
 
 <body>
-  <div class="logo">MANOS CRM</div>
+  <div class="header">
+    <div class="logo">MANOS <span>CRM</span></div>
+    <div class="subtitle">Configurações da Extensão</div>
+  </div>
 
-  <label>URL do seu CRM</label>
-  <input type="text" id="crm-url" placeholder="https://manoscrm.com.br">
+  <div class="form-body">
+    <div class="field">
+      <label>Token de Autenticação</label>
+      <input type="password" id="crm-token" placeholder="Insira seu token API">
+    </div>
 
-  <label style="margin-top: 10px;">Token de Autenticação</label>
-  <input type="password" id="crm-token" placeholder="Insira seu token API">
+    <button id="save-btn">Salvar Configuração</button>
+    <div class="status" id="status-msg">Configuração salva com sucesso!</div>
+  </div>
 
-  <button id="save-btn">Salvar Configuração</button>
-  <div class="status" id="status-msg">Configuração salva!</div>
   <script src="popup.js"></script>
 </body>
 
