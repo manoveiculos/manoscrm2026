@@ -19,6 +19,11 @@ export interface Lead {
   next_step?: string;
   proxima_acao?: string;
   ai_reason?: string;
+  carro_troca?: string;
+  troca?: string;
+  interesse?: string;
+  observacoes?: string;
+  resumo?: string;
   followups?: any[];
 }
 
@@ -33,7 +38,7 @@ export interface TimelineEvent {
   feedType?: 'interaction' | 'message' | 'ai_lab';
 }
 
-export type TabId = 'dashboard' | 'timeline' | 'followup' | 'arsenal';
+export type TabId = 'dashboard' | 'timeline' | 'followup' | 'arsenal' | 'troca' | 'financiamento';
 
 export interface InventoryItem {
   marca: string;

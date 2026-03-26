@@ -1,6 +1,10 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Users, Zap, Calendar, Car, CreditCard, BadgeCheck, Phone, AlertCircle } from 'lucide-react';
+import { 
+    Users, Zap, Calendar, Car, CreditCard, 
+    BadgeCheck, Phone, AlertCircle, 
+    Activity, Target, ShieldAlert 
+} from 'lucide-react';
 import { LeadStatus } from '@/lib/types';
 
 interface MoveMenuProps {
@@ -12,14 +16,11 @@ interface MoveMenuProps {
 
 export const MoveMenu = ({ isOpen, currentStatus, onStatusChange, onClose }: MoveMenuProps) => {
     const statusOptions = [
-        { id: 'received' as LeadStatus, label: 'Aguardando', icon: <Users size={14} /> },
-        { id: 'attempt' as LeadStatus, label: 'Em Atendimento', icon: <Zap size={14} /> },
-        { id: 'scheduled' as LeadStatus, label: 'Agendado', icon: <Calendar size={14} /> },
-        { id: 'visited' as LeadStatus, label: 'Visita e Test Drive', icon: <Car size={14} /> },
-        { id: 'proposed' as LeadStatus, label: 'Negociação', icon: <CreditCard size={14} /> },
-        { id: 'closed' as LeadStatus, label: 'Vendido', icon: <BadgeCheck size={14} className="text-emerald-500" /> },
-        { id: 'comprado' as LeadStatus, label: 'Comprado', icon: <Car size={14} className="text-indigo-500" /> },
-        { id: 'post_sale' as LeadStatus, label: 'Sem Contato', icon: <Phone size={14} className="text-white/40" /> },
+        { id: 'entrada' as LeadStatus, label: 'Entrada', icon: <Zap size={14} className="text-yellow-400" /> },
+        { id: 'triagem' as LeadStatus, label: 'Triagem', icon: <Activity size={14} className="text-blue-400" /> },
+        { id: 'ataque' as LeadStatus, label: 'Ataque', icon: <Target size={14} className="text-red-500" /> },
+        { id: 'fechamento' as LeadStatus, label: 'Fechamento', icon: <ShieldAlert size={14} className="text-emerald-500" /> },
+        { id: 'closed' as LeadStatus, label: 'Vendido', icon: <BadgeCheck size={14} className="text-emerald-600" /> },
         { id: 'lost' as LeadStatus, label: 'Perda Total', icon: <AlertCircle size={14} className="text-white/20" /> }
     ];
 
@@ -40,18 +41,18 @@ export const MoveMenu = ({ isOpen, currentStatus, onStatusChange, onClose }: Mov
                         animate={{ opacity: 1, scale: 1, y: 0 }}
                         exit={{ opacity: 0, scale: 0.95, y: -10 }}
                         style={{
-                            bottom: 'calc(100% + 10px)',
+                            top: 'calc(100% + 10px)',
                         }}
-                        className="absolute right-0 w-64 bg-[#0a0a0a] border border-white/20 rounded-2xl shadow-[0_40px_120px_rgba(0,0,0,1),0_0_20px_rgba(220,38,38,0.15)] z-[999] py-4 overflow-hidden backdrop-blur-3xl border-red-500/50 origin-bottom-right"
+                        className="absolute right-0 w-60 bg-[#0a0a0ae6] border border-white/10 rounded-2xl shadow-[0_30px_90px_rgba(0,0,0,0.8)] z-[999] py-3 overflow-hidden backdrop-blur-3xl border-red-500/30 origin-top-right ring-1 ring-white/5"
                     >
-                        <div className="absolute inset-0 bg-gradient-to-br from-red-600/10 to-transparent pointer-events-none" />
+                        <div className="absolute inset-0 bg-gradient-to-br from-red-600/5 to-transparent pointer-events-none" />
                         <div className="relative z-10">
-                            <div className="px-6 pb-4 mb-2 border-b border-white/10 text-left">
-                                <p className="text-[10px] font-black uppercase tracking-[0.25em] text-red-500 flex items-center gap-2">
-                                    <Zap size={10} fill="currentColor" /> Mover Lead para...
+                            <div className="px-5 pb-3 mb-2 border-b border-white/5 text-left">
+                                <p className="text-[9px] font-black uppercase tracking-[0.2em] text-red-500/80 flex items-center gap-2">
+                                    <Zap size={9} fill="currentColor" /> Mover para Etapa
                                 </p>
                             </div>
-                            <div className="max-h-[300px] overflow-y-auto px-2 space-y-1.5 custom-scrollbar">
+                            <div className="max-h-[300px] overflow-y-auto px-1.5 space-y-1 custom-scrollbar">
                                 {statusOptions.filter(st => st.id !== currentStatus).map((st) => (
                                     <button
                                         key={st.id}
@@ -60,12 +61,12 @@ export const MoveMenu = ({ isOpen, currentStatus, onStatusChange, onClose }: Mov
                                             onStatusChange(st.id);
                                             onClose();
                                         }}
-                                        className="w-full flex items-center gap-4 px-4 py-3 rounded-xl text-[12px] font-bold text-white/50 hover:text-white hover:bg-white/5 transition-all group/item text-left"
+                                        className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-[11px] font-bold text-white/40 hover:text-white hover:bg-white/[0.03] transition-all group/item text-left"
                                     >
-                                        <div className="p-2 rounded-lg bg-white/5 group-hover/item:bg-red-600/30 group-hover/item:text-red-500 transition-all">
+                                        <div className="p-1.5 rounded-lg bg-white/5 group-hover/item:bg-red-600/20 group-hover/item:text-red-500 transition-all">
                                             {st.icon}
                                         </div>
-                                        <span className="flex-1">{st.label}</span>
+                                        <span className="flex-1 tracking-tight">{st.label}</span>
                                     </button>
                                 ))}
                             </div>

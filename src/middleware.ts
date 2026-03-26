@@ -10,20 +10,7 @@ export async function middleware(request: NextRequest) {
         request,
     });
 
-    // CORS for Extension API
-    if (request.nextUrl.pathname.startsWith('/api/extension') || request.nextUrl.pathname.startsWith('/api/v2/pulse-alerts')) {
-        supabaseResponse.headers.set('Access-Control-Allow-Origin', '*');
-        supabaseResponse.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-        supabaseResponse.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-
-        // Handle preflight
-        if (request.method === 'OPTIONS') {
-            return new NextResponse(null, { 
-                status: 204, 
-                headers: supabaseResponse.headers 
-            });
-        }
-    }
+    // Middleware logic continues below
 
     const supabase = createServerClient(
         process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -89,6 +76,6 @@ export const config = {
          * Corresponde a todos os caminhos, exceto arquivos estáticos conhecidos.
          * Usamos uma lógica mais abrangente para garantir segurança total.
          */
-        '/((?!api/auth|api/webhook|api/health|api/extension|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+        '/((?!api/auth|api/webhook|api/health|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
     ],
 };

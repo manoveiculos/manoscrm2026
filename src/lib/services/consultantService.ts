@@ -87,6 +87,7 @@ export async function assignConsultant(leadId: string, consultantId: string) {
     cacheInvalidate('leads_');
 }
 
+
 export async function pickNextConsultant(leadName?: string, excludedId?: string, allowedNames?: string[], excludedName?: string) {
     // 0. Robust resolution of excludedId if only excludedName is provided
     let effectiveExcludedId = excludedId;
@@ -156,6 +157,31 @@ export async function pickNextConsultant(leadName?: string, excludedId?: string,
     }
 
     return consultants[0];
+}
+
+/**
+ * Resolves a consultant UUID based on a name string (case-insensitive).
+ * Useful for leads arriving from external webhooks with only a name.
+ */
+export async function resolveConsultantIdByName(name: string): Promise<string | null> {
+    if (!name || name.trim() === '') return null;
+    
+    // Attempt first name match first to be more precise
+    const firstName = name.trim().split(' ')[0];
+    
+    // Check cache or db
+    const { data: consultants, error } = await supabase
+        .from('consultants_manos_crm')
+        .select('id, name')
+        .ilike('name', `%${firstName}%`);
+        
+    if (error || !consultants || consultants.length === 0) return null;
+    
+    // If multiple matches, try exact full name or just pick the first one as fallback
+    if (consultants.length === 1) return consultants[0].id;
+    
+    const exactMatch = consultants.find(c => c.name.toLowerCase() === name.toLowerCase().trim());
+    return exactMatch ? exactMatch.id : consultants[0].id;
 }
 
 export async function getConsultantMetrics(consultantId: string) {

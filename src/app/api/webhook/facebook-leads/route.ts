@@ -169,9 +169,11 @@ export async function POST(req: NextRequest) {
                         id_meta: leadData.id,
                         id_formulario: leadData.form_id,
                         plataforma_meta: platform,
-                        ai_summary: `[${new Date().toLocaleString('pt-BR')}] 🤖 ENTRADA META ADS:\nEstratégia: ${aiResumo}\nScript Recomendado: ${recomendacaoCTA}\n`,
+                        ai_summary: `[${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}] 🤖 ENTRADA META ADS:\nEstratégia: ${aiResumo}\nScript Recomendado: ${recomendacaoCTA}\n`,
                         ai_classification: aiClassification as any,
-                        ai_reason: recomendacaoCTA, // We hijack ai_reason to store the CTA so the Front-end can access it easily
+                        ai_reason: recomendacaoCTA,
+                        next_step: recomendacaoCTA,
+                        proxima_acao: recomendacaoCTA,
                         ai_score: aiClassification === 'hot' ? 85 : aiClassification === 'warm' ? 60 : 30
                     });
                 } catch (insertError: any) {

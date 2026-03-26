@@ -21,9 +21,19 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: 'Lead ID é obrigatório' }, { status: 400 });
         }
 
-        const cleanId = leadId.replace(/main_|crm26_|dist_/, '');
-        const isCRM26 = leadId.startsWith('crm26_');
-        const table = isCRM26 ? 'leads_distribuicao_crm_26' : 'leads_manos_crm';
+        let table = 'leads_manos_crm';
+        let cleanId = leadId;
+
+        if (leadId.startsWith('crm26_')) {
+            table = 'leads_distribuicao_crm_26';
+            cleanId = leadId.replace('crm26_', '');
+        } else if (leadId.startsWith('main_')) {
+            table = 'leads_manos_crm';
+            cleanId = leadId.replace('main_', '');
+        } else {
+            table = 'leads_master';
+            cleanId = leadId.replace('master_', '');
+        }
 
         // 1. Fetch Lead Details & Inventory Summary
         const [{ data: lead }, { data: inventory }] = await Promise.all([
@@ -83,6 +93,7 @@ export async function POST(req: NextRequest) {
           "urgency_score": number,
           "temperature": "frio" | "morno" | "quente",
           "recommended_status": "new" | "attempt" | "contacted" | "negotiation" | "proposed",
+          "veiculo_troca": "Marca Modelo Ano do carro do CLIENTE na troca ou 'não informado'",
           "por_que_este_script": "A técnica de fechamento usada."
         }`;
 
@@ -110,18 +121,22 @@ export async function POST(req: NextRequest) {
         const recommendedStatus = iaResult.recommended_status || lead.status;
 
         // --- PERSISTENCE LOGIC ---
-        const timestamp = new Date().toLocaleString('pt-BR');
+        const timestamp = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
         const timelineNote = `[${timestamp}] 👨‍🏫 MENTORIA IA (ELITE CLOSER):\nSTATUS RECOMENDADO: ${recommendedStatus}\nDIAGNÓSTICO: ${diagnostico}\n\nORIENTAÇÃO: ${orientacao}\n\n`;
 
         const updateData: any = {
-            [isCRM26 ? 'resumo_consultor' : 'ai_reason']: `${diagnostico} | ORIENTAÇÃO: ${orientacao}`,
-            [isCRM26 ? 'resumo' : 'ai_summary']: timelineNote + (lead?.ai_summary || lead?.resumo || ''),
+            [table === 'leads_distribuicao_crm_26' ? 'resumo_consultor' : 'ai_reason']: `${diagnostico} | ORIENTAÇÃO: ${orientacao}`,
+            [table === 'leads_distribuicao_crm_26' ? 'resumo' : 'ai_summary']: timelineNote + (lead?.ai_summary || lead?.resumo || ''),
             ai_score: urgencyScore,
             ai_classification: temperature === 'quente' ? 'hot' : temperature === 'morno' ? 'warm' : 'cold',
             next_step: scriptWhatsApp,
             proxima_acao: scriptWhatsApp,
             status: recommendedStatus // AUTO STATUS UPDATE
         };
+
+        if (iaResult.veiculo_troca && iaResult.veiculo_troca !== 'não informado') {
+            updateData.carro_troca = iaResult.veiculo_troca;
+        }
 
         await supabaseAdmin
             .from(table)

@@ -12,18 +12,20 @@ export async function GET(req: NextRequest) {
     if (authError) return authError;
 
     try {
-        // Buscar em ambas as tabelas
-        const [mainResponse, crm26Response] = await Promise.all([
+        // Buscar em todas as tabelas (Main, CRM26 e Master/V2)
+        const [mainResponse, crm26Response, masterResponse] = await Promise.all([
             supabaseAdmin.from('leads_manos_crm').select('id, name, status, ai_classification, vehicle_interest'),
-            supabaseAdmin.from('leads_distribuicao_crm_26').select('id, nome, status, ai_classification, interesse')
+            supabaseAdmin.from('leads_distribuicao_crm_26').select('id, nome, status, ai_classification, interesse'),
+            supabaseAdmin.from('leads_master').select('id, name, status, ai_classification, vehicle_interest')
         ]);
 
         if (mainResponse.error) throw mainResponse.error;
         if (crm26Response.error) throw crm26Response.error;
-
+        if (masterResponse.error) throw masterResponse.error;
+ 
         const allLeads = [
             ...(mainResponse.data || []).map(l => ({
-                id: l.id,
+                id: `main_${l.id}`,
                 name: l.name,
                 status: l.status,
                 classification: l.ai_classification,
@@ -37,6 +39,14 @@ export async function GET(req: NextRequest) {
                 classification: l.ai_classification,
                 vehicle: l.interesse,
                 source: 'crm26'
+            })),
+            ...(masterResponse.data || []).map(l => ({
+                id: `master_${l.id}`,
+                name: l.name,
+                status: l.status,
+                classification: l.ai_classification,
+                vehicle: l.vehicle_interest,
+                source: 'master'
             }))
         ];
 

@@ -61,7 +61,11 @@ export const leadService = {
                 .select('*', { count: 'exact' });
 
             if (consultantId) {
-                query = query.eq('assigned_consultant_id', consultantId);
+                if (consultantId === 'unassigned' || consultantId === 'none') {
+                    query = query.is('assigned_consultant_id', null);
+                } else {
+                    query = query.eq('assigned_consultant_id', consultantId);
+                }
             }
             if (status) {
                 query = query.eq('status', status);
@@ -106,10 +110,12 @@ export const leadService = {
             targetTable = 'leads_master';
             cleanId = idStr.replace('master_', '');
         } else {
-            // Plain UUID — came from leads_master (no prefix)
+            // Plain UUID or unknown prefix — assume leads_master
             targetTable = 'leads_master';
             cleanId = idStr.replace(/^(main_|crm26_|dist_|lead_|crm25_|master_)/, '');
         }
+
+        const realId = targetTable === 'leads_distribuicao_crm_26' ? parseInt(cleanId) : cleanId;
 
         const updatePayload: any = {
             status,
@@ -129,7 +135,7 @@ export const leadService = {
         const { error } = await client
             .from(targetTable)
             .update(updatePayload)
-            .eq('id', cleanId);
+            .eq('id', realId);
 
         if (error) throw error;
         leadCacheInvalidate();
@@ -165,6 +171,8 @@ export const leadService = {
             cleanId = idStr.replace(/^(main_|crm26_|dist_|lead_|crm25_|master_)/, '');
         }
 
+        const realId = targetTable === 'leads_distribuicao_crm_26' ? parseInt(cleanId) : cleanId;
+
         const updateData: any = { ...details };
         delete updateData.id;
         delete updateData.source_type;
@@ -173,12 +181,19 @@ export const leadService = {
         if (targetTable === 'leads_distribuicao_crm_26') {
             updateData.atualizado_em = updateData.updated_at;
             delete updateData.updated_at;
+
+            // Mapeamentos específicos CRM26
+            if (updateData.name) { updateData.nome = updateData.name; delete updateData.name; }
+            if (updateData.vehicle_interest) { updateData.interesse = updateData.vehicle_interest; } 
+            if (updateData.carro_troca) { 
+                updateData.troca = updateData.carro_troca; 
+            }
         }
 
         const { error } = await client
             .from(targetTable)
             .update(updateData)
-            .eq('id', cleanId);
+            .eq('id', realId);
 
         if (error) throw error;
         leadCacheInvalidate();

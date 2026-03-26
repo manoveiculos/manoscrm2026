@@ -107,6 +107,7 @@ export interface Lead {
   scheduled_at?: string;
   ai_summary?: string;
   ai_reason?: string;
+  churn_probability?: number;
   behavioral_profile?: {
     urgency: 'high' | 'medium' | 'low';
     sentiment: string;

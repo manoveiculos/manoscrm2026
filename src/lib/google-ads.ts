@@ -95,8 +95,6 @@ export async function fetchGoogleAdsCampaigns(creds: GoogleAdsCredentials) {
             headers['login-customer-id'] = loginId;
         }
 
-        console.log(`[GOOGLE ADS DEBUG] Request: useLoginId=${useLoginId}, customerId=${customerId}, loginId=${loginId}`);
-
         return fetch(
             `https://googleads.googleapis.com/v19/customers/${customerId}/googleAds:search`,
             {
@@ -110,13 +108,11 @@ export async function fetchGoogleAdsCampaigns(creds: GoogleAdsCredentials) {
     // Tenta com login-customer-id primeiro
     let response = await makeRequest(true);
     let text = await response.text();
-    console.log(`[GOOGLE ADS DEBUG] Response 1 (MCC Mode): ${response.status}`);
 
     if (!response.ok) {
         // Tenta sem login-customer-id como fallback
         response = await makeRequest(false);
         text = await response.text();
-        console.log(`[GOOGLE ADS DEBUG] Response 2 (Direct Mode): ${response.status}`);
     }
 
     if (!response.ok) {
@@ -125,8 +121,7 @@ export async function fetchGoogleAdsCampaigns(creds: GoogleAdsCredentials) {
             data = JSON.parse(text);
         } catch (e) {
             const accessible = await listAccessibleCustomers(creds).catch(() => []);
-            console.log(`[GOOGLE ADS DEBUG] Accessible Accounts: ${JSON.stringify(accessible)}`);
-            throw new Error(`Erro Crítico Google (HTTP ${response.status}). Suas contas acessíveis: ${accessible.join(', ') || 'Nenhuma detected'}. Verifique se o ID ${customerId} está ativo e vinculado.`);
+            throw new Error(`Erro Crítico Google (HTTP ${response.status}). Suas contas acessíveis: ${accessible.join(', ') || 'Nenhuma detectada'}. Verifique se o ID ${customerId} está ativo e vinculado.`);
         }
 
         const details = data.error?.details?.[0]?.errors?.[0] || data.error;
@@ -147,7 +142,6 @@ export async function fetchGoogleAdsCampaigns(creds: GoogleAdsCredentials) {
         throw new Error(`Google Ads API: ${msg}`);
     }
 
-    console.log(`[GOOGLE ADS DEBUG] Success! Data length: ${text.length}`);
     const data = JSON.parse(text);
     const results = data.results || [];
 

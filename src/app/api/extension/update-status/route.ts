@@ -8,10 +8,17 @@ export async function POST(req: NextRequest) {
     if (authError) return authError;
 
     try {
-        const { leadId, status, notes } = await req.json();
+        const body = await req.json();
+        // Aceita tanto "leadId" (legado) quanto "lead_id" (padrão atual)
+        const leadId = body.leadId || body.lead_id;
+        const { status, notes } = body;
 
         if (!leadId || !status) {
-            return NextResponse.json({ error: 'Dados inválidos' }, { status: 400 });
+            console.error("[api/extension/update-status] Erro de validação:", { body });
+            return NextResponse.json({ 
+                success: false, 
+                error: `Dados inválidos: lead_id (${leadId}) e status (${status}) são obrigatórios` 
+            }, { status: 400 });
         }
 
         const adminClient = createClient();
@@ -24,6 +31,10 @@ export async function POST(req: NextRequest) {
 
     } catch (err: any) {
         console.error("Update Status API Error:", err);
-        return NextResponse.json({ error: err.message }, { status: 500 });
+        const isNotFound = err.message?.includes('não encontrado');
+        return NextResponse.json(
+            { success: false, error: isNotFound ? 'Lead não encontrado ou erro ao atualizar' : err.message },
+            { status: isNotFound ? 404 : 500 }
+        );
     }
 }

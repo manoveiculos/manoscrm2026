@@ -345,10 +345,15 @@ function detectDirection(msg: any): 'in' | 'out' {
 }
 
 function mapInteraction(item: any): TimelineEvent {
+  const mappedType = mapInteractionType(item.type);
+  const isWhatsApp = mappedType.startsWith('whatsapp');
+  
   return {
     id: item.id.toString(),
-    type: mapInteractionType(item.type),
-    title: formatInteractionTitle(item),
+    type: mappedType,
+    title: isWhatsApp 
+      ? (mappedType === 'whatsapp_in' ? 'Mensagem do cliente' : 'Mensagem enviada')
+      : formatInteractionTitle(item),
     description: item.notes || item.description || item.content || item.message || formatStatusChange(item.old_status, item.new_status),
     author: item.user_name || item.user_id || 'Sistema',
     created_at: item.created_at,
@@ -399,7 +404,8 @@ function mapInteractionType(raw: string): TimelineEvent['type'] {
   if (t.includes('status')) return 'status_change';
   if (t.includes('note') || t.includes('nota')) return 'note';
   if (t.includes('call') || t.includes('ligacao') || t.includes('ligação')) return 'call';
-  if (t.includes('whatsapp')) return 'whatsapp_out';
+  if (t === 'whatsapp_in') return 'whatsapp_in';
+  if (t === 'whatsapp_out' || t === 'whatsapp') return 'whatsapp_out';
   if (t.includes('visit') || t.includes('visita')) return 'visit';
   if (t.includes('proposal') || t.includes('proposta')) return 'proposal';
   if (t.includes('vehicle') || t.includes('veiculo') || t.includes('veículo')) return 'vehicle_linked';

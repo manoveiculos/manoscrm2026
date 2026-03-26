@@ -13,6 +13,7 @@ import {
     Phone,
     Globe,
     MessageCircle,
+    AlertTriangle,
 } from 'lucide-react';
 import { motion, Variants } from 'framer-motion';
 import { normalizeStatus } from '@/constants/status';
@@ -157,15 +158,19 @@ export default function Pulse() {
     const leadsWithScores = useMemo(() => {
         const now = new Date();
         return leads.map(l => {
-            const tempoFunilH = Math.max(0, (now.getTime() - new Date(l.created_at).getTime()) / (1000 * 60 * 60));
-            const score = calculateLeadScore({
-                status: normalizeStatus(l.status),
-                tempoFunilHoras: tempoFunilH,
-                totalInteracoes: 0,
-                ultimaInteracaoH: tempoFunilH,
-                temValorDefinido: !!l.valor_investimento && l.valor_investimento !== '0',
-                temVeiculoInteresse: !!l.vehicle_interest && l.vehicle_interest !== '---'
-            });
+            // Prioridade: ai_score real do banco; fallback para heurístico local
+            const aiScore = Number(l.ai_score);
+            const score = aiScore > 0 ? aiScore : (() => {
+                const tempoFunilH = Math.max(0, (now.getTime() - new Date(l.created_at).getTime()) / (1000 * 60 * 60));
+                return calculateLeadScore({
+                    status: normalizeStatus(l.status),
+                    tempoFunilHoras: tempoFunilH,
+                    totalInteracoes: 0,
+                    ultimaInteracaoH: tempoFunilH,
+                    temValorDefinido: !!l.valor_investimento && l.valor_investimento !== '0',
+                    temVeiculoInteresse: !!l.vehicle_interest && l.vehicle_interest !== '---'
+                });
+            })();
             return { ...l, tactical_score: score };
         });
     }, [leads]);
@@ -177,6 +182,11 @@ export default function Pulse() {
             .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
             .slice(0, 8),
         [leadsWithScores]
+    );
+
+    const orphanedLeads = useMemo(() => 
+        leads.filter(l => !l.assigned_consultant_id),
+        [leads]
     );
 
     const closingLeads = useMemo(() =>
@@ -193,6 +203,14 @@ export default function Pulse() {
             (l.scheduled_at && new Date(l.scheduled_at) >= new Date())
         ),
         [leads]
+    );
+
+    const churnRiskLeads = useMemo(() =>
+        leadsWithScores
+            .filter(l => Number((l as any).churn_probability) > 70)
+            .sort((a, b) => Number((b as any).churn_probability) - Number((a as any).churn_probability))
+            .slice(0, 5),
+        [leadsWithScores]
     );
 
     const topLead = closingLeads[0];
@@ -233,6 +251,31 @@ export default function Pulse() {
                 responseRate={metrics?.responseRate}
                 userRole={userRole}
             />
+
+            {/* ── CRITICAL ALERTS (ADMIN ONLY) ────────────────── */}
+            {userRole === 'admin' && orphanedLeads.length > 0 && (
+                <motion.div
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="mx-2 md:mx-0 p-4 rounded-2xl bg-red-950/20 border border-red-500/20 flex items-center justify-between gap-4 group"
+                >
+                    <div className="flex items-center gap-3">
+                        <div className="h-10 w-10 rounded-xl bg-red-500/10 flex items-center justify-center text-red-500">
+                            <AlertCircle size={20} className="animate-pulse" />
+                        </div>
+                        <div>
+                            <h3 className="text-[11px] font-black text-red-500 uppercase tracking-widest">Alerta de Leads Órfãos</h3>
+                            <p className="text-[13px] text-white/60 font-medium">Existem <span className="text-white font-bold">{orphanedLeads.length}</span> leads sem vendedor atribuído.</p>
+                        </div>
+                    </div>
+                    <button 
+                        onClick={() => window.location.href = '/v2/leads?consultant=none'}
+                        className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-[10px] font-black uppercase tracking-widest rounded-xl transition-all shadow-[0_4px_15px_rgba(239,68,68,0.3)]"
+                    >
+                        Resolver Agora
+                    </button>
+                </motion.div>
+            )}
 
             {/* ── MAIN GRID ────────────────────────────────────── */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -342,6 +385,64 @@ export default function Pulse() {
                                                 </div>
 
                                                 <ChevronRight size={13} className="text-white/15 group-hover:text-white/40 shrink-0 transition-colors" />
+                                            </motion.div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        </motion.section>
+                    )}
+
+                    {/* ── RISCO DE CHURN ───────────────────────────── */}
+                    {churnRiskLeads.length > 0 && (
+                        <motion.section variants={fadeUp} className="space-y-1">
+                            <SectionTitle
+                                icon={AlertTriangle}
+                                label="Risco de Abandono"
+                                count={churnRiskLeads.length}
+                                accent="#f59e0b"
+                            />
+                            <div className="rounded-2xl border border-amber-500/15 bg-[#0d0d10] overflow-hidden">
+                                <div className="flex items-center gap-3 px-4 py-2.5 border-b border-amber-500/10"
+                                    style={{ background: 'linear-gradient(90deg, rgba(245,158,11,0.07), transparent)' }}>
+                                    <motion.div animate={{ opacity: [1, 0.4, 1] }} transition={{ repeat: Infinity, duration: 2 }}>
+                                        <AlertTriangle size={12} className="text-amber-500" />
+                                    </motion.div>
+                                    <p className="text-[10px] font-black text-amber-400/70 uppercase tracking-widest">
+                                        Leads inativos com alto risco de abandono — Reative agora
+                                    </p>
+                                </div>
+                                <div className="divide-y divide-white/[0.04]">
+                                    {churnRiskLeads.map((lead, i) => {
+                                        const churn = Number((lead as any).churn_probability);
+                                        const hoursInactive = Math.round((Date.now() - new Date(lead.updated_at).getTime()) / 3_600_000);
+                                        return (
+                                            <motion.div
+                                                key={lead.id}
+                                                initial={{ opacity: 0, x: -10 }}
+                                                animate={{ opacity: 1, x: 0 }}
+                                                transition={{ delay: i * 0.05 }}
+                                                onClick={() => setSelectedLead(lead)}
+                                                className="flex items-center gap-4 px-4 py-3 hover:bg-white/[0.03] cursor-pointer group transition-colors"
+                                            >
+                                                <div className="h-9 w-9 rounded-xl flex items-center justify-center text-sm font-black border shrink-0"
+                                                    style={{ backgroundColor: 'rgba(245,158,11,0.08)', color: '#f59e0b', borderColor: 'rgba(245,158,11,0.2)' }}>
+                                                    {(lead.name?.[0] || 'U').toUpperCase()}
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="text-[13px] font-semibold text-white/80 truncate">{lead.name}</p>
+                                                    <p className="text-[10px] text-white/30 truncate">{lead.vehicle_interest || 'Sem interesse'}</p>
+                                                </div>
+                                                <div className="flex items-center gap-3 shrink-0">
+                                                    <div className="text-right">
+                                                        <p className="text-[10px] font-black text-amber-400">{churn}%</p>
+                                                        <p className="text-[9px] text-white/20">{hoursInactive}h inativo</p>
+                                                    </div>
+                                                    <div className="h-7 w-7 rounded-lg flex items-center justify-center bg-amber-500/10 border border-amber-500/15">
+                                                        <AlertTriangle size={11} className="text-amber-400" />
+                                                    </div>
+                                                    <ChevronRight size={13} className="text-white/15 group-hover:text-white/40 transition-colors" />
+                                                </div>
                                             </motion.div>
                                         );
                                     })}

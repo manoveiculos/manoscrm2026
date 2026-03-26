@@ -10,11 +10,15 @@ import { useLeadData } from './hooks/useLeadData';
 import { useLeadTimeline } from './hooks/useLeadTimeline';
 import { useLeadFollowUp } from './hooks/useLeadFollowUp';
 import { useLeadScore } from './hooks/useLeadScore';
+import { TabId } from './types';
+import { leadService } from '@/lib/leadService';
 
 import { DashboardTab } from './tabs/DashboardTab';
 import { TimelineTab } from './tabs/TimelineTab';
 import { FollowUpTab } from './tabs/FollowUpTab';
 import { ArsenalTab } from './tabs/ArsenalTab';
+import { TradeInTab } from './tabs/TradeInTab';
+import { FinancingTab } from './tabs/FinancingTab';
 
 import { StatusSelector } from './sections/StatusSelector';
 import { LeadHeader } from './sections/LeadHeader';
@@ -48,7 +52,7 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
 }) => {
     const supabase = createClient();
     const [userName, setUserName] = useState(propUserName || '');
-    const [activeTab, setActiveTab] = useState<'dashboard' | 'timeline' | 'followup' | 'arsenal'>('dashboard');
+    const [activeTab, setActiveTab] = useState<TabId>('dashboard');
     const [isManagement, setIsManagement] = useState(propIsManagement || false);
     
     // Core Data Hooks
@@ -194,99 +198,129 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
         setActiveTab('followup');
     };
 
+    const handleSaveFinish = async () => {
+        if (!finishType) return;
+        try {
+            const res = await fetch('/api/lead/finish', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    lead_id: lead.id,
+                    finish_type: finishType,
+                    vehicle_details: vehicleDetails,
+                    loss_reason: lossReason,
+                    consultant_name: userName,
+                    consultant_id: lead.assigned_consultant_id,
+                }),
+            });
+
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({ error: 'Erro desconhecido' }));
+                throw new Error(err.error || res.statusText);
+            }
+
+            const data = await res.json();
+
+            // Atualiza estado local otimisticamente
+            setLead((prev: any) => ({ ...prev, status: data.status }));
+            if (setLeads) {
+                setLeads((prev: any[]) =>
+                    prev.map(l => l.id === lead.id ? { ...l, status: data.status } : l)
+                );
+            }
+
+            setShowFinishing(false);
+            setFinishType(null);
+            setVehicleDetails('');
+            setLossReason('');
+
+            await timeline.refresh();
+            onClose();
+        } catch (err: any) {
+            console.error('[handleSaveFinish]', err);
+            alert('Erro ao salvar conclusão: ' + (err.message || 'Tente novamente.'));
+        }
+    };
+
     // ══════════════════════════════════════
     // CORREÇÃO 4: SALVAR EDIÇÕES (mismatch de colunas e schemas)
     // ══════════════════════════════════════
     async function handleSaveField(field: string, value: string) {
-        const cleanId = lead.id.toString().replace(/^(main_|crm26_|dist_|lead_|crm25_)/, '');
-
-        // Mapeamento: campo do frontend → possíveis colunas no banco (V2 e V1)
+        const fieldLower = field.toLowerCase();
+        
+        // Mapeamento: campo do frontend -> objeto de atualização para o leadService
         const fieldMappings: Record<string, string[]> = {
-            'interesse':          ['vehicle_interest', 'interest', 'interesse'],
-            'ticket':             ['valor_investimento', 'estimated_ticket', 'budget', 'investment_value'],
-            'valor_investimento': ['valor_investimento', 'estimated_ticket', 'budget', 'investment_value'],
-            'origem':             ['origem', 'source', 'origin'],
-            'nome':               ['nome', 'name', 'full_name'],
-            'telefone':           ['phone', 'telefone', 'contact_phone'],
+            'interesse':          ['vehicle_interest', 'interesse'],
+            'ticket':             ['valor_investimento', 'estimated_ticket'],
+            'valor_investimento': ['valor_investimento', 'estimated_ticket'],
+            'origem':             ['origem', 'source'],
+            'carro_troca':        ['carro_troca', 'troca', 'observacoes', 'resumo'],
+            'nome':               ['name', 'nome'],
+            'telefone':           ['phone', 'telefone'],
         };
 
-        const possibleColumns = fieldMappings[field.toLowerCase()] || [field];
-        
-        // Detectar se o ID é UUID para priorizar leads_master
-        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(cleanId);
-        const tables = isUUID 
-            ? ['leads_master', 'leads_manos_crm', 'leads_distribuicao_crm_26'] 
-            : ['leads_manos_crm', 'leads_distribuicao_crm_26', 'leads_master'];
-
-        let saved = false;
+        const targetColumns = fieldMappings[fieldLower] || [field];
         let cleanValue: any = value;
 
-        // Limpeza de valores financeiros - CORREÇÃO 1: Tratar escala de valores
-        if (field.toLowerCase().includes('valor') || field.toLowerCase().includes('ticket')) {
-            // Se o usuário digitou "25.900", transformamos em "25900"
+        // Limpeza de valores financeiros
+        if (fieldLower.includes('valor') || fieldLower.includes('ticket')) {
             cleanValue = value.replace(/\D/g, '');
         }
 
-        for (const table of tables) {
-            let tableSaved = false;
-            
-            // ══════════════════════════════════════
-            // CORREÇÃO: TRATAR IDs E CASTS POR TABELA
-            // ══════════════════════════════════════
-            let targetId: any = cleanId;
-            if (table === 'leads_distribuicao_crm_26' || table === 'leads_manos_crm') {
-                // Se o ID atual não for numérico, precisamos buscar o ID correspondente
-                if (!/^\d+$/.test(cleanId)) {
-                    const { data } = await supabase.from(table).select('id').or(`id_meta.eq.${cleanId},lead_id.eq.${cleanId}`).limit(1);
-                    if (data?.[0]?.id) targetId = data[0].id; else continue; // Pula se não achar correspondente numérico
-                } else {
-                    targetId = parseInt(cleanId);
-                }
-            }
+        let saved = false;
+        let lastError = null;
 
-            for (const column of possibleColumns) {
-                let colValue: any = cleanValue;
+        // Tentar salvar em cada coluna possível até ter sucesso (resiliência para schemas mistos V1/V2)
+        for (const col of targetColumns) {
+            try {
+                let colValue = (col === 'estimated_ticket' || col === 'ai_score') ? (parseInt(cleanValue) || 0) : cleanValue;
                 
-                // Conversão para colunas numéricas
-                if (['estimated_ticket', 'budget', 'ai_score'].includes(column)) {
-                    colValue = parseInt(cleanValue) || 0;
+                // Se estivermos salvando no fallback de observações, não sobrescreva, anexe
+                if ((col === 'observacoes' || col === 'resumo') && fieldLower === 'carro_troca') {
+                    const currentObs = lead.observacoes || lead.resumo || '';
+                    colValue = `${currentObs}\n🚗 CARRO DE TROCA: ${cleanValue}`.trim();
                 }
+
+                await leadService.updateLeadDetails(supabase, lead.id, { [col]: colValue });
                 
-                // UPDATE — Tenta atualizar na tabela atual
-                const { error } = await supabase
-                    .from(table)
-                    .update({ [column]: colValue })
-                    .eq('id', targetId);
-
-                if (!error) {
-                    tableSaved = true;
-                    
-                    // Atualizar estado local para refletir a mudança imediatamente
-                    setLead((prev: any) => ({ ...prev, [field === 'interesse' ? 'vehicle_interest' : (field === 'origem' ? 'origem' : column)]: value }));
-                    if (setLeads) setLeads((prev: any[]) => prev.map(l => l.id === lead.id ? { ...l, [field === 'interesse' ? 'vehicle_interest' : (field === 'origem' ? 'origem' : column)]: value } : l));
-                }
-            }
-
-            if (tableSaved) {
+                // Se chegou aqui, salvou com sucesso em algum lugar
                 saved = true;
-                // Registrar na timeline
-                await supabase.from('interactions_manos_crm').insert({
-                    [isUUID ? 'lead_id' : 'lead_id_v1']: cleanId,
-                    type: 'note',
-                    notes: `🔧 Campo "${field.toUpperCase()}" alterado para "${value}"`,
-                    consultant_id: lead.assigned_consultant_id?.replace(/^(main_|crm26_|dist_|lead_|crm25_)/, ''),
-                    user_name: userName,
-                    created_at: new Date().toISOString(),
-                });
-                break; 
+                console.log(`[Save] Sucesso ao salvar campo "${field}" na coluna "${col}"`);
+                
+                // Atualizar estado local
+                setLead((prev: any) => ({ ...prev, [col]: colValue, [fieldLower]: value }));
+                if (setLeads) {
+                    setLeads((prev: any[]) => prev.map(l => l.id === lead.id ? { ...l, [col]: colValue, [fieldLower]: value } : l));
+                }
+                break;
+            } catch (err) {
+                lastError = err;
+                continue; // Tenta a próxima coluna
             }
         }
 
         if (saved) {
-            await timeline.refresh();
+            try {
+                // Registrar na timeline (Interação genérica de log)
+                const cleanId = lead.id.toString().replace(/^(main_|crm26_|dist_|lead_|crm25_|master_)/, '');
+                const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(cleanId);
+                
+                await supabase.from('interactions_manos_crm').insert({
+                    [isUUID ? 'lead_id' : 'lead_id_v1']: cleanId,
+                    type: 'note',
+                    notes: `🔧 Campo "${field.toUpperCase()}" alterado para "${value}"`,
+                    consultant_id: lead.assigned_consultant_id?.replace(/^(main_|crm26_|dist_|lead_|crm25_|master_)/, ''),
+                    user_name: userName,
+                    created_at: new Date().toISOString(),
+                });
+
+                await timeline.refresh();
+            } catch (timelineErr) {
+                console.warn("Erro ao registrar log na timeline:", timelineErr);
+            }
         } else {
-            console.error(`[Save] FALHA: nenhuma tabela aceitou o campo "${field}"`);
-            alert('Não foi possível salvar esta alteração no banco de dados.');
+            console.error(`[Save] FALHA definitiva ao salvar campo "${field}":`, lastError);
+            alert('Não foi possível salvar esta alteração no banco de dados. Verifique o esquema das tabelas.');
         }
     }
 
@@ -370,10 +404,12 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
     if (!isOpen || !lead) return null;
 
     const TABS = [
-        { id: 'dashboard', label: 'Visão Geral' },
-        { id: 'timeline',  label: 'Timeline'    },
-        { id: 'followup',  label: 'Ações'        },
-        { id: 'arsenal',   label: 'Arsenal'      },
+        { id: 'dashboard',    label: 'Geral' },
+        { id: 'timeline',     label: 'Timeline'    },
+        { id: 'followup',     label: 'Ações'        },
+        { id: 'arsenal',      label: 'Arsenal'      },
+        { id: 'troca',        label: 'Troca'        },
+        { id: 'financiamento', label: 'Crédito'     },
     ] as const;
 
     const modalContent = (
@@ -485,9 +521,7 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
                                             setVehicleDetails={setVehicleDetails}
                                             lossReason={lossReason}
                                             setLossReason={setLossReason}
-                                            handleSaveFinish={() => {
-                                                setShowFinishing(false);
-                                            }}
+                                            handleSaveFinish={handleSaveFinish}
                                             isAnalyzing={isAnalyzing}
                                             recalculateStrategy={recalculateStrategy}
                                             handleExecuteAIDirective={handleExecuteAIDirective}
@@ -553,6 +587,15 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
                                             handleVincularVeiculo={handleVincularVeiculo}
                                             parsePrice={parsePrice}
                                         />
+                                    )}
+                                    {activeTab === 'troca' && (
+                                        <TradeInTab 
+                                            lead={lead} 
+                                            onSaveField={handleSaveField} 
+                                        />
+                                    )}
+                                    {activeTab === 'financiamento' && (
+                                        <FinancingTab />
                                     )}
                                 </motion.div>
                             </AnimatePresence>

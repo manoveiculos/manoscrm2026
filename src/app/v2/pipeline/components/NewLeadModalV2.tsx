@@ -45,6 +45,12 @@ export function NewLeadModalV2({ isOpen, onClose, onSuccess, userName, consultan
 
             if (newLead) {
                 onSuccess(newLead);
+                // Fire-and-forget: análise IA inicial em background
+                fetch('/api/lead/init-score', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ leadId: newLead.id }),
+                }).catch(() => {});
                 setFormData({ name: '', phone: '', vehicle_interest: '', valor_investimento: '', carro_troca: '' });
                 setChatText('');
                 onClose();

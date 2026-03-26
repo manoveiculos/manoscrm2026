@@ -103,12 +103,46 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                     <div className="h-5 w-5 border-2 border-red-600 border-t-transparent rounded-full animate-spin" />
                 </div>
             ) : events.length > 0 ? (
-                <div className="bg-[#141418] border border-white/[0.07] rounded-xl overflow-hidden">
+                <div className={`${filter === 'whatsapp' ? 'space-y-1 py-4' : 'bg-[#141418] border border-white/[0.07] rounded-xl overflow-hidden'}`}>
                     {events.map((event, idx) => {
                         const config = EVENT_CONFIG[event.type] || EVENT_CONFIG.system;
                         const date = new Date(event.created_at);
                         const dateStr = date.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 
+                        // Layout de CHAT para a aba específica de WhatsApp
+                        if (filter === 'whatsapp') {
+                            const isOut = event.type === 'whatsapp_out';
+                            return (
+                                <div key={event.id} className={`flex w-full ${isOut ? 'justify-end' : 'justify-start'} px-2`}>
+                                    <div 
+                                        className={`max-w-[85%] rounded-2xl px-3 py-2.5 shadow-sm border ${
+                                            isOut 
+                                                ? 'bg-[#3b82f6]/10 border-[#3b82f6]/20 text-blue-50 rounded-tr-none' 
+                                                : 'bg-[#25d366]/10 border-[#25d366]/20 text-green-50 rounded-tl-none'
+                                        }`}
+                                    >
+                                        <div className="flex items-center justify-between gap-4 mb-1.5">
+                                            <span className={`text-[10px] font-bold uppercase tracking-wider opacity-50`}>
+                                                {event.author}
+                                            </span>
+                                            <span className="text-[9px] opacity-30 tabular-nums">
+                                                {dateStr.split(', ')[1]} {/* Só a hora */}
+                                            </span>
+                                        </div>
+                                        <p className="text-[13px] leading-relaxed whitespace-pre-wrap">
+                                            {event.description}
+                                        </p>
+                                        <div className={`mt-1 text-right`}>
+                                            <span className="text-[8px] opacity-20 uppercase">
+                                                {dateStr.split(', ')[0]}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        }
+
+                        // Layout Padrão de TIMELINE para o restante
                         return (
                             <div key={event.id} className="flex items-start gap-3 px-4 py-3.5 border-b border-white/[0.04] last:border-0">
                                 {/* Dot */}

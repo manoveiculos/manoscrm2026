@@ -14,12 +14,21 @@ const openai = new OpenAI({
 
 
 export async function POST(req: NextRequest) {
+    const corsHeaders = {
+        'Access-Control-Allow-Origin': 'https://web.whatsapp.com',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        'Access-Control-Allow-Credentials': 'true',
+    };
+
     const authError = verifyExtensionToken(req);
     if (authError) return authError;
 
     try {
         const body = await req.json();
-        const { leadId, messages, phone, name, consultantName } = body;
+        // Aceita snake_case (lead_id) enviado pela extensão e camelCase (leadId) legado
+        const leadId = body.lead_id || body.leadId;
+        const { messages, phone, name, consultantName } = body;
         console.log(`[Sync API] Recebido: leadId=${leadId}, msgs=${messages?.length}`);
 
         const consultor = consultantName || 'Consultor Especialista';
@@ -33,61 +42,112 @@ export async function POST(req: NextRequest) {
         let leadType: 'main' | 'crm26' = 'crm26';
 
         const cleanPhone = phone ? phone.replace(/\D/g, '') : '';
-        const last8 = cleanPhone.length >= 8 ? cleanPhone.substring(cleanPhone.length - 8) : cleanPhone;
-        const last9 = cleanPhone.length >= 9 ? cleanPhone.substring(cleanPhone.length - 9) : cleanPhone;
         
-        // Formatos comuns: com 55, sem 55, com 9, sem 9 no DDD
-        const phoneVariants = [
-            cleanPhone,
-            cleanPhone.startsWith('55') ? cleanPhone.substring(2) : `55${cleanPhone}`,
-            last8,
-            last9
-        ].filter(p => p.length >= 8);
+        const getPhoneVariants = (p: string) => {
+            if (!p) return [];
+            const variants = new Set<string>();
+            let base = p;
+            if (p.startsWith('55')) base = p.substring(2);
+            
+            variants.add(p); // Original
+            variants.add(base); // Sem 55
+            
+            // Lógica para 9º dígito (Brasil)
+            if (base.length === 11 && base[2] === '9') {
+                // Tem 11 dígitos e o 3º é 9 (formato novo), tenta o formato antigo
+                variants.add(base.substring(0, 2) + base.substring(3));
+            } else if (base.length === 10) {
+                // Tem 10 dígitos (formato antigo), tenta adicionar o 9
+                variants.add(base.substring(0, 2) + '9' + base.substring(2));
+            }
 
-        // 1. Resolver o ID do lead - Tentar leads_manos_crm (UUID) primeiro
-        if (leadId && !leadId.startsWith('crm26_')) {
-            const cleanId = leadId.replace('main_', '').replace('dist_', '');
+            // Sufixos para busca broad (muito importante para casos de truncamento no banco)
+            if (base.length >= 4) variants.add(base.slice(-4));
+            if (base.length >= 6) variants.add(base.slice(-6));
+            if (base.length >= 8) variants.add(base.slice(-8));
+            if (base.length >= 9) variants.add(base.slice(-9));
+            
+            // Casos onde o BANCO está truncado (ex: o banco tem 12 dígitos, mas o real tem 13)
+            // Se o real tem 13 e o banco 12, o banco cortou o último dígito.
+            if (base.length >= 6) {
+                variants.add(base.substring(0, base.length - 1)); // Sem o último
+                variants.add(base.substring(0, base.length - 2)); // Sem os dois últimos
+            }
+
+            return Array.from(variants).filter(v => v.length >= 4);
+        };
+
+        const phoneVariants = getPhoneVariants(cleanPhone);
+        console.log(`[Sync API] Phone Variants p/ ${cleanPhone}:`, phoneVariants);
+
+        // 1. Resolver o ID do lead - Tentar leads_master (UUID) primeiro
+        if (leadId) {
+            const cleanId = leadId.replace(/^(main_|dist_|crm26_|dist_|lead_|crm25_|master_)/, '');
             const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+            
             if (uuidRegex.test(cleanId)) {
-                const { data: leadMain } = await supabaseAdmin
-                    .from('leads_manos_crm')
-                    .select('*')
-                    .eq('id', cleanId)
-                    .maybeSingle();
-                
-                if (leadMain) {
-                    uuidId = leadMain.id;
-                    leadFound = leadMain;
+                // Tenta leads_master
+                const { data: leadMaster } = await supabaseAdmin.from('leads_master').select('*').eq('id', cleanId).maybeSingle();
+                if (leadMaster) {
+                    uuidId = leadMaster.id;
+                    leadFound = { ...leadMaster, source_table: 'leads_master' };
                     leadType = 'main';
+                } else {
+                    // Tenta leads_manos_crm
+                    const { data: leadMain } = await supabaseAdmin.from('leads_manos_crm').select('*').eq('id', cleanId).maybeSingle();
+                    if (leadMain) {
+                        uuidId = leadMain.id;
+                        leadFound = { ...leadMain, source_table: 'leads_manos_crm' };
+                        leadType = 'main';
+                    }
                 }
             }
         }
 
-        // 2. Se não encontrou por UUID, tentar por telefone em leads_manos_crm
+        // 2. Se não encontrou por ID, tentar por telefone em leads_master e leads_manos_crm
         if (!uuidId && cleanPhone) {
-            // Busca usando várias combinações
-            let query = supabaseAdmin.from('leads_manos_crm').select('*');
-            
             const orConditions = phoneVariants.map(v => `phone.ilike.%${v}%`).join(',');
-            const { data: leadsMain } = await query.or(orConditions).order('created_at', { ascending: false }).limit(1);
             
-            if (leadsMain && leadsMain.length > 0) {
-                uuidId = leadsMain[0].id;
-                leadFound = leadsMain[0];
+            // Tenta leads_master por telefone
+            const { data: leadsMaster, error: errMaster } = await supabaseAdmin.from('leads_master').select('*').or(orConditions).order('created_at', { ascending: false }).limit(3);
+            
+            if (leadsMaster && leadsMaster.length > 0) {
+                // Filtro extra em JS para garantir proximidade
+                const bestMatch = leadsMaster.find(l => {
+                    const lClean = (l.phone || '').replace(/\D/g, '');
+                    return lClean.includes(cleanPhone.slice(-8)) || cleanPhone.includes(lClean.slice(-8));
+                }) || leadsMaster[0];
+
+                uuidId = bestMatch.id;
+                leadFound = { ...bestMatch, source_table: 'leads_master' };
                 leadType = 'main';
+                console.log(`[Sync API] Lead localizado em leads_master: ${bestMatch.name}`);
+            } else {
+                if (errMaster) console.error('[Sync API] Erro busca leads_master:', errMaster);
+                
+                // Tenta leads_manos_crm por telefone
+                const { data: leadsMain, error: errMain } = await supabaseAdmin.from('leads_manos_crm').select('*').or(orConditions).order('created_at', { ascending: false }).limit(3);
+                
+                if (leadsMain && leadsMain.length > 0) {
+                    const bestMatch = leadsMain.find(l => {
+                        const lClean = (l.phone || '').replace(/\D/g, '');
+                        return lClean.includes(cleanPhone.slice(-8)) || cleanPhone.includes(lClean.slice(-8));
+                    }) || leadsMain[0];
+
+                    uuidId = bestMatch.id;
+                    leadFound = { ...bestMatch, source_table: 'leads_manos_crm' };
+                    leadType = 'main';
+                    console.log(`[Sync API] Lead localizado em leads_manos_crm: ${bestMatch.name}`);
+                } else if (errMain) console.error('[Sync API] Erro busca leads_manos_crm:', errMain);
             }
         }
 
         // 3. Se não encontrou UUID, tentar leads_distribuicao_crm_26 (BigInt)
         if (!uuidId) {
-            if (leadId?.startsWith('crm26_')) {
-                const cleanId = leadId.replace('crm26_', '');
+            if (leadId?.startsWith('crm26_') || /^\d+$/.test(leadId || '')) {
+                const cleanId = (leadId || '').replace('crm26_', '');
                 if (/^\d+$/.test(cleanId)) {
-                    const { data: lead26 } = await supabaseAdmin
-                        .from('leads_distribuicao_crm_26')
-                        .select('*')
-                        .eq('id', parseInt(cleanId))
-                        .maybeSingle();
+                    const { data: lead26 } = await supabaseAdmin.from('leads_distribuicao_crm_26').select('*').eq('id', parseInt(cleanId)).maybeSingle();
                     if (lead26) {
                         numericId = lead26.id;
                         leadFound = lead26;
@@ -98,49 +158,72 @@ export async function POST(req: NextRequest) {
             
             if (!numericId && cleanPhone) {
                 const orConditions = phoneVariants.map(v => `telefone.ilike.%${v}%`).join(',');
-                const { data: leads26 } = await supabaseAdmin
-                    .from('leads_distribuicao_crm_26')
-                    .select('*')
-                    .or(orConditions)
-                    .order('created_at', { ascending: false })
-                    .limit(1);
+                const { data: leads26, error: err26 } = await supabaseAdmin.from('leads_distribuicao_crm_26').select('*').or(orConditions).order('created_at', { ascending: false }).limit(3);
                 
                 if (leads26 && leads26.length > 0) {
-                    numericId = leads26[0].id;
-                    leadFound = leads26[0];
+                    const bestMatch = leads26.find(l => {
+                        const lClean = (l.telefone || l.phone || '').replace(/\D/g, '');
+                        return lClean.includes(cleanPhone.slice(-8)) || cleanPhone.includes(lClean.slice(-8));
+                    }) || leads26[0];
+
+                    numericId = bestMatch.id;
+                    leadFound = bestMatch;
                     leadType = 'crm26';
-                }
+                    console.log(`[Sync API] Lead localizado em leads26: ${bestMatch.nome}`);
+                } else if (err26) console.error('[Sync API] Erro busca leads26:', err26);
             }
         }
 
         if (!uuidId && !numericId) {
-            console.error(`[Sync API] Falha crítica: Lead não identificado para phone=${phone}`);
+            const errorMsg = `Lead não identificado para phone=${phone} (clean=${cleanPhone}, id=${leadId})`;
+            console.error(`[Sync API] Falha crítica: ${errorMsg}`);
+            
+            // Grava log de erro para inspeção profunda
+            try {
+                const fs = require('fs');
+                const logPath = 'c:/Users/Usuario/OneDrive/Documentos/crm-manos/sync_errors.log';
+                const logEntry = `${new Date().toISOString()} - ${errorMsg} - payload: ${JSON.stringify(body).slice(0, 500)}\n`;
+                fs.appendFileSync(logPath, logEntry);
+            } catch (e) {}
+
             return NextResponse.json({ 
                 success: false, 
                 error: 'Lead não encontrado no CRM. Certifique-se que o lead já está cadastrado.' 
-            }, { status: 404 });
+            }, { 
+                status: 404,
+                headers: {
+                    ...corsHeaders,
+                    'Cache-Control': 'no-store, max-age=0'
+                }
+            });
         }
 
         console.log(`[Sync API] Sincronizando ${messages.length} mensagens para lead (${leadType}): ${uuidId || numericId}`);
 
-        // 2. Preparar registros para inserção
+        // 2. Preparar registros para inserção (Deduplicação Inteligente)
         if (leadType === 'crm26') {
             const messagesToInsert = messages.map((m: any) => ({
                 lead_id: numericId,
                 message_text: m.text,
                 direction: m.direction,
+                message_id: m.id || m.messageId, // Tenta capturar o ID único do WhatsApp
                 created_at: m.timestamp || new Date().toISOString()
             }));
 
-            // Deduplicação básica
+            // Deduplicação por ID de mensagem ou Conteúdo+Direção+Recentidade
             const { data: existingMsgs } = await supabaseAdmin
                 .from('whatsapp_messages')
-                .select('message_text, direction')
+                .select('message_text, direction, message_id')
                 .eq('lead_id', numericId)
                 .order('created_at', { ascending: false })
-                .limit(messagesToInsert.length + 50);
+                .limit(messagesToInsert.length + 100);
 
             const filteredMessages = messagesToInsert.filter(newMsg => {
+                // Se temos message_id, usamos ele (mais preciso)
+                if (newMsg.message_id) {
+                    return !existingMsgs?.some(extMsg => extMsg.message_id === newMsg.message_id);
+                }
+                // Fallback: Conteúdo Exato + Direção
                 return !existingMsgs?.some(extMsg => 
                     extMsg.message_text === newMsg.message_text && 
                     extMsg.direction === newMsg.direction
@@ -149,6 +232,7 @@ export async function POST(req: NextRequest) {
 
             if (filteredMessages.length > 0) {
                 await supabaseAdmin.from('whatsapp_messages').insert(filteredMessages);
+                console.log(`[Sync API] Inseridas ${filteredMessages.length} novas msgs p/ lead ${numericId}`);
             }
         }
 
@@ -190,6 +274,7 @@ export async function POST(req: NextRequest) {
                       "script_whatsapp_agora": "O texto EXATO: 1-2 frases CURTAS, IMPACTANTES, HUMANAS. SEM LISTAS. SEM INFINITIVO.",
                       "por_que_este_script": "A técnica de fechamento usada.",
                       "urgency_score": number,
+                      "veiculo_troca": "Marca Modelo Ano do carro do CLIENTE na troca ou 'não informado'",
                       "temperature": "frio" | "morno" | "quente",
                       "novo_status_sugerido": "attempt" | "contacted" | "negotiation" | "proposed" | "manter"
                     }`;
@@ -225,7 +310,7 @@ export async function POST(req: NextRequest) {
             if (aiAnalysisResult) {
                 const aiResult = aiAnalysisResult;
                 
-                const timestamp = new Date().toLocaleString('pt-BR');
+                const timestamp = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
                 const newNote = `[${timestamp}] 🤖 IA CIRÚRGICA V2 (SYNC):\n` +
                     `🔥 Temperatura: ${aiResult.temperature || 'N/A'} (Score: ${aiResult.urgency_score || 0})\n` +
                     `📌 Diagnóstico: ${aiResult.diagnostico || 'N/A'}\n` +
@@ -242,7 +327,7 @@ export async function POST(req: NextRequest) {
                 
                 if (aiSuggestedStatus && aiSuggestedStatus !== 'manter' && currentStatus !== 'closed' && currentStatus !== 'lost' && currentStatus !== 'comprado') {
                      // Move forward in pipeline safely
-                     const pipelineOrder = ['received', 'new', 'attempt', 'contacted', 'negotiation', 'proposed'];
+                     const pipelineOrder = ['received', 'new', 'attempt', 'contacted', 'scheduled', 'visited', 'negotiation', 'proposed'];
                      const currentIndex = pipelineOrder.indexOf(currentStatus);
                      const suggestedIndex = pipelineOrder.indexOf(aiSuggestedStatus);
                      if (suggestedIndex > currentIndex) {
@@ -251,12 +336,15 @@ export async function POST(req: NextRequest) {
                      }
                 }
 
+                const tableToUpdate = leadFound.source_table || 'leads_master';
+
                 await supabaseAdmin
-                    .from('leads_manos_crm')
+                    .from(tableToUpdate)
                     .update({
                         status: finalStatus,
                         ai_score: aiResult.urgency_score || 0,
                         ai_classification: aiResult.temperature === 'quente' ? 'hot' : aiResult.temperature === 'morno' ? 'warm' : 'cold',
+                        carro_troca: (aiResult.veiculo_troca && aiResult.veiculo_troca !== 'não informado') ? aiResult.veiculo_troca : leadFound.carro_troca,
                         ai_reason: aiResult.diagnostico,
                         ai_summary: newNote + currentSummary,
                         next_step: aiResult.script_whatsapp || '',
@@ -275,6 +363,50 @@ export async function POST(req: NextRequest) {
                         created_at: new Date().toISOString()
                     }]);
 
+                // 3.2 — DETECÇÃO DE INTENÇÃO DE COMPRA
+                const clientMsgs = messages.filter((m: any) => m.direction === 'inbound').slice(-5);
+                const buyingKeywords = ['quando posso', 'quanto de entrada', 'tenho o dinheiro', 'vou comprar',
+                    'fechar', 'quero comprar', 'vou pegar', 'que horas', 'visita', 'test drive',
+                    'buscar', 'posso ir', 'valor total', 'quanto fica', 'à vista'];
+                const hasBuyingSignal = clientMsgs.some((m: any) =>
+                    buyingKeywords.some(kw => (m.text || '').toLowerCase().includes(kw))
+                );
+                const isHighScore = (aiResult.urgency_score || 0) >= 88;
+
+                if (hasBuyingSignal || isHighScore) {
+                    if (hasBuyingSignal) {
+                        await supabaseAdmin
+                            .from(tableToUpdate)
+                            .update({ ai_score: 92, ai_classification: 'hot' })
+                            .eq('id', uuidId);
+                    }
+
+                    // Dedup: não cria se já existe alerta nas últimas 4h
+                    const cutoff4h = new Date(Date.now() - 4 * 3_600_000).toISOString();
+                    const { data: existingAlert } = await supabaseAdmin
+                        .from('follow_ups')
+                        .select('id')
+                        .eq('lead_id', uuidId)
+                        .eq('type', 'ai_alert_compra')
+                        .gte('created_at', cutoff4h)
+                        .maybeSingle();
+
+                    if (!existingAlert) {
+                        await supabaseAdmin.from('follow_ups').insert({
+                            lead_id: uuidId,
+                            user_id: leadFound.assigned_consultant_id || 'system',
+                            scheduled_at: new Date().toISOString(),
+                            type: 'ai_alert_compra',
+                            note: hasBuyingSignal
+                                ? `🔥 Sinal de compra detectado! Última msg: "${clientMsgs.at(-1)?.text?.slice(0, 100)}"`
+                                : `🔥 Score de urgência elevado (${aiResult.urgency_score}). Contato imediato recomendado.`,
+                            priority: 'high',
+                            status: 'pending',
+                        });
+                        console.log(`[BuyingSignal] Alerta criado para lead ${uuidId}`);
+                    }
+                }
+
             } else if (leadType === 'crm26' && numericId) {
                 // Update leads_distribuicao_crm_26
                 const currentResumoFull = leadFound.resumo || '';
@@ -291,7 +423,7 @@ export async function POST(req: NextRequest) {
                 let finalStatus = currentStatus;
                 
                 if (aiSuggestedStatus && aiSuggestedStatus !== 'manter' && currentStatus !== 'closed' && currentStatus !== 'lost' && currentStatus !== 'comprado') {
-                     const pipelineOrder = ['received', 'new', 'attempt', 'contacted', 'negotiation', 'proposed'];
+                     const pipelineOrder = ['received', 'new', 'attempt', 'contacted', 'scheduled', 'visited', 'negotiation', 'proposed'];
                      const currentIndex = pipelineOrder.indexOf(currentStatus);
                      const suggestedIndex = pipelineOrder.indexOf(aiSuggestedStatus);
                      if (suggestedIndex > currentIndex) {
@@ -327,23 +459,38 @@ export async function POST(req: NextRequest) {
             }
             console.log(`[SyncMessages] AI analysis persisted for ${leadType} lead: ${uuidId || numericId}`);
 
-            // --- NEW: Save formatted conversation to interactions for Main Leads ---
+            // --- NEW: Save individual messages to interactions for Main/Master Leads ---
             if (leadType === 'main' && uuidId) {
-                const chatHistory = messages
-                    .map((m: any) => `[${m.direction === 'outbound' ? 'Vendedor' : 'Cliente'}] - ${m.text}`)
-                    .join('\n');
-                
-                const interactionNote = `--- IMPORTAÇÃO WHATSAPP ---\n${chatHistory}`;
-
-                await supabaseAdmin
+                // 1. Buscar interações recentes de WhatsApp para este lead para deduplicar
+                const { data: existingInteractions } = await supabaseAdmin
                     .from('interactions_manos_crm')
-                    .insert({
-                        lead_id: uuidId,
-                        new_status: leadFound.status,
-                        notes: interactionNote, // Coluna correta é notes
-                        created_at: new Date().toISOString()
-                    });
-                console.log(`[SyncMessages] Conversation history saved to interactions for lead ${uuidId}`);
+                    .select('notes, type')
+                    .eq('lead_id', uuidId)
+                    .ilike('type', 'whatsapp%')
+                    .order('created_at', { ascending: false })
+                    .limit(100);
+
+                const messagesToInsert = messages.map((m: any) => ({
+                    lead_id: uuidId,
+                    type: m.direction === 'outbound' ? 'whatsapp_out' : 'whatsapp_in',
+                    notes: m.text,
+                    user_name: m.direction === 'outbound' ? (consultantName || 'Consultor') : 'Cliente',
+                    created_at: m.timestamp || new Date().toISOString()
+                }));
+
+                const filteredInteractions = messagesToInsert.filter(newMsg => {
+                    return !existingInteractions?.some(extInt => 
+                        extInt.notes === newMsg.notes && 
+                        extInt.type === newMsg.type
+                    );
+                });
+
+                if (filteredInteractions.length > 0) {
+                    await supabaseAdmin
+                        .from('interactions_manos_crm')
+                        .insert(filteredInteractions);
+                    console.log(`[Sync API] Inseridas ${filteredInteractions.length} interações de WhatsApp p/ lead ${uuidId}`);
+                }
             }
         }
     } catch (aiErr: any) {
@@ -372,3 +519,14 @@ export async function POST(req: NextRequest) {
     }
 }
 
+export async function OPTIONS() {
+    return new NextResponse(null, {
+        status: 204,
+        headers: {
+            'Access-Control-Allow-Origin': 'https://web.whatsapp.com',
+            'Access-Control-Allow-Methods': 'POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+            'Access-Control-Allow-Credentials': 'true',
+        },
+    });
+}

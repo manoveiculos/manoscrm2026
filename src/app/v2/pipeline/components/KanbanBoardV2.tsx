@@ -33,6 +33,7 @@ export const KanbanBoardV2: React.FC<KanbanBoardV2Props> = ({
 }) => {
     const [draggingLeadId, setDraggingLeadId] = useState<string | null>(null);
     const [isOverColumnId, setIsOverColumnId] = useState<string | null>(null);
+    const [columnWithMenuOpen, setColumnWithMenuOpen] = useState<string | null>(null);
 
     const columns = PIPELINE_STAGES.map(s => ({
         id: s.id,
@@ -65,18 +66,22 @@ export const KanbanBoardV2: React.FC<KanbanBoardV2Props> = ({
     };
 
     return (
-        <div className="h-full w-full overflow-hidden bg-[#0C0C0F]">
-            <div className="grid grid-cols-4 h-full w-full gap-1 px-1 pt-4 pb-2 antialiased items-stretch">
+        <div className="h-full w-full flex flex-col bg-[#0C0C0F] overflow-y-hidden overflow-x-hidden min-h-0">
+            <div className="flex h-full w-full gap-2 px-2 pt-2 pb-2 antialiased items-stretch overflow-x-auto custom-scrollbar-h min-h-0">
                 {columns.map((col, index) => {
                     const colLeads = getColumnLeads(col.id);
                     const isClosingStage = col.id === 'fechamento';
                     const isOver = isOverColumnId === col.id;
+                    const hasMenuOpen = columnWithMenuOpen === col.id;
 
                     return (
                         <div 
                             key={col.id} 
-                            className="flex flex-col min-w-0 h-full relative"
-                            style={{ zIndex: 50 - index }}
+                            className="flex flex-col min-w-[200px] h-full relative"
+                            style={{ 
+                                flex: '1 1 0%',
+                                zIndex: hasMenuOpen ? 100 : 50 - index 
+                            }}
                         >
                             {/* Cabeçalho da coluna */}
                             <div className="mb-3 flex items-center justify-between px-1 shrink-0">
@@ -108,7 +113,7 @@ export const KanbanBoardV2: React.FC<KanbanBoardV2Props> = ({
                                 onDragOver={(e) => handleDragOver(e, col.id)}
                                 onDragLeave={handleDragLeave}
                                 onDrop={(e) => handleDrop(e, col.id)}
-                                className={`flex-1 overflow-y-auto custom-scrollbar space-y-1.5 pb-20 rounded-2xl border transition-colors p-1.5 relative group/col ${
+                                className={`flex-grow h-0 overflow-y-auto custom-scrollbar space-y-1.5 pb-24 rounded-2xl border transition-colors p-1.5 relative group/col min-h-0 scrollbar-gutter-stable ${
                                     isOver
                                         ? 'bg-white/[0.04] border-white/20'
                                         : isClosingStage && colLeads.length > 0
@@ -126,6 +131,7 @@ export const KanbanBoardV2: React.FC<KanbanBoardV2Props> = ({
                                                 onManage={onManage}
                                                 onStatusChange={onStatusChange}
                                                 setDraggingLeadId={setDraggingLeadId}
+                                                onMenuOpenChange={(isOpen) => setColumnWithMenuOpen(isOpen ? col.id : null)}
                                             />
                                         ))
                                     ) : (

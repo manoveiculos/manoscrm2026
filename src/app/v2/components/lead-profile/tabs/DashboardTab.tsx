@@ -194,13 +194,13 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
             />
 
             {/* Agendamentos ativos */}
-            {lead.followups && lead.followups.filter((f: any) => f.status === 'pending').length > 0 && (
+            {lead?.followups && (lead.followups as any[]).filter((f: any) => f?.status === 'pending').length > 0 && (
                 <div className="bg-[#141418] border border-white/[0.07] rounded-xl overflow-hidden">
                     <div className="flex items-center gap-2 px-4 py-3 border-b border-white/[0.05]">
                         <Clock size={13} className="text-white/30" />
                         <span className="text-[11px] font-semibold text-white/50 uppercase tracking-widest">Agendamentos</span>
                     </div>
-                    {lead.followups.filter((f: any) => f.status === 'pending').map((fu: any) => (
+                    {lead.followups.filter((f: any) => f?.status === 'pending').map((fu: any) => (
                         <div key={fu.id} className="flex items-center justify-between px-4 py-3 border-b border-white/[0.04] last:border-0">
                             <div className="flex items-center gap-3">
                                 <div className="h-8 w-8 rounded-lg bg-amber-400/10 border border-amber-400/20 flex items-center justify-center shrink-0">

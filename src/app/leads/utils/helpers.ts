@@ -64,10 +64,20 @@ export const formatValue = (val: string) => {
 
 export function formatPreco(value: any): string {
   if (!value || value === '0' || value === 0) return 'R$ 0';
-  const clean = String(value).replace(/\D/g, '');
-  const num = parseInt(clean);
+  
+  let num: number;
+  if (typeof value === 'number') {
+    num = value;
+  } else {
+    const clean = String(value)
+      .replace(/R\$\s?/, '')
+      .replace(/\./g, '')
+      .replace(',', '.');
+    num = parseFloat(clean);
+  }
+
   if (isNaN(num)) return 'R$ 0';
-  return 'R$ ' + num.toLocaleString('pt-BR');
+  return 'R$ ' + Math.round(num).toLocaleString('pt-BR');
 }
 
 export function formatKM(value: any): string {

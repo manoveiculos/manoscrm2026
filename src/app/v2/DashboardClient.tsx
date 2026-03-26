@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
     LayoutDashboard, 
     Target, 
@@ -58,8 +58,14 @@ export default function DashboardClient({ metrics, userName, aiInsights, salesTo
         "Venda é relacionamento. Conecte-se e vença hoje.",
         "O sucesso é a soma de pequenos esforços repetidos dia após dia."
     ];
-    
-    const randomPhrase = motivationalPhrases[Math.floor(Math.random() * motivationalPhrases.length)];
+
+    // Índice baseado no dia — estável no SSR e no cliente, muda 1x/dia
+    const dayIndex = new Date().getDate() % motivationalPhrases.length;
+    const [randomPhrase, setRandomPhrase] = useState(motivationalPhrases[dayIndex]);
+    useEffect(() => {
+        setRandomPhrase(motivationalPhrases[Math.floor(Math.random() * motivationalPhrases.length)]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     const cards = [
         { title: 'Leads Ativos', value: metrics.leadCount, icon: Users, color: 'blue' },

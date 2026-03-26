@@ -142,13 +142,21 @@ export const InfoGrid: React.FC<InfoGridProps> = ({ lead, isAdmin, onSave, calcu
                 isAdmin={isAdmin}
                 onSave={onSave}
             />
-            {/* Permanência — somente leitura */}
+            <EditableRow
+                icon={Car}
+                label="Troca"
+                value={lead.carro_troca || lead.troca || 'Não informado'}
+                field="carro_troca"
+                isAdmin={isAdmin}
+                onSave={onSave}
+            />
+            {/* Tempo no CRM — somente leitura */}
             <div className="flex items-center gap-3 px-4 py-3.5">
                 <div className="h-8 w-8 rounded-lg bg-white/[0.04] border border-white/[0.06] flex items-center justify-center shrink-0">
                     <Clock size={14} className="text-white/35" />
                 </div>
                 <div className="flex-1 min-w-0">
-                    <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium mb-0.5">No funil há</p>
+                    <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium mb-0.5">Tempo no CRM</p>
                     <p className="text-[14px] font-semibold" style={{ color: timeColor }}>
                         {calcularTempoFunil(lead.created_at)}
                     </p>

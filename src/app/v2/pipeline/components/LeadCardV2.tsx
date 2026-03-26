@@ -3,7 +3,7 @@
 import React, { useRef, useState } from 'react';
 import { Lead, LeadStatus } from '@/lib/types';
 import { motion } from 'framer-motion';
-import { CarFront, Zap, Activity, Target, ArrowRight } from 'lucide-react';
+import { CarFront, Zap, Activity, Target, ArrowRight, AlertTriangle } from 'lucide-react';
 import { formatPhoneBR } from '@/app/leads/utils/helpers';
 import { extractWhatsAppScript } from '@/lib/aiParser';
 import { normalizeStatus, STAGE_SLA_HOURS } from '@/constants/status';
@@ -17,6 +17,7 @@ interface LeadCardV2Props {
     onManage: (lead: Lead) => void;
     onStatusChange: (leadId: string, newStatus: LeadStatus) => void;
     setDraggingLeadId?: (id: string | null) => void;
+    onMenuOpenChange?: (isOpen: boolean) => void;
 }
 
 export const LeadCardV2: React.FC<LeadCardV2Props> = ({ 
@@ -24,7 +25,8 @@ export const LeadCardV2: React.FC<LeadCardV2Props> = ({
     onView, 
     onManage, 
     onStatusChange,
-    setDraggingLeadId 
+    setDraggingLeadId,
+    onMenuOpenChange 
 }) => {
     const [activeMoveMenu, setActiveMoveMenu] = useState(false);
     const clickTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -36,7 +38,9 @@ export const LeadCardV2: React.FC<LeadCardV2Props> = ({
     const diffHours = Math.floor(diffMs / (1000 * 3600));
     const diffDays = Math.floor(diffHours / 24);
     
-    const scoreVal = calculateLeadScore({
+    // Prioriza ai_score real do banco; fallback heurístico para leads sem análise IA ainda
+    const aiScore = Number(lead.ai_score);
+    const scoreVal = aiScore > 0 ? aiScore : calculateLeadScore({
         status: normalizeStatus(lead.status),
         tempoFunilHoras: diffHours,
         totalInteracoes: 0,
@@ -48,6 +52,8 @@ export const LeadCardV2: React.FC<LeadCardV2Props> = ({
     const scoreInfo = getScoreLabel(scoreVal);
     const isHot = scoreVal >= 70;
     const isEmergency = scoreVal >= 90;
+    const churnRisk = Number(lead.churn_probability) || 0;
+    const isChurnRisk = churnRisk > 70;
 
     // Tempo por extenso: 1h, 2 dias, 1 semana, 2 meses
     function formatTempoInteiro(ms: number): string {
@@ -157,14 +163,14 @@ export const LeadCardV2: React.FC<LeadCardV2Props> = ({
             className="w-full"
         >
             <motion.div
-                initial={{ opacity: 0, y: 6 }}
+                initial={{ opacity: 0, y: 4 }}
                 animate={{ opacity: 1, y: 0 }}
                 onClick={handleSmartClick}
                 className={`relative p-2 rounded-xl border border-white/[0.07] border-l-2 ${accentBorder} bg-[#141418] hover:bg-[#1A1A20] hover:border-white/[0.12] transition-colors cursor-grab active:cursor-grabbing select-none ${
                     activeMoveMenu ? 'z-[250] ring-1 ring-white/20' : 'z-10'
                 }`}
             >
-                <div className="space-y-2">
+                <div className="space-y-1.5">
                     {/* Linha 1: Avatar (origem) + Nome + Score */}
                     <div className="flex items-start justify-between gap-1.5">
                         <div className="flex items-center gap-2 min-w-0">
@@ -176,17 +182,17 @@ export const LeadCardV2: React.FC<LeadCardV2Props> = ({
                                     borderColor: getSourceBorder(lead.source, lead.plataforma_meta),
                                 }}
                             >
-                                <div className="scale-[0.65]">
-                                    <SourceIcon source={lead.source} name={lead.name} plataforma_meta={lead.plataforma_meta} className="text-[14px] font-bold text-white/60" />
+                                <div className="scale-[0.55]">
+                                    <SourceIcon source={lead.source} name={lead.name} plataforma_meta={lead.plataforma_meta} className="text-[12px] font-bold text-white/60" />
                                 </div>
                             </div>
                             <div className="min-w-0">
-                                <h4 className="font-semibold text-[12px] text-white/90 truncate leading-tight">
+                                <h4 className="font-semibold text-[11px] text-white/90 truncate leading-tight">
                                     {lead.name.split(' ')[0]}{lead.name.split(' ').length > 1 ? ' ' + lead.name.split(' ')[1][0] + '.' : ''}
                                 </h4>
                                 {/* Tempo por extenso + consultor */}
-                                <div className="flex items-center gap-1 mt-0.5">
-                                    <span className={`text-[10px] font-medium ${timeColor}`}>
+                                <div className="flex items-center gap-1 mt-0">
+                                    <span className={`text-[9px] font-medium ${timeColor}`}>
                                         {tempoInteiro}
                                     </span>
                                     {lead.consultant_name && (
@@ -198,19 +204,26 @@ export const LeadCardV2: React.FC<LeadCardV2Props> = ({
                             </div>
                         </div>
 
-                        {/* Score */}
-                        <div className="flex items-center gap-0.5 shrink-0">
-                            <span className="text-[12px] font-bold tabular-nums text-white/80">{scoreVal}</span>
-                            <span className="text-[8px] text-white/30">%</span>
-                            <span className="w-1.5 h-1.5 rounded-full ml-0.5 shrink-0" style={{ backgroundColor: scoreDotColor }} />
+                        {/* Score + Churn badge */}
+                        <div className="flex items-center gap-1 shrink-0">
+                            {isChurnRisk && (
+                                <span title={`Risco de churn: ${churnRisk}%`} className="h-4 w-4 flex items-center justify-center rounded text-amber-400">
+                                    <AlertTriangle size={10} />
+                                </span>
+                            )}
+                            <div className="flex items-center gap-0.5">
+                                <span className="text-[12px] font-bold tabular-nums text-white/80">{scoreVal}</span>
+                                <span className="text-[8px] text-white/30">%</span>
+                                <span className="w-1.5 h-1.5 rounded-full ml-0.5 shrink-0" style={{ backgroundColor: scoreDotColor }} />
+                            </div>
                         </div>
                     </div>
 
                     {/* Linha 2: Interesse */}
-                    <div className="flex items-center gap-1 px-1.5 py-1 bg-white/[0.03] rounded-lg border border-white/[0.04]">
-                        <CarFront size={9} className="text-white/20 shrink-0" />
-                        <span className="text-[10px] text-white/50 truncate">
-                            {lead.vehicle_interest || 'Interesse não definido'}
+                    <div className="flex items-center gap-1 px-1.5 py-0.5 bg-white/[0.02] rounded-md border border-white/[0.04]">
+                        <CarFront size={8} className="text-white/20 shrink-0" />
+                        <span className="text-[9px] text-white/40 truncate">
+                            {lead.vehicle_interest || 'Sem interesse'}
                         </span>
                     </div>
 
@@ -239,34 +252,42 @@ export const LeadCardV2: React.FC<LeadCardV2Props> = ({
                         <div className="flex items-center gap-1">
                             <div className="relative">
                                 <button
-                                    onClick={(e) => { e.stopPropagation(); setActiveMoveMenu(!activeMoveMenu); }}
-                                    className={`h-6 px-2 rounded-lg flex items-center gap-1 transition-all border text-[10px] font-medium ${
+                                    onClick={(e) => { 
+                                        e.stopPropagation(); 
+                                        const next = !activeMoveMenu;
+                                        setActiveMoveMenu(next); 
+                                        onMenuOpenChange?.(next);
+                                    }}
+                                    className={`h-7 px-2 px-2.5 rounded-lg flex items-center gap-1 transition-all border text-[9px] font-medium ${
                                         activeMoveMenu
                                             ? 'bg-white/10 border-white/20 text-white'
                                             : 'bg-transparent border-white/[0.06] text-white/35 hover:text-white/65 hover:border-white/15'
                                     }`}
                                 >
-                                    <ArrowRight size={10} className={activeMoveMenu ? 'rotate-90 transition-transform' : 'transition-transform'} />
+                                    <ArrowRight size={9} className={activeMoveMenu ? 'rotate-90 transition-transform' : 'transition-transform'} />
                                     Mover
                                 </button>
                                 <MoveMenu
                                     isOpen={activeMoveMenu}
                                     currentStatus={lead.status as LeadStatus}
                                     onStatusChange={(status) => onStatusChange(lead.id, status)}
-                                    onClose={() => setActiveMoveMenu(false)}
+                                    onClose={() => {
+                                        setActiveMoveMenu(false);
+                                        onMenuOpenChange?.(false);
+                                    }}
                                 />
                             </div>
 
                             <button
                                 onClick={handleQuickStrike}
-                                className={`h-6 w-6 rounded-lg flex items-center justify-center transition-all border ${
+                                className={`h-7 w-7 rounded-lg flex items-center justify-center transition-all border ${
                                     isEmergency
                                         ? 'bg-red-600/15 border-red-500/25 text-red-400'
                                         : 'bg-transparent border-white/[0.06] text-white/25 hover:bg-white/[0.06] hover:text-white/60'
                                 }`}
                                 title="WhatsApp"
                             >
-                                <Zap size={10} />
+                                <Zap size={9} />
                             </button>
                         </div>
 

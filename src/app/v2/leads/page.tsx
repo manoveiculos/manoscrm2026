@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { dataService } from '@/lib/dataService';
-import { Lead, Consultant, InventoryItem } from '@/lib/types';
+import { Lead, Consultant, InventoryItem, LeadStatus } from '@/lib/types';
 import { LeadListV2 } from '../pipeline/components/LeadListV2';
 import { LeadProfileModalV2 } from '../components/lead-profile/LeadProfileModalV2';
 import { NewLeadModalV2 } from '../pipeline/components/NewLeadModalV2';
@@ -57,7 +57,7 @@ function HUDSelect({ label, value, options, onChange, minWidth = '120px', disabl
                         initial={{ opacity: 0, y: -5 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: -5 }}
-                        className="absolute top-full left-0 bg-[#0a0a0a] border border-white/10 rounded-lg shadow-[0_10px_40px_rgba(0,0,0,0.8)] py-1.5 z-[100] min-w-[180px] backdrop-blur-2xl"
+                        className="absolute top-full left-0 bg-[#0a0a0a]/95 border border-white/10 rounded-lg shadow-[0_20px_50px_rgba(0,0,0,0.95)] py-1.5 z-[100] min-w-[200px] backdrop-blur-3xl"
                     >
                         <div className="max-h-[300px] overflow-y-auto custom-scrollbar">
                             {options.map(opt => (
@@ -161,42 +161,50 @@ function LeadsContent() {
         loadInitialData();
     }, []);
 
-    const filteredLeads = leads
+    const filteredLeads = (leads || [])
         .filter(lead => {
-            const matchesSearch = 
+            const matchesSearch = !searchTerm || 
                 lead.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                 lead.phone.includes(searchTerm) ||
                 (lead.vehicle_interest && lead.vehicle_interest.toLowerCase().includes(searchTerm.toLowerCase()));
             
-            const matchesConsultant = filterConsultant === 'all' || lead.assigned_consultant_id === filterConsultant;
+            const matchesConsultant = 
+                filterConsultant === 'all' ? true : 
+                filterConsultant === 'none' ? !lead.assigned_consultant_id : 
+                lead.assigned_consultant_id === filterConsultant;
             const matchesStatus = filterStatus === 'all' || normalizeStatus(lead.status) === filterStatus;
+            const matchesOrigin = filterOrigin === 'all' || lead.source === filterOrigin || lead.origem === filterOrigin;
             const matchesInterest = filterInterest === 'all' || lead.vehicle_interest === filterInterest;
-            const matchesOrigin = filterOrigin === 'all' || lead.source === filterOrigin;
             
             // Date Filter Logic
             const leadDate = new Date(lead.created_at);
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-            
+            const todayDate = new Date();
+            todayDate.setHours(0, 0, 0, 0);
+            const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+            const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
             const matchesDate = filterDate === 'all' || (
-                filterDate === 'today' ? leadDate >= today :
-                filterDate === '7days' ? leadDate >= new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) :
-                filterDate === '30days' ? leadDate >= new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) :
+                filterDate === 'today' ? leadDate >= todayDate :
+                filterDate === '7days' ? leadDate >= sevenDaysAgo :
+                filterDate === '30days' ? leadDate >= thirtyDaysAgo :
                 true
             );
             
-            // Calc current score for filter
-            const now = new Date();
-            const createdAt = new Date(lead.created_at);
-            const tempoFunilH = Math.max(0, (now.getTime() - createdAt.getTime()) / (1000 * 60 * 60));
-            const currentScore = calculateLeadScore({
-                status: normalizeStatus(lead.status),
-                tempoFunilHoras: tempoFunilH,
-                totalInteracoes: 0,
-                ultimaInteracaoH: tempoFunilH,
-                temValorDefinido: !!lead.valor_investimento && lead.valor_investimento !== '0',
-                temVeiculoInteresse: !!lead.vehicle_interest && lead.vehicle_interest !== '---'
-            });
+            // Calc current score for filter — prioriza ai_score do banco, fallback heurístico
+            const aiScore = Number(lead.ai_score);
+            const currentScore = aiScore > 0 ? aiScore : (() => {
+                const now = new Date();
+                const createdAt = new Date(lead.created_at);
+                const tempoFunilH = Math.max(0, (now.getTime() - createdAt.getTime()) / (1000 * 60 * 60));
+                return calculateLeadScore({
+                    status: normalizeStatus(lead.status),
+                    tempoFunilHoras: tempoFunilH,
+                    totalInteracoes: 0,
+                    ultimaInteracaoH: tempoFunilH,
+                    temValorDefinido: !!lead.valor_investimento && lead.valor_investimento !== '0',
+                    temVeiculoInteresse: !!lead.vehicle_interest && lead.vehicle_interest !== '---'
+                });
+            })();
 
             const matchesScore = filterScore === 'all' || (
                 filterScore === 'quente' ? currentScore >= 80 :
@@ -209,6 +217,46 @@ function LeadsContent() {
             return matchesSearch && matchesConsultant && matchesStatus && matchesInterest && matchesOrigin && matchesScore && matchesDate;
         })
         .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    const handleStatusChange = async (leadId: string, newStatus: LeadStatus) => {
+        try {
+            const { error } = await supabase
+                .from('leads_manos_crm')
+                .update({ status: newStatus, updated_at: new Date().toISOString() })
+                .eq('id', leadId);
+
+            if (error) throw error;
+
+            setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: newStatus } : l));
+        } catch (error) {
+            console.error("Error updating status:", error);
+        }
+    };
+
+    const handleConsultantChange = async (leadId: string, consultantId: string) => {
+        if (role !== 'admin') return;
+        try {
+            const consultant = consultants.find(c => c.id === consultantId);
+            const { error } = await supabase
+                .from('leads_manos_crm')
+                .update({ 
+                    assigned_consultant_id: consultantId,
+                    primeiro_vendedor: consultant?.name,
+                    updated_at: new Date().toISOString() 
+                })
+                .eq('id', leadId);
+
+            if (error) throw error;
+
+            setLeads(prev => prev.map(l => l.id === leadId ? { 
+                ...l, 
+                assigned_consultant_id: consultantId,
+                consultant_name: consultant?.name,
+                primeiro_vendedor: consultant?.name
+            } : l));
+        } catch (error) {
+            console.error("Error updating consultant:", error);
+        }
+    };
 
     const interests = Array.from(new Set(leads.map(l => l.vehicle_interest).filter(Boolean)))
         .filter(interest => {
@@ -222,7 +270,7 @@ function LeadsContent() {
     return (
         <div className="flex flex-col h-screen w-full bg-[#03060b] overflow-hidden text-white font-inter">
             {/* HUD HEADER - ELITE OS STYLE */}
-            <header className="shrink-0 h-16 border-b border-white/5 bg-[#050101]/80 backdrop-blur-xl flex items-center justify-between px-6 z-30 shadow-[0_4px_20px_rgba(0,0,0,0.5)]">
+            <header className="shrink-0 h-16 border-b border-white/5 bg-[#050101]/80 backdrop-blur-xl flex items-center justify-between px-3 sm:px-6 z-30 shadow-[0_4px_20px_rgba(0,0,0,0.5)]">
                 <div className="flex items-center gap-5">
                     <div className="flex flex-col">
                         <div className="flex items-center gap-2">
@@ -250,7 +298,7 @@ function LeadsContent() {
                             placeholder="BUSCAR..."
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
-                            className="bg-white/5 border border-white/5 rounded-xl py-2.5 pl-10 pr-4 text-[10px] font-black uppercase tracking-widest w-48 focus:w-64 lg:w-64 lg:focus:w-80 focus:bg-white/10 focus:border-red-500/30 outline-none transition-all placeholder:text-white/10"
+                            className="bg-white/5 border border-white/5 rounded-xl py-2.5 pl-10 pr-4 text-[10px] font-black uppercase tracking-widest w-32 sm:w-48 focus:w-44 sm:focus:w-64 lg:w-64 lg:focus:w-80 focus:bg-white/10 focus:border-red-500/30 outline-none transition-all placeholder:text-white/10"
                         />
                     </div>
 
@@ -265,7 +313,7 @@ function LeadsContent() {
             </header>
 
             {/* QUICK FILTERS BAR - OPTIMIZED FOR 100% SCREEN */}
-            <div className="shrink-0 min-h-14 border-b border-white/5 bg-[#03060b] flex flex-wrap items-center gap-x-4 gap-y-3 px-6 py-2 z-20">
+            <div className="shrink-0 min-h-12 border-b border-white/5 bg-[#03060b] flex flex-wrap items-center gap-x-2 gap-y-2 px-3 sm:px-6 py-2.5 z-[60] relative">
                 <div className="flex items-center gap-2 bg-white/5 p-1 rounded-xl border border-white/10">
                     <button 
                         onClick={() => setViewMode('list')}
@@ -285,7 +333,7 @@ function LeadsContent() {
 
                 <div className="h-4 w-[1px] bg-white/10 hidden lg:block" />
 
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
                     <HUDSelect 
                         label="Período"
                         value={filterDate}
@@ -309,6 +357,7 @@ function LeadsContent() {
                         disabled={role !== 'admin'}
                         options={[
                             { id: 'all', label: 'TODOS' },
+                            { id: 'none', label: 'SEM VENDEDOR' },
                             ...consultants.map(c => ({ id: c.id, label: c.name }))
                         ]}
                     />
@@ -375,7 +424,7 @@ function LeadsContent() {
                                 setLoading(false);
                             });
                         }}
-                        className="p-2 bg-white/5 border border-white/5 rounded-lg text-white/20 hover:text-white hover:border-white/10 transition-all active:rotate-180"
+                        className="p-2.5 h-9 w-9 flex items-center justify-center bg-white/5 border border-white/5 rounded-lg text-white/20 hover:text-white hover:border-white/10 transition-all active:rotate-180"
                     >
                         <RefreshCcw size={12} />
                     </button>
@@ -392,7 +441,7 @@ function LeadsContent() {
                         </div>
                     </div>
                 ) : (
-                    <div className="h-full relative overflow-hidden">
+                    <div className="h-full relative px-2 sm:px-4">
                          <AnimatePresence mode="wait">
                             {viewMode === 'list' ? (
                                 <motion.div 
@@ -400,7 +449,7 @@ function LeadsContent() {
                                     initial={{ opacity: 0, x: -20 }}
                                     animate={{ opacity: 1, x: 0 }}
                                     exit={{ opacity: 0, x: 20 }}
-                                    className="h-full overflow-y-auto custom-scrollbar px-6 py-6 pb-20"
+                                    className="h-full overflow-y-auto custom-scrollbar pt-6 pb-20"
                                 >
                                     <LeadListV2 
                                         leads={filteredLeads} 
@@ -412,15 +461,19 @@ function LeadsContent() {
                                             setIsManagement(true);
                                             setSelectedLead(lead);
                                         }}
+                                        onStatusChange={handleStatusChange}
+                                        onConsultantChange={handleConsultantChange}
+                                        role={role}
+                                        consultants={consultants}
                                     />
                                 </motion.div>
                             ) : (
                                 <motion.div 
                                     key="kanban"
-                                    initial={{ opacity: 0, x: 20 }}
-                                    animate={{ opacity: 1, x: 0 }}
-                                    exit={{ opacity: 0, x: -20 }}
-                                    className="h-full"
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    exit={{ opacity: 0 }}
+                                    className="h-full min-h-0 flex-1 relative"
                                 >
                                     <KanbanBoardV2 
                                         leads={filteredLeads} 
@@ -434,16 +487,7 @@ function LeadsContent() {
                                             setIsManagement(true);
                                             setSelectedLead(lead);
                                         }}
-                                        onStatusChange={async (leadId, newStatus) => {
-                                            const { error } = await supabase
-                                                .from('leads_master')
-                                                .update({ status: newStatus })
-                                                .eq('id', leadId);
-                                            
-                                            if (!error) {
-                                                setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: newStatus } : l));
-                                            }
-                                        }}
+                                        onStatusChange={handleStatusChange}
                                     />
                                 </motion.div>
                             )}

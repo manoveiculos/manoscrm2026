@@ -119,19 +119,19 @@ export function ConsultantDashboard({ consultantId, consultantName }: { consulta
     return (
         <div className="space-y-10 pb-20">
             {/* Welcome Header */}
-            <header className="flex-col md:flex-row md:items-end justify-between gap-6">
+            <header className="flex flex-col md:flex-row md:items-end justify-between gap-6">
                 <div className="space-y-2">
                     <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/10 w-fit text-[10px] font-bold uppercase tracking-wider shadow-md shadow-emerald-500/5">
                         <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
                         Online & Disponível
                     </div>
-                    <h1 className="text-5xl font-black tracking-tighter text-white font-outfit">
+                    <h1 className="text-3xl sm:text-4xl md:text-5xl font-black tracking-tighter text-white font-outfit">
                         Olá, <span className="bg-clip-text text-transparent bg-gradient-to-r from-red-500 via-white to-red-600">{consultantName.split(' ')[0]}!</span>
                     </h1>
                     <p className="text-white/40 font-medium italic">Seu desempenho comercial e pipeline de hoje.</p>
                 </div>
 
-                <div className="flex items-center gap-4 bg-white/5 p-3 rounded-2xl border border-white/10 shadow-lg shadow-black/20">
+                <div className="flex flex-wrap items-center gap-4 bg-white/5 p-3 rounded-2xl border border-white/10 shadow-lg shadow-black/20">
                     <div className="flex items-center gap-3 px-4 py-1.5 border-r border-white/10 group cursor-help">
                         <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-500 group-hover:bg-emerald-500 group-hover:text-white transition-all">
                             <Sparkles size={12} className="animate-pulse" />
@@ -153,7 +153,7 @@ export function ConsultantDashboard({ consultantId, consultantName }: { consulta
                 variants={container}
                 initial="hidden"
                 animate="show"
-                className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6"
+                className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6"
             >
                 <StatsCard
                     title="Meus Leads"
@@ -285,7 +285,7 @@ export function ConsultantDashboard({ consultantId, consultantName }: { consulta
                     {/* Highly Qualified Leads List */}
                     <div className="space-y-4">
                         <div className="flex items-center justify-between px-2">
-                            <h2 className="text-2xl font-bold flex items-center gap-3">
+                            <h2 className="text-lg sm:text-2xl font-bold flex items-center gap-3">
                                 <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-red-500/10 text-red-500">
                                     <Star size={18} />
                                 </span>
@@ -303,7 +303,7 @@ export function ConsultantDashboard({ consultantId, consultantName }: { consulta
                                         className="glass-card p-5 flex items-center justify-between group hover:border-red-500/30 transition-all"
                                     >
                                         <div className="flex items-center gap-5">
-                                            <div className="h-14 w-14 rounded-2xl bg-red-600/10 border border-red-500/20 flex items-center justify-center text-red-500 font-bold group-hover:bg-red-600 group-hover:text-white transition-all">
+                                            <div className="h-10 w-10 sm:h-14 sm:w-14 rounded-2xl bg-red-600/10 border border-red-500/20 flex items-center justify-center text-red-500 font-bold group-hover:bg-red-600 group-hover:text-white transition-all">
                                                 {lead.name[0]}
                                             </div>
                                             <div>
@@ -349,7 +349,7 @@ export function ConsultantDashboard({ consultantId, consultantName }: { consulta
                     className="lg:col-span-4 space-y-8"
                 >
                     {/* Performance Breakdown */}
-                    <div className="glass-card p-8 space-y-8 bg-gradient-to-b from-white/[0.03] to-transparent">
+                    <div className="glass-card p-4 sm:p-8 space-y-6 sm:space-y-8 bg-gradient-to-b from-white/[0.03] to-transparent">
                         <div className="flex items-center gap-3">
                             <div className="h-10 w-10 flex items-center justify-center rounded-xl bg-red-500/10 text-red-500">
                                 <Zap size={20} />
@@ -388,7 +388,7 @@ export function ConsultantDashboard({ consultantId, consultantName }: { consulta
                     </div>
 
                     {/* AI Coach Card */}
-                    <div className="glass-card p-8 relative overflow-hidden group">
+                    <div className="glass-card p-4 sm:p-8 relative overflow-hidden group">
                         <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
                             <Sparkles size={60} className="text-red-500" />
                         </div>
@@ -402,7 +402,7 @@ export function ConsultantDashboard({ consultantId, consultantName }: { consulta
                             &quot;Você tem <b>{uncontactedCount} leads</b> sem contato. O tempo médio de resposta ideal é abaixo de 5 minutos para aumentar sua taxa de conversão em até 20%.&quot;
                         </p>
 
-                        <button className="mt-8 w-full py-4 rounded-2xl bg-white/5 border border-white/10 text-[10px] font-black text-white hover:bg-white/10 transition-all uppercase tracking-[0.2em]">
+                        <button className="mt-6 sm:mt-8 w-full py-3 sm:py-4 rounded-2xl bg-white/5 border border-white/10 text-[10px] font-black text-white hover:bg-white/10 transition-all uppercase tracking-[0.2em]">
                             Ver Estratégias
                         </button>
                     </div>

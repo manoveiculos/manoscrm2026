@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Zap, Calendar, Check, X, MessageSquare, History, ChevronDown, ChevronUp, Clock, AlertCircle, Phone, Car } from 'lucide-react';
+import { Zap, Calendar, Check, X, MessageSquare, History, ChevronDown, ChevronUp, Clock, AlertCircle, Phone, Car, Bot, ShoppingCart, Send } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getStatusConfig, normalizeStatus } from '@/constants/status';
 
@@ -91,8 +91,91 @@ export const FollowUpTab: React.FC<FollowUpTabProps> = ({
     const normStatus = normalizeStatus(lead.status);
     const currentStepIndex = FUNNEL_STEPS.findIndex(s => s.id === normStatus);
 
+    // Alertas gerados pela IA que aguardam ação do vendedor
+    const aiAlerts = historicoFollowUps.filter(f =>
+        f.status === 'pending' && (f.type === 'ai_auto' || f.type === 'ai_alert_compra')
+    );
+
+    const handleSendViaWhatsApp = (fu: any) => {
+        const phone = (lead.phone || '').replace(/\D/g, '');
+        if (phone.length >= 10) {
+            const url = `https://wa.me/55${phone}?text=${encodeURIComponent(fu.note || '')}`;
+            window.open(url, '_blank');
+            // Marca como concluído após abrir
+            setSelectedFollowUpId(fu.id);
+            handleCompleteFollowUp('positive');
+        }
+    };
+
     return (
         <div className="space-y-4 pb-10">
+
+            {/* ── Alertas IA (safety gate) ─────────────────── */}
+            {aiAlerts.length > 0 && (
+                <div className="bg-[#141418] border border-amber-500/20 rounded-xl overflow-hidden">
+                    <div className="flex items-center gap-2 px-4 py-3 border-b border-amber-500/10 bg-amber-500/[0.04]">
+                        <Bot size={13} className="text-amber-400" />
+                        <span className="text-[11px] font-semibold text-amber-400/90 uppercase tracking-widest">
+                            Alertas IA — {aiAlerts.length} pendente{aiAlerts.length > 1 ? 's' : ''}
+                        </span>
+                    </div>
+
+                    <div className="divide-y divide-white/[0.04]">
+                        {aiAlerts.map((fu) => {
+                            const isCompra = fu.type === 'ai_alert_compra';
+                            return (
+                                <div key={fu.id} className="px-4 py-3 space-y-3">
+                                    <div className="flex items-start gap-2.5">
+                                        <div className={`h-7 w-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5 ${isCompra ? 'bg-red-500/10 border border-red-500/15' : 'bg-amber-500/10 border border-amber-500/15'}`}>
+                                            {isCompra
+                                                ? <ShoppingCart size={12} className="text-red-400" />
+                                                : <Zap size={12} className="text-amber-400" />
+                                            }
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-2 mb-1">
+                                                <span className={`text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded ${isCompra ? 'bg-red-500/10 text-red-400' : 'bg-amber-500/10 text-amber-400'}`}>
+                                                    {isCompra ? 'Sinal de compra' : 'Reengajamento IA'}
+                                                </span>
+                                            </div>
+                                            <p className="text-[12px] text-white/70 leading-relaxed">
+                                                {fu.note}
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            onClick={() => handleSendViaWhatsApp(fu)}
+                                            className="flex items-center gap-1.5 px-3 py-2 bg-[#25D366]/10 hover:bg-[#25D366]/20 border border-[#25D366]/20 text-[#25D366] text-[11px] font-semibold rounded-lg transition-colors"
+                                        >
+                                            <Send size={11} /> Enviar via WhatsApp
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                setSelectedFollowUpId(fu.id);
+                                                setShowCompletionModal(true);
+                                            }}
+                                            className="flex items-center gap-1.5 px-3 py-2 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] text-white/40 hover:text-white/70 text-[11px] font-medium rounded-lg transition-colors"
+                                        >
+                                            <Check size={11} /> Concluir
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                setSelectedFollowUpId(fu.id);
+                                                handleCompleteFollowUp('negative');
+                                            }}
+                                            className="flex items-center gap-1.5 px-3 py-2 bg-white/[0.03] hover:bg-white/[0.06] border border-white/[0.05] text-white/25 hover:text-white/50 text-[11px] rounded-lg transition-colors"
+                                        >
+                                            <X size={11} /> Dispensar
+                                        </button>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
+
             {/* Progresso no funil */}
             <div className="bg-[#141418] border border-white/[0.07] rounded-xl px-4 py-3">
                 <div className="flex items-center justify-between mb-3">
@@ -255,14 +338,14 @@ export const FollowUpTab: React.FC<FollowUpTabProps> = ({
 
             {/* Formulário de agendamento ... (mantido igual) */}
 
-            {/* Agendamentos Pendentes (Painel de Ações) */}
-            {historicoFollowUps.filter(f => f.status === 'pending' && f.id !== proximoFollowUp?.id).length > 0 && (
+            {/* Agendamentos Pendentes (Painel de Ações) — exclui alertas IA já mostrados acima */}
+            {historicoFollowUps.filter(f => f.status === 'pending' && f.id !== proximoFollowUp?.id && f.type !== 'ai_auto' && f.type !== 'ai_alert_compra').length > 0 && (
                 <div className="bg-[#141418] border border-white/[0.07] rounded-xl overflow-hidden">
                     <div className="flex items-center gap-2 px-4 py-3 border-b border-white/[0.05]">
                         <Calendar size={12} className="text-amber-400" />
                         <span className="text-[11px] font-semibold text-amber-400/80 uppercase tracking-widest">Outros Agendamentos</span>
                     </div>
-                    {historicoFollowUps.filter(f => f.status === 'pending' && f.id !== proximoFollowUp?.id).map((fu) => (
+                    {historicoFollowUps.filter(f => f.status === 'pending' && f.id !== proximoFollowUp?.id && f.type !== 'ai_auto' && f.type !== 'ai_alert_compra').map((fu) => (
                         <div key={fu.id} className="flex items-center justify-between px-4 py-3 border-b border-white/[0.04] last:border-0 hover:bg-white/[0.02] transition-colors">
                             <div className="flex items-center gap-3">
                                 <div className="h-1.5 w-1.5 rounded-full bg-amber-400" />

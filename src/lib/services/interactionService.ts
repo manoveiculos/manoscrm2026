@@ -47,7 +47,7 @@ export async function logHistory(leadId: string, newStatus: string, oldStatus?: 
 
 export interface TimelineEntry {
     id: string;
-    type: 'interaction' | 'message' | 'followup' | 'ai_system' | 'status_change';
+    type: 'interaction' | 'message' | 'followup' | 'ai_system' | 'status_change' | 'whatsapp_in' | 'whatsapp_out';
     timestamp: string;
     title: string;
     content: string;
@@ -76,13 +76,19 @@ export async function getUnifiedTimeline(leadId: string, phone?: string): Promis
             .order('created_at', { ascending: false });
 
         interactions?.forEach(i => {
+            const isWA = i.type === 'whatsapp_in' || i.type === 'whatsapp_out';
             timeline.push({
                 id: `int_${i.id}`,
-                type: i.old_status ? 'status_change' : 'interaction',
+                type: isWA ? i.type
+                    : i.old_status ? 'status_change'
+                    : 'interaction',
                 timestamp: i.created_at,
-                title: i.old_status ? `Status: ${i.old_status} → ${i.new_status}` : 'Nota de Atendimento',
+                title: isWA
+                    ? (i.user_name || (i.type === 'whatsapp_out' ? 'Vendedor' : 'Cliente'))
+                    : i.old_status ? `Status: ${i.old_status} → ${i.new_status}`
+                    : 'Nota de Atendimento',
                 content: i.notes || '',
-                meta: { old: i.old_status, new: i.new_status }
+                meta: { old: i.old_status, new: i.new_status, user: i.user_name }
             });
         });
     }

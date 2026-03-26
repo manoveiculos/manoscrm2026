@@ -11,14 +11,14 @@ import { KanbanBoardV2 } from './components/KanbanBoardV2';
 import { LeadListV2 } from './components/LeadListV2';
 import { LeadProfileModalV2 } from '../components/lead-profile/LeadProfileModalV2';
 import { NewLeadModalV2 } from './components/NewLeadModalV2';
-import { 
-    Search, 
-    MessageSquare, 
-    Activity, 
-    Brain, 
-    Zap, 
-    Target, 
-    TrendingUp, 
+import {
+    Search,
+    MessageSquare,
+    Activity,
+    Brain,
+    Zap,
+    Target,
+    TrendingUp,
     Filter,
     LayoutGrid,
     List as ListIcon,
@@ -28,7 +28,8 @@ import {
     Car,
     Globe,
     Calendar,
-    Plus
+    Plus,
+    X
 } from 'lucide-react';
 import { dataService } from '@/lib/dataService';
 
@@ -46,8 +47,9 @@ function PipelineContent() {
     const [userName, setUserName] = useState('');
     const [role, setRole] = useState('consultant');
     const [searchTerm, setSearchTerm] = useState('');
+    const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
     const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
-    const [viewMode, setViewMode] = useState<'kanban' | 'list'>('kanban');
+    const [viewMode, setViewMode] = useState<'kanban' | 'list'>('list');
     const [sortBy, setSortBy] = useState<'date' | 'score'>('date');
     const [isAddingLead, setIsAddingLead] = useState(false);
     const [isManagement, setIsManagement] = useState(false);
@@ -65,6 +67,18 @@ function PipelineContent() {
     const [origins, setOrigins] = useState<string[]>([]);
 
     const [consultantId, setConsultantId] = useState<string | undefined>(undefined);
+
+    const [filterAI, setFilterAI] = useState(false);
+
+    // Briefing Matinal IA
+    const [dailyBrief, setDailyBrief] = useState<{
+        saudacao: string;
+        resumo: string;
+        prioridades: string[];
+        aviso: string | null;
+        stats?: { total: number; hot: number; slaBreached: number };
+    } | null>(null);
+    const [briefDismissed, setBriefDismissed] = useState(false);
 
     // Initial Load & Auth
     useEffect(() => {
@@ -144,7 +158,7 @@ function PipelineContent() {
                 page: pageNum,
                 limit: 200, // MASSIVE LOAD
                 consultantId,
-                searchTerm: searchTerm || undefined
+                searchTerm: debouncedSearchTerm || undefined
             });
 
             if (isNewSearch) {
@@ -169,17 +183,35 @@ function PipelineContent() {
 
         try {
             await leadService.updateLeadStatus(supabase, leadId, newStatus);
+
+            // IA proativa: quando lead avança para estágios decisivos, dispara análise em background.
+            // Quando o vendedor abrir o modal do lead, o script já estará pronto.
+            if (newStatus === 'ataque' || newStatus === 'fechamento') {
+                fetch('/api/lead/next-steps', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ leadId }),
+                }).catch(() => {});
+            }
         } catch (err) {
             console.error("Error updating lead status:", err);
             setLeads(oldLeads); // Revert on error
         }
     };
 
+    // Debounce Search Term — aguarda o usuário parar de digitar (500ms) para não sobrecarregar o banco
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            setDebouncedSearchTerm(searchTerm);
+        }, 500); 
+        return () => clearTimeout(timer);
+    }, [searchTerm]);
+
     // Re-fetch on filter/search change
     useEffect(() => {
         setPage(1);
         loadLeads(1, true);
-    }, [searchTerm, consultantId, filterFromUrl]);
+    }, [debouncedSearchTerm, consultantId, filterFromUrl]);
 
     const filteredLeads = useMemo(() => {
         // Normalize status before filtering so V1 statuses ('perda total', 'venda realizada', etc.) are handled
@@ -188,20 +220,17 @@ function PipelineContent() {
             return norm !== 'vendido' && norm !== 'perdido';
         });
         
-        // Date Filter
+        // Date Filter (Aligned with Central de Leads)
         if (filterDate !== 'all') {
             const now = new Date();
-            const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-            const yesterday = today - 86400000;
-            const lastWeek = today - 7 * 86400000;
-            const lastMonth = today - 30 * 86400000;
-
+            const todayStart = new Date();
+            todayStart.setHours(0, 0, 0, 0);
+            
             filtered = filtered.filter(l => {
                 const leadDate = new Date(l.created_at || 0).getTime();
-                if (filterDate === 'today') return leadDate >= today;
-                if (filterDate === 'yesterday') return leadDate >= yesterday && leadDate < today;
-                if (filterDate === 'week') return leadDate >= lastWeek;
-                if (filterDate === 'month') return leadDate >= lastMonth;
+                if (filterDate === 'today') return leadDate >= todayStart.getTime();
+                if (filterDate === '7days') return leadDate >= (Date.now() - 7 * 24 * 60 * 60 * 1000);
+                if (filterDate === '30days') return leadDate >= (Date.now() - 30 * 24 * 60 * 60 * 1000);
                 return true;
             });
         }
@@ -240,19 +269,29 @@ function PipelineContent() {
 
         // Status Filter
         if (filterStatus !== 'all') {
-            filtered = filtered.filter(l => 
-                filterStatus === 'new' ? (l.status === 'received' || l.status === 'new') : l.status === filterStatus
-            );
+            filtered = filtered.filter(l => normalizeStatus(l.status) === filterStatus);
         }
 
         // Score Filter
         if (filterScore !== 'all') {
             filtered = filtered.filter(l => {
                 const s = l.ai_score || 0;
-                if (filterScore === 'high') return s >= 70;
-                if (filterScore === 'med') return s >= 40 && s < 70;
-                if (filterScore === 'low') return s < 40;
+                if (filterScore === 'quente') return s >= 80;
+                if (filterScore === 'morno') return s >= 60 && s < 80;
+                if (filterScore === 'frio') return s >= 30 && s < 60;
+                if (filterScore === 'gelado') return s < 30;
                 return true;
+            });
+        }
+
+        // Filtro IA Recomenda Hoje: hot/quente + sem contato recente (>2h)
+        if (filterAI) {
+            const cutoff = Date.now() - 2 * 3_600_000;
+            filtered = filtered.filter(l => {
+                const score = Number(l.ai_score) || 0;
+                const isHot = score >= 70 || l.ai_classification === 'hot';
+                const lastTouch = new Date(l.updated_at || l.created_at).getTime();
+                return isHot && lastTouch < cutoff;
             });
         }
 
@@ -269,18 +308,78 @@ function PipelineContent() {
             const dateB = new Date(b.created_at || 0).getTime();
             return dateB - dateA;
         });
-    }, [leads, searchTerm, filterStatus, filterScore, filterDate, filterConsultant, filterInterest, filterOrigin, sortBy]);
+    }, [leads, searchTerm, filterStatus, filterScore, filterDate, filterConsultant, filterInterest, filterOrigin, sortBy, filterAI]);
+
+    // Briefing Matinal — busca 1x por sessão após leads carregados
+    useEffect(() => {
+        if (loading || !userName || leads.length === 0 || briefDismissed || dailyBrief) return;
+        const today = new Date().toISOString().split('T')[0];
+        const cacheKey = `brief_${today}_${consultantId || 'admin'}`;
+        const dismissKey = `brief_dismissed_${today}`;
+        if (typeof window !== 'undefined' && sessionStorage.getItem(dismissKey)) {
+            setBriefDismissed(true);
+            return;
+        }
+        const cached = typeof window !== 'undefined' ? sessionStorage.getItem(cacheKey) : null;
+        if (cached) { setDailyBrief(JSON.parse(cached)); return; }
+        const params = new URLSearchParams({ name: userName });
+        if (consultantId) params.set('consultantId', consultantId);
+        fetch(`/api/ai/daily-brief?${params}`)
+            .then(r => r.json())
+            .then(data => {
+                if (data.saudacao) {
+                    setDailyBrief(data);
+                    sessionStorage.setItem(cacheKey, JSON.stringify(data));
+                }
+            })
+            .catch(() => {});
+    }, [loading, userName]);
 
     // TACTICAL COUNTERS
     const counters = useMemo(() => {
         const elite = filteredLeads.filter(l => (l.ai_score || 0) >= 70 && (l.ai_score || 0) < 99).length;
         const emergency = filteredLeads.filter(l => (l.ai_score || 0) === 99).length;
-        return { total: filteredLeads.length, elite, emergency };
+        const cutoff = Date.now() - 2 * 3_600_000;
+        const aiHoje = leads.filter(l => {
+            const norm = normalizeStatus(l.status);
+            if (norm === 'vendido' || norm === 'perdido') return false;
+            const score = Number(l.ai_score) || 0;
+            const isHot = score >= 70 || l.ai_classification === 'hot';
+            const lastTouch = new Date(l.updated_at || l.created_at).getTime();
+            return isHot && lastTouch < cutoff;
+        }).length;
+        return { total: filteredLeads.length, elite, emergency, aiHoje };
     }, [filteredLeads]);
 
-    if (loading && page === 1) {
+    const handleConsultantChange = async (leadId: string, consultantId: string) => {
+        if (role !== 'admin') return;
+        try {
+            const consultant = consultants.find(c => c.id === consultantId);
+            const { error } = await supabase
+                .from('leads_manos_crm')
+                .update({ 
+                    assigned_consultant_id: consultantId,
+                    primeiro_vendedor: consultant?.name,
+                    updated_at: new Date().toISOString() 
+                })
+                .eq('id', leadId);
+
+            if (error) throw error;
+
+            setLeads(prev => prev.map(l => l.id === leadId ? { 
+                ...l, 
+                assigned_consultant_id: consultantId,
+                consultant_name: consultant?.name,
+                primeiro_vendedor: consultant?.name
+            } : l));
+        } catch (error) {
+            console.error("Error updating consultant:", error);
+        }
+    };
+
+    if (loading && page === 1 && leads.length === 0) {
         return (
-            <div className="flex h-[80vh] items-center justify-center">
+            <div className="flex h-[80vh] items-center justify-center bg-[#0C0C0F]">
                 <div className="h-12 w-12 border-4 border-red-500 border-t-transparent rounded-full animate-spin" />
             </div>
         );
@@ -289,7 +388,7 @@ function PipelineContent() {
     return (
         <div className="w-full h-screen flex flex-col pt-0 px-0 items-start justify-start leading-none bg-[#0C0C0F] overflow-hidden">
             {/* HEADER — linha 1: título + contadores + ações */}
-            <header className="px-5 py-3 bg-[#0C0C0F] border-b border-white/[0.06] shrink-0 w-full z-[60]">
+            <header className="px-3 sm:px-5 py-2 bg-[#0C0C0F] border-b border-white/[0.06] shrink-0 w-full z-[60]">
                 <div className="flex items-center justify-between gap-4 w-full">
                     {/* Título */}
                     <div className="flex items-center gap-3 shrink-0">
@@ -320,8 +419,12 @@ function PipelineContent() {
                     {/* Ações */}
                     <div className="flex items-center gap-2">
                         {/* Busca */}
-                        <div className="flex items-center bg-[#141418] border border-white/[0.07] rounded-lg px-3 py-2 w-36 lg:w-44 xl:w-56 focus-within:border-white/20 transition-all">
-                            <Search size={13} className="text-white/30 shrink-0" />
+                        <div className="flex items-center bg-[#141418] border border-white/[0.07] rounded-lg px-3 py-2 w-28 sm:w-36 lg:w-44 xl:w-56 focus-within:border-white/20 transition-all">
+                            {loading ? (
+                                <div className="h-3.5 w-3.5 border-2 border-white/20 border-t-white/80 rounded-full animate-spin shrink-0" />
+                            ) : (
+                                <Search size={13} className="text-white/30 shrink-0" />
+                            )}
                             <input
                                 type="text"
                                 placeholder="Buscar..."
@@ -367,22 +470,25 @@ function PipelineContent() {
             </header>
 
             {/* FILTROS — linha 2: compacta e organizada */}
-            <div className="w-full bg-[#0C0C0F] border-b border-white/[0.05] px-5 py-2 flex items-center gap-2 overflow-x-auto custom-scrollbar shrink-0 z-[60]">
+            <div className="w-full bg-[#0C0C0F] border-b border-white/[0.05] px-3 sm:px-5 py-1.5 flex items-center gap-2 overflow-x-auto custom-scrollbar shrink-0 z-[60]">
                 {/* Select estilizado padrão */}
                 {[
                     { icon: Calendar, value: filterDate, onChange: setFilterDate, options: [
                         { value: 'all', label: 'Todas as datas' },
-                        { value: 'today', label: 'Hoje' },
-                        { value: 'week', label: 'Esta semana' },
-                        { value: 'month', label: 'Este mês' },
+                        { value: 'today', label: 'Ontem/Hoje' },
+                        { value: '7days', label: 'Últimos 7 dias' },
+                        { value: '30days', label: 'Últimos 30 dias' },
                     ]},
                     { icon: User, value: filterConsultant, onChange: setFilterConsultant, disabled: role !== 'admin', options: [
-                        { value: 'all', label: 'Todos os consultores' },
+                        { value: 'all', label: 'Consultores' },
                         ...consultants.map(c => ({ value: c.id, label: c.name.split(' ')[0] }))
                     ]},
-                    { icon: Car, value: filterInterest, onChange: setFilterInterest, options: [
-                        { value: 'all', label: 'Qualquer veículo' },
-                        ...inventory.slice(0, 20).map(item => ({ value: item.name, label: item.name }))
+                    { icon: Zap, value: filterScore, onChange: setFilterScore, options: [
+                        { value: 'all', label: 'Todas Probabs.' },
+                        { value: 'quente', label: 'Quente (80%+)' },
+                        { value: 'morno', label: 'Morno (60-79%)' },
+                        { value: 'frio', label: 'Frio (30-59%)' },
+                        { value: 'gelado', label: 'Gelado (<30%)' }
                     ]},
                     { icon: Globe, value: filterOrigin, onChange: setFilterOrigin, options: [
                         { value: 'all', label: 'Todas as origens' },
@@ -395,7 +501,7 @@ function PipelineContent() {
                             value={value}
                             onChange={(e) => onChange(e.target.value)}
                             disabled={disabled}
-                            className="bg-transparent border-none text-[11px] font-medium text-white/80 outline-none cursor-pointer disabled:opacity-30 max-w-[130px]"
+                            className="bg-transparent border-none text-[11px] font-medium text-white/80 outline-none cursor-pointer disabled:opacity-30 max-w-[100px] sm:max-w-[130px]"
                         >
                             {options.map((opt, idx) => (
                                 <option key={`${opt.value}-${idx}`} value={opt.value}>{opt.label}</option>
@@ -404,38 +510,63 @@ function PipelineContent() {
                     </div>
                 ))}
 
-                <div className="w-px h-4 bg-white/[0.08] shrink-0 mx-1" />
-
-                <div className="flex items-center gap-1.5 bg-[#141418] border border-white/[0.07] rounded-md px-2.5 py-1.5 shrink-0">
-                    <select
-                        value={filterStatus}
-                        onChange={(e) => setFilterStatus(e.target.value)}
-                        className="bg-transparent border-none text-[11px] font-medium text-white/60 outline-none cursor-pointer"
+                {/* Chip — IA Recomenda Hoje */}
+                {counters.aiHoje > 0 && (
+                    <button
+                        onClick={() => setFilterAI(p => !p)}
+                        className={`flex items-center gap-1.5 border rounded-md px-2.5 py-1.5 shrink-0 text-[11px] font-semibold transition-all ${
+                            filterAI
+                                ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
+                                : 'bg-[#141418] border-white/[0.07] text-white/40 hover:text-white/60 hover:border-white/15'
+                        }`}
                     >
-                        <option value="all">Todas as etapas</option>
-                        <option value="new">Entrada</option>
-                        <option value="contacted">Triagem</option>
-                        <option value="negotiation">Ataque</option>
-                        <option value="proposed">Fechamento</option>
-                    </select>
-                </div>
-
-                <div className="flex items-center gap-1.5 bg-[#141418] border border-white/[0.07] rounded-md px-2.5 py-1.5 shrink-0">
-                    <select
-                        value={filterScore}
-                        onChange={(e) => setFilterScore(e.target.value)}
-                        className="bg-transparent border-none text-[11px] font-medium text-white/60 outline-none cursor-pointer"
-                    >
-                        <option value="all">Score IA</option>
-                        <option value="high">Elite (70%+)</option>
-                        <option value="med">Médio (40-70%)</option>
-                        <option value="low">Frio (&lt;40%)</option>
-                    </select>
-                </div>
+                        <Brain size={11} />
+                        IA Hoje ({counters.aiHoje})
+                    </button>
+                )}
             </div>
 
+            {/* BRIEFING MATINAL IA */}
+            {dailyBrief && !briefDismissed && (
+                <div className="w-full px-3 sm:px-5 py-2 bg-[#0C0C0F] border-b border-white/[0.05] shrink-0">
+                    <div className="flex items-start gap-3 bg-[#141418] border border-amber-500/15 rounded-xl px-4 py-3">
+                        <Brain size={14} className="text-amber-400 mt-0.5 shrink-0" />
+                        <div className="flex-1 min-w-0">
+                            <div className="flex items-start justify-between gap-2">
+                                <p className="text-[11px] font-bold text-amber-300 leading-snug">{dailyBrief.saudacao}</p>
+                                <button
+                                    onClick={() => {
+                                        setBriefDismissed(true);
+                                        const today = new Date().toISOString().split('T')[0];
+                                        sessionStorage.setItem(`brief_dismissed_${today}`, 'true');
+                                    }}
+                                    className="text-white/20 hover:text-white/50 transition-colors shrink-0 mt-0.5"
+                                >
+                                    <X size={11} />
+                                </button>
+                            </div>
+                            {dailyBrief.resumo && (
+                                <p className="text-[10px] text-white/45 mt-0.5 leading-snug">{dailyBrief.resumo}</p>
+                            )}
+                            {dailyBrief.prioridades.length > 0 && (
+                                <div className="flex flex-wrap gap-x-5 gap-y-0.5 mt-1.5">
+                                    {dailyBrief.prioridades.map((p, i) => (
+                                        <span key={i} className="text-[10px] text-white/55 leading-snug">
+                                            <span className="text-amber-500/50 mr-1">→</span>{p}
+                                        </span>
+                                    ))}
+                                </div>
+                            )}
+                            {dailyBrief.aviso && (
+                                <p className="text-[10px] text-red-400/75 mt-1.5 font-semibold leading-snug">⚠ {dailyBrief.aviso}</p>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* MAIN CONTENT AREA - NO DOUBLE SCROLLBARS */}
-            <main className="flex-1 w-full overflow-hidden relative">
+            <main className="flex-1 w-full overflow-hidden relative min-h-0">
                 <AnimatePresence mode="wait">
                     {viewMode === 'kanban' ? (
                         <motion.div
@@ -443,7 +574,7 @@ function PipelineContent() {
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
                             exit={{ opacity: 0 }}
-                            className="h-full"
+                            className="h-full min-h-0 relative flex-1"
                         >
                             <KanbanBoardV2 
                                 leads={filteredLeads} 
@@ -478,6 +609,10 @@ function PipelineContent() {
                                     setIsManagement(true);
                                     setSelectedLead(lead);
                                 }}
+                                onStatusChange={handleStatusChange}
+                                onConsultantChange={handleConsultantChange}
+                                role={role as 'admin' | 'consultant'}
+                                consultants={consultants}
                             />
                         </motion.div>
                     )}

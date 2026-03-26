@@ -53,6 +53,9 @@ export const calcularDiffHoras = (createdAt: string) => {
 export const parsePrice = (price: any): number => {
     if (!price) return 0;
     if (typeof price === 'number') return price;
-    const cleaned = price.replace(/[^\d]/g, '');
-    return parseInt(cleaned) || 0;
+    const cleaned = String(price)
+        .replace(/R\$\s?/, '')
+        .replace(/\./g, '')
+        .replace(',', '.');
+    return parseFloat(cleaned) || 0;
 };

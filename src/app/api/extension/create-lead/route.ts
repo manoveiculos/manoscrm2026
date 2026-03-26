@@ -83,6 +83,15 @@ export async function POST(req: NextRequest) {
                 );
         }
 
+        // Fire-and-forget: análise IA inicial em background
+        if (result?.id) {
+            fetch(`${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/api/lead/init-score`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ leadId: result.id }),
+            }).catch(() => {});
+        }
+
         return NextResponse.json({ success: true, lead: result });
 
     } catch (err: any) {
