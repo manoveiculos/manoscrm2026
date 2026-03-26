@@ -7,6 +7,9 @@ import { usePathname } from 'next/navigation';
 export function LayoutWrapper({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
     const isLoginPage = pathname === '/login';
+    const isV2 = pathname.startsWith('/v2');
+
+    if (isV2) return <>{children}</>;
 
     return (
         <>

@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node --check extension/content/ui.js)",
+      "Bash(node --check extension/content/index.js)",
+      "Bash(node --check extension/background.js)",
+      "Bash(wc -l c:/Users/Usuario/OneDrive/Documentos/crm-manos/src/app/v2/**/*.tsx c:/Users/Usuario/OneDrive/Documentos/crm-manos/src/app/v2/*/*.tsx c:/Users/Usuario/OneDrive/Documentos/crm-manos/src/app/v2/*/*/*.tsx)",
+      "Bash(wc -l \"c:/Users/Usuario/OneDrive/Documentos/crm-manos/src/components/v2\"/*.tsx)",
+      "Bash(find \"c:/Users/Usuario/OneDrive/Documentos/crm-manos/src/app/v2\" -name \"*.tsx\" -type f -exec wc -l {} +)",
+      "Bash(find \"c:/Users/Usuario/OneDrive/Documentos/crm-manos/src/app/v2/components\" -name \"*.tsx\" -type f -exec wc -l {} +)",
+      "Bash(find /c/Users/Usuario/OneDrive/Documentos/crm-manos/src/app/v2/analytics -type f -name *.tsx -o -name *.ts -o -name *.jsx -o -name *.js)",
+      "Bash(npx tsc:*)"
+    ]
+  }
+}

@@ -1,0 +1,10 @@
+﻿0734004 Fix: loop de recarregamento infinito no mobile (leads e reativa├º├úo)
+d7a144b fix: resolve loop de recarregamento mobile e otimiza performance
+4f974c0 fix: whatsapp sync robust scraper, database columns and manual copy fallback
+a4484e8 feat: auditoria completa, endurecimento da integra├º├úo WhatsApp e novos Pr├│ximos Passos
+b5ae33e Updates: Admin User Management, Leads Panel Simplified, and Google branding
+c531819 Atualiza├º├Áes no dashboard e an├ílise de qualidade de marketing
+5d46856 fix: Desativa rod├¡zio autom├ítico fantasma de leads pendentes e redistribui├º├úo autom├ítica. Atualiza├º├úo do token da Meta.
+8a9f8f8 fix: corrige gatilho de an├ílise autom├ítica da IA, remove erro undefined no nome do lead e restaura bot├úo de exportar conversa
+c19463b Fix: Explicitly exclude 'origem' from database payload in createLead
+70d8326 Fix: Remove 'origem' column from leads_manos_crm inserts and fix mapping for UI

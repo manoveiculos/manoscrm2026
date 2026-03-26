@@ -33,7 +33,7 @@ export async function adminUpdateUserEmail(userId: string, consultantId: string,
         if (dbError) throw dbError;
 
         revalidatePath('/admin/equipe');
-        return { success: true };
+        return { success: true, message: 'E-mail atualizado com sucesso!' };
     } catch (error: any) {
         return { success: false, error: error.message };
     }
@@ -48,7 +48,7 @@ export async function adminUpdateUserPassword(userId: string, newPassword: strin
         });
         if (error) throw error;
 
-        return { success: true };
+        return { success: true, message: 'Senha atualizada com sucesso!' };
     } catch (error: any) {
         return { success: false, error: error.message };
     }
@@ -58,19 +58,29 @@ export async function adminDeleteUser(userId: string, consultantId: string) {
     if (!await verifyAdmin()) throw new Error('Unauthorized');
 
     try {
-        // 1. Delete from Auth
-        const { error: authError } = await supabaseAdmin.auth.admin.deleteUser(userId);
-        if (authError) throw authError;
+        // 1. Delete from Auth (Resilient)
+        if (userId) {
+            try {
+                const { error: authError } = await supabaseAdmin.auth.admin.deleteUser(userId);
+                // If user not found in Auth, we don't care, we still want to remove from CRM DB
+                if (authError && authError.message !== 'User not found') {
+                    console.error('Auth Delete Error (Ignored):', authError);
+                }
+            } catch (authErr) {
+                console.warn('Silent Auth Delete Failure:', authErr);
+            }
+        }
 
         // 2. Delete from DB
         const { error: dbError } = await supabaseAdmin
             .from('consultants_manos_crm')
             .delete()
             .eq('id', consultantId);
+        
         if (dbError) throw dbError;
 
         revalidatePath('/admin/equipe');
-        return { success: true };
+        return { success: true, message: 'Consultor removido com sucesso!' };
     } catch (error: any) {
         return { success: false, error: error.message };
     }

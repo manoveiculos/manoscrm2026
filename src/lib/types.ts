@@ -16,6 +16,9 @@ export interface Campaign {
   ctr?: number;
   cpm?: number;
   frequency?: number;
+  meta_results?: number;
+  meta_conversions?: number;
+  meta_id?: string;
   updated_at?: string;
   leads_manos_crm?: { count: number }[];
   ai_analysis_result?: {
@@ -104,6 +107,7 @@ export interface Lead {
   scheduled_at?: string;
   ai_summary?: string;
   ai_reason?: string;
+  churn_probability?: number;
   behavioral_profile?: {
     urgency: 'high' | 'medium' | 'low';
     sentiment: string;
@@ -120,7 +124,12 @@ export interface Lead {
   resumo_consultor?: string;
   proxima_acao?: string;
   primeiro_vendedor?: string;
+  consultant_name?: string;
   lead_id?: string;
+  
+  // View Metadata
+  real_id?: string | number;
+  source_table?: string;
 }
 
 export interface InventoryItem {
@@ -168,7 +177,11 @@ export interface FinancialMetrics {
   cpl: number;
   roi: number;
   leadCount: number;
+  avgResponseTime?: number; // Em minutos
+  responseRate?: number; // Em porcentagem
+  conversionRate?: number; // Em porcentagem (Fase 3)
 }
+
 
 export interface Recommendation {
   title: string;

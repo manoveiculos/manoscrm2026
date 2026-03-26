@@ -1,0 +1,282 @@
+import { supabase } from './supabaseClients';
+import { cacheGet, cacheSet, TTL, cacheInvalidate } from './cacheLayer';
+import { stripPrefix, getTableForLead } from './leadRouter';
+import { logHistory, getLeadMessages } from './interactionService';
+import { pickNextConsultant, resolveConsultantIdByName } from './consultantService';
+import { Lead, LeadStatus, AIClassification } from '@/lib/types';
+import { sendMetaConversion } from '@/lib/meta-service';
+
+/**
+ * SERVIÇO DE CRUD DE LEADS
+ */
+
+export async function getLeads(consultantId?: string, leadId?: string) {
+    const cacheKey = `leads_${consultantId || 'all'}_${leadId || 'none'}`;
+    const cached = cacheGet<Lead[]>(cacheKey);
+    if (cached) return cached;
+
+    try {
+        let query = supabase.from('leads').select('*');
+        if (consultantId) query = query.eq('assigned_consultant_id', consultantId);
+        if (leadId) query = query.eq('id', leadId);
+        query = query.order('created_at', { ascending: false });
+
+        const { data, error } = await query;
+        if (error) throw error;
+        
+        let leads = data as Lead[];
+
+        // Enriquecer com nomes de consultores
+        const consultants = await getConsultantNamesCached();
+        leads = leads.map(l => {
+            const consultant = consultants.find(c => c.id === l.assigned_consultant_id);
+            return {
+                ...l,
+                consultant_name: consultant?.name || l.primeiro_vendedor || '—'
+            };
+        });
+
+        cacheSet(cacheKey, leads, TTL.LEADS);
+        return leads;
+    } catch (err) {
+        console.error("Error fetching leads from unified View:", err);
+        return [];
+    }
+}
+
+/**
+ * Busca resiliente por telefone (usado por IA e Extensão)
+ */
+export async function getLeadByPhone(phone: string): Promise<Lead | null> {
+    const cleanPhone = phone.replace(/\D/g, '');
+    if (!cleanPhone || cleanPhone.length < 8) return null;
+
+    const last8 = cleanPhone.substring(cleanPhone.length - 8);
+    const variants = [cleanPhone, last8, `55${cleanPhone}`];
+
+    // Busca na VIEW unificada (Prioridade automática via Fase 4 SQL)
+    const { data, error } = await supabase
+        .from('leads')
+        .select('*')
+        .or(`phone.ilike.%${variants.join('%,phone.ilike.%')}%`)
+        .order('priority', { ascending: true }) // V2 > CRM26 > Legado
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+    if (error) {
+        console.error("Error getLeadByPhone:", error);
+        return null;
+    }
+
+    if (!data) return null;
+
+    // Buscar nome do consultor para o Dashboard/Extensão
+    const consultants = await getConsultantNamesCached();
+    const consultant = consultants.find(c => c.id === data.assigned_consultant_id);
+
+    return {
+        ...data,
+        primeiro_vendedor: consultant?.name || data.assigned_consultant_id || 'Não atribuído'
+    } as Lead;
+}
+
+export async function getLeadsManos(consultantId?: string, leadId?: string) {
+    let query = supabase.from('leads_manos_crm').select('*').order('created_at', { ascending: false });
+    if (consultantId) query = query.eq('assigned_consultant_id', consultantId);
+    if (leadId) {
+        const realId = stripPrefix(leadId);
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (uuidRegex.test(realId)) query = query.eq('id', realId);
+        else return [];
+    }
+    const { data } = await query;
+    const consultants = await getConsultantNamesCached();
+    return (data || []).map(item => {
+        const consultant = consultants?.find(c => c.id === item.assigned_consultant_id);
+        return {
+            ...item,
+            id: `main_${item.id}`,
+            origem: item.source || 'Contato Direto WhatsApp',
+            consultant_name: consultant?.name || item.primeiro_vendedor || 'Pendente',
+            consultants_manos_crm: consultant || { name: 'Pendente' }
+        };
+    });
+}
+
+export async function getLeadsCRM26(consultantName?: string, includeSent: boolean = false, showRedistributed: boolean = false, leadId?: string) {
+    let query = supabase.from('leads_distribuicao_crm_26').select('*');
+    if (!showRedistributed) query = query.not('status', 'eq', 'lost_redistributed');
+    query = query.order('criado_em', { ascending: false });
+    if (consultantName) query = query.ilike('vendedor', `%${consultantName.split(' ')[0]}%`);
+    if (leadId && leadId.startsWith('crm26_')) query = query.eq('id', stripPrefix(leadId));
+
+    const { data } = await query;
+    const consultants = await getConsultantNamesCached();
+    return (data || []).filter(i => i.nome && i.telefone).map(i => normalizeCRM26(i, consultants));
+}
+
+export async function createLead(leadData: Partial<Lead>) {
+    const cleanPhone = (leadData.phone || '').replace(/\D/g, '');
+    if (!cleanPhone) throw new Error("Telefone obrigatório");
+
+    const { data: existing } = await supabase.from('leads_manos_crm').select('*, consultants_manos_crm(name)').eq('phone', cleanPhone).maybeSingle();
+
+    if (existing) {
+        const now = new Date().toISOString();
+        const { data } = await supabase.from('leads_manos_crm').update({
+            updated_at: now,
+            ai_summary: `${existing.ai_summary || ''}\n\n[REATIVADO ${new Date().toLocaleDateString()}]`.trim()
+        }).eq('id', existing.id).select().single();
+        cacheInvalidate('leads_');
+        return data;
+    }
+
+    const payload = sanitizeLeadPayload(leadData, cleanPhone);
+    
+    // ATRIBUIÇÃO AUTOMÁTICA OU POR NOME
+    if (!payload.assigned_consultant_id) {
+        try {
+            // Se já veio com o NOME do vendedor (primeiro_vendedor), resolver o ID
+            if (payload.primeiro_vendedor) {
+                const resolvedId = await resolveConsultantIdByName(payload.primeiro_vendedor);
+                if (resolvedId) {
+                    payload.assigned_consultant_id = resolvedId;
+                }
+            }
+            
+            // Se ainda não tem ID (nome não resolveu ou não veio), usar Round Robin
+            if (!payload.assigned_consultant_id) {
+                const nextCons = await pickNextConsultant(payload.name);
+                if (nextCons) {
+                    payload.assigned_consultant_id = nextCons.id;
+                    payload.primeiro_vendedor = nextCons.name;
+                } else {
+                    // FAIL-SAFE: If no consultant is found via Round Robin, pick any active one
+                    const { data: fallback } = await supabase.from('consultants_manos_crm')
+                        .select('id, name')
+                        .eq('is_active', true)
+                        .limit(1)
+                        .single();
+                    if (fallback) {
+                        payload.assigned_consultant_id = fallback.id;
+                        payload.primeiro_vendedor = fallback.name;
+                        console.log(`[createLead] Atribuição de fallback para ${fallback.name}`);
+                    }
+                }
+            }
+        } catch (atribError) {
+            console.error("Erro na atribuição de consultor:", atribError);
+        }
+    }
+
+    const { data, error } = await supabase.from('leads_manos_crm').insert([payload]).select().single();
+    if (error) throw error;
+    cacheInvalidate('leads_');
+    return data;
+}
+
+export async function updateLeadStatus(leadId: string, status: LeadStatus, oldStatus?: LeadStatus, notes?: string, motivo_perda?: string, resumo_fechamento?: string) {
+    const table = getTableForLead(leadId);
+    const realId = stripPrefix(leadId);
+    const now = new Date().toISOString();
+    
+    const updatePayload: any = {
+        status,
+        updated_at: (table === 'leads_manos_crm' || table === 'leads_master') ? now : undefined,
+        atualizado_em: (table !== 'leads_manos_crm' && table !== 'leads_master') ? now : undefined,
+        motivo_perda,
+        resumo_fechamento
+    };
+
+    if (notes) {
+        if (table === 'leads_manos_crm') {
+            updatePayload.observacoes = notes;
+        } else {
+            updatePayload.notas = notes;
+        }
+    }
+
+    const { data, error } = await supabase.from(table).update(updatePayload).eq('id', realId).select('id');
+
+    if (error) throw error;
+    if (!data || data.length === 0) throw new Error(`Lead não encontrado na tabela ${table} (id: ${realId})`);
+
+    await logHistory(leadId, status, oldStatus, notes);
+    cacheInvalidate('leads_');
+}
+
+export async function updateLeadDetails(leadId: string, details: Partial<Lead>) {
+    const table = getTableForLead(leadId);
+    const realId = stripPrefix(leadId);
+    const payload = table === 'leads_manos_crm' ? details : mapToCRM26(details);
+    
+    const { data, error } = await supabase.from(table).update({
+        ...payload,
+        updated_at: (table === 'leads_manos_crm' || table === 'leads_master') ? new Date().toISOString() : undefined,
+        atualizado_em: (table !== 'leads_manos_crm' && table !== 'leads_master') ? new Date().toISOString() : undefined
+    }).eq('id', realId).select('id');
+
+    if (error) throw error;
+    if (!data || data.length === 0) throw new Error(`Lead não encontrado na tabela ${table} (id: ${realId})`);
+    cacheInvalidate('leads_');
+}
+
+// === HELPERS ===
+async function getConsultantNamesCached() {
+    let cached = cacheGet<any[]>('consultant_names');
+    if (!cached) {
+        const { data } = await supabase.from('consultants_manos_crm').select('id, name');
+        cached = data || [];
+        cacheSet('consultant_names', cached, TTL.CONSULTANTS);
+    }
+    return cached;
+}
+
+function normalizeCRM26(i: any, consultants: any[]) {
+    const consultant = consultants?.find(c => c.id === i.assigned_consultant_id);
+    return {
+        ...i,
+        id: `crm26_${i.id}`,
+        name: i.nome,
+        phone: i.telefone,
+        ai_summary: (i.resumo || '').split('||IA_DATA||')[0].trim(),
+        status: i.status === 'NOVO' ? 'received' : i.status,
+        consultant_name: consultant?.name || i.vendedor || i.primeiro_vendedor || 'Pendente',
+        carro_troca: i.carro_troca || i.troca
+    };
+}
+
+function sanitizeLeadPayload(ld: any, phone: string) {
+    return {
+        name: ld.name || ld.nome || 'Sem Nome',
+        phone,
+        source: ld.source || ld.origem || 'Não especificada',
+        status: ld.status || 'received',
+        assigned_consultant_id: ld.assigned_consultant_id || null,
+        primeiro_vendedor: ld.primeiro_vendedor || null,
+        created_at: new Date().toISOString()
+    } as any;
+}
+
+function mapToCRM26(details: any) {
+    const obj: any = {};
+    if (details.name) obj.nome = details.name;
+    if (details.phone) obj.telefone = details.phone.replace(/\D/g, '');
+    if (details.ai_summary) obj.resumo = details.ai_summary;
+    if (details.status) obj.status = details.status;
+    
+    // Suporte para troca (mapear para ambos os nomes usados no CRM26)
+    if (details.carro_troca) {
+        obj.carro_troca = details.carro_troca;
+        obj.troca = details.carro_troca;
+    }
+    
+    if (details.vehicle_interest) obj.interesse = details.vehicle_interest;
+    if (details.valor_investimento) obj.valor_investimento = details.valor_investimento;
+    if (details.assigned_consultant_id) obj.assigned_consultant_id = details.assigned_consultant_id;
+    
+    return obj;
+}
+
+export { getLeadMessages, logHistory };

@@ -10,6 +10,8 @@ export async function middleware(request: NextRequest) {
         request,
     });
 
+    // Middleware logic continues below
+
     const supabase = createServerClient(
         process.env.NEXT_PUBLIC_SUPABASE_URL!,
         process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -38,10 +40,11 @@ export async function middleware(request: NextRequest) {
     const path = request.nextUrl.pathname;
     const isLoginPage = path === '/login';
     const isPublicApi = path.startsWith('/api/auth') || path.startsWith('/api/webhook') || path.startsWith('/api/health') || path.startsWith('/api/extension');
+    const isEmbed = path === '/v2/pipeline/embed';
     const isStaticAsset = path.includes('.') || path.startsWith('/_next');
 
-    // Se for um asset estático ou API pública, ignoramos
-    if (isStaticAsset || isPublicApi) {
+    // Se for um asset estático, API pública ou Embed, ignoramos
+    if (isStaticAsset || isPublicApi || isEmbed) {
         return supabaseResponse;
     }
 
@@ -73,6 +76,6 @@ export const config = {
          * Corresponde a todos os caminhos, exceto arquivos estáticos conhecidos.
          * Usamos uma lógica mais abrangente para garantir segurança total.
          */
-        '/((?!api/auth|api/webhook|api/health|api/extension|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+        '/((?!api/auth|api/webhook|api/health|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
     ],
 };

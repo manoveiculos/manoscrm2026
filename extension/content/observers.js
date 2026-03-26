@@ -1,63 +1,100 @@
 /**
- * Manos CRM - DOM Observers
+ * Manos CRM v2 - DOM Observers
+ * Detecta troca de conversa no WhatsApp com múltiplas estratégias
  */
-
-export const Observers = {
-    chatObserver: null,
-
+const Observers = {
     watchChatChange(callback) {
-        console.log("Manos CRM: Iniciando observadores sensíveis...");
+        let debounceTimer = null;
+        let lastTitle = '';
+        let lastUrl = location.href;
+        let lastPhone = '';
 
-        // 1. Observer para #app (Monitora mudanças globais de navegação)
-        const app = document.getElementById('app');
-        if (app) {
-            const appObserver = new MutationObserver(() => callback());
-            appObserver.observe(app, { childList: true, subtree: false });
-        }
+        const fire = () => {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(callback, 350);
+        };
 
-        // 2. Observer para a lista lateral (Troca de seleção)
-        const watchSidePane = () => {
-            const sidePane = document.getElementById('pane-side');
-            if (sidePane) {
-                const sideObserver = new MutationObserver(() => callback());
-                sideObserver.observe(sidePane, {
+        // 1. Observa mudanças no título do cabeçalho (indicador mais confiável de troca de contato)
+        const watchHeader = () => {
+            const hdr = document.querySelector('#main header');
+            if (!hdr) { setTimeout(watchHeader, 800); return; }
+
+            new MutationObserver(() => {
+                // Pega o título atual do header (nome do contato)
+                const titleEl = hdr.querySelector('span[title]');
+                const title = titleEl?.getAttribute('title') || hdr.innerText?.split('\n')[0] || '';
+                if (title && title !== lastTitle) {
+                    lastTitle = title;
+                    fire();
+                }
+            }).observe(hdr, {
+                subtree: true,
+                childList: true,
+                attributes: true,
+                attributeFilter: ['title'],
+                characterData: true
+            });
+        };
+        watchHeader();
+
+        // Quando o #main ainda não existe, tenta de novo depois
+        const watchMain = () => {
+            const m = document.getElementById('main');
+            if (!m) { setTimeout(watchMain, 800); return; }
+            // Observa apenas childList do #main (não subtree inteiro — evita disparo excessivo)
+            new MutationObserver(() => {
+                // Verifica se o header mudou após o childList mudar
+                const hdr = m.querySelector('header');
+                const titleEl = hdr?.querySelector('span[title]');
+                const title = titleEl?.getAttribute('title') || '';
+                if (title && title !== lastTitle) {
+                    lastTitle = title;
+                    fire();
+                }
+            }).observe(m, { childList: true, subtree: false });
+        };
+        watchMain();
+
+        // 2. Observa seleção na lista lateral (clique em novo contato)
+        const watchSide = () => {
+            const s = document.getElementById('pane-side');
+            if (s) {
+                new MutationObserver(fire).observe(s, {
                     subtree: true,
                     attributeFilter: ['aria-selected'],
-                    childList: true
+                    childList: false
                 });
-                console.log("Manos CRM: Observando lista lateral (#pane-side)");
-            } else {
-                setTimeout(watchSidePane, 1500);
-            }
+            } else { setTimeout(watchSide, 1000); }
         };
+        watchSide();
 
-        // 3. Observer para o container de chat (Mudança interna e Header)
-        const watchMainChat = () => {
-            const main = document.getElementById('main');
-            if (main) {
-                const mainObserver = new MutationObserver(() => callback());
-                // Subtree true é vital para detectar mudanças no título/header
-                mainObserver.observe(main, { childList: true, subtree: true });
-                console.log("Manos CRM: Observando mudanças em #main (subtree)");
-            } else {
-                setTimeout(watchMainChat, 1500);
-            }
-        };
+        // 3. Observa #app (muda quando abre/fecha painéis)
+        const app = document.getElementById('app');
+        if (app) new MutationObserver(fire).observe(app, { childList: true, subtree: false });
 
-        watchSidePane();
-        watchMainChat();
-
-
-        // 4. Heartbeat: Failsafe a cada 5s (apenas se a aba estiver ativa)
+        // 4. Polling de URL — WhatsApp às vezes muda a URL ao trocar chat
         setInterval(() => {
-            if (document.visibilityState === 'visible') {
-                callback();
+            if (location.href !== lastUrl) {
+                lastUrl = location.href;
+                fire();
             }
-        }, 5000);
-    },
+        }, 600);
 
+        // 5. Polling do título — fallback caso MutationObserver falhe
+        setInterval(() => {
+            if (document.visibilityState !== 'visible') return;
+            const hdr = document.querySelector('#main header');
+            const titleEl = hdr?.querySelector('span[title]');
+            const title = titleEl?.getAttribute('title') || '';
+            if (title && title !== lastTitle) {
+                lastTitle = title;
+                fire();
+            }
+        }, 1500);
 
-    stop() {
-        if (this.chatObserver) this.chatObserver.disconnect();
+        // 6. Verificação periódica de visibilidade
+        setInterval(() => {
+            if (document.visibilityState === 'visible') fire();
+        }, 8000);
     }
 };

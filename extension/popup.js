@@ -1,12 +1,8 @@
 
 document.getElementById('save-btn').onclick = () => {
-    const url = document.getElementById('crm-url').value;
     const token = document.getElementById('crm-token').value;
 
-    chrome.storage.local.set({
-        crmUrl: url,
-        crmToken: token
-    }, () => {
+    chrome.storage.local.set({ crmToken: token }, () => {
         document.getElementById('status-msg').style.display = 'block';
         setTimeout(() => {
             document.getElementById('status-msg').style.display = 'none';
@@ -15,7 +11,6 @@ document.getElementById('save-btn').onclick = () => {
     });
 };
 
-chrome.storage.local.get(['crmUrl', 'crmToken'], (result) => {
-    if (result.crmUrl) document.getElementById('crm-url').value = result.crmUrl;
+chrome.storage.local.get(['crmToken'], (result) => {
     if (result.crmToken) document.getElementById('crm-token').value = result.crmToken;
 });

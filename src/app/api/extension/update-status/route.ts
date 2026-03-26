@@ -1,40 +1,40 @@
-
-import { createClient } from '@supabase/supabase-js';
+import { dataService } from '@/lib/services';
+import { createClient } from '@/lib/supabase/admin';
 import { NextRequest, NextResponse } from 'next/server';
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+import { verifyExtensionToken } from '@/lib/extensionAuth';
 
 export async function POST(req: NextRequest) {
+    const authError = verifyExtensionToken(req);
+    if (authError) return authError;
+
     try {
-        const { leadId, status } = await req.json();
+        const body = await req.json();
+        // Aceita tanto "leadId" (legado) quanto "lead_id" (padrão atual)
+        const leadId = body.leadId || body.lead_id;
+        const { status, notes } = body;
 
         if (!leadId || !status) {
-            return NextResponse.json({ error: 'Dados inválidos' }, { status: 400 });
+            console.error("[api/extension/update-status] Erro de validação:", { body });
+            return NextResponse.json({ 
+                success: false, 
+                error: `Dados inválidos: lead_id (${leadId}) e status (${status}) são obrigatórios` 
+            }, { status: 400 });
         }
 
-        const isCrm26 = leadId.startsWith('crm26_');
-        const realId = leadId.replace('crm26_', '');
+        const adminClient = createClient();
+        dataService.setClient(adminClient);
 
-        if (isCrm26) {
-            const { error } = await supabaseAdmin
-                .from('leads_distribuicao_crm_26')
-                .update({ status })
-                .eq('id', parseInt(realId));
-            if (error) throw error;
-        } else {
-            const { error } = await supabaseAdmin
-                .from('leads_manos_crm')
-                .update({ status })
-                .eq('id', realId);
-            if (error) throw error;
-        }
+        // O dataService.updateLeadStatus já lida com prefixos e históricos
+        await dataService.updateLeadStatus(leadId, status, undefined, notes || '[API Extensão] Alteração de status via WhatsApp');
 
         return NextResponse.json({ success: true, status });
 
     } catch (err: any) {
         console.error("Update Status API Error:", err);
-        return NextResponse.json({ error: err.message }, { status: 500 });
+        const isNotFound = err.message?.includes('não encontrado');
+        return NextResponse.json(
+            { success: false, error: isNotFound ? 'Lead não encontrado ou erro ao atualizar' : err.message },
+            { status: isNotFound ? 404 : 500 }
+        );
     }
 }

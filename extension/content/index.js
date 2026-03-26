@@ -1,292 +1,534 @@
 /**
- * Manos CRM - Main Controller
+ * Manos CRM v2.1 – Main Controller
+ * Orquestra: Lead lookup, Kanban, Auth, Novos Leads (polling)
  */
 
-import { UI } from './ui.js';
-import { Observers } from './observers.js';
-import { Scraper } from './scraper.js';
-
 const App = {
-    API_BASE: "http://localhost:3000/api/extension",
+    API_BASE: 'https://manoscrm.com.br/api/extension',
+    // API_BASE: 'http://localhost:3000/api/extension',
+    baseUrl: '',
+    apiToken: '',
     currentPhone: null,
-    currentLeadId: null, // ID numérico do banco
-    currentNextSteps: null, // Persiste os próximos passos da IA
-    currentMode: 'chat', // 'chat' or 'kanban'
-    isSyncing: false,
+    currentLeadId: null,
+    currentNextSteps: null,
     isFetching: false,
+    _pollInterval: null,
 
+    // Retorna headers padrão incluindo Authorization token
+    authHeaders() {
+        const h = { 'Content-Type': 'application/json' };
+        if (this.apiToken) h['Authorization'] = `Bearer ${this.apiToken}`;
+        return h;
+    },
 
     async init() {
-        console.log("Manos CRM: Iniciando App...");
+        console.log('Manos CRM v2.1: Iniciando...');
+        const s = await chrome.storage.local.get(['crmToken', 'pendingLeadsCount', 'pendingLeads']);
 
-        // 1. Carregar Configurações
-        const settings = await chrome.storage.local.get(['crmUrl']);
-        let baseUrl = settings.crmUrl || "https://manoscrm.com.br";
+        this.baseUrl = 'https://manoscrm.com.br';
+        this.apiToken = s.crmToken || '';
+        console.log('Manos CRM v2.1: API ->', this.API_BASE);
 
-        // Remover trailing slash e garantir /api/extension
-        baseUrl = baseUrl.replace(/\/$/, "");
-        this.baseUrl = baseUrl;
-        this.API_BASE = `${baseUrl}/api/extension`;
-
-        console.log("Manos CRM: API Base configurada para ->", this.API_BASE);
-
-        // 2. Injetar UI
+        // Inicializar UI
         UI.init();
 
-        // 3. Iniciar Observadores
-        Observers.watchChatChange(() => {
-            if (this.currentMode === 'chat') {
-                this.handleChatChange();
+        // Restaurar badge de leads pendentes do storage (persistência entre reloads)
+        if (s.pendingLeads?.length) {
+            UI.renderPendingLeads(s.pendingLeads);
+        }
+
+        // Observar mudanças de chat
+        Observers.watchChatChange(() => this.handleChatChange());
+
+        // Listener para updates do background (polling de leads)
+        chrome.runtime.onMessage.addListener((msg) => {
+            if (msg.type === 'PENDING_LEADS_UPDATE') {
+                UI.renderPendingLeads(msg.leads || []);
             }
         });
 
-        // 4. Lógica de Hover (Abrir/Fechar Sidebar)
-        this.initHoverLogic();
+        // Listener para carregar kanban quando painel abre
+        document.addEventListener('manos-load-kanban', () => this.loadKanban());
 
-        // Evento manual
+        // Refresh manual de chat ao abrir painel de lead
         window.addEventListener('manos-crm-refresh', () => {
             this.currentPhone = null;
-            this.currentNextSteps = null; // Reset de IA ao refresh
+            this.currentNextSteps = null;
             this.handleChatChange();
         });
 
-        // Execução inicial
+        // Poll imediato ao iniciar
+        chrome.runtime.sendMessage({ type: 'POLL_NOW' });
+
         this.handleChatChange();
     },
 
-    initHoverLogic() {
-        let closeTimeout;
-
-        // Borda direita para abrir (40px)
-        document.addEventListener('mousemove', (e) => {
-            const edgeWidth = 40;
-            if (window.innerWidth - e.clientX <= edgeWidth) {
-                UI.toggleSidebar(true);
-            }
-        });
-
-        // Monitorar Shadow Root Host
-        const host = document.getElementById('manos-crm-root');
-        if (host) {
-            host.onmouseenter = () => {
-                clearTimeout(closeTimeout);
-            };
-            host.onmouseleave = () => {
-                closeTimeout = setTimeout(() => {
-                    UI.toggleSidebar(false);
-                }, 500);
-            };
-        }
-    },
-
-    async fetchKanban() {
-        // Removido a pedido do usuário
-    },
-
+    // ── Troca de Chat ─────────────────────────────────
     async handleChatChange() {
-        console.log("Manos CRM: handleChatChange trigger 🔄");
         const phone = Scraper.getPhone();
-        console.log("Manos CRM: [DEBUG] Scraper retornou ->", phone);
+        const name  = Scraper.getName();
 
         if (phone) {
-            // Filtro de Segurança
             if (phone.length > 13 || !phone.startsWith('55')) return;
-
             if (phone !== this.currentPhone && !this.isFetching) {
+                console.log('Manos CRM: novo chat ->', phone, name);
+                // Novo contato detectado — para polling anterior e limpa estado
+                this._stopLeadPolling();
                 this.currentPhone = phone;
                 this.currentLeadId = null;
-                this.currentNextSteps = null; // Reset de IA ao trocar de chat
+                this.currentNextSteps = null;
+                UI.setLeadFound(false);
                 UI.setLoading();
                 await this.fetchLead(phone);
             }
         } else {
+            // Sem telefone identificável — pode ser grupo ou tela inicial
+            this._stopLeadPolling();
             this.currentPhone = null;
             this.currentLeadId = null;
-            this.currentNextSteps = null; // Reset de IA ao não encontrar telefone
+            this.currentNextSteps = null;
+            UI.setLeadFound(false);
         }
-
     },
 
+    // ── Feedback de Score ────────────────────────────
+    async handleScoreFeedback(leadId, feedback) {
+        try {
+            const data = await this._apiFetch('/ai-feedback', {
+                method: 'POST',
+                body: JSON.stringify({ lead_id: leadId, ...feedback })
+            });
+            return data.success;
+        } catch (e) {
+            console.error('Manos CRM: Feedback erro ->', e.message);
+            return false;
+        }
+    },
+
+    // ── Buscar Lead ───────────────────────────────────
     async fetchLead(phone) {
         if (this.isFetching) return;
         this.isFetching = true;
-
         try {
-            console.log("Manos CRM: Chamando Proxy para ->", phone);
-            const name = Scraper.getName();
             const url = `${this.API_BASE}/lead-info?phone=${phone}`;
-
             chrome.runtime.sendMessage({
-                type: 'FETCH_DATA',
-                url: url
+                type: 'FETCH_DATA', url,
+                options: { headers: this.authHeaders() }
             }, (response) => {
                 this.isFetching = false;
-                console.log("Manos CRM Proxy Response:", response);
+                if (!response?.success) {
+                    console.warn('Manos CRM: API erro ->', response?.error || 'sem resposta');
+                }
 
-
-                if (response && response.success && response.data.success) {
+                if (response?.success && response.data?.success) {
                     const lead = response.data.lead;
                     if (lead) {
-                        this.currentLeadId = lead.id; // Salva o ID do banco
-
-                        // Restaurar Próximos Passos se existirem no banco e não tivermos no estado atual da sessão
-                        if (lead.diagnosis && lead.nextSteps && !this.currentNextSteps) {
-                            this.currentNextSteps = {
-                                diagnostico: lead.diagnosis,
-                                proximos_passos: typeof lead.nextSteps === 'string' ? lead.nextSteps.split(' | ') : lead.nextSteps
-                            };
+                        // Normaliza ID: produção antiga retorna UUID puro (sem prefixo).
+                        // Reconstruímos o prefixo a partir de response.data.source.
+                        const rawId = String(lead.id || '');
+                        const uuidOnly = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawId);
+                        let cleanId;
+                        if (uuidOnly) {
+                            const src = response.data.source || 'main';
+                            cleanId = `${src}_${rawId}`;
+                        } else {
+                            cleanId = rawId.replace(/^master_/, '') || rawId;
                         }
-
-                        UI.renderLead(
-                            lead,
-                            this.baseUrl,
-                            (id, status) => this.updateStatus(id, status),
-                            (id) => this.syncChat(id),
-                            this.currentNextSteps // Passa o estado persistido (da sessão ou do banco)
-                        );
-                        UI.setAlert(true); // Piscar o botão para avisar o consultor
+                        lead.id = cleanId;
+                        this.currentLeadId = cleanId;
+                        UI.setLeadFound(true);
+                        UI.renderLead(lead, {
+                            onStatusChange: (s) => this.handleStatusChange(lead.id, s),
+                            onSync: () => this.handleSync(lead.id),
+                            onTimeline: () => this.handleTimeline(lead.id),
+                            onFollowUp: () => this.handleFollowUp(lead.id),
+                            onArsenal: () => this.handleArsenal(),
+                            onInventory: () => this.handleInventory(),
+                            onAddNote: (note) => this.handleAddNote(lead.id, note),
+                            onUpdateField: (field, val) => this.handleUpdateField(lead.id, field, val),
+                            onFipeSearch: (brand, model, year) => this.handleFipeSearch(brand, model, year),
+                            onScoreFeedback: (fb) => this.handleScoreFeedback(lead.id, fb),
+                            onCreateFollowUp: (id, data) => this.handleCreateFollowUp(id, data),
+                            onCompleteFollowUp: (fuId, id) => this.handleCompleteFollowUp(fuId, id),
+                            onFinishLead: (id, type, details) => this.handleFinishLead(id, type, details),
+                            nextSteps: this.currentNextSteps,
+                            crmUrl: this.baseUrl
+                        });
+                        this.fetchNextSteps(phone, lead);
                     } else {
-                        console.warn("Manos CRM: Lead não encontrado no retorno da API", phone);
-                        UI.renderNotFound(phone, () => this.createLead(phone, name));
+                        UI.setLeadFound(false);
+                        const contactName = Scraper.getName();
+                        UI.renderNotFound(phone, contactName, (formData) => this.handleCreate(formData));
                     }
                 } else {
-                    console.warn("Manos CRM: Lead não encontrado ou erro no Proxy", phone);
-                    UI.renderNotFound(phone, () => this.createLead(phone, name));
+                    UI.setLeadFound(false);
+                    const contactName = Scraper.getName();
+                    UI.renderNotFound(phone, contactName, (formData) => this.handleCreate(formData));
                 }
             });
         } catch (err) {
-            console.error("Manos CRM: Erro ao buscar lead via Proxy", err);
-            const isContextInvalid = err.message?.includes('Extension context invalidated');
-            const errorLabel = isContextInvalid ? "CONTEXTO INVÁLIDO (Recarregue a página)" : "Erro de Proxy";
-            UI.renderNotFound(`${phone} (${errorLabel})`, () => { 
-                if (isContextInvalid) window.location.reload();
-            });
+            console.error('Manos CRM v2.1: Erro fetchLead ->', err);
+            this.isFetching = false;
         }
     },
 
-    async createLead(phone, name) {
-        UI.setLoading();
+    // ── Próximos Passos (IA) ──────────────────────────
+    async fetchNextSteps(phone, lead) {
         try {
-            const url = `${this.API_BASE}/create-lead`;
-            chrome.runtime.sendMessage({
-                type: 'FETCH_DATA',
-                url: url,
-                options: {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ phone, name })
-                }
-            }, (response) => {
-                if (response && response.success && response.data.success) {
-                    alert("Lead criado com sucesso!");
-                    this.fetchLead(phone);
-                } else {
-                    const error = response?.data?.error || "Erro desconhecido";
-                    alert(`Falha ao criar lead: ${error}`);
-                    this.fetchLead(phone);
+            const url = `${this.baseUrl}/api/lead/next-steps?phone=${phone}&lead_id=${lead.id}`;
+            chrome.runtime.sendMessage({ type: 'FETCH_DATA', url, options: { headers: this.authHeaders() } }, (response) => {
+                if (response?.success && response.data) {
+                    this.currentNextSteps = response.data;
+                    UI.renderNextSteps(response.data);
                 }
             });
-        } catch (err) {
-            console.error("Manos CRM: Erro ao criar lead via Proxy", err);
-        }
+        } catch (_) {}
     },
 
-    async updateStatus(leadId, status) {
-        if (!status) return;
-        try {
-            const url = `${this.API_BASE}/update-status`;
-            chrome.runtime.sendMessage({
-                type: 'FETCH_DATA',
-                url: url,
-                options: {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ leadId, status })
-                }
-            }, (response) => {
-                if (response && response.success && response.data.success) {
-                    alert("Status atualizado!");
-                    this.fetchLead(this.currentPhone);
-                }
-            });
-        } catch (err) {
-            console.error("Manos CRM: Erro ao atualizar status via Proxy", err);
-        }
-    },
-
-    async syncChat(leadId) {
-        if (this.isSyncing) return;
-        
-        if (!this.currentLeadId && !this.currentPhone) {
-            alert("Erro: Lead não identificado. Tente atualizar a página.");
-            return;
-        }
-
-        this.isSyncing = true;
-        const messages = await Scraper.getFullMessages(25);
-        const leadName = Scraper.getName();
-
-        console.log(`Manos CRM: [SYNC] Extraídas ${messages?.length || 0} mensagens.`);
-        if (!messages || messages.length === 0) {
-            console.error("Manos CRM: [ERROR] Nenhuma mensagem encontrada no DOM.");
-            alert("Erro: Não foi possível extrair mensagens do chat. Se a conversa for nova, tente enviar um 'Oi' primeiro.");
-            this.isSyncing = false;
-            return;
-        }
-
-        // Hardening do ID: Prioridade ao ID numérico salvo do banco
-        let rawId = this.currentLeadId || leadId;
-        let cleanId = rawId.toString().replace(/crm26_|main_|dist_/, '');
-
-        console.log("Manos CRM: [SYNC] Iniciando envio para o CRM...", { id: cleanId, phone: this.currentPhone, count: messages.length });
-        try {
-            // 1. Sincronizar mensagens brutas
-            const syncUrl = `${this.API_BASE}/sync-messages`;
-            const syncRes = await new Promise((resolve) => {
-                chrome.runtime.sendMessage({
-                    type: 'FETCH_DATA',
-                    url: syncUrl,
-                    options: {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ 
-                            leadId: cleanId, 
-                            messages,
-                            phone: this.currentPhone,
-                            name: leadName 
-                        })
-                    }
-                }, resolve);
-            });
-
-            if (syncRes && syncRes.success && syncRes.data?.success) {
-                const aiResult = syncRes.data.aiAnalysis;
-                if (aiResult) {
-                    this.currentNextSteps = {
-                        diagnostico: aiResult.resumo_estrategico,
-                        proximos_passos: (aiResult.proxima_acao || aiResult.next_step || '').split(' | ')
-                    };
-                    UI.renderNextSteps(this.currentNextSteps);
-                }
-                
-                alert(`Sincronizado! ${syncRes.data?.count || 0} novas mensagens.\nDados e análise atualizados com o CRM.`);
-                this.fetchLead(this.currentPhone);
+    // ── Kanban ────────────────────────────────────────
+    async loadKanban() {
+        const url = `${this.API_BASE}/kanban`;
+        chrome.runtime.sendMessage({ type: 'FETCH_DATA', url, options: { headers: this.authHeaders() } }, (response) => {
+            if (response?.success && response.data?.kanban) {
+                UI.renderKanban(response.data.kanban);
             } else {
-                const error = syncRes?.data?.error || syncRes?.error || "Erro na API de Mensagens";
-                throw new Error(error);
+                const board = document.getElementById('manos-kanban-board');
+                if (board) board.innerHTML = `<div style="margin:auto;color:#555;font-size:12px;font-family:Inter,sans-serif">Erro ao carregar kanban.</div>`;
+            }
+        });
+    },
+
+    // ── Status ────────────────────────────────────────
+    async handleStatusChange(leadId, status) {
+        if (!leadId || leadId === 'null' || leadId === 'undefined') {
+            console.warn('Manos CRM: Tentativa de update sem leadId válido. Abortando.');
+            UI.renderError('Lead não identificado. Sincronize novamente.');
+            return;
+        }
+
+        const payload = { lead_id: leadId, leadId, status };
+        console.log('Manos CRM: Payload Status ->', payload);
+
+        try {
+            chrome.runtime.sendMessage({
+                type: 'FETCH_DATA',
+                url: `${this.API_BASE}/update-status`,
+                options: {
+                    method: 'POST',
+                    headers: this.authHeaders(),
+                    body: JSON.stringify(payload)
+                }
+            }, (r) => {
+                console.log('Manos CRM: Status atualizado ->', r);
+                if (r && !r.success && r.error?.includes('não encontrado')) {
+                    UI.setLeadFound(false);
+                    UI.renderNotFound(this.currentPhone, Scraper.getName(), (fd) => this.handleCreate(fd));
+                }
+            });
+        } catch (e) { console.error(e); }
+    },
+
+    // ── Sync Conversa ─────────────────────────────────
+    handleSync(leadId) {
+        if (!leadId) {
+            UI.renderNotFound(this.currentPhone, Scraper.getName(), (fd) => this.handleCreate(fd));
+            return Promise.resolve({ success: false });
+        }
+
+        const messages = Scraper.extractMessages();
+        return new Promise((resolve) => {
+            chrome.runtime.sendMessage({
+                type: 'FETCH_DATA',
+                url: `${this.API_BASE}/sync-messages`,
+                options: {
+                    method: 'POST',
+                    headers: this.authHeaders(),
+                    body: JSON.stringify({
+                        lead_id: leadId,
+                        leadId,
+                        messages,
+                        phone: this.currentPhone,
+                        name: Scraper.getName()
+                    })
+                }
+            }, (r) => {
+                const apiData = r?.data || {};
+                console.log('Manos CRM: Sync ->', apiData);
+                if (r?.success && apiData.success) {
+                    resolve({ success: true, count: apiData.count || messages.length });
+                } else {
+                    const err = apiData.error || r?.error || 'erro desconhecido';
+                    if (err.includes('não encontrado')) {
+                        UI.setLeadFound(false);
+                        UI.renderNotFound(this.currentPhone, Scraper.getName(), (fd) => this.handleCreate(fd));
+                    }
+                    resolve({ success: false, error: err });
+                }
+            });
+        });
+    },
+
+    // ── API fetch via background (evita CORS do content script) ──
+    _apiFetch(path, opts = {}) {
+        return new Promise((resolve, reject) => {
+            chrome.runtime.sendMessage({
+                type: 'FETCH_DATA',
+                url: `${this.API_BASE}${path}`,
+                options: { ...opts, headers: { ...this.authHeaders(), ...(opts.headers || {}) } }
+            }, (r) => {
+                if (chrome.runtime.lastError) {
+                    // Service worker adormeceu — tenta novamente uma vez
+                    chrome.runtime.sendMessage({
+                        type: 'FETCH_DATA',
+                        url: `${this.API_BASE}${path}`,
+                        options: { ...opts, headers: { ...this.authHeaders(), ...(opts.headers || {}) } }
+                    }, (r2) => {
+                        if (chrome.runtime.lastError || !r2?.success) reject(new Error(r2?.error || 'Service worker unavailable'));
+                        else resolve(r2.data);
+                    });
+                    return;
+                }
+                if (r?.success) resolve(r.data);
+                else reject(new Error(r?.error || 'API error'));
+            });
+        });
+    },
+
+    // ── Timeline ──────────────────────────────────────
+    async handleTimeline(leadId) {
+        try {
+            const phone = this.currentPhone || '';
+            const data = await this._apiFetch(`/timeline?lead_id=${leadId}&phone=${phone}`);
+            UI.updateTimeline(data.events || []);
+        } catch (e) {
+            console.error('Manos CRM: Timeline erro ->', e.message);
+            UI.updateTimeline([]);   // limpa spinner mesmo em erro
+        }
+    },
+
+    // ── Follow-up ─────────────────────────────────────
+    async handleFollowUp(leadId) {
+        try {
+            const data = await this._apiFetch(`/follow-ups?lead_id=${leadId}`);
+            UI.updateFollowUps(data.followups || []);
+        } catch (e) {
+            console.error('Manos CRM: FollowUp erro ->', e.message);
+            UI.updateFollowUps([]);
+        }
+    },
+
+    // ── Arsenal ───────────────────────────────────────
+    async handleArsenal() {
+        try {
+            const data = await this._apiFetch(`/arsenal`);
+            UI.updateArsenal(data.scripts || data || []);
+        } catch (e) {
+            console.error('Manos CRM: Arsenal erro ->', e.message);
+            UI.updateArsenal([]);
+        }
+    },
+
+    // ── Adicionar Nota ────────────────────────────────
+    async handleAddNote(leadId, note) {
+        try {
+            await this._apiFetch('/add-note', {
+                method: 'POST',
+                body: JSON.stringify({ lead_id: leadId, leadId, note })
+            });
+            this.handleTimeline(leadId); // Refresh timeline
+        } catch (e) { console.error('Nota erro:', e); }
+    },
+
+    // ── Atualizar Campo do Lead ───────────────────────
+    async handleUpdateField(leadId, field, value) {
+        try {
+            const data = await this._apiFetch('/update-lead-field', {
+                method: 'POST',
+                body: JSON.stringify({ lead_id: leadId, leadId, field, value })
+            });
+            if (!data.success) {
+                console.warn(`Manos CRM: Campo ${field} não gravado no banco ->`, data.error);
+                return;
+            }
+            console.log(`Manos CRM: Campo ${field} atualizado para ${value}`);
+        } catch (e) {
+            console.error('Update field erro:', e.message);
+        }
+    },
+
+    // ── Busca FIPE ────────────────────────────────────
+    async handleFipeSearch(brand, modelName, year) {
+        return new Promise((resolve) => {
+            const fullQuery = `${brand} ${modelName} ${year}`.trim();
+            chrome.runtime.sendMessage({
+                type: 'FETCH_DATA',
+                url: `${this.baseUrl}/api/lead/fipe-search`,
+                options: { method: 'POST', headers: this.authHeaders(), body: JSON.stringify({ brand, model: modelName, year, fullQuery }) }
+            }, (r) => {
+                if (r?.success) resolve(r.data);
+                else resolve({ error: r?.error || 'Fipe search erro' });
+            });
+        });
+    },
+
+    // ── Criar Follow-up ───────────────────────────────
+    async handleCreateFollowUp(leadId, fuData) {
+        try {
+            const data = await this._apiFetch('/create-followup', {
+                method: 'POST',
+                body: JSON.stringify({ lead_id: leadId, leadId, ...fuData })
+            });
+            if (data.success) this.handleFollowUp(leadId);
+            return data;
+        } catch (e) { console.error(e); return { success: false }; }
+    },
+
+    // ── Concluir Follow-up ────────────────────────────
+    async handleCompleteFollowUp(followupId, leadId) {
+        try {
+            const data = await this._apiFetch('/follow-ups', {
+                method: 'PATCH',
+                body: JSON.stringify({ followup_id: followupId, result: 'completed' })
+            });
+            if (data.success) this.handleFollowUp(leadId);
+            return data;
+        } catch (e) { console.error(e); return { success: false }; }
+    },
+
+    // ── Encerrar Lead (Venda / Perda) ─────────────────
+    async handleFinishLead(leadId, finishType, details) {
+        try {
+            let consultantName = '';
+            try { const s = await chrome.storage.local.get(['consultantName']); consultantName = s.consultantName || ''; } catch (_) {}
+            return await this._apiFetch('/finish-lead', {
+                method: 'POST',
+                body: JSON.stringify({ lead_id: leadId, leadId, finish_type: finishType, consultant_name: consultantName, ...details })
+            });
+        } catch (e) { console.error(e); return { success: false }; }
+    },
+
+    // ── Estoque / Simulação ───────────────────────────
+    async handleInventory() {
+        try {
+            chrome.runtime.sendMessage(
+                { type: 'FETCH_DATA', url: `${this.API_BASE}/inventory`, options: { headers: this.authHeaders() } },
+                (r) => {
+                    if (r?.success && r.data?.inventory) {
+                        UI.updateInventory(r.data.inventory);
+                    } else {
+                        UI.updateInventory([]);
+                    }
+                }
+            );
+        } catch (e) { console.error(e); }
+    },
+
+    // ── Auto-refresh: polling silencioso do lead ──────
+    _startLeadPolling(phone) {
+        this._stopLeadPolling();
+        // Refresh a cada 30s: atualiza header (score/status) e aba ativa (timeline/follow-ups)
+        this._pollInterval = setInterval(() => this._silentLeadUpdate(phone), 30_000);
+    },
+
+    _stopLeadPolling() {
+        if (this._pollInterval) { clearInterval(this._pollInterval); this._pollInterval = null; }
+    },
+
+    async _silentLeadUpdate(phone) {
+        const panel = UI.shadow?.getElementById('panel');
+        if (!panel?.classList.contains('active')) return;
+        try {
+            const data = await this._apiFetch(`/lead-info?phone=${phone}`);
+            if (!data?.lead) return;
+            UI.updateLeadHeader(data.lead);
+            if (UI.activeTab === 'timeline' && this.currentLeadId)  this.handleTimeline(this.currentLeadId);
+            else if (UI.activeTab === 'followup' && this.currentLeadId) this.handleFollowUp(this.currentLeadId);
+        } catch (_) {}
+    },
+
+    // ── Criar Lead pelo formulário da extensão ────────
+    // Usa fetch() direto para não depender do SW (que pode estar morto no MV3)
+    async handleCreate(formData) {
+        const { name, phone, interesse, valor, tipo, messages } = formData;
+        const c = UI.shadow?.getElementById('content');
+
+        const setErr = (msg) => {
+            const btn = c?.querySelector('#cf-finish');
+            if (btn) { btn.disabled = false; btn.textContent = 'Cadastrar no CRM'; }
+            let errEl = c?.querySelector('.cf-error');
+            if (!errEl && c) {
+                errEl = document.createElement('div');
+                errEl.className = 'cf-error';
+                errEl.style.cssText = 'font-size:11px;color:#f87171;text-align:center;margin-top:8px';
+                c.appendChild(errEl);
+            }
+            if (errEl) errEl.textContent = msg;
+        };
+
+        try {
+            // Obter nome do consultor — chrome.storage pode falhar se contexto morreu,
+            // então envolvemos em try/catch
+            let consultantName = '';
+            try {
+                const s = await chrome.storage.local.get(['consultantName']);
+                consultantName = s.consultantName || '';
+            } catch (_) {}
+
+            const data = await this._apiFetch('/create-lead', {
+                method: 'POST',
+                body: JSON.stringify({
+                    name: name || 'Lead WhatsApp',
+                    phone,
+                    interesse,
+                    valor_investimento: valor,
+                    tipo,
+                    consultor_name: consultantName,
+                    source: 'WhatsApp Extension'
+                })
+            });
+
+            if (!data.success) {
+                setErr(data.error || 'Erro ao criar lead. Tente novamente.');
+                return;
             }
 
-        } catch (err) {
-            console.error("Manos CRM: Erro ao sincronizar via Proxy", err);
-            const errorMsg = err.message || "Erro desconhecido";
-            alert(`Erro na sincronização: ${errorMsg}\n\nSe o erro persistir, verifique o console do desenvolvedor.`);
-        } finally {
-            this.isSyncing = false;
+            const lead = data.lead;
+            this.currentLeadId = lead.id;
+
+            // Sincronizar conversa via background proxy
+            if (messages?.length && lead.id) {
+                chrome.runtime.sendMessage({
+                    type: 'FETCH_DATA',
+                    url: `${this.API_BASE}/sync-messages`,
+                    options: { method: 'POST', headers: this.authHeaders(), body: JSON.stringify({ lead_id: lead.id, leadId: lead.id, messages }) }
+                }, () => {});
+            }
+
+            // Exibir o lead criado no painel
+            UI.setLeadFound(true);
+            UI.renderLead(lead, {
+                onStatusChange: (s) => this.handleStatusChange(lead.id, s),
+                onSync: () => this.handleSync(lead.id),
+                onTimeline: () => this.handleTimeline(lead.id),
+                onFollowUp: () => this.handleFollowUp(lead.id),
+                onArsenal: () => this.handleArsenal(),
+                onInventory: () => this.handleInventory(),
+                onAddNote: (note) => this.handleAddNote(lead.id, note),
+                onUpdateField: (field, val) => this.handleUpdateField(lead.id, field, val),
+                onFipeSearch: (brand, model, year) => this.handleFipeSearch(brand, model, year),
+                onScoreFeedback: (fb) => this.handleScoreFeedback(lead.id, fb),
+                onCreateFollowUp: (id, data) => this.handleCreateFollowUp(id, data),
+                onCompleteFollowUp: (fuId, id) => this.handleCompleteFollowUp(fuId, id),
+                onFinishLead: (id, type, details) => this.handleFinishLead(id, type, details),
+                nextSteps: null,
+                crmUrl: this.baseUrl
+            });
+
+        } catch (e) {
+            console.error('handleCreate error:', e);
+            setErr('Erro ao conectar ao CRM. Verifique o token nas configurações.');
         }
     }
 };
 
-
-
-// Start
 App.init();
