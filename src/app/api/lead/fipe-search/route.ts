@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { GoogleGenerativeAI } from "@google/generative-ai";
-
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY || "");
+import { getGeminiModel } from '@/lib/aiProviders';
 
 export async function POST(req: NextRequest) {
     try {
@@ -12,7 +10,7 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: 'Dados insuficientes para pesquisa' }, { status: 400 });
         }
 
-        const genModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const genModel = getGeminiModel();
 
         const prompt = `Você é um especialista em avaliação de veículos para o mercado brasileiro.
         ESTAMOS EM: Março de 2026.
@@ -36,8 +34,7 @@ export async function POST(req: NextRequest) {
         }`;
 
         const result = await genModel.generateContent(prompt);
-        const response = await result.response;
-        const text = response.text();
+        const text = result.response.text();
         
         console.log("Gemini Raw Response:", text);
 

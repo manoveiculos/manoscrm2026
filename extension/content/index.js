@@ -399,10 +399,15 @@ const App = {
     async handleFinishLead(leadId, finishType, details) {
         try {
             let consultantName = '';
-            try { const s = await chrome.storage.local.get(['consultantName']); consultantName = s.consultantName || ''; } catch (_) {}
+            let consultantId = '';
+            try {
+                const s = await chrome.storage.local.get(['consultantName', 'consultantId']);
+                consultantName = s.consultantName || '';
+                consultantId = s.consultantId || '';
+            } catch (_) {}
             return await this._apiFetch('/finish-lead', {
                 method: 'POST',
-                body: JSON.stringify({ lead_id: leadId, leadId, finish_type: finishType, consultant_name: consultantName, ...details })
+                body: JSON.stringify({ lead_id: leadId, leadId, finish_type: finishType, consultant_name: consultantName, assigned_consultant_id: consultantId, ...details })
             });
         } catch (e) { console.error(e); return { success: false }; }
     },
@@ -466,12 +471,13 @@ const App = {
         };
 
         try {
-            // Obter nome do consultor — chrome.storage pode falhar se contexto morreu,
-            // então envolvemos em try/catch
+            // Obter dados do consultor do storage
             let consultantName = '';
+            let consultantId = '';
             try {
-                const s = await chrome.storage.local.get(['consultantName']);
+                const s = await chrome.storage.local.get(['consultantName', 'consultantId']);
                 consultantName = s.consultantName || '';
+                consultantId = s.consultantId || '';
             } catch (_) {}
 
             const data = await this._apiFetch('/create-lead', {
@@ -483,6 +489,7 @@ const App = {
                     valor_investimento: valor,
                     tipo,
                     consultor_name: consultantName,
+                    assigned_consultant_id: consultantId,
                     source: 'WhatsApp Extension'
                 })
             });

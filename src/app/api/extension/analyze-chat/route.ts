@@ -1,16 +1,14 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
-import { OpenAI } from 'openai';
 import { verifyExtensionToken } from '@/lib/extensionAuth';
 import { getAIContext } from '@/lib/services/aiFeedbackService';
+import { analyzeMultiModalChat } from '@/lib/gemini';
+import { openai, AI_MODELS } from '@/lib/aiProviders';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
-
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-});
+const supabaseAdmin = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
 
 export const maxDuration = 60;
 
@@ -20,7 +18,7 @@ export async function POST(req: NextRequest) {
 
     try {
         const body = await req.json();
-        const { messages, leadId, consultantName } = body;
+        const { messages, leadId, consultantName, attachments = [] } = body;
 
         if (!messages || messages.length === 0) {
             return NextResponse.json({ error: 'Nenhuma mensagem para analisar' }, { status: 400 });
@@ -32,7 +30,6 @@ export async function POST(req: NextRequest) {
         const isMaster = leadId?.startsWith('master_');
         const table = isCRM26 ? 'leads_distribuicao_crm_26' : (isMaster ? 'leads_master' : 'leads_manos_crm');
 
-        // 1. Fetch Lead context for deeper logic
         const { data: lead } = await supabaseAdmin
             .from(table)
             .select('*')
@@ -43,11 +40,38 @@ export async function POST(req: NextRequest) {
             .map((m: any) => '[' + (m.direction === 'inbound' ? 'CLIENTE' : 'VENDEDOR') + ']: ' + m.content)
             .join('\n');
 
-        // 2. Contexto de aprendizado da IA (feedbacks dos vendedores)
         const feedbackContext = cleanId ? await getAIContext(cleanId).catch(() => '') : '';
-
-        // 3. OpenAI Elite Closers Protocol (V2 + Feedback-Aware)
         const leadNome = lead?.nome || lead?.name || 'Desconhecido';
+
+        // ── Tentativa 1: Gemini Flash (multimodal, mais barato) ───────────────
+        try {
+            const geminiResult = await analyzeMultiModalChat(chatText, attachments, leadNome);
+
+            return NextResponse.json({
+                success: true,
+                provider: 'gemini',
+                classificacao: geminiResult.classificacao || 'WARM',
+                urgency_score: geminiResult.score || 50,
+                diagnostico_360: geminiResult.resumo_estrategico,
+                orientacao_tativa_vendedor: geminiResult.recomendacao_abordagem,
+                script_whatsapp_agora: geminiResult.recomendacao_abordagem,
+                por_que_este_script: geminiResult.resumo_detalhado,
+                // Campos extras do Gemini
+                estagio_funil: geminiResult.estagio_funil,
+                proxima_acao: geminiResult.proxima_acao,
+                probabilidade_fechamento: geminiResult.probabilidade_fechamento,
+                intencao_compra: geminiResult.intencao_compra,
+                objecoes: geminiResult.objecoes,
+                behavioral_profile: geminiResult.behavioral_profile,
+                vehicle_interest: geminiResult.vehicle_interest,
+                valor_investimento: geminiResult.valor_investimento,
+            });
+
+        } catch (geminiErr: any) {
+            console.warn('[analyze-chat] Gemini falhou, usando fallback GPT-4o:', geminiErr.message);
+        }
+
+        // ── Fallback: GPT-4o (Elite Closer V3 original) ───────────────────────
         const leadStatus = lead?.status || 'Novo';
         const leadInteresse = lead?.interesse || lead?.vehicle_interest || 'Nao informado';
 
@@ -87,17 +111,13 @@ export async function POST(req: NextRequest) {
             '}',
         ].join('\n');
 
-        const systemMsg = [
-            'Voce e o Manos Elite Closer.',
-            'Voce e ambicioso, persuasivo e protetor do faturamento da empresa.',
-            'Voce nao da tarefas, voce da a tatica de xeque-mate.',
-            'Use o nome do consultor (' + consultor + ').',
-        ].join(' ');
-
         const response = await openai.chat.completions.create({
-            model: 'gpt-4o',
+            model: AI_MODELS.OPENAI_FULL,
             messages: [
-                { role: 'system', content: systemMsg },
+                {
+                    role: 'system',
+                    content: `Voce e o Manos Elite Closer. Voce e ambicioso, persuasivo e protetor do faturamento da empresa. Voce nao da tarefas, voce da a tatica de xeque-mate. Use o nome do consultor (${consultor}).`,
+                },
                 { role: 'user', content: prompt },
             ],
             response_format: { type: 'json_object' },
@@ -108,6 +128,7 @@ export async function POST(req: NextRequest) {
 
         return NextResponse.json({
             success: true,
+            provider: 'openai',
             classificacao: result.classificacao || 'WARM',
             urgency_score: result.urgency_score || 50,
             diagnostico_360: result.diagnostico_do_mentor,

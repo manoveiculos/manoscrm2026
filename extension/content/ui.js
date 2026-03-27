@@ -481,14 +481,44 @@ const UI = {
     },
 
     // ── Auth Modal ────────────────────────────────────
-    openAuth() {
+    async openAuth() {
         let overlay = document.getElementById('manos-auth-overlay');
         if (!overlay) { overlay = this._buildAuthModal(); document.body.appendChild(overlay); }
+        
         overlay.classList.add('open');
-        // Preencher campos salvos
-        chrome.storage.local.get(['consultantName'], ({ consultantName }) => {
-            const nameInput = overlay.querySelector('#am-name');
-            if (nameInput && consultantName) nameInput.value = consultantName;
+        overlay.querySelector('#am-status').textContent = 'Carregando consultores...';
+        
+        try {
+            // Chamar API de consultores (pode estar no App ou ser global)
+            // Aqui assumimos que App._apiFetch está disponível ou usamos fetch direto de forma segura via background
+            document.dispatchEvent(new CustomEvent('manos-load-consultants', { detail: { overlay } }));
+            
+            const s = await chrome.storage.local.get(['consultantId', 'consultantName']);
+            this._populateConsultants(overlay, s.consultantId);
+        } catch (e) {
+            console.error('Erro ao abrir auth:', e);
+        }
+    },
+
+    _populateConsultants(overlay, selectedId) {
+        const select = overlay.querySelector('#am-consultant-select');
+        if (!select) return;
+
+        chrome.runtime.sendMessage({
+            type: 'FETCH_DATA',
+            url: `https://manoscrm.com.br/api/extension/consultants`, // Ajustado para produção
+            options: { headers: { 'Authorization': `Bearer ${App.apiToken}` } }
+        }, (r) => {
+            const status = overlay.querySelector('#am-status');
+            if (r?.success && r.data?.success) {
+                const list = r.data.consultants || [];
+                select.innerHTML = '<option value="">Selecione seu perfil...</option>' + 
+                    list.map(c => `<option value="${c.id}" ${c.id === selectedId ? 'selected' : ''}>${c.name}</option>`).join('');
+                status.textContent = '';
+            } else {
+                status.textContent = 'Erro ao carregar consultores.';
+                status.className = 'am-status err';
+            }
         });
     },
 
@@ -502,8 +532,10 @@ const UI = {
 
                 <div class="am-section">
                     <div class="am-section-title">Identificação do Vendedor</div>
-                    <div class="am-label">Seu Nome / Identificador</div>
-                    <input id="am-name" type="text" placeholder="Ex: Alexandre, alex@manos.com.br">
+                    <div class="am-label">Selecione seu Nome</div>
+                    <select id="am-consultant-select" style="width:100%;padding:9px;background:#0E0E12;border:1px solid rgba(255,255,255,0.08);border-radius:8px;color:#fff;font-size:12px;margin-bottom:12px;outline:none;">
+                        <option value="">Carregando...</option>
+                    </select>
                 </div>
 
                 <button class="am-btn" id="am-save">Salvar Configuração</button>
@@ -516,11 +548,19 @@ const UI = {
         overlay.onclick = (e) => { if (e.target === overlay) overlay.classList.remove('open'); };
 
         overlay.querySelector('#am-save').onclick = () => {
-            const name = overlay.querySelector('#am-name').value.trim();
+            const select = overlay.querySelector('#am-consultant-select');
+            const consultantId = select.value;
+            const consultantName = select.options[select.selectedIndex]?.text || '';
             const status = overlay.querySelector('#am-status');
 
-            chrome.storage.local.set({ consultantName: name }, () => {
-                status.textContent = '✓ Salvo com sucesso!';
+            if (!consultantId) {
+                status.textContent = 'Selecione um consultor!';
+                status.className = 'am-status err';
+                return;
+            }
+
+            chrome.storage.local.set({ consultantId, consultantName }, () => {
+                status.textContent = '✓ Configurado com sucesso!';
                 status.className = 'am-status ok';
                 setTimeout(() => overlay.classList.remove('open'), 1200);
                 chrome.runtime.sendMessage({ type: 'POLL_NOW' });

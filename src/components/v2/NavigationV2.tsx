@@ -19,6 +19,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
 import { UserProfileModal } from '@/components/UserProfileModal'; // using existing profile modal
+import { useAIAlerts } from '@/hooks/useAIAlerts';
 
 interface NavItem {
     label: string;
@@ -55,6 +56,7 @@ export const NavigationV2 = () => {
     const [mobileOpen, setMobileOpen] = useState(false);
     const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
     const [isCollapsed, setIsCollapsed] = useState(false);
+    const { count: aiAlertCount } = useAIAlerts();
 
     // Load collapse state
     useEffect(() => {
@@ -184,15 +186,27 @@ export const NavigationV2 = () => {
                                     : 'text-white/45 hover:text-white/80 hover:bg-white/[0.04] border-l-2 border-transparent'
                             }`}
                         >
-                            <item.icon
-                                size={18}
-                                className={isActive ? 'text-red-500 shrink-0' : 'shrink-0 transition-colors group-hover:text-white/60'}
-                            />
+                            <div className="relative shrink-0">
+                                <item.icon
+                                    size={18}
+                                    className={isActive ? 'text-red-500' : 'transition-colors group-hover:text-white/60'}
+                                />
+                                {item.href === '/v2/pulse' && aiAlertCount > 0 && (
+                                    <motion.span
+                                        key={aiAlertCount}
+                                        initial={{ scale: 0 }}
+                                        animate={{ scale: 1 }}
+                                        className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-amber-500 border border-[#0C0C0F] flex items-center justify-center text-[9px] font-black text-black leading-none"
+                                    >
+                                        {aiAlertCount > 9 ? '9+' : aiAlertCount}
+                                    </motion.span>
+                                )}
+                            </div>
                             {!isCollapsed && (
-                                <motion.div 
-                                    initial={{ opacity: 0, x: -10 }} 
+                                <motion.div
+                                    initial={{ opacity: 0, x: -10 }}
                                     animate={{ opacity: 1, x: 0 }}
-                                    className="flex flex-col min-w-0"
+                                    className="flex flex-col min-w-0 flex-1"
                                 >
                                     <span className={`font-semibold text-[13px] tracking-tight whitespace-nowrap ${isActive ? 'text-white' : ''}`}>
                                         {item.label}

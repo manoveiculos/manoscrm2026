@@ -1,4 +1,3 @@
-
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyExtensionToken } from '@/lib/extensionAuth';
@@ -19,13 +18,34 @@ export async function POST(req: NextRequest) {
 
     try {
         const body = await req.json();
-        const { phone, name, interesse, valor_investimento, tipo, consultor_name, source } = body;
+        const { phone, name, interesse, valor_investimento, tipo, consultor_name, assigned_consultant_id, source } = body;
 
         if (!phone) {
             return NextResponse.json({ error: 'Telefone não fornecido' }, { status: 400 });
         }
 
-        const cleanPhone = phone.replace(/\D/g, '');
+        let cleanPhone = phone.replace(/\D/g, '');
+        if (cleanPhone.startsWith('55') && cleanPhone.length >= 12) {
+            cleanPhone = cleanPhone.substring(2);
+        }
+
+        // ── Verificação de Existência (Prevenção de Duplicata) ──
+        // Busca na View unificada ou diretamente nas tabelas
+        const { data: existing } = await supabaseAdmin
+            .from('leads')
+            .select('id, name, source_table')
+            .ilike('phone', `%${cleanPhone.slice(-8)}%`)
+            .limit(1)
+            .maybeSingle();
+
+        if (existing) {
+            return NextResponse.json({ 
+                success: true, 
+                lead: existing, 
+                message: 'Lead já existe no sistema.', 
+                isDuplicate: true 
+            });
+        }
 
         // ── Payload — apenas colunas conhecidas no schema ──
         const leadData: Record<string, any> = {
@@ -41,9 +61,9 @@ export async function POST(req: NextRequest) {
         if (valor_investimento) leadData.valor_investimento = valor_investimento;
         if (tipo)               leadData.metodo_compra      = TIPO_LABEL[tipo] ?? tipo;
 
-        // Resolve consultant ID from name so lead appears in consultant's pipeline
-        // leads_manos_crm.assigned_consultant_id references consultants_manos_crm.id
-        if (consultor_name) {
+        if (assigned_consultant_id) {
+            leadData.assigned_consultant_id = assigned_consultant_id;
+        } else if (consultor_name) {
             const firstName = consultor_name.trim().split(' ')[0];
             const { data: consultant } = await supabaseAdmin
                 .from('consultants_manos_crm')
@@ -77,15 +97,13 @@ export async function POST(req: NextRequest) {
                     new_status: 'received',
                     created_at: new Date().toISOString(),
                 }])
-                .then(
-                    () => {},
-                    (e: any) => console.warn('[Extension] Timeline insert failed:', e.message)
-                );
+                .catch((e: any) => console.warn('[Extension] Timeline insert failed:', e.message));
         }
 
-        // Fire-and-forget: análise IA inicial em background
+        // IA Background
         if (result?.id) {
-            fetch(`${process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'}/api/lead/init-score`, {
+            const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
+            fetch(`${siteUrl}/api/lead/init-score`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ leadId: result.id }),

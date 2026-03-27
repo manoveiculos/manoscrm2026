@@ -14,6 +14,11 @@ import {
     Globe,
     MessageCircle,
     AlertTriangle,
+    Users,
+    X,
+    Bot,
+    CheckCircle,
+    XCircle,
 } from 'lucide-react';
 import { motion, Variants } from 'framer-motion';
 import { normalizeStatus } from '@/constants/status';
@@ -100,6 +105,18 @@ export default function Pulse() {
     const [userName, setUserName] = useState('');
     const [userRole, setUserRole] = useState<'admin' | 'consultant'>('consultant');
     const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+    const [aiMetrics, setAiMetrics] = useState<{
+        autoTotal: number;
+        autoSent: number;
+        autoDismissed: number;
+        alertCompra: number;
+    } | null>(null);
+    const [overloadAlerts, setOverloadAlerts] = useState<Array<{
+        id: string;
+        consultantId: string;
+        consultantName: string;
+        leadCount: number;
+    }>>([]);
 
     const loadData = useCallback(async () => {
         setLoading(true);
@@ -131,6 +148,67 @@ export default function Pulse() {
 
                 setLeads(leadsResult.leads || []);
                 setMetrics(metricsResult as FinancialMetrics);
+
+                // Alertas de sobrecarga — só para admin
+                if (isAdmin) {
+                    const { data: overloads } = await supabase
+                        .from('follow_ups')
+                        .select('id, metadata')
+                        .eq('user_id', 'admin')
+                        .eq('type', 'admin_overload')
+                        .eq('status', 'pending')
+                        .order('created_at', { ascending: false });
+
+                    if (overloads?.length) {
+                        // Resolve nomes dos consultores em lote
+                        const cids = [...new Set(overloads.map((o: any) => {
+                            try { return JSON.parse(o.metadata)?.consultant_id; } catch { return null; }
+                        }).filter(Boolean))] as string[];
+
+                        const { data: consultants } = await supabase
+                            .from('consultants_manos_crm')
+                            .select('id, name')
+                            .in('id', cids);
+
+                        const nameMap = Object.fromEntries((consultants || []).map((c: any) => [c.id, c.name]));
+
+                        setOverloadAlerts(overloads.map((o: any) => {
+                            let meta: any = {};
+                            try { meta = JSON.parse(o.metadata); } catch { /* noop */ }
+                            return {
+                                id: o.id,
+                                consultantId: meta.consultant_id || '',
+                                consultantName: nameMap[meta.consultant_id] || meta.consultant_id || 'Consultor',
+                                leadCount: meta.lead_count || 0,
+                            };
+                        }));
+                    } else {
+                        setOverloadAlerts([]);
+                    }
+
+                    // Métricas de performance IA — últimos 7 dias
+                    const weekAgo = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
+                    const [autoRes, compraRes] = await Promise.all([
+                        supabase
+                            .from('follow_ups')
+                            .select('id, status, result')
+                            .eq('type', 'ai_auto')
+                            .gte('created_at', weekAgo),
+                        supabase
+                            .from('follow_ups')
+                            .select('id', { count: 'exact', head: true })
+                            .eq('type', 'ai_alert_compra')
+                            .gte('created_at', weekAgo),
+                    ]);
+
+                    const autoList = autoRes.data || [];
+                    setAiMetrics({
+                        autoTotal:     autoList.length,
+                        autoSent:      autoList.filter((f: any) => f.status === 'completed' && f.result !== 'negative').length,
+                        autoDismissed: autoList.filter((f: any) => f.result === 'negative').length,
+                        alertCompra:   compraRes.count || 0,
+                    });
+                }
             }
         } catch (err) {
             console.error(err);
@@ -274,6 +352,59 @@ export default function Pulse() {
                     >
                         Resolver Agora
                     </button>
+                </motion.div>
+            )}
+
+            {/* ── OVERLOAD ALERTS (ADMIN ONLY) ─────────────────── */}
+            {userRole === 'admin' && overloadAlerts.length > 0 && (
+                <motion.div
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="mx-2 md:mx-0 rounded-2xl border border-orange-500/20 bg-orange-950/10 overflow-hidden"
+                >
+                    <div className="flex items-center gap-3 px-4 py-3 border-b border-orange-500/10"
+                        style={{ background: 'linear-gradient(90deg, rgba(249,115,22,0.07), transparent)' }}>
+                        <Users size={14} className="text-orange-400" />
+                        <h3 className="text-[11px] font-black text-orange-400 uppercase tracking-widest flex-1">
+                            Consultores Sobrecarregados — {overloadAlerts.length} alerta{overloadAlerts.length > 1 ? 's' : ''}
+                        </h3>
+                    </div>
+                    <div className="divide-y divide-white/[0.04]">
+                        {overloadAlerts.map((alert) => (
+                            <div key={alert.id} className="flex items-center gap-4 px-4 py-3">
+                                <div className="h-9 w-9 rounded-xl bg-orange-500/10 border border-orange-500/20 flex items-center justify-center text-orange-400 font-black text-sm shrink-0">
+                                    {alert.consultantName[0]?.toUpperCase() || 'C'}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-[13px] font-bold text-white/90 truncate">{alert.consultantName}</p>
+                                    <p className="text-[11px] text-orange-400/70">
+                                        <span className="font-black">{alert.leadCount}</span> leads ativos — redistribuição recomendada
+                                    </p>
+                                </div>
+                                <div className="flex items-center gap-2 shrink-0">
+                                    <a
+                                        href={`/v2/leads?consultant=${alert.consultantId}`}
+                                        className="px-3 py-1.5 rounded-lg bg-orange-500/15 hover:bg-orange-500/25 text-orange-400 text-[10px] font-black uppercase tracking-widest transition-all"
+                                    >
+                                        Ver Leads
+                                    </a>
+                                    <button
+                                        onClick={async () => {
+                                            await supabase
+                                                .from('follow_ups')
+                                                .update({ status: 'completed', completed_at: new Date().toISOString() })
+                                                .eq('id', alert.id);
+                                            setOverloadAlerts(prev => prev.filter(a => a.id !== alert.id));
+                                        }}
+                                        className="h-7 w-7 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] flex items-center justify-center text-white/25 hover:text-white/50 transition-all"
+                                        title="Dispensar alerta"
+                                    >
+                                        <X size={12} />
+                                    </button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
                 </motion.div>
             )}
 
@@ -650,6 +781,59 @@ export default function Pulse() {
                                 </div>
                             ))}
                         </motion.div>
+
+                        {/* ── IA PERFORMANCE (ADMIN ONLY) ────────────── */}
+                        {userRole === 'admin' && aiMetrics && (
+                            <motion.div variants={fadeUp}
+                                className="rounded-2xl border border-purple-500/15 bg-[#0d0d10] overflow-hidden"
+                            >
+                                <div className="flex items-center gap-2 px-4 py-3 border-b border-white/[0.05]"
+                                    style={{ background: 'linear-gradient(90deg, rgba(168,85,247,0.06), transparent)' }}>
+                                    <Bot size={13} className="text-purple-400" />
+                                    <h3 className="text-[10px] font-black text-white/60 uppercase tracking-[0.3em]">IA — Últimos 7 dias</h3>
+                                </div>
+                                <div className="p-4 space-y-3">
+                                    {/* Follow-ups automáticos */}
+                                    <div>
+                                        <div className="flex items-center justify-between mb-1.5">
+                                            <span className="text-[10px] text-white/40 uppercase tracking-widest">Follow-ups IA</span>
+                                            <span className="text-[11px] font-black text-white/60">{aiMetrics.autoTotal} gerados</span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <div className="flex-1 h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
+                                                <div
+                                                    className="h-full rounded-full bg-emerald-500"
+                                                    style={{ width: aiMetrics.autoTotal > 0 ? `${Math.round(aiMetrics.autoSent / aiMetrics.autoTotal * 100)}%` : '0%' }}
+                                                />
+                                            </div>
+                                            <span className="text-[10px] font-black text-emerald-400 w-8 text-right tabular-nums">
+                                                {aiMetrics.autoTotal > 0 ? Math.round(aiMetrics.autoSent / aiMetrics.autoTotal * 100) : 0}%
+                                            </span>
+                                        </div>
+                                        <div className="flex items-center gap-3 mt-2">
+                                            <div className="flex items-center gap-1">
+                                                <CheckCircle size={10} className="text-emerald-400" />
+                                                <span className="text-[10px] text-white/30">{aiMetrics.autoSent} enviados</span>
+                                            </div>
+                                            <div className="flex items-center gap-1">
+                                                <XCircle size={10} className="text-red-400/60" />
+                                                <span className="text-[10px] text-white/30">{aiMetrics.autoDismissed} dispensados</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {/* Divisor */}
+                                    <div className="h-px bg-white/[0.05]" />
+                                    {/* Alertas de compra */}
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-2">
+                                            <Zap size={11} className="text-amber-400" />
+                                            <span className="text-[10px] text-white/40 uppercase tracking-widest">Alertas de compra</span>
+                                        </div>
+                                        <span className="text-lg font-black text-amber-400 tabular-nums">{aiMetrics.alertCompra}</span>
+                                    </div>
+                                </div>
+                            </motion.div>
+                        )}
 
                     </div>
                 </div>

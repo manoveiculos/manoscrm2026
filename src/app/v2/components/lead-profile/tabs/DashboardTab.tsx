@@ -1,5 +1,5 @@
 import React from 'react';
-import { Trophy, CarFront, Flag, Clock } from 'lucide-react';
+import { Trophy, CarFront, Flag, Clock, AlertTriangle, TrendingDown, MessageCircle } from 'lucide-react';
 import { InfoGrid } from '../sections/InfoGrid';
 import { TacticalAction } from '../sections/TacticalAction';
 import { QuickActions } from '../sections/QuickActions';
@@ -173,6 +173,26 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
         );
     }
 
+    // ── CHURN RISK HELPERS ──
+    const churn = Number((lead as any).churn_probability) || 0;
+    const hoursInactive = Math.round(
+        (Date.now() - new Date((lead as any).updated_at || lead.created_at).getTime()) / 3_600_000
+    );
+    const aiScore = Number(lead.ai_score) || 0;
+
+    const churnColor  = churn >= 80 ? '#ef4444' : churn >= 60 ? '#f59e0b' : churn >= 40 ? '#f97316' : '#22c55e';
+    const churnLabel  = churn >= 80 ? 'Crítico' : churn >= 60 ? 'Alto' : churn >= 40 ? 'Moderado' : 'Baixo';
+    const churnBgRing = churn >= 80 ? 'border-red-500/20 bg-red-950/10'
+                      : churn >= 60 ? 'border-amber-500/20 bg-amber-950/10'
+                      : churn >= 40 ? 'border-orange-500/20 bg-orange-950/10'
+                      : 'border-emerald-500/15 bg-emerald-950/10';
+
+    const churnSuggestion = hoursInactive > 72
+        ? `Lead inativo há ${hoursInactive}h. Envie uma mensagem de reengajamento agora.`
+        : aiScore > 0 && aiScore < 40
+        ? 'Score IA baixo. Qualifique o interesse: pergunte sobre prazo e orçamento.'
+        : 'Mantenha contato regular para reduzir o risco de abandono.';
+
     // ── TELA PRINCIPAL ──
     return (
         <div className="space-y-4">
@@ -192,6 +212,40 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                 onTabChange={onTabChange}
                 fallbackAction={getAcaoTaticaFallback(lead)}
             />
+
+            {/* ── RISCO DE CHURN ── (exibe quando churn > 0) */}
+            {churn > 0 && (
+                <div className={`rounded-xl border overflow-hidden ${churnBgRing}`}>
+                    <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.05]">
+                        <div className="flex items-center gap-2">
+                            {churn >= 60
+                                ? <AlertTriangle size={13} style={{ color: churnColor }} />
+                                : <TrendingDown size={13} style={{ color: churnColor }} />
+                            }
+                            <span className="text-[11px] font-black uppercase tracking-widest" style={{ color: churnColor }}>
+                                Risco de Abandono
+                            </span>
+                        </div>
+                        <span className="text-[11px] font-black" style={{ color: churnColor }}>
+                            {churnLabel} · {churn}%
+                        </span>
+                    </div>
+                    <div className="px-4 pt-3 pb-4 space-y-3">
+                        {/* Barra de progresso */}
+                        <div className="h-2 rounded-full bg-white/[0.06] overflow-hidden">
+                            <div
+                                className="h-full rounded-full transition-all duration-700"
+                                style={{ width: `${churn}%`, backgroundColor: churnColor, boxShadow: `0 0 8px ${churnColor}60` }}
+                            />
+                        </div>
+                        {/* Sugestão de ação */}
+                        <div className="flex items-start gap-2">
+                            <MessageCircle size={12} className="text-white/30 mt-0.5 shrink-0" />
+                            <p className="text-[11px] text-white/50 leading-relaxed">{churnSuggestion}</p>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Agendamentos ativos */}
             {lead?.followups && (lead.followups as any[]).filter((f: any) => f?.status === 'pending').length > 0 && (

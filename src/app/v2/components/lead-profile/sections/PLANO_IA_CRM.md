@@ -1,6 +1,6 @@
 # PLANO_IA_CRM.md
 # Manos CRM — Contexto de Implementação IA-First
-> Última atualização: 26/03/2026
+> Última atualização: 27/03/2026
 > Documento vivo — atualizar a cada sessão de desenvolvimento
 
 ---
@@ -19,6 +19,36 @@
 **Objetivo da transformação:** Converter o CRM de um sistema de registro passivo para um software 100% AI-First — onde a IA antecipa, sugere e executa ações no funil de vendas.
 
 **Metodologia:** Cognitive Walkthrough — cada interação do usuário (clique, drag, abertura de modal) foi dissecada para identificar onde a IA pode atuar.
+
+---
+
+## INTEGRAÇÃO MULTI-IA (27/03/2026)
+
+### Pacotes instalados
+- `@anthropic-ai/sdk ^0.80.0` (Claude)
+- `@google/generative-ai ^0.24.1` (Gemini)
+- `openai ^6.25.0` (OpenAI — já existia)
+
+### Hub central — `src/lib/aiProviders.ts`
+Exporta clientes singleton (`openai`, `genAI`, `anthropic`) + constantes `AI_MODELS` + helper `getGeminiModel()`.
+Nenhuma rota nova deve criar `new OpenAI()` diretamente — importar do hub.
+
+### Estratégia de roteamento
+| Tarefa | Modelo |
+|---|---|
+| Elite Closer (`analyze-chat`) | Gemini Flash → fallback GPT-4o |
+| Scoring, follow-up, churn, brief | GPT-4o mini (mantém) |
+| Proposta de financiamento | GPT-4o (mantém) |
+| FIPE search | Gemini Flash (via hub) |
+| Análise complexa futura | Claude Sonnet |
+
+### Arquivos atualizados
+| Arquivo | Mudança |
+|---|---|
+| `src/lib/gemini.ts` | Usa hub; model corrigido para `gemini-2.0-flash` |
+| `src/lib/claude.ts` | Usa hub; retorna `string` limpo |
+| `src/app/api/extension/analyze-chat/route.ts` | Gemini primary + fallback GPT-4o; aceita `attachments[]` |
+| `src/app/api/lead/fipe-search/route.ts` | Usa `getGeminiModel()` do hub |
 
 ---
 
@@ -210,20 +240,25 @@ if (request.headers.get('authorization') !== `Bearer ${process.env.CRON_SECRET}`
 
 ### Alta prioridade
 
-**P1 — Notificações em tempo real (Supabase Realtime)**
-- Subscribed em `follow_ups` onde `status='pending'` e `type IN ('ai_auto','ai_alert_compra')`
-- Badge de notificação no header/navbar sem precisar recarregar a página
-- Arquivo: criar `src/hooks/useAIAlerts.ts` com `supabase.channel('ai-alerts').on('postgres_changes', ...)`
+**P1 — Notificações em tempo real (Supabase Realtime) ✅ COMPLETO**
+- `src/hooks/useAIAlerts.ts` — Realtime em `follow_ups` onde `user_id = consultor logado`, filtra `status='pending'` e `type IN ('ai_auto','ai_alert_compra')`
+- Badge âmbar com contagem no item "Painel de Ações" em `NavigationV2.tsx`
+- Animação `scale` no badge ao trocar valor. Atualiza sem reload.
+- ⚠️ Pré-requisito: habilitar Realtime na tabela `follow_ups` no painel Supabase → Table Editor → follow_ups → Enable Realtime
 
-**P2 — Dashboard `/v2` compacto com atalhos rápidos**
-- A tentativa anterior foi revertida pelo linter
-- Redesenho: header menor + grid de 8 atalhos (Pipeline, Pulse, Leads, Follow-ups pendentes, Leads IA Hoje, Risco de Churn, Nova Proposta, Agenda)
-- Métricas em linha horizontal compacta em vez de 4 cards grandes
-- Arquivo: `src/app/v2/DashboardClient.tsx`
+**P2 — Dashboard `/v2` compacto com atalhos rápidos ✅ COMPLETO**
+- Header compacto com saudação + frase + pill de status + badge âmbar de alertas IA em tempo real
+- Strip de 4 métricas horizontais (leads, vendas, receita, conversão)
+- Grid 2×4 de 8 atalhos rápidos: Pipeline, Pulse, Leads, Follow-ups IA, IA Hoje, Churn, Proposta, Agenda
+- Badge dinâmico via `useAIAlerts()` nos atalhos Pulse e Follow-ups IA
+- Sugestões IA compactas embaixo (sem os cards grandes anteriores)
 
-**P3 — Pulse: alertas admin_overload visíveis**
-- Exibir alertas `type='admin_overload'` da tabela `follow_ups` para o admin
-- Seção abaixo de "Leads Órfãos" com lista de consultores sobrecarregados + botão redistribuir
+**P3 — Pulse: alertas admin_overload visíveis ✅ COMPLETO**
+- Seção "Consultores Sobrecarregados" no Pulse, visível apenas para `role='admin'`
+- Busca `follow_ups` com `user_id='admin'`, `type='admin_overload'`, `status='pending'`
+- Resolve nome do consultor via `metadata.consultant_id` → `consultants_manos_crm`
+- Botão "Ver Leads" → `/v2/leads?consultant={id}`; botão "Dispensar" → marca como `completed` inline
+- Renderizado entre "Leads Órfãos" e o grid principal
 
 ### Média prioridade
 
@@ -232,14 +267,17 @@ if (request.headers.get('authorization') !== `Bearer ${process.env.CRON_SECRET}`
 - SQL: `ALTER TABLE leads_manos_crm ADD COLUMN IF NOT EXISTS embedding vector(1536);`
 - Criar: `POST /api/ai/semantic-search` + input de linguagem natural no Pipeline
 
-**P5 — Métricas de performance da IA**
-- Quantos `ai_auto` foram enviados vs dispensados por semana
-- Taxa de conversão de leads com `ai_alert_compra` vs leads sem alerta
-- Painel simples em `/v2/pulse` seção admin
+**P5 — Métricas de performance da IA ✅ COMPLETO**
+- Card "IA — Últimos 7 dias" na sidebar direita do Pulse (admin only)
+- Barra de progresso: follow-ups gerados vs enviados (%) + contador de dispensados
+- Contador de alertas de compra (`ai_alert_compra`) da semana
+- Dados: `follow_ups` com `type='ai_auto'` e `type='ai_alert_compra'` dos últimos 7 dias
 
-**P6 — Churn no DashboardTab do modal**
-- Mostrar gauge/barra de churn dentro do modal do lead (DashboardTab)
-- Com sugestão de ação baseada no motivo calculado (inatividade vs score baixo)
+**P6 — Churn no DashboardTab do modal ✅ COMPLETO**
+- Bloco "Risco de Abandono" entre TacticalAction e Agendamentos no DashboardTab
+- Barra de progresso colorida: verde (Baixo) → laranja (Moderado) → âmbar (Alto) → vermelho (Crítico)
+- Sugestão de ação contextual baseada em: inatividade (>72h), score IA baixo (<40), ou padrão
+- Oculto quando `churn_probability = 0` (sem dados ainda)
 
 ### Baixa prioridade / Futuro
 
