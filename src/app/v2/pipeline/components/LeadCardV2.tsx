@@ -195,11 +195,15 @@ export const LeadCardV2: React.FC<LeadCardV2Props> = ({
                                     <span className={`text-[9px] font-medium ${timeColor}`}>
                                         {tempoInteiro}
                                     </span>
-                                    {lead.consultant_name && (
-                                        <span className="text-[9px] font-medium text-blue-400 bg-blue-400/10 border border-blue-400/20 px-1 py-px rounded leading-none">
-                                            {lead.consultant_name.split(' ')[0]}
-                                        </span>
-                                    )}
+                                    {(() => {
+                                        const vendorName = lead.vendedor || lead.consultant_name;
+                                        if (!vendorName) return null;
+                                        return (
+                                            <span className="text-[9px] font-medium text-blue-400 bg-blue-400/10 border border-blue-400/20 px-1 py-px rounded leading-none">
+                                                {vendorName.split(' ')[0]}
+                                            </span>
+                                        );
+                                    })()}
                                 </div>
                             </div>
                         </div>

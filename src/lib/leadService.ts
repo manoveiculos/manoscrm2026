@@ -200,6 +200,38 @@ export const leadService = {
         return true;
     },
 
+    async deleteLead(supabase: SupabaseClient | undefined, leadId: string) {
+        const client = this.getClient(supabase);
+        const idStr = leadId.toString();
+
+        let targetTable: string;
+        let cleanId: string;
+        if (idStr.startsWith('main_')) {
+            targetTable = 'leads_manos_crm';
+            cleanId = idStr.replace('main_', '');
+        } else if (idStr.startsWith('crm26_')) {
+            targetTable = 'leads_distribuicao_crm_26';
+            cleanId = idStr.replace('crm26_', '');
+        } else if (idStr.startsWith('master_')) {
+            targetTable = 'leads_master';
+            cleanId = idStr.replace('master_', '');
+        } else {
+            targetTable = 'leads_master';
+            cleanId = idStr.replace(/^(main_|crm26_|dist_|lead_|crm25_|master_)/, '');
+        }
+
+        const realId = targetTable === 'leads_distribuicao_crm_26' ? parseInt(cleanId) : cleanId;
+
+        const { error } = await client
+            .from(targetTable)
+            .delete()
+            .eq('id', realId);
+
+        if (error) throw error;
+        leadCacheInvalidate();
+        return true;
+    },
+
     async getLeadById(supabase: SupabaseClient | undefined, leadId: string): Promise<Lead | null> {
         const client = this.getClient(supabase);
         const { data, error } = await client

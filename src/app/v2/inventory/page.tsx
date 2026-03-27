@@ -496,27 +496,26 @@ export default function InventoryV2() {
             {/* ── HUD HEADER ──────────────────────────────── */}
             <header className="border-b border-white/5 bg-[#050101]/80 backdrop-blur-xl flex flex-wrap items-center justify-between gap-3 px-6 py-3 -mx-2 md:-mx-0 shadow-[0_4px_20px_rgba(0,0,0,0.5)]">
                 {/* Left: identity + stats */}
-                <div className="flex items-center gap-5">
+                <div className="flex items-center gap-4 px-4 py-2.5 bg-white/[0.03] border border-white/10 rounded-2xl shadow-sm">
                     <div className="flex flex-col">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2.5">
                             <CarFront size={14} className="text-red-600" />
-                            <h1 className="text-sm font-black uppercase tracking-[0.3em] text-white/90">
+                            <h1 className="text-xs font-black uppercase tracking-[0.3em] text-white/95 whitespace-nowrap">
                                 Arsenal <span className="text-red-500">de Veículos</span>
                             </h1>
                         </div>
-                        <p className="text-[10px] font-black text-white/20 uppercase tracking-widest mt-0.5">V2.5 // Estoque Inteligente</p>
                     </div>
 
-                    <div className="hidden sm:flex items-center gap-1">
-                        <div className="h-6 w-[1px] bg-white/5 mr-3" />
-                        <span className="text-xs font-black text-white/70 tabular-nums">{stats.total}</span>
-                        <span className="text-[9px] text-white/25 uppercase ml-1">estoque</span>
-                        <span className="w-px h-3 bg-white/10 mx-2" />
-                        <span className="text-xs font-black text-emerald-400 tabular-nums">{stats.available}</span>
-                        <span className="text-[9px] text-white/25 uppercase ml-1">disponíveis</span>
-                        <span className="w-px h-3 bg-white/10 mx-2" />
-                        <span className="text-xs font-black text-amber-400 tabular-nums">{formatPrice(stats.totalValue)}</span>
-                        <span className="text-[9px] text-white/25 uppercase ml-1">total</span>
+                    <div className="hidden sm:flex items-center gap-4 pl-4 border-l border-white/10 ml-2">
+                        <div className="flex items-baseline gap-1.5">
+                            <span className="text-xs font-black text-white/80 tabular-nums">{stats.total}</span>
+                            <span className="text-[8px] font-bold text-white/20 uppercase tracking-widest">ESTOQUE</span>
+                        </div>
+                        <div className="w-px h-3 bg-white/10" />
+                        <div className="flex items-baseline gap-1.5">
+                            <span className="text-xs font-black text-emerald-400 tabular-nums">{stats.available}</span>
+                            <span className="text-[8px] font-bold text-white/20 uppercase tracking-widest">DISPONÍVEIS</span>
+                        </div>
                     </div>
                 </div>
 
@@ -545,13 +544,12 @@ export default function InventoryV2() {
                 variants={container}
                 initial="hidden"
                 animate="show"
-                className="grid grid-cols-2 md:grid-cols-4 gap-4"
+                className="grid grid-cols-1 sm:grid-cols-3 gap-4"
             >
                 {[
                     { label: 'Em Estoque', value: stats.total, icon: CarFront, color: 'red' },
                     { label: 'Disponíveis', value: stats.available, icon: Sparkles, color: 'emerald' },
                     { label: 'Ticket Médio', value: formatPrice(stats.avgPrice), icon: DollarSign, color: 'amber' },
-                    { label: 'Valor Total', value: formatPrice(stats.totalValue), icon: TrendingUp, color: 'blue' },
                 ].map((s, i) => (
                     <motion.div
                         key={i}

@@ -1,4 +1,4 @@
-export type LeadStatus = 'new' | 'received' | 'attempt' | 'contacted' | 'confirmed' | 'scheduled' | 'visited' | 'test_drive' | 'proposed' | 'negotiation' | 'closed' | 'post_sale' | 'lost' | 'lost_redistributed' | 'comprado' | 'desqualificado' | 'reativacao' | 'perda total' | 'sem contato' | 'lixo' | 'duplicado';
+export type LeadStatus = 'new' | 'received' | 'attempt' | 'contacted' | 'confirmed' | 'scheduled' | 'visited' | 'test_drive' | 'proposed' | 'negotiation' | 'closed' | 'post_sale' | 'lost' | 'lost_redistributed' | 'comprado' | 'desqualificado' | 'reativacao' | 'perda total' | 'sem contato' | 'lixo' | 'duplicado' | 'entrada' | 'triagem' | 'ataque' | 'fechamento' | 'vendido' | 'perdido';
 export type AIClassification = 'hot' | 'warm' | 'cold';
 export type Platform = 'facebook' | 'google' | 'instagram' | 'whatsapp' | 'site';
 
@@ -130,6 +130,7 @@ export interface Lead {
   // View Metadata
   real_id?: string | number;
   source_table?: string;
+  vendedor?: string;
 }
 
 export interface InventoryItem {

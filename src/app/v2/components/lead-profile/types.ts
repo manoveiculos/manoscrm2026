@@ -24,7 +24,9 @@ export interface Lead {
   interesse?: string;
   observacoes?: string;
   resumo?: string;
-  followups?: any[];
+  vendedor?: string;
+  consultant_name?: string;
+  primeiro_vendedor?: string;
 }
 
 export interface TimelineEvent {

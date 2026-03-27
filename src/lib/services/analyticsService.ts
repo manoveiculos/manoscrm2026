@@ -12,7 +12,7 @@ export async function getFinancialMetrics(params?: {
     customRange?: { start: string, end: string } 
 }) {
     const { period = 'this_month', consultantId, customRange } = params || {};
-    const cacheKey = `metrics_${period}_${consultantId || 'all'}_${customRange?.start || 'no'}_${customRange?.end || 'no'}`;
+    const cacheKey = `metrics_v2_${period}_${consultantId || 'all'}_${customRange?.start || 'no'}_${customRange?.end || 'no'}`;
     const cached = cacheGet<any>(cacheKey);
     if (cached) return cached;
 
@@ -40,7 +40,7 @@ export async function getFinancialMetrics(params?: {
                 startDate = new Date(now.getFullYear(), now.getMonth(), diff).toISOString();
                 break;
             case 'all':
-                startDate = new Date(2024, 0, 1).toISOString(); // Epoch do sistema
+                startDate = new Date(2024, 0, 1).toISOString();
                 break;
             case 'this_month':
             default:
@@ -49,56 +49,31 @@ export async function getFinancialMetrics(params?: {
         }
     }
 
-    // 1. Leads (Baseado na VIEW unificada)
-    let leadsQuery = supabase.from('leads').select('id', { count: 'exact' }).gte('created_at', startDate);
-    if (consultantId) leadsQuery = leadsQuery.eq('assigned_consultant_id', consultantId);
-    if (endDate) leadsQuery = leadsQuery.lte('created_at', endDate);
+    // Chamada à RPC Cirúrgica para obter todas as métricas unificadas e deduplicadas
+    const { data: metrics, error } = await supabase.rpc('get_crm_metrics_v2', {
+        p_consultant_id: consultantId || null,
+        p_start_date: startDate,
+        p_end_date: endDate || now.toISOString()
+    });
 
-    // 2. Vendas (Unificação: sales + sales_manos_crm)
-    let salesLegacyQuery = supabase.from('sales').select('sale_value, profit_margin').gte('sale_date', startDate);
-    let salesV2Query = supabase.from('sales_manos_crm').select('sale_value, profit_margin').gte('created_at', startDate);
-
-    if (consultantId) {
-        // Nota: 'sales' usa uuid do consultor (auth?), 'sales_manos_crm' usa uuid ou prefixo
-        const cleanConsId = consultantId.replace(/main_|crm26_|dist_/, '');
-        salesLegacyQuery = salesLegacyQuery.eq('consultant_id', cleanConsId);
-        salesV2Query = salesV2Query.eq('consultant_id', consultantId);
-    }
-    if (endDate) {
-        salesLegacyQuery = salesLegacyQuery.lte('sale_date', endDate);
-        salesV2Query = salesV2Query.lte('created_at', endDate);
+    if (error) {
+        console.error("Error calling get_crm_metrics_v2:", error);
+        throw error;
     }
 
-    const [leadsRes, salesLegRes, salesV2Res, inventoryRes] = await Promise.all([
-        leadsQuery,
-        salesLegacyQuery,
-        salesV2Query,
-        supabase.from('estoque').select('id', { count: 'exact' })
-    ]);
-
-    const leadCount = leadsRes.count || 0;
-    const combinedSales = [...(salesLegRes.data || []), ...(salesV2Res.data || [])];
-    
-    // Remover duplicidades se houver (se o sistema gravou nas duas tabelas - Fase 4 resolverá isso)
-    const salesCount = combinedSales.length; 
-    const totalRevenue = combinedSales.reduce((acc, s) => acc + (parseFloat(s.sale_value) || 0), 0);
-    const totalProfit = combinedSales.reduce((acc, s) => acc + (parseFloat(s.profit_margin) || 0), 0);
-    const inventoryCount = inventoryRes.count || 0;
-
-    // 3. Performance (Calculado direto do analyticsService)
-    const avgResponseTime = await getAverageResponseTime(startDate, consultantId);
-    const responseRate = leadCount > 0 ? await getResponseRate(startDate, consultantId) : 0;
+    const { data: inventoryRes } = await supabase.from('estoque').select('id', { count: 'exact', head: true });
 
     const result = {
-        leadCount,
-        salesCount,
-        inventoryCount,
-        totalRevenue,
-        totalProfit,
-        avgResponseTime,
-        responseRate,
-        conversionRate: leadCount > 0 ? (salesCount / leadCount) * 100 : 0,
-        cac: 0, // Implementar quando tivermos integração de custos
+        leadCount: metrics.total_leads,
+        salesCount: metrics.total_sales,
+        inventoryCount: inventoryRes?.length || 0, // Fallback se necessário
+        totalRevenue: metrics.total_revenue,
+        totalProfit: metrics.total_profit,
+        conversionRate: metrics.conversion_rate,
+        funnelData: metrics.funnel_data,
+        avgResponseTime: await getAverageResponseTime(startDate, consultantId), // Mantido por enquanto
+        responseRate: metrics.total_leads > 0 ? await getResponseRate(startDate, consultantId) : 0,
+        cac: 0,
         roi: 0
     };
 

@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { Lead } from '../types';
 import { formatPreco } from '@/app/leads/utils/helpers';
-import { Car, DollarSign, MapPin, Clock, ChevronRight, Pencil, Check, X } from 'lucide-react';
+import { Car, DollarSign, MapPin, Clock, ChevronRight, Pencil, Check, X, UserCircle2 } from 'lucide-react';
 
 interface InfoGridProps {
     lead: Lead;
@@ -123,7 +123,7 @@ export const InfoGrid: React.FC<InfoGridProps> = ({ lead, isAdmin, onSave, calcu
                 label="Interesse"
                 value={cleanInterest(lead.vehicle_interest || lead.interesse || '')}
                 field="interesse"
-                isAdmin={isAdmin}
+                isAdmin={true} // Todos podem editar
                 onSave={onSave}
             />
             <EditableRow
@@ -131,7 +131,7 @@ export const InfoGrid: React.FC<InfoGridProps> = ({ lead, isAdmin, onSave, calcu
                 label="Valor de Investimento"
                 value={valorDisplay}
                 field="valor_investimento"
-                isAdmin={isAdmin}
+                isAdmin={true} // Todos podem editar
                 onSave={onSave}
             />
             <EditableRow
@@ -142,6 +142,17 @@ export const InfoGrid: React.FC<InfoGridProps> = ({ lead, isAdmin, onSave, calcu
                 isAdmin={isAdmin}
                 onSave={onSave}
             />
+            <div className="flex items-center gap-3 px-4 py-3.5 border-b border-white/[0.05]">
+                <div className="h-8 w-8 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center shrink-0">
+                    <UserCircle2 size={14} className="text-blue-400" />
+                </div>
+                <div className="flex-1 min-w-0">
+                    <p className="text-[10px] text-white/30 uppercase tracking-widest font-medium mb-0.5">Consultor Atual</p>
+                    <p className="text-[14px] font-semibold text-white/85">
+                        {lead.vendedor || lead.consultant_name || lead.primeiro_vendedor || 'Pendente'}
+                    </p>
+                </div>
+            </div>
             <EditableRow
                 icon={Car}
                 label="Troca"

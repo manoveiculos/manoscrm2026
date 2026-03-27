@@ -33,6 +33,60 @@ import {
 } from 'lucide-react';
 import { dataService } from '@/lib/dataService';
 
+function HUDSelect({ label, value, options, onChange, minWidth = '120px', disabled = false }: { 
+    label: string, 
+    value: string, 
+    options: { id: string, label: string }[], 
+    onChange: (val: string) => void,
+    minWidth?: string,
+    disabled?: boolean
+}) {
+    const [isOpen, setIsOpen] = useState(false);
+    const selectedOption = options.find(opt => opt.id === value) || options[0];
+
+    return (
+        <div className={`flex flex-col relative ${disabled ? 'opacity-30 pointer-events-none' : ''}`} onMouseLeave={() => setIsOpen(false)}>
+            <span className="text-[7px] font-black text-red-500 uppercase tracking-widest mb-0.5">{label}</span>
+            <button 
+                onClick={() => !disabled && setIsOpen(!isOpen)}
+                disabled={disabled}
+                className="flex items-center justify-between gap-2 bg-transparent text-[9px] font-black text-white/60 outline-none uppercase cursor-pointer hover:text-white transition-colors text-left"
+                style={{ minWidth }}
+            >
+                <span className="truncate">{selectedOption.label}</span>
+                <ChevronDown size={8} className={isOpen ? 'text-red-500' : 'text-white/20'} />
+            </button>
+
+            <AnimatePresence>
+                {isOpen && (
+                    <motion.div 
+                        initial={{ opacity: 0, y: -5 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -5 }}
+                        className="absolute top-full left-0 bg-[#0a0a0a]/95 border border-white/10 rounded-lg shadow-[0_20px_50px_rgba(0,0,0,0.95)] py-1.5 z-[100] min-w-[200px] backdrop-blur-3xl"
+                    >
+                        <div className="max-h-[300px] overflow-y-auto custom-scrollbar">
+                            {options.map(opt => (
+                                <button
+                                    key={opt.id}
+                                    onClick={() => {
+                                        onChange(opt.id);
+                                        setIsOpen(false);
+                                    }}
+                                    className={`w-full text-left px-4 py-2 text-[8px] font-black uppercase tracking-widest hover:bg-red-600/10 hover:text-white transition-all flex items-center justify-between group ${value === opt.id ? 'text-red-500 bg-red-600/5' : 'text-white/40'}`}
+                                >
+                                    {opt.label}
+                                    {value === opt.id && <div className="w-1 h-1 rounded-full bg-red-600 shadow-[0_0_8px_rgba(220,38,38,0.8)]" />}
+                                </button>
+                            ))}
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+        </div>
+    );
+}
+
 function PipelineContent() {
     const supabase = createClient();
     const searchParams = useSearchParams();
@@ -391,26 +445,34 @@ function PipelineContent() {
             <header className="px-3 sm:px-5 py-2 bg-[#0C0C0F] border-b border-white/[0.06] shrink-0 w-full z-[60]">
                 <div className="flex items-center justify-between gap-4 w-full">
                     {/* Título */}
-                    <div className="flex items-center gap-3 shrink-0">
-                        <div>
-                            <h1 className="text-base font-black text-white uppercase tracking-tight leading-none">
-                                Pipeline <span className="text-red-500">de Vendas</span>
+                    <div className="flex items-center gap-4 px-4 py-2 bg-white/[0.03] border border-white/10 rounded-2xl shadow-sm">
+                        <div className="flex flex-col">
+                            <h1 className="text-sm font-black text-white uppercase tracking-tight leading-none whitespace-nowrap">
+                                Central <span className="text-red-500">de Vendas</span>
                             </h1>
-                            <p className="text-[9px] text-white/25 font-medium uppercase tracking-widest mt-0.5">Central de Vendas</p>
                         </div>
 
                         {/* Contadores inline */}
-                        <div className="hidden sm:flex items-center gap-1 ml-4">
-                            <span className="text-xs font-black text-white/70 tabular-nums">{counters.total}</span>
-                            <span className="text-[9px] text-white/25 uppercase">total</span>
-                            <span className="w-px h-3 bg-white/10 mx-2" />
-                            <span className="text-xs font-black text-amber-400 tabular-nums">{counters.elite}</span>
-                            <span className="text-[9px] text-white/25 uppercase">elite</span>
+                        <div className="hidden sm:flex items-center gap-4 pl-4 border-l border-white/10 ml-2">
+                            <div className="flex items-baseline gap-1.5">
+                                <span className="text-xs font-black text-white/80 tabular-nums">{counters.total}</span>
+                                <span className="text-[8px] font-bold text-white/20 uppercase tracking-widest leading-none">TOTAL</span>
+                            </div>
+                            
+                            <div className="w-px h-3 bg-white/10" />
+                            
+                            <div className="flex items-baseline gap-1.5">
+                                <span className="text-xs font-black text-amber-400 tabular-nums">{counters.elite}</span>
+                                <span className="text-[8px] font-bold text-white/20 uppercase tracking-widest leading-none">ELITE</span>
+                            </div>
+
                             {counters.emergency > 0 && (
                                 <>
-                                    <span className="w-px h-3 bg-white/10 mx-2" />
-                                    <span className="text-xs font-black text-red-500 tabular-nums animate-pulse">{counters.emergency}</span>
-                                    <span className="text-[9px] text-red-500/60 uppercase">urgente</span>
+                                    <div className="w-px h-3 bg-white/10" />
+                                    <div className="flex items-baseline gap-1.5">
+                                        <span className="text-xs font-black text-red-500 tabular-nums animate-pulse">{counters.emergency}</span>
+                                        <span className="text-[8px] font-bold text-red-500/40 uppercase tracking-widest leading-none">URGENTE</span>
+                                    </div>
                                 </>
                             )}
                         </div>
@@ -469,46 +531,64 @@ function PipelineContent() {
                 </div>
             </header>
 
-            {/* FILTROS — linha 2: compacta e organizada */}
-            <div className="w-full bg-[#0C0C0F] border-b border-white/[0.05] px-3 sm:px-5 py-1.5 flex items-center gap-2 overflow-x-auto custom-scrollbar shrink-0 z-[60]">
-                {/* Select estilizado padrão */}
-                {[
-                    { icon: Calendar, value: filterDate, onChange: setFilterDate, options: [
-                        { value: 'all', label: 'Todas as datas' },
-                        { value: 'today', label: 'Ontem/Hoje' },
-                        { value: '7days', label: 'Últimos 7 dias' },
-                        { value: '30days', label: 'Últimos 30 dias' },
-                    ]},
-                    { icon: User, value: filterConsultant, onChange: setFilterConsultant, disabled: role !== 'admin', options: [
-                        { value: 'all', label: 'Consultores' },
-                        ...consultants.map(c => ({ value: c.id, label: c.name.split(' ')[0] }))
-                    ]},
-                    { icon: Zap, value: filterScore, onChange: setFilterScore, options: [
-                        { value: 'all', label: 'Todas Probabs.' },
-                        { value: 'quente', label: 'Quente (80%+)' },
-                        { value: 'morno', label: 'Morno (60-79%)' },
-                        { value: 'frio', label: 'Frio (30-59%)' },
-                        { value: 'gelado', label: 'Gelado (<30%)' }
-                    ]},
-                    { icon: Globe, value: filterOrigin, onChange: setFilterOrigin, options: [
-                        { value: 'all', label: 'Todas as origens' },
-                        ...origins.map(o => ({ value: o, label: o }))
-                    ]},
-                ].map(({ icon: Icon, value, onChange, disabled, options }, i) => (
-                    <div key={i} className="flex items-center gap-1.5 bg-[#141418] border border-white/[0.07] rounded-md px-2.5 py-1.5 shrink-0">
-                        <Icon size={11} className="text-white/25 shrink-0" />
-                        <select
-                            value={value}
-                            onChange={(e) => onChange(e.target.value)}
-                            disabled={disabled}
-                            className="bg-transparent border-none text-[11px] font-medium text-white/80 outline-none cursor-pointer disabled:opacity-30 max-w-[100px] sm:max-w-[130px]"
-                        >
-                            {options.map((opt, idx) => (
-                                <option key={`${opt.value}-${idx}`} value={opt.value}>{opt.label}</option>
-                            ))}
-                        </select>
-                    </div>
-                ))}
+            {/* FILTROS — linha 2: compacta e organizada (HUD Style) */}
+            <div className="w-full bg-[#0C0C0F] border-b border-white/[0.05] px-3 sm:px-6 py-2.5 flex items-center gap-6 overflow-x-auto custom-scrollbar shrink-0 z-[60]">
+                
+                <HUDSelect 
+                    label="Período"
+                    value={filterDate}
+                    onChange={setFilterDate}
+                    options={[
+                        { id: 'all', label: 'TODAS AS DATAS' },
+                        { id: 'today', label: 'HOJE' },
+                        { id: '7days', label: 'ÚLTIMOS 7 DIAS' },
+                        { id: '30days', label: 'ÚLTIMOS 30 DIAS' }
+                    ]}
+                />
+
+                <div className="h-4 w-[1px] bg-white/10 shrink-0" />
+
+                <HUDSelect 
+                    label="Consultor"
+                    value={filterConsultant}
+                    onChange={setFilterConsultant}
+                    minWidth="140px"
+                    disabled={role !== 'admin'}
+                    options={[
+                        { id: 'all', label: 'TODOS OS CONSULTORES' },
+                        ...consultants.map(c => ({ id: c.id, label: c.name }))
+                    ]}
+                />
+
+                <div className="h-4 w-[1px] bg-white/10 shrink-0" />
+
+                <HUDSelect 
+                    label="Probabilidade"
+                    value={filterScore}
+                    onChange={setFilterScore}
+                    options={[
+                        { id: 'all', label: 'TODAS AS CHANCES' },
+                        { id: 'quente', label: 'QUENTE (80%+)' },
+                        { id: 'morno', label: 'MORNO (60-79%)' },
+                        { id: 'frio', label: 'FRIO (30-59%)' },
+                        { id: 'gelado', label: 'GELADO (<30%)' }
+                    ]}
+                />
+
+                <div className="h-4 w-[1px] bg-white/10 shrink-0" />
+
+                <HUDSelect 
+                    label="Origem"
+                    value={filterOrigin}
+                    onChange={setFilterOrigin}
+                    minWidth="140px"
+                    options={[
+                        { id: 'all', label: 'TODAS ORIGENS' },
+                        ...origins.map(o => ({ id: o, label: o }))
+                    ]}
+                />
+
+                <div className="h-4 w-[1px] bg-white/10 shrink-0 ml-auto" />
 
                 {/* Chip — IA Recomenda Hoje */}
                 {counters.aiHoje > 0 && (

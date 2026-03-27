@@ -326,28 +326,32 @@ export default function AnalyticsV2() {
             {/* ── HUD HEADER ─────────────────────────────── */}
             <header className="border-b border-white/5 bg-[#050101]/80 backdrop-blur-xl flex flex-wrap items-center justify-between gap-3 px-6 py-3 -mx-2 md:-mx-0 shadow-[0_4px_20px_rgba(0,0,0,0.5)]">
                 {/* Left: identity + stats */}
-                <div className="flex items-center gap-5">
+                <div className="flex items-center gap-4 px-4 py-2.5 bg-white/[0.03] border border-white/10 rounded-2xl shadow-sm">
                     <div className="flex flex-col">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2.5">
                             <BarChart3 size={14} className="text-red-600" />
-                            <h1 className="text-sm font-black uppercase tracking-[0.3em] text-white/90">
-                                {tab === 'minha' && myName ? myName : 'Visão'}{' '}
-                                <span className="text-red-500">{tab === 'minha' ? '— Performance' : 'Geral'}</span>
+                            <h1 className="text-xs font-black uppercase tracking-[0.3em] text-white/95 whitespace-nowrap">
+                                {tab === 'minha' && myName ? myName : 'Análise'}{' '}
+                                <span className="text-red-500">{tab === 'minha' ? '— Performance' : 'Inteligente'}</span>
                             </h1>
                         </div>
-                        <p className="text-[10px] font-black text-white/20 uppercase tracking-widest mt-0.5">V2.5 // Central de Análise</p>
                     </div>
 
-                    <div className="hidden sm:flex items-center gap-1">
-                        <div className="h-6 w-[1px] bg-white/5 mr-3" />
-                        <span className="text-xs font-black text-white/70 tabular-nums">{totalLeads}</span>
-                        <span className="text-[9px] text-white/25 uppercase ml-1">leads</span>
-                        <span className="w-px h-3 bg-white/10 mx-2" />
-                        <span className="text-xs font-black text-emerald-400 tabular-nums">{closedLeads}</span>
-                        <span className="text-[9px] text-white/25 uppercase ml-1">vendas</span>
-                        <span className="w-px h-3 bg-white/10 mx-2" />
-                        <span className="text-xs font-black text-red-400 tabular-nums">{conversionRate}%</span>
-                        <span className="text-[9px] text-white/25 uppercase ml-1">conv.</span>
+                    <div className="hidden sm:flex items-center gap-4 pl-4 border-l border-white/10 ml-2">
+                        <div className="flex items-baseline gap-1.5">
+                            <span className="text-xs font-black text-white/80 tabular-nums">{totalLeads}</span>
+                            <span className="text-[8px] font-bold text-white/20 uppercase tracking-widest leading-none">LEADS</span>
+                        </div>
+                        <div className="w-px h-3 bg-white/10" />
+                        <div className="flex items-baseline gap-1.5">
+                            <span className="text-xs font-black text-emerald-400 tabular-nums">{closedLeads}</span>
+                            <span className="text-[8px] font-bold text-white/20 uppercase tracking-widest leading-none">VENDAS</span>
+                        </div>
+                        <div className="w-px h-3 bg-white/10" />
+                        <div className="flex items-baseline gap-1.5">
+                            <span className="text-xs font-black text-red-500 tabular-nums">{conversionRate}%</span>
+                            <span className="text-[8px] font-bold text-white/20 uppercase tracking-widest leading-none">CONV.</span>
+                        </div>
                     </div>
                 </div>
 

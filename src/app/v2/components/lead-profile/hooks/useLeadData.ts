@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/client';
 import { leadService } from '@/lib/leadService';
 import { Lead } from '../types';
 import { normalizeStatus } from '@/constants/status';
+import { updateLeadStatusAction } from '@/app/actions/leads'; // Adicionando Server Action
 
 export function useLeadData(initialLead: Lead, setLeads: React.Dispatch<React.SetStateAction<any[]>>, userName: string) {
     const supabase = createClient();
@@ -19,31 +20,46 @@ export function useLeadData(initialLead: Lead, setLeads: React.Dispatch<React.Se
 
     const updateStatus = useCallback(async (newStatusId: string) => {
         const oldStatus = lead.status;
-        await leadService.updateLeadStatus(supabase, lead.id, newStatusId as any, oldStatus);
-
-        const cleanUUID = (id: string | null | undefined): string | null => {
-            if (!id) return null;
-            const cleaned = id.toString().replace(/main_|crm26_|dist_|lead_|crm25_/, '');
-            if (/^\d+$/.test(cleaned)) return cleaned;
-            const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-            return uuidRegex.test(cleaned) ? cleaned : null;
-        };
-
-        const cleanId = cleanUUID(lead.id);
-        if (cleanId) {
-            await supabase.from('interactions_manos_crm').insert({
-                lead_id: cleanId,
-                type: 'status_change',
-                notes: `[${userName || 'SISTEMA'}] Status alterado de ${oldStatus} para ${newStatusId}`,
-                consultant_id: cleanUUID(lead.assigned_consultant_id)
-            });
-        }
-
-        setLead(prev => ({ ...prev, status: newStatusId as any }));
-        setLeads(prev => prev.map(l => l.id === lead.id ? { ...l, status: newStatusId } : l));
         
-        // Disparar evento global para recarregar interações se necessário
-        window.dispatchEvent(new CustomEvent('update-lead-timeline', { detail: lead.id }));
+        // Chamando a Server Action para garantir paridade total com a V1
+        // (Isso lida com Conversões do Meta e Redistribuição de Leads automaticamente)
+        setLoading(true);
+        try {
+            await updateLeadStatusAction(
+                lead.id, 
+                newStatusId as any, 
+                oldStatus
+            );
+
+            const cleanUUID = (id: string | null | undefined): string | null => {
+                if (!id) return null;
+                const cleaned = id.toString().replace(/main_|crm26_|dist_|lead_|crm25_/, '');
+                if (/^\d+$/.test(cleaned)) return cleaned;
+                const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+                return uuidRegex.test(cleaned) ? cleaned : null;
+            };
+
+            const cleanId = cleanUUID(lead.id);
+            if (cleanId) {
+                await supabase.from('interactions_manos_crm').insert({
+                    lead_id: cleanId,
+                    type: 'status_change',
+                    notes: `[${userName || 'SISTEMA'}] Status alterado de ${oldStatus} para ${newStatusId} (via Elite Dashboard)`,
+                    consultant_id: cleanUUID(lead.assigned_consultant_id)
+                });
+            }
+
+            setLead(prev => ({ ...prev, status: newStatusId as any }));
+            setLeads(prev => prev.map(l => l.id === lead.id ? { ...l, status: newStatusId } : l));
+            
+            // Disparar evento global para recarregar interações se necessário
+            window.dispatchEvent(new CustomEvent('update-lead-timeline', { detail: lead.id }));
+        } catch (err) {
+            console.error("Erro ao atualizar status via Action:", err);
+            alert("Erro ao sincronizar status com o servidor.");
+        } finally {
+            setLoading(false);
+        }
     }, [lead, supabase, userName, setLeads]);
 
     const handleUpdateLead = useCallback(async () => {

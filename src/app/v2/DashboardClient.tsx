@@ -61,7 +61,7 @@ export default function DashboardClient({ metrics, userName, aiInsights, salesTo
         { label: 'Receita', value: `R$\u00a0${metrics.totalRevenue.toLocaleString('pt-BR')}`, icon: TrendingUp, color: 'emerald' },
         {
             label: 'Conversão',
-            value: `${((metrics.salesCount / (metrics.leadCount || 1)) * 100).toFixed(1)}%`,
+            value: `${(metrics.conversionRate || 0).toFixed(1)}%`,
             icon: Zap,
             color: 'amber',
         },

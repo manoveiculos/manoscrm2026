@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, LayoutDashboard, History, Edit3, Car } from 'lucide-react';
+import { X, LayoutDashboard, History, Edit3, Car, Trash2, Loader2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
 import { useLeadData } from './hooks/useLeadData';
@@ -77,6 +77,7 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
     const [lossReason, setLossReason] = useState('');
     const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
     const [editedTemplates, setEditedTemplates] = useState<Record<string, string>>({});
+    const [isDeleting, setIsDeleting] = useState(false);
 
     // Client-side rendering check for Portal
     const [mounted, setMounted] = useState(false);
@@ -156,6 +157,26 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
         }
     }, [lead, newNote, userName, supabase, timeline]);
 
+    const handleDeleteLead = async () => {
+        if (!window.confirm('🚨 TEM CERTEZA? Esta ação irá deletar permanentemente o lead e todo o seu histórico. Não há como desfazer!')) {
+            return;
+        }
+
+        setIsDeleting(true);
+        try {
+            await leadService.deleteLead(supabase, lead.id);
+            if (setLeads) {
+                setLeads(prev => prev.filter(l => l.id !== lead.id));
+            }
+            onClose();
+        } catch (err: any) {
+            console.error('Erro ao deletar lead:', err);
+            alert('Erro ao deletar lead: ' + (err.message || 'Erro de permissão'));
+        } finally {
+            setIsDeleting(false);
+        }
+    };
+
     // IA Action (Elite Closer v3)
     const recalculateStrategy = async () => {
         setIsAnalyzing(true);
@@ -200,32 +221,43 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
 
     const handleSaveFinish = async () => {
         if (!finishType) return;
+        setIsAnalyzing(true); // Usando loading genérico do modal
         try {
-            const res = await fetch('/api/lead/finish', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    lead_id: lead.id,
-                    finish_type: finishType,
-                    vehicle_details: vehicleDetails,
-                    loss_reason: lossReason,
-                    consultant_name: userName,
-                    consultant_id: lead.assigned_consultant_id,
-                }),
-            });
+            const { recordSaleAction, recordPurchaseAction, updateLeadStatusAction } = await import('@/app/actions/leads');
 
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({ error: 'Erro desconhecido' }));
-                throw new Error(err.error || res.statusText);
+            let result;
+            if (finishType === 'venda') {
+                result = await recordSaleAction(
+                    { ...lead, status: 'closed', vehicle_interest: vehicleDetails || lead.vehicle_interest },
+                    { consultant_id: lead.assigned_consultant_id, vehicle_details: vehicleDetails, sale_value: 0 }
+                );
+            } else if (finishType === 'compra') {
+                result = await recordPurchaseAction(
+                    { ...lead, status: 'comprado', vehicle_interest: vehicleDetails || lead.vehicle_interest },
+                    { consultant_id: lead.assigned_consultant_id, vehicle_details: vehicleDetails, purchase_value: 0 }
+                );
+            } else {
+                // Perda
+                result = await updateLeadStatusAction(
+                    lead.id, 
+                    'lost' as any, 
+                    lead.status, 
+                    `🏁 ATENDIMENTO FINALIZADO: PERDIDO / DESCARTE. Motivo: ${lossReason}`,
+                    lossReason
+                );
             }
 
-            const data = await res.json();
+            if (result && !result.success) {
+                throw new Error((result as any).error || "Falha ao processar finalização");
+            }
 
-            // Atualiza estado local otimisticamente
-            setLead((prev: any) => ({ ...prev, status: data.status }));
+            // Atualiza estado local otimistically/after action
+            const finalStatus = finishType === 'venda' ? 'closed' : finishType === 'compra' ? 'comprado' : 'lost';
+            
+            setLead((prev: any) => ({ ...prev, status: finalStatus }));
             if (setLeads) {
                 setLeads((prev: any[]) =>
-                    prev.map(l => l.id === lead.id ? { ...l, status: data.status } : l)
+                    prev.map(l => l.id === lead.id ? { ...l, status: finalStatus } : l)
                 );
             }
 
@@ -236,9 +268,12 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
 
             await timeline.refresh();
             onClose();
+            alert('✅ Atendimento finalizado com sucesso!');
         } catch (err: any) {
             console.error('[handleSaveFinish]', err);
             alert('Erro ao salvar conclusão: ' + (err.message || 'Tente novamente.'));
+        } finally {
+            setIsAnalyzing(false);
         }
     };
 
@@ -456,6 +491,16 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
                                             if (setLeads) setLeads((prev: any[]) => prev.map(l => l.id === lead.id ? { ...l, assigned_consultant_id: consultantId } : l));
                                         }}
                                     />
+                                    {isManagement && (
+                                        <button
+                                            onClick={handleDeleteLead}
+                                            disabled={isDeleting}
+                                            className="h-8 w-8 flex items-center justify-center rounded-full bg-red-500/10 border border-red-500/20 text-red-500/40 hover:text-red-500 hover:bg-red-500/20 transition-all ml-1"
+                                            title="Deletar Lead (Admin)"
+                                        >
+                                            {isDeleting ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
+                                        </button>
+                                    )}
                                     <button
                                         onClick={onClose}
                                         className="h-8 w-8 flex items-center justify-center rounded-full bg-white/[0.05] border border-white/[0.07] text-white/40 hover:text-white hover:bg-white/10 transition-all"

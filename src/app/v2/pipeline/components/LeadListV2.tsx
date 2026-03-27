@@ -126,12 +126,24 @@ export function LeadListV2({
                                         {status.label}
                                     </span>
                                 </div>
-                                <div className="flex items-center gap-2 text-[11px] text-white/30">
-                                    <span className="tabular-nums">{formatPhoneBR(lead.phone)}</span>
+                                <div className="flex items-center gap-2 text-[11px] text-white/30 truncate">
+                                    <span className="tabular-nums shrink-0">{formatPhoneBR(lead.phone)}</span>
+                                    {(() => {
+                                        const vendorName = lead.vendedor || lead.consultant_name;
+                                        if (!vendorName) return null;
+                                        return (
+                                            <>
+                                                <span className="text-white/10 shrink-0">·</span>
+                                                <span className="text-blue-400/80 font-medium truncate">
+                                                    {vendorName.split(' ')[0]}
+                                                </span>
+                                            </>
+                                        );
+                                    })()}
                                     {lead.vehicle_interest && lead.vehicle_interest !== '---' && (
                                         <>
-                                            <span className="text-white/10">·</span>
-                                            <span className="truncate max-w-[120px]">{lead.vehicle_interest}</span>
+                                            <span className="text-white/10 shrink-0">·</span>
+                                            <span className="truncate">{lead.vehicle_interest}</span>
                                         </>
                                     )}
                                 </div>
@@ -257,7 +269,7 @@ export function LeadListV2({
                                                         className="flex items-center gap-1.5 text-[11px] text-white/50 hover:text-white transition-colors group/cons"
                                                     >
                                                         <span className="truncate block max-w-[110px]">
-                                                            {lead.consultant_name || lead.primeiro_vendedor || '—'}
+                                                            {lead.vendedor || lead.consultant_name || lead.primeiro_vendedor || '—'}
                                                         </span>
                                                         <ChevronDown size={10} className="text-white/20 group-hover/cons:text-white/50 transition-colors" />
                                                     </button>
@@ -300,7 +312,7 @@ export function LeadListV2({
                                                 </div>
                                             ) : (
                                                 <span className="text-[11px] text-white/50 truncate block max-w-[110px]">
-                                                    {lead.consultant_name || lead.primeiro_vendedor || '—'}
+                                                    {lead.vendedor || lead.consultant_name || lead.primeiro_vendedor || '—'}
                                                 </span>
                                             )}
                                         </td>
