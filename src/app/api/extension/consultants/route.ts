@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
     try {
         const { data: consultants, error } = await supabaseAdmin
             .from('consultants_manos_crm')
-            .select('id, name')
+            .select('id, name, role')
             .eq('is_active', true)
             .order('name', { ascending: true });
 

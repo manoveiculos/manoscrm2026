@@ -21,6 +21,7 @@ const UI = {
     btnKanban: null,
     btnConfig: null,
     btnLeads: null,
+    _aiAlerts: [],
 
     // ── Init ──────────────────────────────────────────
     init() {
@@ -513,7 +514,7 @@ const UI = {
             if (r?.success && r.data?.success) {
                 const list = r.data.consultants || [];
                 select.innerHTML = '<option value="">Selecione seu perfil...</option>' + 
-                    list.map(c => `<option value="${c.id}" ${c.id === selectedId ? 'selected' : ''}>${c.name}</option>`).join('');
+                    list.map(c => `<option value="${c.id}" data-role="${c.role || 'consultant'}" ${c.id === selectedId ? 'selected' : ''}>${c.name}</option>`).join('');
                 status.textContent = '';
             } else {
                 status.textContent = 'Erro ao carregar consultores.';
@@ -551,6 +552,7 @@ const UI = {
             const select = overlay.querySelector('#am-consultant-select');
             const consultantId = select.value;
             const consultantName = select.options[select.selectedIndex]?.text || '';
+            const role = select.options[select.selectedIndex]?.dataset.role || 'consultant';
             const status = overlay.querySelector('#am-status');
 
             if (!consultantId) {
@@ -559,7 +561,7 @@ const UI = {
                 return;
             }
 
-            chrome.storage.local.set({ consultantId, consultantName }, () => {
+            chrome.storage.local.set({ consultantId, consultantName, role }, () => {
                 status.textContent = '✓ Configurado com sucesso!';
                 status.className = 'am-status ok';
                 setTimeout(() => overlay.classList.remove('open'), 1200);
@@ -651,7 +653,16 @@ const UI = {
         this._handlers = handlers;
         const crmUrl = handlers.crmUrl || '';
         this._crmUrl = crmUrl;
+        
+        // Buscar papel do usuário para habilitar exclusão
+        chrome.storage.local.get(['role'], (s) => {
+            this._userRole = s.role || 'consultant';
+            this._renderLeadInternal(lead, handlers);
+        });
+    },
 
+    _renderLeadInternal(lead, handlers) {
+        const crmUrl = handlers.crmUrl || '';
         const c = this.shadow.getElementById('content');
         if (!c) return;
         const stageColor = this._stageColor(lead.status);
@@ -803,7 +814,10 @@ const UI = {
             this._renderTab();
         };
         this.activeTab = 'dashboard';
+        this._aiAlerts = [];
         this._renderTab();
+        // Pre-load follow-ups para exibir alertas IA no dashboard
+        setTimeout(() => this._handlers.onFollowUp?.(), 300);
     },
 
     _stageIcon(s) {
@@ -950,16 +964,35 @@ const UI = {
         const tempoHoras = lead.created_at ? (Date.now() - new Date(lead.created_at).getTime()) / 36e5 : 0;
         const timeColor = tempoHoras < 24 ? '#10b981' : tempoHoras < 72 ? '#f59e0b' : '#ef4444';
 
+        const aiAlert = this._aiAlerts[0];
         tc.innerHTML = `
+            <!-- ── AI Alert Banner (ai_alert_compra) ── -->
+            <div class="ai-alert-banner" id="ai-alert-banner" style="display:${aiAlert ? 'flex' : 'none'}">
+                <div class="ai-alert-icon">🔔</div>
+                <div class="ai-alert-body">
+                    <div class="ai-alert-title">Alerta IA — Oportunidade de Compra</div>
+                    <div class="ai-alert-msg">${this._esc(aiAlert?.note || 'Lead com alta probabilidade de compra detectada pela IA.')}</div>
+                </div>
+                <button class="ai-alert-dismiss" id="btn-dismiss-alert">✕</button>
+            </div>
+
             <!-- ── InfoGrid (idêntico ao CRM) ── -->
             <div class="ig-card">
-                <div class="ig-row">
+                <div class="ig-row ig-editable" id="ig-edit-interesse">
                     <div class="ig-icon">🚗</div>
-                    <div class="ig-body"><div class="ig-label">Interesse</div><div class="ig-val">${this._esc(lead.vehicle || '—')}</div></div>
+                    <div class="ig-body">
+                        <div class="ig-label">Interesse</div>
+                        <div class="ig-val" id="val-interesse">${this._esc(lead.vehicle || '—')}</div>
+                    </div>
+                    <div class="ig-edit-icon">✏️</div>
                 </div>
-                <div class="ig-row">
+                <div class="ig-row ig-editable" id="ig-edit-valor">
                     <div class="ig-icon">💰</div>
-                    <div class="ig-body"><div class="ig-label">Valor de Investimento</div><div class="ig-val">${this._esc(lead.valor || 'Pendente')}</div></div>
+                    <div class="ig-body">
+                        <div class="ig-label">Valor de Investimento</div>
+                        <div class="ig-val" id="val-valor">${this._esc(lead.valor || 'Pendente')}</div>
+                    </div>
+                    <div class="ig-edit-icon">✏️</div>
                 </div>
                 <div class="ig-row">
                     <div class="ig-icon">📍</div>
@@ -1012,6 +1045,13 @@ const UI = {
             </div>
         `;
 
+        // Dismiss AI alert banner
+        this.shadow.getElementById('btn-dismiss-alert')?.addEventListener('click', () => {
+            this._aiAlerts = [];
+            const banner = this.shadow.getElementById('ai-alert-banner');
+            if (banner) banner.style.display = 'none';
+        });
+
         this.shadow.getElementById('btn-recalc').onclick = async (e) => {
             const btn = e.currentTarget; btn.textContent = '✨ Analisando...'; btn.disabled = true;
             setTimeout(() => { btn.textContent = '✨ Recalcular'; btn.disabled = false; }, 2000);
@@ -1045,6 +1085,24 @@ const UI = {
             }
         };
         this.shadow.getElementById('btn-finish').onclick = () => this._renderFinishModal(lead);
+
+        // Listeners para edição inline
+        const setupEdit = (id, field, title) => {
+            const el = this.shadow.getElementById(id);
+            if (!el) return;
+            el.onclick = () => {
+                const currentVal = this.shadow.getElementById(`val-${field === 'vehicle_interest' ? 'interesse' : 'valor'}`).textContent;
+                const newVal = prompt(`Alterar ${title}:`, currentVal === '—' || currentVal === 'Pendente' ? '' : currentVal);
+                if (newVal !== null && newVal !== currentVal) {
+                    this._handlers.onUpdateField(field, newVal);
+                    this.shadow.getElementById(`val-${field === 'vehicle_interest' ? 'interesse' : 'valor'}`).textContent = newVal || '—';
+                    if (field === 'vehicle_interest') this._lead.vehicle = newVal;
+                    else this._lead.valor = newVal;
+                }
+            };
+        };
+        setupEdit('ig-edit-interesse', 'vehicle_interest', 'Interesse');
+        setupEdit('ig-edit-valor', 'valor_investimento', 'Valor de Investimento');
     },
 
     _renderTimeline(tc, onTimeline, lead) {
@@ -1170,6 +1228,8 @@ const UI = {
         this.shadow.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === 'dashboard'));
         this.activeTab = 'dashboard';
 
+        const isManagement = this._userRole === 'admin' || this._userRole === 'manager' || this._userRole === 'owner';
+
         tc.innerHTML = `
             <div class="finish-modal">
                 <div class="finish-modal-title">🏁 Encerrar Missão</div>
@@ -1185,9 +1245,32 @@ const UI = {
                     <input id="finish-loss" class="cf-input" placeholder="Motivo da perda..." style="margin-bottom:7px">
                 </div>
                 <button class="btn-finish-confirm" id="btn-finish-confirm" disabled>Confirmar encerramento</button>
-                <button class="btn-action btn-secondary btn-small" id="btn-finish-cancel" style="width:100%;margin-top:6px">Cancelar</button>
+                
+                ${isManagement ? `
+                <div style="margin-top:20px;padding-top:15px;border-top:1px solid rgba(255,255,255,0.05)">
+                    <button class="btn-delete-lead" id="btn-delete-lead">🗑️ Excluir Lead Permanentemente</button>
+                </div>
+                ` : ''}
+
+                <button class="btn-action btn-secondary btn-small" id="btn-finish-cancel" style="width:100%;margin-top:12px">Cancelar</button>
             </div>
         `;
+
+        if (isManagement) {
+            this.shadow.getElementById('btn-delete-lead').onclick = async () => {
+                if (!confirm("⚠️ ATENÇÃO: Deseja realmente EXCLUIR este lead permanentemente?\n\nEsta ação não poderá ser desfeita.")) return;
+                const btn = this.shadow.getElementById('btn-delete-lead');
+                btn.disabled = true; btn.textContent = 'Excluindo...';
+                
+                const r = await this._handlers.onDeleteLead(lead.id);
+                if (r?.success) {
+                    tc.innerHTML = `<div class="center-state"><div style="font-size:32px;margin-bottom:12px">🗑️</div><div class="nf-title">Lead Excluído</div><div class="sub-text">O registro foi removido do CRM.</div></div>`;
+                    setTimeout(() => this.togglePanel(false), 2000);
+                } else {
+                    btn.disabled = false; btn.textContent = '❌ Erro ao excluir';
+                }
+            };
+        }
 
         let selectedType = null;
         this.shadow.getElementById('finish-type-group').onclick = (e) => {
@@ -1322,6 +1405,21 @@ const UI = {
     },
 
     updateFollowUps(items) {
+        // Cache AI purchase alerts for dashboard banner
+        const newAlerts = (items || []).filter(i => i.type === 'ai_alert_compra' && i.status === 'pending');
+        this._aiAlerts = newAlerts;
+        // Update banner if dashboard is visible
+        const banner = this.shadow?.getElementById('ai-alert-banner');
+        if (banner) {
+            if (newAlerts.length > 0) {
+                banner.style.display = 'flex';
+                const msg = banner.querySelector('.ai-alert-msg');
+                if (msg) msg.textContent = newAlerts[0].note || 'Lead com alta probabilidade de compra detectada pela IA.';
+            } else {
+                banner.style.display = 'none';
+            }
+        }
+
         const listEl = this.shadow?.getElementById('fu-list');
         if (!listEl) return;  // Não está na aba Ações — não bloqueia com activeTab
         const target = listEl;
@@ -2291,6 +2389,21 @@ const UI = {
 .ig-body{flex:1;min-width:0}
 .ig-label{font-size:9px;text-transform:uppercase;letter-spacing:.6px;color:rgba(255,255,255,.28);font-weight:600;margin-bottom:2px}
 .ig-val{font-size:13px;font-weight:600;color:rgba(255,255,255,.85);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ig-editable{cursor:pointer;transition:all .15s;position:relative}
+.ig-editable:hover{background:rgba(255,255,255,.03)}
+.ig-edit-icon{font-size:10px;opacity:0;transition:opacity .15s;color:rgba(255,255,255,.2);margin-left:auto}
+.ig-editable:hover .ig-edit-icon{opacity:1}
+.btn-delete-lead{width:100%;padding:9px;background:rgba(220,38,38,.08);border:1px solid rgba(220,38,38,.15);border-radius:8px;color:#ef4444;font-size:10px;font-weight:700;cursor:pointer;transition:all .15s;font-family:inherit}
+.btn-delete-lead:hover{background:rgba(220,38,38,.15);border-color:#ef4444}
+
+/* ── AI Alert Banner (ai_alert_compra) ── */
+.ai-alert-banner{align-items:flex-start;gap:10px;padding:10px 12px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.3);border-radius:10px;margin-bottom:12px}
+.ai-alert-icon{font-size:16px;flex-shrink:0;line-height:1.4}
+.ai-alert-body{flex:1;min-width:0}
+.ai-alert-title{font-size:10px;font-weight:700;color:#f59e0b;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px}
+.ai-alert-msg{font-size:11px;color:rgba(255,255,255,.6);line-height:1.5}
+.ai-alert-dismiss{flex-shrink:0;background:none;border:none;color:rgba(255,255,255,.25);cursor:pointer;font-size:13px;padding:0;line-height:1;margin-top:1px;transition:color .15s;font-family:inherit}
+.ai-alert-dismiss:hover{color:rgba(255,255,255,.6)}
 
 /* ── TacticalAction (ta-*) ── */
 .ta-card{background:#141418;border:1px solid rgba(255,255,255,.07);border-radius:12px;overflow:hidden;margin-bottom:12px}

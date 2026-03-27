@@ -399,6 +399,40 @@ export default function Pulse() {
             animate="show"
             className="w-full space-y-6 pb-24 pt-0 px-2 md:px-0"
         >
+            {/* ── HUD HEADER ──────────────────────────────── */}
+            <header className="border-b border-white/5 bg-[#050101]/80 backdrop-blur-xl flex flex-wrap items-center justify-between gap-3 px-6 py-3 -mx-2 md:-mx-0 shadow-[0_4px_20px_rgba(0,0,0,0.5)]">
+                {/* Left: identity + stats */}
+                <div className="flex items-center gap-4 px-4 py-2.5 bg-white/[0.03] border border-white/10 rounded-2xl shadow-sm">
+                    <div className="flex flex-col">
+                        <div className="flex items-center gap-2.5">
+                            <Zap size={14} className="text-red-500" />
+                            <h1 className="text-xs font-black uppercase tracking-[0.3em] text-white/95 whitespace-nowrap">
+                                Painel <span className="text-red-500">de Elite</span>
+                            </h1>
+                        </div>
+                    </div>
+
+                    <div className="hidden sm:flex items-center gap-4 pl-4 border-l border-white/10 ml-2">
+                        <div className="flex items-baseline gap-1.5">
+                            <span className="text-xs font-black text-white/80 tabular-nums">{leads.length}</span>
+                            <span className="text-[8px] font-bold text-white/20 uppercase tracking-widest leading-none">PIPELINE</span>
+                        </div>
+                        <div className="w-px h-3 bg-white/10" />
+                        <div className="flex items-baseline gap-1.5">
+                            <span className="text-xs font-black text-emerald-400 tabular-nums">{metrics?.salesCount || 0}</span>
+                            <span className="text-[8px] font-bold text-white/20 uppercase tracking-widest leading-none">VENDAS</span>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Right: Status */}
+                <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-red-600/10 border border-red-500/20">
+                        <div className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
+                        <span className="text-[9px] font-black text-red-500 uppercase tracking-widest">LIVE OPS</span>
+                    </div>
+                </div>
+            </header>
             {/* ── DAILY MISSION HEADER ─────────────────────────── */}
             <DailyMissionHeader
                 userName={userName}

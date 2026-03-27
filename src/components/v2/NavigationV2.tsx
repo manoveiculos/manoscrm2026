@@ -30,10 +30,10 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
-    { label: 'Painel de Ações', icon: Activity, href: '/v2/pulse' },
+    { label: 'Painel de Elite', icon: Activity, href: '/v2/pulse' },
+    { label: 'Central de Vendas', icon: KanbanSquare, href: '/v2/pipeline' },
     { label: 'Central de Leads', icon: Users, href: '/v2/leads' },
-    { label: 'Pipeline de Vendas', icon: KanbanSquare, href: '/v2/pipeline' },
-    { label: 'Estoque Inteligente', icon: CarFront, href: '/v2/inventory' },
+    { label: 'Arsenal de Veículos', icon: CarFront, href: '/v2/inventory' },
     { label: 'Análise Inteligente', icon: BarChart3, href: '/v2/analytics' },
     { label: 'Campanhas Meta/Google', icon: Target, href: '/v2/marketing', adminOnly: true },
     { label: 'Gerenciar Equipe', icon: Shield, href: '/v2/admin/equipe', adminOnly: true },
@@ -139,13 +139,17 @@ export const NavigationV2 = () => {
                 </motion.div>
             </button>
 
-            {/* Logo compacto */}
-            <div
-                className={`mb-8 flex items-center ${isCollapsed ? 'justify-center px-0' : 'gap-3 px-5'} cursor-pointer group transition-all`}
-                onClick={handleLogoClick}
+            {/* Logo Interativo (Home) */}
+            <Link
+                href="/v2"
+                className={`mb-10 flex items-center ${isCollapsed ? 'justify-center px-0' : 'gap-3 px-5'} cursor-pointer group transition-all relative py-2 rounded-2xl hover:bg-white/[0.02] active:scale-[0.98] focus:outline-none`}
             >
-                <div className="h-8 w-8 rounded-xl bg-red-600/15 border border-red-500/20 flex items-center justify-center shrink-0">
-                    <CarFront size={16} className="text-red-500" />
+                <div className="h-9 w-9 rounded-xl bg-white/[0.03] border border-white/10 flex items-center justify-center shrink-0 group-hover:border-red-500/30 group-hover:bg-red-500/5 group-hover:shadow-[0_0_15px_rgba(239,68,68,0.1)] transition-all overflow-hidden p-1.5">
+                    <img 
+                        src="https://manosveiculos.com.br/wp-content/uploads/2024/02/LogoManos.png" 
+                        alt="Manos" 
+                        className="w-full h-full object-contain group-hover:scale-110 transition-transform duration-300"
+                    />
                 </div>
                 {!isCollapsed && (
                     <motion.div 
@@ -153,21 +157,18 @@ export const NavigationV2 = () => {
                         animate={{ opacity: 1, x: 0 }}
                         className="min-w-0 flex flex-col"
                     >
-                        <img 
-                            src="https://manosveiculos.com.br/wp-content/uploads/2024/02/LogoManos.png" 
-                            alt="Manos" 
-                            className="h-8 w-auto object-contain mb-3 opacity-100 group-hover:scale-[1.02] transition-all"
-                        />
-                        <p className="text-sm font-black text-white leading-none truncate">Manos Veículos</p>
-                        <p className="text-[9px] text-white/30 font-bold uppercase tracking-[0.2em] mt-0.5">CRM v2</p>
+                        <div className="flex items-center gap-2 mb-0.5">
+                            <span className="text-sm font-black text-white tracking-tight group-hover:text-red-500 transition-colors">Manos Veículos</span>
+                        </div>
+                        <p className="text-[9px] text-white/30 font-bold uppercase tracking-[0.2em] leading-none">Premium Intelligence</p>
                     </motion.div>
                 )}
-            </div>
+            </Link>
 
             <div className={`flex-1 w-full ${isCollapsed ? 'px-2' : 'px-3'} space-y-1 overflow-y-auto custom-scrollbar transition-all`}>
                 {!isCollapsed && (
-                    <div className="px-3 mb-3">
-                        <p className="text-[9px] font-bold text-white/25 uppercase tracking-[0.25em]">Navegação</p>
+                    <div className="px-3 mb-4 mt-2">
+                        <p className="text-[10px] font-black text-white/20 uppercase tracking-[0.3em]">Navegação Principal</p>
                     </div>
                 )}
                 {NAV_ITEMS.filter(item => !item.adminOnly || role === 'admin').map((item) => {
@@ -178,25 +179,35 @@ export const NavigationV2 = () => {
                             href={item.blocked ? '#' : item.href}
                             title={isCollapsed ? item.label : undefined}
                             onClick={(e) => item.blocked && e.preventDefault()}
-                            className={`relative flex items-center ${isCollapsed ? 'justify-center px-0' : 'gap-3 px-3'} py-3 rounded-xl transition-all group overflow-hidden ${
+                            className={`relative flex items-center ${isCollapsed ? 'justify-center px-0' : 'gap-3 px-4'} py-3.5 rounded-2xl transition-all group overflow-hidden ${
                                 isActive
-                                    ? 'bg-[#1A1A20] text-white border-l-2 border-red-500'
+                                    ? 'bg-gradient-to-r from-white/[0.05] to-transparent text-white'
                                     : item.blocked
-                                    ? 'opacity-35 cursor-not-allowed'
-                                    : 'text-white/45 hover:text-white/80 hover:bg-white/[0.04] border-l-2 border-transparent'
+                                    ? 'opacity-30 cursor-not-allowed'
+                                    : 'text-white/40 hover:text-white/90 hover:bg-white/[0.03]'
                             }`}
                         >
-                            <div className="relative shrink-0">
+                            {/* Indicador de borda ativa com Glow */}
+                            {isActive && (
+                                <motion.div 
+                                    layoutId="active-nav-indicator"
+                                    className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-red-500 rounded-r-full shadow-[0_0_12px_rgba(239,68,68,0.8)]"
+                                    transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+                                />
+                            )}
+
+                            <div className="relative shrink-0 flex items-center justify-center w-5">
                                 <item.icon
-                                    size={18}
-                                    className={isActive ? 'text-red-500' : 'transition-colors group-hover:text-white/60'}
+                                    size={19}
+                                    strokeWidth={isActive ? 2.5 : 2}
+                                    className={isActive ? 'text-red-500' : 'transition-colors group-hover:text-white/70'}
                                 />
                                 {item.href === '/v2/pulse' && aiAlertCount > 0 && (
                                     <motion.span
                                         key={aiAlertCount}
                                         initial={{ scale: 0 }}
                                         animate={{ scale: 1 }}
-                                        className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-amber-500 border border-[#0C0C0F] flex items-center justify-center text-[9px] font-black text-black leading-none"
+                                        className="absolute -top-2 -right-2 h-4 w-4 rounded-full bg-red-500 border border-[#0C0C0F] flex items-center justify-center text-[9px] font-black text-white leading-none shadow-lg shadow-red-500/20"
                                     >
                                         {aiAlertCount > 9 ? '9+' : aiAlertCount}
                                     </motion.span>
@@ -208,11 +219,11 @@ export const NavigationV2 = () => {
                                     animate={{ opacity: 1, x: 0 }}
                                     className="flex flex-col min-w-0 flex-1"
                                 >
-                                    <span className={`font-semibold text-[13px] tracking-tight whitespace-nowrap ${isActive ? 'text-white' : ''}`}>
+                                    <span className={`font-bold text-[13px] tracking-tight whitespace-nowrap ${isActive ? 'text-white' : 'group-hover:translate-x-0.5 transition-transform'}`}>
                                         {item.label}
                                     </span>
                                     {item.blocked && (
-                                        <span className="text-[8px] font-bold uppercase tracking-widest text-white/25 leading-none mt-0.5">Em breve</span>
+                                        <span className="text-[8px] font-black uppercase tracking-widest text-red-500/40 leading-none mt-0.5">Em breve</span>
                                     )}
                                 </motion.div>
                             )}

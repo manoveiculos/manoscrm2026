@@ -151,6 +151,7 @@ const App = {
                             onCreateFollowUp: (id, data) => this.handleCreateFollowUp(id, data),
                             onCompleteFollowUp: (fuId, id) => this.handleCompleteFollowUp(fuId, id),
                             onFinishLead: (id, type, details) => this.handleFinishLead(id, type, details),
+                            onDeleteLead: (id) => this.handleDeleteLead(id),
                             nextSteps: this.currentNextSteps,
                             crmUrl: this.baseUrl
                         });
@@ -412,6 +413,16 @@ const App = {
         } catch (e) { console.error(e); return { success: false }; }
     },
 
+    // ── Excluir Lead Permanentemente ─────────────────
+    async handleDeleteLead(leadId) {
+        try {
+            return await this._apiFetch('/delete-lead', {
+                method: 'POST',
+                body: JSON.stringify({ lead_id: leadId })
+            });
+        } catch (e) { console.error(e); return { success: false }; }
+    },
+
     // ── Estoque / Simulação ───────────────────────────
     async handleInventory() {
         try {
@@ -527,6 +538,7 @@ const App = {
                 onCreateFollowUp: (id, data) => this.handleCreateFollowUp(id, data),
                 onCompleteFollowUp: (fuId, id) => this.handleCompleteFollowUp(fuId, id),
                 onFinishLead: (id, type, details) => this.handleFinishLead(id, type, details),
+                onDeleteLead: (id) => this.handleDeleteLead(id),
                 nextSteps: null,
                 crmUrl: this.baseUrl
             });

@@ -1,12 +1,12 @@
 'use client';
 
-import React, { useState, useEffect, Suspense } from 'react';
-import { 
-    Search, 
-    Users, 
-    Filter, 
-    Zap, 
-    Target, 
+import React, { useState, useEffect, useRef, Suspense } from 'react';
+import {
+    Search,
+    Users,
+    Filter,
+    Zap,
+    Target,
     Calendar,
     CarFront,
     Activity,
@@ -14,7 +14,11 @@ import {
     Plus,
     RefreshCcw,
     KanbanSquare,
-    List
+    List,
+    Brain,
+    X,
+    Loader2,
+    Database
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { dataService } from '@/lib/dataService';
@@ -110,6 +114,15 @@ function LeadsContent() {
     const [filterOrigin, setFilterOrigin] = useState('all');
     const [filterScore, setFilterScore] = useState('all');
     const [filterDate, setFilterDate] = useState('all');
+
+    // Busca Semântica (P4)
+    const [semanticMode, setSemanticMode] = useState(false);
+    const [semanticQuery, setSemanticQuery] = useState('');
+    const [semanticLoading, setSemanticLoading] = useState(false);
+    const [semanticResults, setSemanticResults] = useState<{ id: string; similarity: number }[] | null>(null);
+    const [semanticUnindexed, setSemanticUnindexed] = useState(0);
+    const [indexingBatch, setIndexingBatch] = useState(false);
+    const semanticDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     useEffect(() => {
         const loadInitialData = async () => {
@@ -217,6 +230,65 @@ function LeadsContent() {
             return matchesSearch && matchesConsultant && matchesStatus && matchesInterest && matchesOrigin && matchesScore && matchesDate;
         })
         .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+    // ── Busca Semântica ──────────────────────────────────────
+    const runSemanticSearch = async (q: string) => {
+        if (!q.trim()) { setSemanticResults(null); return; }
+        setSemanticLoading(true);
+        try {
+            const res = await fetch('/api/ai/semantic-search', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query: q }),
+            });
+            const data = await res.json();
+            if (data.success) {
+                setSemanticResults(data.results);
+                setSemanticUnindexed(data.unindexed_count ?? 0);
+            }
+        } catch (e) {
+            console.error('[semantic-search]', e);
+        } finally {
+            setSemanticLoading(false);
+        }
+    };
+
+    const handleSemanticInput = (val: string) => {
+        setSemanticQuery(val);
+        if (semanticDebounce.current) clearTimeout(semanticDebounce.current);
+        semanticDebounce.current = setTimeout(() => runSemanticSearch(val), 600);
+    };
+
+    const handleIndexBatch = async () => {
+        setIndexingBatch(true);
+        try {
+            const res = await fetch('/api/ai/embed-lead', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ batch: true }),
+            });
+            const data = await res.json();
+            setSemanticUnindexed(prev => Math.max(0, prev - (data.indexed ?? 0)));
+            if (semanticQuery) runSemanticSearch(semanticQuery);
+        } catch (e) {
+            console.error('[embed-lead batch]', e);
+        } finally {
+            setIndexingBatch(false);
+        }
+    };
+
+    // Leads resultantes da busca semântica (por ID, ordenados por similarity)
+    const semanticLeads = semanticResults
+        ? semanticResults
+            .map(r => ({ lead: leads.find(l => l.id === r.id), similarity: r.similarity }))
+            .filter(r => r.lead)
+            .map(r => r.lead!)
+        : null;
+
+    // Em modo semântico, usa os leads da busca IA (já ordenados por similarity)
+    const displayLeads = (semanticMode && semanticLeads) ? semanticLeads : filteredLeads;
+    // ──────────────────────────────────────────────────────────
+
     const handleStatusChange = async (leadId: string, newStatus: LeadStatus) => {
         try {
             const { error } = await supabase
@@ -227,6 +299,15 @@ function LeadsContent() {
             if (error) throw error;
 
             setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: newStatus } : l));
+
+            // IA proativa: dispara análise em background ao avançar para etapas decisivas
+            if (newStatus === 'ataque' || newStatus === 'fechamento') {
+                fetch('/api/lead/next-steps', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ leadId }),
+                }).catch(() => {});
+            }
         } catch (error) {
             console.error("Error updating status:", error);
         }
@@ -271,35 +352,75 @@ function LeadsContent() {
         <div className="flex flex-col h-screen w-full bg-[#03060b] overflow-hidden text-white font-inter">
             {/* HUD HEADER - ELITE OS STYLE */}
             <header className="shrink-0 h-16 border-b border-white/5 bg-[#050101]/80 backdrop-blur-xl flex items-center justify-between px-3 sm:px-6 z-30 shadow-[0_4px_20px_rgba(0,0,0,0.5)]">
-                <div className="flex items-center gap-5">
+                <div className="flex items-center gap-4 px-4 py-2.5 bg-white/[0.03] border border-white/10 rounded-2xl shadow-sm">
                     <div className="flex flex-col">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2.5">
                             <Users size={14} className="text-red-600" />
-                            <h1 className="text-sm font-black uppercase tracking-[0.3em] text-white/90">Central de <span className="text-red-500">Leads</span></h1>
+                            <h1 className="text-xs font-black uppercase tracking-[0.3em] text-white/95 whitespace-nowrap">
+                                Central de <span className="text-red-500">Leads</span>
+                            </h1>
                         </div>
-                        <p className="text-[10px] font-black text-white/20 uppercase tracking-widest mt-0.5">V2.5 // Elite Sales OS</p>
                     </div>
 
-                    <div className="hidden sm:flex items-center gap-1">
-                        <div className="h-6 w-[1px] bg-white/5 mr-3" />
-                        <span className="text-xs font-black text-white/70 tabular-nums">{leads.length}</span>
-                        <span className="text-[9px] text-white/25 uppercase ml-1">total</span>
-                        <span className="w-px h-3 bg-white/10 mx-2" />
-                        <span className="text-xs font-black text-red-500 tabular-nums">{filteredLeads.length}</span>
-                        <span className="text-[9px] text-white/25 uppercase ml-1">filtrados</span>
+                    <div className="hidden sm:flex items-center gap-4 pl-4 border-l border-white/10 ml-2">
+                        <div className="flex items-baseline gap-1.5">
+                            <span className="text-xs font-black text-white/80 tabular-nums">{leads.length}</span>
+                            <span className="text-[8px] font-bold text-white/20 uppercase tracking-widest">TOTAL</span>
+                        </div>
+                        <div className="w-px h-3 bg-white/10" />
+                        <div className="flex items-baseline gap-1.5">
+                            <span className={`text-xs font-black tabular-nums ${semanticMode ? 'text-violet-400' : 'text-red-500'}`}>0</span>
+                            <span className="text-[8px] font-bold text-white/20 uppercase tracking-widest">IA</span>
+                        </div>
                     </div>
                 </div>
 
                 <div className="flex items-center gap-3">
+                    {/* Toggle busca semântica IA */}
+                    <button
+                        onClick={() => {
+                            setSemanticMode(m => !m);
+                            setSemanticQuery('');
+                            setSemanticResults(null);
+                        }}
+                        title={semanticMode ? 'Fechar busca IA' : 'Busca inteligente por IA'}
+                        className={`h-9 w-9 flex items-center justify-center rounded-xl border transition-all ${
+                            semanticMode
+                                ? 'bg-violet-600/20 border-violet-500/50 text-violet-400 shadow-[0_0_12px_rgba(139,92,246,0.3)]'
+                                : 'bg-white/5 border-white/5 text-white/25 hover:text-white/60 hover:border-white/15'
+                        }`}
+                    >
+                        <Brain size={14} />
+                    </button>
+
+                    {/* Input — normal ou semântico */}
                     <div className="relative group">
-                        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/20 group-focus-within:text-red-500 transition-colors" />
-                        <input
-                            type="text"
-                            placeholder="BUSCAR..."
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                            className="bg-white/5 border border-white/5 rounded-xl py-2.5 pl-10 pr-4 text-[10px] font-black uppercase tracking-widest w-32 sm:w-48 focus:w-44 sm:focus:w-64 lg:w-64 lg:focus:w-80 focus:bg-white/10 focus:border-red-500/30 outline-none transition-all placeholder:text-white/10"
-                        />
+                        {semanticMode ? (
+                            <>
+                                <Brain size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-violet-400" />
+                                {semanticLoading && <Loader2 size={12} className="absolute right-3 top-1/2 -translate-y-1/2 text-violet-400 animate-spin" />}
+                                <input
+                                    autoFocus
+                                    type="text"
+                                    placeholder="Ex: clientes com SUV e troca..."
+                                    value={semanticQuery}
+                                    onChange={(e) => handleSemanticInput(e.target.value)}
+                                    onKeyDown={(e) => e.key === 'Enter' && runSemanticSearch(semanticQuery)}
+                                    className="bg-violet-950/30 border border-violet-500/30 rounded-xl py-2.5 pl-9 pr-8 text-[10px] font-black w-56 sm:w-72 focus:w-72 sm:focus:w-80 focus:border-violet-500/60 outline-none transition-all placeholder:text-violet-300/20 text-violet-100"
+                                />
+                            </>
+                        ) : (
+                            <>
+                                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/20 group-focus-within:text-red-500 transition-colors" />
+                                <input
+                                    type="text"
+                                    placeholder="BUSCAR..."
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                    className="bg-white/5 border border-white/5 rounded-xl py-2.5 pl-10 pr-4 text-[10px] font-black uppercase tracking-widest w-32 sm:w-48 focus:w-44 sm:focus:w-64 lg:w-64 lg:focus:w-80 focus:bg-white/10 focus:border-red-500/30 outline-none transition-all placeholder:text-white/10"
+                                />
+                            </>
+                        )}
                     </div>
 
                     <button
@@ -311,6 +432,45 @@ function LeadsContent() {
                     </button>
                 </div>
             </header>
+
+            {/* SEMANTIC SEARCH STATUS BAR */}
+            <AnimatePresence>
+                {semanticMode && (
+                    <motion.div
+                        key="semantic-bar"
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        className="shrink-0 border-b border-violet-500/20 bg-violet-950/20 overflow-hidden"
+                    >
+                        <div className="flex items-center gap-3 px-3 sm:px-6 py-2">
+                            <Brain size={11} className="text-violet-400 shrink-0" />
+                            <span className="text-[10px] font-black text-violet-400/80 uppercase tracking-widest">
+                                Modo IA —
+                            </span>
+                            {semanticResults === null ? (
+                                <span className="text-[10px] text-white/30">Digite uma descrição para buscar leads por contexto</span>
+                            ) : semanticResults.length === 0 ? (
+                                <span className="text-[10px] text-white/30">Nenhum lead encontrado para esta descrição</span>
+                            ) : (
+                                <span className="text-[10px] text-white/50">
+                                    <span className="text-violet-300 font-black">{semanticResults.length}</span> leads encontrados por similaridade
+                                </span>
+                            )}
+                            {semanticUnindexed > 0 && (
+                                <button
+                                    onClick={handleIndexBatch}
+                                    disabled={indexingBatch}
+                                    className="ml-auto flex items-center gap-1.5 px-2.5 py-1 bg-violet-600/20 border border-violet-500/30 rounded-lg text-[9px] font-black text-violet-300 hover:bg-violet-600/30 transition-all disabled:opacity-40"
+                                >
+                                    {indexingBatch ? <Loader2 size={9} className="animate-spin" /> : <Database size={9} />}
+                                    {indexingBatch ? 'Indexando...' : `Indexar ${semanticUnindexed} leads`}
+                                </button>
+                            )}
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
             {/* QUICK FILTERS BAR - OPTIMIZED FOR 100% SCREEN */}
             <div className="shrink-0 min-h-12 border-b border-white/5 bg-[#03060b] flex flex-wrap items-center gap-x-2 gap-y-2 px-3 sm:px-6 py-2.5 z-[60] relative">
@@ -451,8 +611,8 @@ function LeadsContent() {
                                     exit={{ opacity: 0, x: 20 }}
                                     className="h-full overflow-y-auto custom-scrollbar pt-6 pb-20"
                                 >
-                                    <LeadListV2 
-                                        leads={filteredLeads} 
+                                    <LeadListV2
+                                        leads={displayLeads}
                                         onView={(lead) => {
                                             setIsManagement(false);
                                             setSelectedLead(lead);
@@ -475,8 +635,8 @@ function LeadsContent() {
                                     exit={{ opacity: 0 }}
                                     className="h-full min-h-0 flex-1 relative"
                                 >
-                                    <KanbanBoardV2 
-                                        leads={filteredLeads} 
+                                    <KanbanBoardV2
+                                        leads={displayLeads}
                                         setLeads={setLeads}
                                         userName={userName}
                                         onView={(lead) => {
