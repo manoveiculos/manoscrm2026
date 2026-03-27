@@ -285,9 +285,12 @@ if (request.headers.get('authorization') !== `Bearer ${process.env.CRON_SECRET}`
 - Substituir fórmula heurística por modelo treinado nos dados históricos de perda
 - Usar `loss_category` acumulado para treinar
 
-**P8 — Redistribuição semi-automática de leads**
-- Admin vê sugestão de redistribuição gerada pela IA
-- 1 clique confirma, sem precisar ir ao painel de leads
+**P8 — Redistribuição semi-automática de leads ✅ COMPLETO**
+- Botão "⇄ Redistribuir" em cada alerta de sobrecarga no Pulse
+- Calcula automaticamente: consultor com menor carga + até 5 leads não contactados para mover
+- Painel inline com lista de leads sugeridos + consultor destino com carga atual
+- Botão "Confirmar redistribuição" → PATCH em lote em `leads_manos_crm`
+- Atualiza lista local sem reload; mostra "✓ Redistribuído" na linha
 
 **P9 — Extensão Chrome v2: alertas IA inline**
 - Mostrar badge de `ai_alert_compra` pendente diretamente na extensão ao abrir conversa do WhatsApp

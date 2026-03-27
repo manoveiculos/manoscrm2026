@@ -20,7 +20,7 @@ import {
     CheckCircle,
     XCircle,
 } from 'lucide-react';
-import { motion, Variants } from 'framer-motion';
+import { motion, AnimatePresence, Variants } from 'framer-motion';
 import { normalizeStatus } from '@/constants/status';
 import { Lead, FinancialMetrics } from '@/lib/types';
 import { getFinancialMetrics } from '@/lib/services/analyticsService';
@@ -105,6 +105,85 @@ export default function Pulse() {
     const [userName, setUserName] = useState('');
     const [userRole, setUserRole] = useState<'admin' | 'consultant'>('consultant');
     const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+    // ── Redistribuição ────────────────────────────────────────────────────────
+    type RedistSuggestion = {
+        leadsToMove: Array<{ id: string; name: string }>;
+        target: { id: string; name: string; currentLoad: number };
+    };
+    const [redistOpen, setRedistOpen] = useState<string | null>(null);       // consultantId aberto
+    const [redistSuggestions, setRedistSuggestions] = useState<Record<string, RedistSuggestion>>({});
+    const [redistLoading, setRedistLoading] = useState<string | null>(null); // consultantId carregando
+    const [redistDone, setRedistDone]       = useState<string | null>(null); // consultantId concluído
+
+    const fetchRedistSuggestion = async (consultantId: string) => {
+        setRedistLoading(consultantId);
+        try {
+            // 1. Consultores ativos + carga atual (usa leads já carregados)
+            const loadMap: Record<string, number> = {};
+            leads.forEach(l => {
+                if (l.assigned_consultant_id) {
+                    loadMap[l.assigned_consultant_id] = (loadMap[l.assigned_consultant_id] || 0) + 1;
+                }
+            });
+
+            // 2. Busca todos os consultores ativos para resolver nomes
+            const { data: allConsultants } = await supabase
+                .from('consultants_manos_crm')
+                .select('id, name')
+                .eq('is_active', true);
+
+            // 3. Consultor com menor carga (excluindo o sobrecarregado)
+            const target = (allConsultants || [])
+                .filter((c: any) => c.id !== consultantId)
+                .sort((a: any, b: any) => (loadMap[a.id] || 0) - (loadMap[b.id] || 0))[0];
+
+            if (!target) return;
+
+            // 4. Leads não contactados do consultor sobrecarregado (até 5)
+            const toMove = leads
+                .filter(l =>
+                    l.assigned_consultant_id === consultantId &&
+                    ['received', 'new', 'entrada'].includes(normalizeStatus(l.status))
+                )
+                .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+                .slice(0, 5)
+                .map(l => ({ id: l.id, name: l.name || 'Lead sem nome' }));
+
+            setRedistSuggestions(prev => ({
+                ...prev,
+                [consultantId]: {
+                    leadsToMove: toMove,
+                    target: { id: target.id, name: target.name, currentLoad: loadMap[target.id] || 0 },
+                },
+            }));
+        } finally {
+            setRedistLoading(null);
+        }
+    };
+
+    const confirmRedistribution = async (consultantId: string) => {
+        const suggestion = redistSuggestions[consultantId];
+        if (!suggestion || suggestion.leadsToMove.length === 0) return;
+
+        setRedistLoading(consultantId);
+        try {
+            const ids = suggestion.leadsToMove.map(l => l.id);
+            await supabase
+                .from('leads_manos_crm')
+                .update({ assigned_consultant_id: suggestion.target.id })
+                .in('id', ids);
+
+            // Atualiza a lista local
+            setLeads(prev => prev.map(l =>
+                ids.includes(l.id) ? { ...l, assigned_consultant_id: suggestion.target.id } : l
+            ));
+            setRedistDone(consultantId);
+            setRedistOpen(null);
+        } finally {
+            setRedistLoading(null);
+        }
+    };
+
     const [aiMetrics, setAiMetrics] = useState<{
         autoTotal: number;
         autoSent: number;
@@ -370,40 +449,103 @@ export default function Pulse() {
                         </h3>
                     </div>
                     <div className="divide-y divide-white/[0.04]">
-                        {overloadAlerts.map((alert) => (
-                            <div key={alert.id} className="flex items-center gap-4 px-4 py-3">
-                                <div className="h-9 w-9 rounded-xl bg-orange-500/10 border border-orange-500/20 flex items-center justify-center text-orange-400 font-black text-sm shrink-0">
-                                    {alert.consultantName[0]?.toUpperCase() || 'C'}
+                        {overloadAlerts.map((alert) => {
+                            const suggestion  = redistSuggestions[alert.consultantId];
+                            const isOpen      = redistOpen === alert.consultantId;
+                            const isLoading   = redistLoading === alert.consultantId;
+                            const isDone      = redistDone === alert.consultantId;
+                            return (
+                                <div key={alert.id}>
+                                    {/* ── Linha principal ── */}
+                                    <div className="flex items-center gap-4 px-4 py-3">
+                                        <div className="h-9 w-9 rounded-xl bg-orange-500/10 border border-orange-500/20 flex items-center justify-center text-orange-400 font-black text-sm shrink-0">
+                                            {alert.consultantName[0]?.toUpperCase() || 'C'}
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <p className="text-[13px] font-bold text-white/90 truncate">{alert.consultantName}</p>
+                                            <p className="text-[11px] text-orange-400/70">
+                                                <span className="font-black">{alert.leadCount}</span> leads ativos
+                                                {isDone && <span className="text-emerald-400 ml-2 font-black">✓ Redistribuído</span>}
+                                            </p>
+                                        </div>
+                                        <div className="flex items-center gap-2 shrink-0">
+                                            {!isDone && (
+                                                <button
+                                                    onClick={() => {
+                                                        if (isOpen) { setRedistOpen(null); return; }
+                                                        setRedistOpen(alert.consultantId);
+                                                        if (!suggestion) fetchRedistSuggestion(alert.consultantId);
+                                                    }}
+                                                    className="px-3 py-1.5 rounded-lg bg-orange-500/15 hover:bg-orange-500/25 text-orange-400 text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-1.5"
+                                                >
+                                                    {isLoading ? (
+                                                        <motion.span animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 0.8, ease: 'linear' }} className="inline-block">↻</motion.span>
+                                                    ) : isOpen ? '▲ Fechar' : '⇄ Redistribuir'}
+                                                </button>
+                                            )}
+                                            <a href={`/v2/leads?consultant=${alert.consultantId}`}
+                                                className="px-3 py-1.5 rounded-lg bg-white/[0.04] hover:bg-white/[0.07] text-white/40 text-[10px] font-black uppercase tracking-widest transition-all">
+                                                Leads
+                                            </a>
+                                            <button
+                                                onClick={async () => {
+                                                    await supabase.from('follow_ups')
+                                                        .update({ status: 'completed', completed_at: new Date().toISOString() })
+                                                        .eq('id', alert.id);
+                                                    setOverloadAlerts(prev => prev.filter(a => a.id !== alert.id));
+                                                }}
+                                                className="h-7 w-7 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] flex items-center justify-center text-white/25 hover:text-white/50 transition-all"
+                                                title="Dispensar alerta"
+                                            >
+                                                <X size={12} />
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {/* ── Painel de redistribuição ── */}
+                                    <AnimatePresence>
+                                    {isOpen && suggestion && (
+                                        <motion.div
+                                            initial={{ opacity: 0, height: 0 }}
+                                            animate={{ opacity: 1, height: 'auto' }}
+                                            exit={{ opacity: 0, height: 0 }}
+                                            className="px-4 pb-4 border-t border-orange-500/10"
+                                            style={{ background: 'linear-gradient(180deg, rgba(249,115,22,0.04), transparent)' }}
+                                        >
+                                            <div className="pt-3 space-y-3">
+                                                {suggestion.leadsToMove.length === 0 ? (
+                                                    <p className="text-[11px] text-white/30 italic">Nenhum lead não-contactado para redistribuir.</p>
+                                                ) : (
+                                                    <>
+                                                        <p className="text-[11px] text-white/50">
+                                                            Sugestão: mover <span className="font-black text-white/80">{suggestion.leadsToMove.length} lead{suggestion.leadsToMove.length > 1 ? 's' : ''} não contactado{suggestion.leadsToMove.length > 1 ? 's' : ''}</span> para{' '}
+                                                            <span className="font-black text-orange-300">{suggestion.target.name}</span>{' '}
+                                                            <span className="text-white/30">({suggestion.target.currentLoad} leads ativos)</span>
+                                                        </p>
+                                                        <div className="space-y-1">
+                                                            {suggestion.leadsToMove.map(l => (
+                                                                <div key={l.id} className="flex items-center gap-2 text-[11px] text-white/40">
+                                                                    <span className="h-1 w-1 rounded-full bg-orange-400/50 shrink-0" />
+                                                                    {l.name}
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                        <button
+                                                            onClick={() => confirmRedistribution(alert.consultantId)}
+                                                            disabled={isLoading}
+                                                            className="w-full py-2.5 rounded-xl bg-orange-500 hover:bg-orange-400 disabled:opacity-50 text-black text-[11px] font-black uppercase tracking-widest transition-all active:scale-[0.98]"
+                                                        >
+                                                            {isLoading ? 'Redistribuindo...' : `Confirmar redistribuição`}
+                                                        </button>
+                                                    </>
+                                                )}
+                                            </div>
+                                        </motion.div>
+                                    )}
+                                    </AnimatePresence>
                                 </div>
-                                <div className="flex-1 min-w-0">
-                                    <p className="text-[13px] font-bold text-white/90 truncate">{alert.consultantName}</p>
-                                    <p className="text-[11px] text-orange-400/70">
-                                        <span className="font-black">{alert.leadCount}</span> leads ativos — redistribuição recomendada
-                                    </p>
-                                </div>
-                                <div className="flex items-center gap-2 shrink-0">
-                                    <a
-                                        href={`/v2/leads?consultant=${alert.consultantId}`}
-                                        className="px-3 py-1.5 rounded-lg bg-orange-500/15 hover:bg-orange-500/25 text-orange-400 text-[10px] font-black uppercase tracking-widest transition-all"
-                                    >
-                                        Ver Leads
-                                    </a>
-                                    <button
-                                        onClick={async () => {
-                                            await supabase
-                                                .from('follow_ups')
-                                                .update({ status: 'completed', completed_at: new Date().toISOString() })
-                                                .eq('id', alert.id);
-                                            setOverloadAlerts(prev => prev.filter(a => a.id !== alert.id));
-                                        }}
-                                        className="h-7 w-7 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] flex items-center justify-center text-white/25 hover:text-white/50 transition-all"
-                                        title="Dispensar alerta"
-                                    >
-                                        <X size={12} />
-                                    </button>
-                                </div>
-                            </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 </motion.div>
             )}
