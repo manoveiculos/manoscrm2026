@@ -48,37 +48,31 @@ export async function getLeads(consultantId?: string, leadId?: string) {
  * Busca resiliente por telefone (usado por IA e Extensão)
  */
 export async function getLeadByPhone(phone: string): Promise<Lead | null> {
-    const cleanPhone = phone.replace(/\D/g, '');
-    if (!cleanPhone || cleanPhone.length < 8) return null;
+    if (!phone) return null;
+    let cleanPhone = phone.replace(/\D/g, '');
+    
+    // Normalização: remove prefixo 55 se presente
+    if (cleanPhone.startsWith('55') && cleanPhone.length >= 12) {
+        cleanPhone = cleanPhone.substring(2);
+    }
+    
+    if (cleanPhone.length < 8) return null;
 
-    const last8 = cleanPhone.substring(cleanPhone.length - 8);
-    const variants = [cleanPhone, last8, `55${cleanPhone}`];
-
-    // Busca na VIEW unificada (Prioridade automática via Fase 4 SQL)
+    // Busca prioritária na VIEW inteligente que unifica tudo
     const { data, error } = await supabase
         .from('leads')
         .select('*')
-        .or(`phone.ilike.%${variants.join('%,phone.ilike.%')}%`)
-        .order('priority', { ascending: true }) // V2 > CRM26 > Legado
-        .order('updated_at', { ascending: false })
+        .ilike('phone', `%${cleanPhone.slice(-8)}%`) // Busca resiliente pelos últimos 8 dígitos
+        .order('priority', { ascending: true }) // V2 > CRM26 > Master
         .limit(1)
         .maybeSingle();
 
     if (error) {
-        console.error("Error getLeadByPhone:", error);
+        console.error("Erro ao buscar lead por telefone:", error);
         return null;
     }
 
-    if (!data) return null;
-
-    // Buscar nome do consultor para o Dashboard/Extensão
-    const consultants = await getConsultantNamesCached();
-    const consultant = consultants.find(c => c.id === data.assigned_consultant_id);
-
-    return {
-        ...data,
-        primeiro_vendedor: consultant?.name || data.assigned_consultant_id || 'Não atribuído'
-    } as Lead;
+    return data as Lead;
 }
 
 export async function getLeadsManos(consultantId?: string, leadId?: string) {
@@ -117,57 +111,69 @@ export async function getLeadsCRM26(consultantName?: string, includeSent: boolea
 }
 
 export async function createLead(leadData: Partial<Lead>) {
-    const cleanPhone = (leadData.phone || '').replace(/\D/g, '');
+    let cleanPhone = (leadData.phone || '').replace(/\D/g, '');
     if (!cleanPhone) throw new Error("Telefone obrigatório");
+    
+    // Normalização padrão CRM: remove '55'
+    if (cleanPhone.startsWith('55') && cleanPhone.length >= 12) {
+        cleanPhone = cleanPhone.substring(2);
+    }
+    leadData.phone = cleanPhone;
 
-    const { data: existing } = await supabase.from('leads_manos_crm').select('*, consultants_manos_crm(name)').eq('phone', cleanPhone).maybeSingle();
+    // Busca inteligente: verifica se já existe antes de duplicar
+    const existing = await getLeadByPhone(cleanPhone);
 
     if (existing) {
-        const now = new Date().toISOString();
-        const { data } = await supabase.from('leads_manos_crm').update({
-            updated_at: now,
-            ai_summary: `${existing.ai_summary || ''}\n\n[REATIVADO ${new Date().toLocaleDateString()}]`.trim()
-        }).eq('id', existing.id).select().single();
+        const table = getTableForLead(existing.id);
+        const realId = stripPrefix(existing.id);
+
+        const updatePayload: any = {
+            name: leadData.name || existing.name,
+            source: leadData.source || existing.source,
+            vehicle_interest: leadData.vehicle_interest || existing.vehicle_interest,
+            updated_at: new Date().toISOString()
+        };
+
+        // Mapeamento para nomes de colunas CRM26 se necessário
+        if (table === 'leads_distribuicao_crm_26') {
+            updatePayload.atualizado_em = updatePayload.updated_at;
+            delete updatePayload.updated_at;
+            if (leadData.name) updatePayload.nome = leadData.name;
+            if (leadData.vehicle_interest) updatePayload.interesse = leadData.vehicle_interest;
+        }
+
+        const { data: updated, error } = await supabase
+            .from(table)
+            .update(updatePayload)
+            .eq('id', (table === 'leads_distribuicao_crm_26' ? parseInt(realId) : realId))
+            .select()
+            .single();
+
+        if (error) throw error;
         cacheInvalidate('leads_');
-        return data;
+        return updated;
     }
 
+    // Se é novo, prepara payload e atribui consultor
     const payload = sanitizeLeadPayload(leadData, cleanPhone);
     
-    // ATRIBUIÇÃO AUTOMÁTICA OU POR NOME
-    if (!payload.assigned_consultant_id) {
-        try {
-            // Se já veio com o NOME do vendedor (primeiro_vendedor), resolver o ID
+    try {
+        if (!payload.assigned_consultant_id) {
             if (payload.primeiro_vendedor) {
                 const resolvedId = await resolveConsultantIdByName(payload.primeiro_vendedor);
-                if (resolvedId) {
-                    payload.assigned_consultant_id = resolvedId;
-                }
+                if (resolvedId) payload.assigned_consultant_id = resolvedId;
             }
             
-            // Se ainda não tem ID (nome não resolveu ou não veio), usar Round Robin
             if (!payload.assigned_consultant_id) {
                 const nextCons = await pickNextConsultant(payload.name);
                 if (nextCons) {
                     payload.assigned_consultant_id = nextCons.id;
                     payload.primeiro_vendedor = nextCons.name;
-                } else {
-                    // FAIL-SAFE: If no consultant is found via Round Robin, pick any active one
-                    const { data: fallback } = await supabase.from('consultants_manos_crm')
-                        .select('id, name')
-                        .eq('is_active', true)
-                        .limit(1)
-                        .single();
-                    if (fallback) {
-                        payload.assigned_consultant_id = fallback.id;
-                        payload.primeiro_vendedor = fallback.name;
-                        console.log(`[createLead] Atribuição de fallback para ${fallback.name}`);
-                    }
                 }
             }
-        } catch (atribError) {
-            console.error("Erro na atribuição de consultor:", atribError);
         }
+    } catch (atribError) {
+        console.error("Erro na atribuição de consultor:", atribError);
     }
 
     const { data, error } = await supabase.from('leads_manos_crm').insert([payload]).select().single();
@@ -222,6 +228,19 @@ export async function updateLeadDetails(leadId: string, details: Partial<Lead>) 
     cacheInvalidate('leads_');
 }
 
+export async function deleteLead(leadId: string) {
+    const table = getTableForLead(leadId);
+    const realId = stripPrefix(leadId);
+
+    const { error } = await supabase
+        .from(table)
+        .delete()
+        .eq('id', (table === 'leads_distribuicao_crm_26' ? parseInt(realId) : realId));
+
+    if (error) throw error;
+    cacheInvalidate('leads_');
+}
+
 // === HELPERS ===
 async function getConsultantNamesCached() {
     let cached = cacheGet<any[]>('consultant_names');
@@ -266,7 +285,6 @@ function mapToCRM26(details: any) {
     if (details.ai_summary) obj.resumo = details.ai_summary;
     if (details.status) obj.status = details.status;
     
-    // Suporte para troca (mapear para ambos os nomes usados no CRM26)
     if (details.carro_troca) {
         obj.carro_troca = details.carro_troca;
         obj.troca = details.carro_troca;
