@@ -38,7 +38,7 @@ const NAV_ITEMS: NavItem[] = [
     { label: 'Arsenal de Veículos', icon: CarFront, href: '/inventory' },
     { label: 'Ranking de Vendas', icon: Trophy, href: '/ranking' },
     { label: 'Análise Inteligente', icon: BarChart3, href: '/analytics' },
-    { label: 'Campanhas Meta/Google', icon: Target, href: '/marketing', adminOnly: true, blocked: true },
+    { label: 'Campanhas Meta/Google', icon: Target, href: '/marketing', adminOnly: true },
     { label: 'Gestão de Vendas', icon: ClipboardCheck, href: '/admin/sales', adminOnly: true },
     { label: 'Gerenciar Equipe', icon: Shield, href: '/admin/equipe', adminOnly: true },
     { label: 'Cowork IA', icon: Bot, href: '/admin/cowork', adminOnly: true, blocked: true },
