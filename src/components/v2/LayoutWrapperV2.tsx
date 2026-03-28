@@ -8,8 +8,9 @@ import { ConsultantAlertModal } from '@/components/v2/ConsultantAlertModal';
 export const LayoutWrapperV2 = ({ children }: { children: React.ReactNode }) => {
     const pathname = usePathname() || '';
     const isEmbed = pathname.endsWith('/embed');
+    const isLogin = pathname === '/login';
 
-    if (isEmbed) {
+    if (isEmbed || isLogin) {
         return (
             <div className="flex min-h-screen bg-[#03060b] font-inter text-white overflow-hidden w-full max-w-[100vw]">
                 <BackgroundDecor />
