@@ -2,13 +2,13 @@
 
 import React, { useRef, useState } from 'react';
 import { Lead, LeadStatus } from '@/lib/types';
-import { formatPhoneBR } from '@/app/leads/utils/helpers';
+import { formatPhoneBR } from '@/lib/shared_utils/helpers';
 import { CarFront, Zap, Activity, Target, ChevronDown } from 'lucide-react';
 import { extractWhatsAppScript } from '@/lib/aiParser';
 import { motion, AnimatePresence } from 'framer-motion';
 import { normalizeStatus, getStatusConfig } from '@/constants/status';
 import { calculateLeadScore, getScoreLabel } from '@/utils/calculateScore';
-import { MoveMenu } from '@/app/leads/components/MoveMenu';
+import { MoveMenu } from '@/components/shared_leads/MoveMenu';
 
 interface LeadListV2Props {
     leads: Lead[];

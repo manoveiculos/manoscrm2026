@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, X, User, Phone, Car, DollarSign, RefreshCw, Zap, Upload, MessageSquare } from 'lucide-react';
-import { formatPhoneBR } from '@/app/leads/utils/helpers';
+import { formatPhoneBR } from '@/lib/shared_utils/helpers';
 import { dataService } from '@/lib/dataService';
 import JSZip from 'jszip';
 

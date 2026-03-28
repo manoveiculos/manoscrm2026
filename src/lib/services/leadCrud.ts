@@ -158,7 +158,16 @@ export async function createLead(leadData: Partial<Lead>) {
     const payload = sanitizeLeadPayload(leadData, cleanPhone);
     
     try {
-        if (!payload.assigned_consultant_id) {
+        // Se já temos o ID do consultor, apenas garantimos que o nome (primeiro_vendedor) esteja preenchido
+        if (payload.assigned_consultant_id) {
+            const consultants = await getConsultantNamesCached();
+            const consultant = consultants.find(c => c.id === payload.assigned_consultant_id);
+            if (consultant) {
+                payload.primeiro_vendedor = consultant.name;
+            }
+        } 
+        // Se não temos ID, tentamos resolver por nome ou Round Robin
+        else {
             if (payload.primeiro_vendedor) {
                 const resolvedId = await resolveConsultantIdByName(payload.primeiro_vendedor);
                 if (resolvedId) payload.assigned_consultant_id = resolvedId;

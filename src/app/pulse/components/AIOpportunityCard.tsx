@@ -4,7 +4,7 @@ import React from 'react';
 import { Lead } from '@/lib/types';
 import { motion } from 'framer-motion';
 import { ArrowRight, CarFront, Flame, Zap, Phone } from 'lucide-react';
-import { formatPhoneBR } from '@/app/leads/utils/helpers';
+import { formatPhoneBR } from '@/lib/shared_utils/helpers';
 import { calculateLeadScore, getScoreLabel } from '@/utils/calculateScore';
 import { normalizeStatus } from '@/constants/status';
 

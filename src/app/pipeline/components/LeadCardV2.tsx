@@ -4,12 +4,12 @@ import React, { useRef, useState } from 'react';
 import { Lead, LeadStatus } from '@/lib/types';
 import { motion } from 'framer-motion';
 import { CarFront, Zap, Activity, Target, ArrowRight, AlertTriangle } from 'lucide-react';
-import { formatPhoneBR } from '@/app/leads/utils/helpers';
+import { formatPhoneBR } from '@/lib/shared_utils/helpers';
 import { extractWhatsAppScript } from '@/lib/aiParser';
 import { normalizeStatus, STAGE_SLA_HOURS } from '@/constants/status';
 import { calculateLeadScore, getScoreLabel } from '@/utils/calculateScore';
-import { SourceIcon } from '@/app/leads/components/SourceIcon';
-import { MoveMenu } from '@/app/leads/components/MoveMenu';
+import { SourceIcon } from '@/components/shared_leads/SourceIcon';
+import { MoveMenu } from '@/components/shared_leads/MoveMenu';
 
 interface LeadCardV2Props {
     lead: Lead;

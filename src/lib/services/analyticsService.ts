@@ -71,7 +71,8 @@ export async function getFinancialMetrics(params?: {
         totalProfit: metrics.total_profit,
         conversionRate: metrics.conversion_rate,
         funnelData: metrics.funnel_data,
-        avgResponseTime: await getAverageResponseTime(startDate, consultantId), // Mantido por enquanto
+        tactical: metrics.tactical,
+        avgResponseTime: await getAverageResponseTime(startDate, consultantId),
         responseRate: metrics.total_leads > 0 ? await getResponseRate(startDate, consultantId) : 0,
         cac: 0,
         roi: 0

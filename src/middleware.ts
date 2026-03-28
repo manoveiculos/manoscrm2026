@@ -40,7 +40,7 @@ export async function middleware(request: NextRequest) {
     const path = request.nextUrl.pathname;
     const isLoginPage = path === '/login';
     const isPublicApi = path.startsWith('/api/auth') || path.startsWith('/api/webhook') || path.startsWith('/api/health') || path.startsWith('/api/extension');
-    const isEmbed = path === '/v2/pipeline/embed';
+    const isEmbed = path === '/pipeline/embed';
     const isStaticAsset = path.includes('.') || path.startsWith('/_next');
 
     // Se for um asset estático, API pública ou Embed, ignoramos

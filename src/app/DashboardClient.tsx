@@ -184,7 +184,7 @@ export default function DashboardClient({ metrics, userName, aiInsights, salesTo
                         </span>
                     )}
                     <Link
-                        href="/v2/pipeline"
+                        href="/pipeline"
                         className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-black text-sm uppercase tracking-wide transition-all active:scale-95 shadow-lg shadow-red-600/20"
                     >
                         Pipeline <ArrowUpRight size={15} />
@@ -251,7 +251,7 @@ export default function DashboardClient({ metrics, userName, aiInsights, salesTo
                         <Sparkles size={11} className="text-red-500" />
                         Sugestões da IA
                     </p>
-                    <Link href="/v2/pulse" className="text-[10px] font-black uppercase tracking-widest text-red-500 hover:text-red-400 flex items-center gap-1">
+                    <Link href="/pulse" className="text-[10px] font-black uppercase tracking-widest text-red-500 hover:text-red-400 flex items-center gap-1">
                         Ver tudo <ArrowUpRight size={10} />
                     </Link>
                 </div>

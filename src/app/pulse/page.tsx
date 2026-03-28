@@ -27,7 +27,7 @@ import { getFinancialMetrics } from '@/lib/services/analyticsService';
 import { leadService } from '@/lib/leadService';
 import { supabase } from '@/lib/supabase';
 import { calculateLeadScore } from '@/utils/calculateScore';
-import { formatPhoneBR } from '@/app/leads/utils/helpers';
+import { formatPhoneBR } from '@/lib/shared_utils/helpers';
 
 // Components
 import { DailyMissionHeader } from './components/DailyMissionHeader';
@@ -460,7 +460,7 @@ export default function Pulse() {
                         </div>
                     </div>
                     <button 
-                        onClick={() => window.location.href = '/v2/leads?consultant=none'}
+                        onClick={() => window.location.href = '/leads?consultant=none'}
                         className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-[10px] font-black uppercase tracking-widest rounded-xl transition-all shadow-[0_4px_15px_rgba(239,68,68,0.3)]"
                     >
                         Resolver Agora

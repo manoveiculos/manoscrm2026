@@ -1,7 +1,7 @@
 'use client';
 import React, { useState } from 'react';
 import { Lead } from '../types';
-import { formatPreco } from '@/app/leads/utils/helpers';
+import { formatPreco } from '@/lib/shared_utils/helpers';
 import { Car, DollarSign, MapPin, Clock, ChevronRight, Pencil, Check, X, UserCircle2 } from 'lucide-react';
 
 interface InfoGridProps {

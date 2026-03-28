@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import {
     Activity, // Pulse/Cockpit
-    Users, // Central de Leads
+    Users, // Pipeline de leads
     KanbanSquare, // Pipeline
     CarFront, // Estoque
     BarChart3, // Analytics
@@ -15,6 +15,8 @@ import {
     Target, // Icone para Campanhas
     Shield, // Icone para Gestão de Equipe
     Bot, // Icone para Cowork IA
+    Trophy, // Icone para Ranking
+    ClipboardCheck, // Icone para Gestão de Vendas
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
@@ -30,14 +32,16 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
-    { label: 'Painel de Elite', icon: Activity, href: '/v2/pulse' },
-    { label: 'Central de Vendas', icon: KanbanSquare, href: '/v2/pipeline' },
-    { label: 'Central de Leads', icon: Users, href: '/v2/leads' },
-    { label: 'Arsenal de Veículos', icon: CarFront, href: '/v2/inventory' },
-    { label: 'Análise Inteligente', icon: BarChart3, href: '/v2/analytics' },
-    { label: 'Campanhas Meta/Google', icon: Target, href: '/v2/marketing', adminOnly: true },
-    { label: 'Gerenciar Equipe', icon: Shield, href: '/v2/admin/equipe', adminOnly: true },
-    { label: 'Cowork IA', icon: Bot, href: '/v2/admin/cowork', adminOnly: true },
+    { label: 'Painel de Elite', icon: Activity, href: '/pulse' },
+    { label: 'Pipeline de leads', icon: KanbanSquare, href: '/pipeline' },
+    { label: 'Central da IA', icon: Bot, href: '/leads' },
+    { label: 'Arsenal de Veículos', icon: CarFront, href: '/inventory' },
+    { label: 'Ranking de Vendas', icon: Trophy, href: '/ranking' },
+    { label: 'Análise Inteligente', icon: BarChart3, href: '/analytics' },
+    { label: 'Campanhas Meta/Google', icon: Target, href: '/marketing', adminOnly: true, blocked: true },
+    { label: 'Gestão de Vendas', icon: ClipboardCheck, href: '/admin/sales', adminOnly: true },
+    { label: 'Gerenciar Equipe', icon: Shield, href: '/admin/equipe', adminOnly: true },
+    { label: 'Cowork IA', icon: Bot, href: '/admin/cowork', adminOnly: true, blocked: true },
 ];
 
 interface NavUser {
@@ -71,7 +75,7 @@ export const NavigationV2 = () => {
     };
 
     const handleLogoClick = () => {
-        router.push('/v2/pulse');
+        router.push('/pulse');
     };
 
     useEffect(() => {
@@ -141,7 +145,7 @@ export const NavigationV2 = () => {
 
             {/* Logo Interativo (Home) */}
             <Link
-                href="/v2"
+                href="/pulse"
                 className={`mb-10 flex items-center ${isCollapsed ? 'justify-center px-0' : 'gap-3 px-5'} cursor-pointer group transition-all relative py-2 rounded-2xl hover:bg-white/[0.02] active:scale-[0.98] focus:outline-none`}
             >
                 <div className="h-9 w-9 rounded-xl bg-white/[0.03] border border-white/10 flex items-center justify-center shrink-0 group-hover:border-red-500/30 group-hover:bg-red-500/5 group-hover:shadow-[0_0_15px_rgba(239,68,68,0.1)] transition-all overflow-hidden p-1.5">
@@ -202,7 +206,7 @@ export const NavigationV2 = () => {
                                     strokeWidth={isActive ? 2.5 : 2}
                                     className={isActive ? 'text-red-500' : 'transition-colors group-hover:text-white/70'}
                                 />
-                                {item.href === '/v2/pulse' && aiAlertCount > 0 && (
+                                {item.href === '/pulse' && aiAlertCount > 0 && (
                                     <motion.span
                                         key={aiAlertCount}
                                         initial={{ scale: 0 }}
@@ -231,19 +235,6 @@ export const NavigationV2 = () => {
                     );
                 })}
 
-                {!isCollapsed && (
-                    <div className="px-3 mt-6 mb-3">
-                        <p className="text-[9px] font-bold text-white/25 uppercase tracking-[0.25em]">Sistema Legado</p>
-                    </div>
-                )}
-                <Link
-                    href="/"
-                    title={isCollapsed ? 'Voltar para V1' : undefined}
-                    className={`flex items-center ${isCollapsed ? 'justify-center px-0' : 'gap-3 px-3'} py-2.5 rounded-xl transition-all text-white/30 hover:text-white/55 hover:bg-white/[0.03] border-l-2 border-transparent`}
-                >
-                    <LogOut size={16} className="rotate-180 shrink-0" />
-                    {!isCollapsed && <span className="font-medium text-[13px] tracking-tight whitespace-nowrap">Voltar para V1</span>}
-                </Link>
             </div>
 
             <div className={`mt-auto w-full ${isCollapsed ? 'px-2' : 'px-3'} pt-4 border-t border-white/[0.06] pb-4`}>

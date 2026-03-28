@@ -2,11 +2,13 @@ import { anthropic, AI_MODELS } from '@/lib/aiProviders';
 
 export async function analyzeWithClaude(
     prompt: string,
-    model: string = AI_MODELS.CLAUDE_SONNET
+    model: string = AI_MODELS.CLAUDE_SONNET,
+    systemPrompt?: string
 ): Promise<string> {
     const response = await anthropic.messages.create({
         model,
-        max_tokens: 2048,
+        max_tokens: 4096,
+        ...(systemPrompt ? { system: systemPrompt } : {}),
         messages: [{ role: 'user', content: prompt }],
     });
 

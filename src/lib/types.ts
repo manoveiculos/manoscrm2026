@@ -158,6 +158,8 @@ export interface Sale {
   sale_value: number;
   profit_margin: number;
   sale_date: string;
+  vehicle_name?: string;
+  consultant_name?: string;
 }
 
 export interface Purchase {

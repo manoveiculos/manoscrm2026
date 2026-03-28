@@ -45,11 +45,24 @@ export const leadService = {
         page?: number;
         limit?: number;
         consultantId?: string;
-        status?: LeadStatus;
+        status?: LeadStatus | 'all';
         searchTerm?: string;
+        startDate?: string;
+        origin?: string;
+        minScore?: number;
     }) {
-        const { page = 1, limit = 50, consultantId, status, searchTerm } = params || {};
-        const cacheKey = `leads_p${page}_l${limit}_c${consultantId || 'all'}_s${status || 'all'}_t${searchTerm || 'none'}`;
+        const { 
+            page = 1, 
+            limit = 50, 
+            consultantId, 
+            status, 
+            searchTerm,
+            startDate,
+            origin,
+            minScore
+        } = params || {};
+        
+        const cacheKey = `leads_p${page}_l${limit}_c${consultantId || 'all'}_s${status || 'all'}_t${searchTerm || 'none'}_d${startDate || 'no'}_o${origin || 'all'}_sc${minScore || 0}`;
         
         const cached = cacheGet<{ leads: Lead[], totalCount: number }>(cacheKey);
         if (cached) return cached;
@@ -67,11 +80,21 @@ export const leadService = {
                     query = query.eq('assigned_consultant_id', consultantId);
                 }
             }
-            if (status) {
+            if (status && status !== 'all') {
                 query = query.eq('status', status);
             }
             if (searchTerm) {
-                query = query.or(`name.ilike.%${searchTerm}%,phone.ilike.%${searchTerm}%`);
+                // Busca por nome, telefone ou interesse
+                query = query.or(`name.ilike.%${searchTerm}%,phone.ilike.%${searchTerm}%,vehicle_interest.ilike.%${searchTerm}%`);
+            }
+            if (startDate) {
+                query = query.gte('created_at', startDate);
+            }
+            if (origin && origin !== 'all') {
+                query = query.or(`origem.eq.${origin},source.eq.${origin}`);
+            }
+            if (minScore) {
+                query = query.gte('ai_score', minScore);
             }
 
             const { data, count, error } = await query

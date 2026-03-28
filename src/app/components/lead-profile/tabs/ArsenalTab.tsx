@@ -1,7 +1,7 @@
 import React from 'react';
 import { Search, Car, Zap } from 'lucide-react';
 import { InventoryItem } from '../types';
-import { formatPreco, formatKM } from '@/app/leads/utils/helpers';
+import { formatPreco, formatKM } from '@/lib/shared_utils/helpers';
 
 interface ArsenalTabProps {
     lead: any;

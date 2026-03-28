@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { Lead } from '../types';
 import { MessageCircle, Facebook, Instagram, Search, Globe, Car, LayoutGrid, Smartphone, MessageSquare, Pencil, Check, X } from 'lucide-react';
-import { formatPhoneBR } from '@/app/leads/utils/helpers';
+import { formatPhoneBR } from '@/lib/shared_utils/helpers';
 
 interface LeadHeaderProps {
     lead: Lead;
