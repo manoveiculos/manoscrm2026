@@ -17,6 +17,7 @@ import {
     Bot, // Icone para Cowork IA
     Trophy, // Icone para Ranking
     ClipboardCheck, // Icone para Gestão de Vendas
+    LayoutDashboard,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
@@ -32,6 +33,7 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
+    { label: 'Visão Geral', icon: LayoutDashboard, href: '/' },
     { label: 'Painel de Elite', icon: Activity, href: '/pulse' },
     { label: 'Pipeline de leads', icon: KanbanSquare, href: '/pipeline' },
     { label: 'Central da IA', icon: Bot, href: '/leads' },
@@ -75,7 +77,7 @@ export const NavigationV2 = () => {
     };
 
     const handleLogoClick = () => {
-        router.push('/pulse');
+        router.push('/');
     };
 
     useEffect(() => {
@@ -145,7 +147,7 @@ export const NavigationV2 = () => {
 
             {/* Logo Interativo (Home) */}
             <Link
-                href="/pulse"
+                href="/"
                 className={`mb-10 flex items-center ${isCollapsed ? 'justify-center px-0' : 'gap-3 px-5'} cursor-pointer group transition-all relative py-2 rounded-2xl hover:bg-white/[0.02] active:scale-[0.98] focus:outline-none`}
             >
                 <div className="h-9 w-9 rounded-xl bg-white/[0.03] border border-white/10 flex items-center justify-center shrink-0 group-hover:border-red-500/30 group-hover:bg-red-500/5 group-hover:shadow-[0_0_15px_rgba(239,68,68,0.1)] transition-all overflow-hidden p-1.5">
