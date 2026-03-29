@@ -145,10 +145,30 @@ export const leadService = {
             updated_at: new Date().toISOString()
         };
 
-        // crm26 uses Portuguese column name
+        // crm26 uses Portuguese column name and needs resonance in 'resumo' marker
         if (targetTable === 'leads_distribuicao_crm_26') {
             updatePayload.atualizado_em = updatePayload.updated_at;
             delete updatePayload.updated_at;
+
+            // Sync status marker in 'resumo' to prevent legacy parser from reverting on state refresh
+            try {
+                const { data: currentLead } = await client
+                    .from(targetTable)
+                    .select('resumo')
+                    .eq('id', realId)
+                    .single();
+
+                let resumo = currentLead?.resumo || '';
+                const targetLabel = status.toUpperCase();
+                const statusMarker = `[STATUS:${targetLabel}]`;
+                
+                if (!resumo.includes('[STATUS:')) resumo += ` ${statusMarker}`;
+                else resumo = resumo.replace(/\[STATUS:.*?\]/, statusMarker);
+                
+                updatePayload.resumo = resumo;
+            } catch (err) {
+                console.warn("[leadService] Failed to sync resumo marker:", err);
+            }
         }
 
         if (lossReason) {

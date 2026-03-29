@@ -442,10 +442,30 @@ export async function POST(req: NextRequest) {
                 // Final string with the marker as required by dataService.getLeadsCRM26 parsing logic
                 const finalResumo = `${newNote}${cleanResumo} ||IA_DATA|| ${iaMetadataStr}`.trim();
 
+                // RE-FETCH PARA EVITAR RACE CONDITION (Proteção contra sobrescrita de status manual)
+                const { data: latestLead } = await supabaseAdmin
+                    .from('leads_distribuicao_crm_26')
+                    .select('status, resumo')
+                    .eq('id', numericId)
+                    .single();
+                
+                const dbStatus = latestLead?.status || currentStatus;
+                
+                // Só atualiza status se a IA sugerir avanço ou se for manutenção do estado atual REAL
+                // Nunca regride o status se o usuário tiver movido o lead manualmente
+                const pipelineOrder = ['received', 'new', 'attempt', 'contacted', 'scheduled', 'visited', 'negotiation', 'proposed'];
+                const dbIndex = pipelineOrder.indexOf(dbStatus);
+                const aiIndex = pipelineOrder.indexOf(aiSuggestedStatus);
+                
+                let persistentStatus = dbStatus;
+                if (aiSuggestedStatus && aiSuggestedStatus !== 'manter' && aiIndex > dbIndex) {
+                    persistentStatus = aiSuggestedStatus;
+                }
+
                 await supabaseAdmin
                     .from('leads_distribuicao_crm_26')
                     .update({
-                        status: finalStatus,
+                        status: persistentStatus,
                         ai_score: aiResult.urgency_score || 0,
                         ai_classification: aiResult.temperature === 'quente' ? 'hot' : aiResult.temperature === 'morno' ? 'warm' : 'cold',
                         ai_reason: aiResult.diagnostico,

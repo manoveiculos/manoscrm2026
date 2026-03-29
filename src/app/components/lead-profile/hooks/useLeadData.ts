@@ -31,22 +31,24 @@ export function useLeadData(initialLead: Lead, setLeads: React.Dispatch<React.Se
                 oldStatus
             );
 
-            const cleanUUID = (id: string | null | undefined): string | null => {
-                if (!id) return null;
-                const cleaned = id.toString().replace(/main_|crm26_|dist_|lead_|crm25_/, '');
-                if (/^\d+$/.test(cleaned)) return cleaned;
-                const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-                return uuidRegex.test(cleaned) ? cleaned : null;
-            };
-
-            const cleanId = cleanUUID(lead.id);
+            const cleanId = initialLead.id.toString().replace(/main_|crm26_|dist_|lead_|crm25_/, '');
+            const isNumeric = /^\d+$/.test(cleanId);
+            
             if (cleanId) {
-                await supabase.from('interactions_manos_crm').insert({
-                    lead_id: cleanId,
+                const interactionPayload: any = {
                     type: 'status_change',
-                    notes: `[${userName || 'SISTEMA'}] Status alterado de ${oldStatus} para ${newStatusId} (via Elite Dashboard)`,
-                    consultant_id: cleanUUID(lead.assigned_consultant_id)
-                });
+                    notes: `[${userName || 'SISTEMA'}] Status alterado de ${oldStatus} para ${newStatusId} (via Sidebar)`,
+                    consultant_id: initialLead.assigned_consultant_id ? initialLead.assigned_consultant_id.toString().replace(/main_|crm26_|dist_|lead_|crm25_/, '') : null,
+                    created_at: new Date().toISOString()
+                };
+
+                if (isNumeric) {
+                    interactionPayload.lead_id_v1 = cleanId;
+                } else {
+                    interactionPayload.lead_id = cleanId;
+                }
+
+                await supabase.from('interactions_manos_crm').insert(interactionPayload);
             }
 
             setLead(prev => ({ ...prev, status: newStatusId as any }));

@@ -17,7 +17,11 @@ export async function getLeads(consultantId?: string, leadId?: string) {
 
     try {
         let query = supabase.from('leads').select('*');
-        if (consultantId) query = query.eq('assigned_consultant_id', consultantId);
+        if (consultantId) {
+            query = query.eq('assigned_consultant_id', consultantId)
+                         .neq('status', 'lost')
+                         .neq('status', 'lost_redistributed');
+        }
         if (leadId) query = query.eq('id', leadId);
         query = query.order('created_at', { ascending: false });
 
@@ -77,7 +81,11 @@ export async function getLeadByPhone(phone: string): Promise<Lead | null> {
 
 export async function getLeadsManos(consultantId?: string, leadId?: string) {
     let query = supabase.from('leads_manos_crm').select('*').order('created_at', { ascending: false });
-    if (consultantId) query = query.eq('assigned_consultant_id', consultantId);
+    if (consultantId) {
+        query = query.eq('assigned_consultant_id', consultantId)
+                     .neq('status', 'lost')
+                     .neq('status', 'lost_redistributed');
+    }
     if (leadId) {
         const realId = stripPrefix(leadId);
         const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -102,7 +110,11 @@ export async function getLeadsCRM26(consultantName?: string, includeSent: boolea
     let query = supabase.from('leads_distribuicao_crm_26').select('*');
     if (!showRedistributed) query = query.not('status', 'eq', 'lost_redistributed');
     query = query.order('criado_em', { ascending: false });
-    if (consultantName) query = query.ilike('vendedor', `%${consultantName.split(' ')[0]}%`);
+    if (consultantName) {
+        query = query.ilike('vendedor', `%${consultantName.split(' ')[0]}%`)
+                     .neq('status', 'lost')
+                     .neq('status', 'lost_redistributed');
+    }
     if (leadId && leadId.startsWith('crm26_')) query = query.eq('id', stripPrefix(leadId));
 
     const { data } = await query;
@@ -193,7 +205,8 @@ export async function createLead(leadData: Partial<Lead>) {
 
 export async function updateLeadStatus(leadId: string, status: LeadStatus, oldStatus?: LeadStatus, notes?: string, motivo_perda?: string, resumo_fechamento?: string) {
     const table = getTableForLead(leadId);
-    const realId = stripPrefix(leadId);
+    const realIdRaw = stripPrefix(leadId);
+    const realId = table === 'leads_distribuicao_crm_26' ? parseInt(realIdRaw) : realIdRaw;
     const now = new Date().toISOString();
     
     const updatePayload: any = {
@@ -223,7 +236,8 @@ export async function updateLeadStatus(leadId: string, status: LeadStatus, oldSt
 
 export async function updateLeadDetails(leadId: string, details: Partial<Lead>) {
     const table = getTableForLead(leadId);
-    const realId = stripPrefix(leadId);
+    const realIdRaw = stripPrefix(leadId);
+    const realId = table === 'leads_distribuicao_crm_26' ? parseInt(realIdRaw) : realIdRaw;
     const payload = table === 'leads_manos_crm' ? details : mapToCRM26(details);
     
     const { data, error } = await supabase.from(table).update({

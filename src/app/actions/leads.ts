@@ -4,6 +4,8 @@ import { createClient } from '@/lib/supabase/admin';
 import { LeadStatus, Lead, Sale, Purchase } from '@/lib/types';
 import { sendMetaConversion } from '@/lib/meta-service';
 import { dataService } from '@/lib/dataService';
+import { revalidatePath } from 'next/cache';
+import { cacheInvalidate } from '@/lib/services/cacheLayer';
 
 export async function updateLeadStatusAction(
     leadId: string,
@@ -23,13 +25,13 @@ export async function updateLeadStatusAction(
 
     if (leadId.startsWith('crm26_')) {
         table = 'leads_distribuicao_crm_26';
-        realId = leadId.replace('crm26_', '');
+        realId = parseInt(leadId.replace('crm26_', ''));
     } else if (leadId.startsWith('main_')) {
         table = 'leads_manos_crm';
         realId = leadId.replace('main_', '');
     } else if (leadId.startsWith('dist_')) {
         table = 'leads_distribuicao';
-        realId = leadId.replace('dist_', '');
+        realId = parseInt(leadId.replace('dist_', ''));
     }
 
     // REDISTRIBUTION TRIGGER LOGIC
@@ -99,6 +101,9 @@ export async function updateLeadStatusAction(
                 }
             }
 
+            cacheInvalidate('leads_');
+            revalidatePath('/', 'layout');
+            
             return { success: true, redistributed: true };
         } catch (err) {
             console.error("Redistribution trigger error:", err);
@@ -118,21 +123,63 @@ export async function updateLeadStatusAction(
     if (resumo_fechamento) updatePayload.resumo_fechamento = resumo_fechamento;
     if (notes) updatePayload.notas = notes;
 
-    const { error } = await adminClient
+    // Sincronizar marcador de status no resumo para leads CRM26 (Evita que o parser legado sobrescreva no refresh)
+    if (table === 'leads_distribuicao_crm_26') {
+        const { data: currentLead } = await adminClient.from(table).select('resumo').eq('id', realId).single();
+        let resumo = currentLead?.resumo || '';
+        const statusMarker = `[STATUS:${targetStatus}]`;
+        if (!resumo.includes('[STATUS:')) resumo += ` ${statusMarker}`;
+        else resumo = resumo.replace(/\[STATUS:.*?\]/, statusMarker);
+        
+        updatePayload.resumo = resumo;
+    }
+
+    const { data: updateData, error } = await adminClient
         .from(table)
         .update(updatePayload)
-        .eq('id', realId);
+        .eq('id', realId)
+        .select('id');
 
-    if (error) {
+    if (error || !updateData || updateData.length === 0) {
+        console.warn(`[updateLeadStatusAction] Falha na atualização primária (tabela: ${table}, id: ${realId}):`, error?.message || 'Zero rows affected');
+        
+        // --- FALLBACK 1: CRM26 Legacy ---
         if (table === 'leads_distribuicao_crm_26') {
-            const { data } = await adminClient.from(table).select('resumo').eq('id', realId).single();
-            let resumo = data?.resumo || '';
+            const { data: currentLead } = await adminClient.from(table).select('resumo').eq('id', realId).single();
+            let resumo = currentLead?.resumo || '';
             const statusMarker = `[STATUS:${targetStatus}]`;
+            
             if (!resumo.includes('[STATUS:')) resumo += ` ${statusMarker}`;
             else resumo = resumo.replace(/\[STATUS:.*?\]/, statusMarker);
-            await adminClient.from(table).update({ resumo, status: targetStatus }).eq('id', realId);
+            
+            const { error: fError, data: fData } = await adminClient
+                .from(table)
+                .update({ resumo, status: targetStatus, atualizado_em: now })
+                .eq('id', realId)
+                .select('id');
+
+            if (fError || !fData || fData.length === 0) {
+                console.error("[updateLeadStatusAction] Erro CRÍTICO: Lead CRM26 não encontrado.", { realId });
+                throw new Error(`Lead ${leadId} não encontrado.`);
+            }
+        } 
+        // --- FALLBACK 2: Transição V1 <-> V2 (UUIDs sem prefixo ou com prefixo trocado) ---
+        else if (table === 'leads_master' || table === 'leads_manos_crm') {
+            const otherTable = table === 'leads_master' ? 'leads_manos_crm' : 'leads_master';
+            console.log(`[updateLeadStatusAction] Tentando fallback na tabela secundária: ${otherTable}`);
+            
+            const { error: fError, data: fData } = await adminClient
+                .from(otherTable)
+                .update(updatePayload)
+                .eq('id', realId)
+                .select('id');
+
+            if (fError || !fData || fData.length === 0) {
+                throw new Error(`Falha ao persistir status do lead ${leadId}. O registro não foi encontrado em nenhuma tabela compatível (Master ou Manos).`);
+            }
+            console.log(`[updateLeadStatusAction] Sucesso no fallback (tabela: ${otherTable})`);
         } else {
-            await adminClient.from(table).update({ status: targetStatus }).eq('id', realId);
+            throw new Error(`Falha ao persistir status do lead ${leadId}. O registro pode ter sido excluído.`);
         }
     }
 
@@ -168,6 +215,11 @@ export async function updateLeadStatusAction(
             console.warn("Non-blocking Meta CAPI error:", metaErr);
         }
     }
+    
+    // ATENÇÃO: Limpa cache local da API Node e FORÇA o re-render da /pipeline do Next.js
+    // Invalidamos 'leads' e 'leads2' para cobrir V2 e CRM26
+    cacheInvalidate('leads_', 'leads2');
+    revalidatePath('/', 'layout');
 
     return { success: true };
 }
