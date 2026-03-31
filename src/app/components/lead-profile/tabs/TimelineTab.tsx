@@ -12,6 +12,7 @@ interface TimelineTabProps {
     isSavingNote: boolean;
     handleAddNote: () => void;
     isAnalyzing?: boolean;
+    loadingStatus?: 'idle' | 'analyzing' | 'matching' | 'finalizing';
     recalculateStrategy?: () => void;
 }
 

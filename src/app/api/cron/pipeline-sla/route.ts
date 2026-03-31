@@ -9,11 +9,35 @@ const supabase = createClient(
 
 export const maxDuration = 60;
 
+type SlaRow = { origem: string; stage: string; sla_hours: number };
+type SlaMap = Map<string, number>; // key: "origem|stage"
+
+/** Monta mapa de SLA por origem+etapa a partir da tabela sla_config */
+async function loadSlaMap(): Promise<SlaMap> {
+    const { data } = await supabase
+        .from('sla_config')
+        .select('origem, stage, sla_hours');
+    const map: SlaMap = new Map();
+    for (const row of (data as SlaRow[] || [])) {
+        map.set(`${row.origem}|${row.stage}`, row.sla_hours);
+    }
+    return map;
+}
+
+/** Retorna SLA em horas para uma origem+etapa, com fallback para 'default' e depois para constante */
+function getSlaHours(origem: string | null | undefined, stage: string, map: SlaMap): number {
+    const key = `${origem || ''}|${stage}`;
+    if (map.has(key)) return map.get(key)!;
+    const defKey = `default|${stage}`;
+    if (map.has(defKey)) return map.get(defKey)!;
+    return STAGE_SLA_HOURS[stage] ?? 24;
+}
+
 /**
  * GET /api/cron/pipeline-sla
  * Roda a cada 2h via Vercel Cron.
  * Detecta leads que excederam o SLA de cada etapa e cria alertas no Cowork IA.
- * Não gera alerta duplicado se já existe um alerta ativo para o mesmo lead+etapa.
+ * SLA é dinâmico por origem (tabela sla_config) com fallback para STAGE_SLA_HOURS.
  */
 export async function GET(request: Request) {
     const authHeader = request.headers.get('authorization');
@@ -25,10 +49,12 @@ export async function GET(request: Request) {
     let alertsCreated = 0;
 
     try {
+        const slaMap = await loadSlaMap();
+
         // Busca leads ativos no pipeline (não vendidos/perdidos)
         const { data: leads, error } = await supabase
             .from('leads_manos_crm')
-            .select('id, name, status, assigned_consultant_id, updated_at, vehicle_interest')
+            .select('id, name, status, assigned_consultant_id, updated_at, vehicle_interest, origem, source')
             .not('status', 'in', '("vendido","perdido","lost","comprado","lixo","duplicado","desqualificado")')
             .not('assigned_consultant_id', 'is', null);
 
@@ -61,7 +87,8 @@ export async function GET(request: Request) {
         for (const lead of leads) {
             // Normaliza o status para o id da etapa
             const stageId = normalizeToStageId(lead.status);
-            const slaHours = STAGE_SLA_HOURS[stageId];
+            const leadOrigem = lead.origem || lead.source || null;
+            const slaHours = getSlaHours(leadOrigem, stageId, slaMap);
 
             if (!slaHours) continue; // status fora do pipeline ativo
 

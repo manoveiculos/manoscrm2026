@@ -22,11 +22,23 @@ import { motion } from 'framer-motion';
 import Link from 'next/link';
 import { FinancialMetrics } from '@/lib/types';
 import { useAIAlerts } from '@/hooks/useAIAlerts';
+import { LeadProfileModalV2 } from './components/lead-profile/LeadProfileModalV2';
+import { Lead } from '@/lib/types';
+import { dataService } from '@/lib/dataService';
+import { supabase } from '@/lib/supabase';
 
 interface DashboardClientProps {
     metrics: FinancialMetrics;
     userName: string;
-    aiInsights: Array<{ title: string; desc: string; time: string; color: string }>;
+    consultantId?: string; // NOVO: ID dinâmico vindo da sessão
+    aiInsights: Array<{ 
+        title: string; 
+        desc: string; 
+        time: string; 
+        color: string;
+        leadId?: string;
+        leadName?: string;
+    }>;
     salesToTop: number;
 }
 
@@ -45,16 +57,84 @@ const PHRASES = [
     'O sucesso é a soma de pequenos esforços diários.',
 ];
 
-export default function DashboardClient({ metrics, userName, aiInsights, salesToTop }: DashboardClientProps) {
+export default function DashboardClient({ metrics, userName, consultantId, aiInsights, salesToTop }: DashboardClientProps) {
     const { count: aiCount } = useAIAlerts();
+    const [leads, setLeads] = useState<Lead[]>([]);
     const [phrase, setPhrase] = useState(PHRASES[new Date().getDate() % PHRASES.length]);
+    const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+    const [isLoadingLead, setIsLoadingLead] = useState(false);
 
     useEffect(() => {
         setPhrase(PHRASES[Math.floor(Math.random() * PHRASES.length)]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    // ── Métricas em strip ─────────────────────────────────────────────────────
+    const handleOpenLead = async (leadId?: string, leadName?: string) => {
+        if (!leadId && !leadName) return;
+        setIsLoadingLead(true);
+        try {
+            // REGRA DE OURO: A IA às vezes resume o UUID (ex: '287' ou '199')
+            const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+            const isUUID = leadId ? uuidRegex.test(leadId) : false;
+
+            let leadData = null;
+
+            // 1. TENTA BUSCA EXATA (UUID) - Prioridade Máxima
+            if (isUUID && leadId) {
+                const { data } = await supabase.from('leads_manos_crm').select('*').or(`id.eq.${leadId},lead_id.eq.${leadId}`).maybeSingle();
+                leadData = data;
+                if (!leadData) {
+                    const { data: masterData } = await supabase.from('leads_master').select('*').eq('id', leadId).maybeSingle();
+                    leadData = masterData;
+                }
+            }
+
+            // 2. TENTA BUSCA RESILIENTE (NOME + FRAGMENTO) - Onde o erro Fabio vs Bruno ocorria
+            if (!leadData) {
+                // Buscamos via VIEW 'leads' que é unificada e já filtrada por consultor se disponível
+                let query = supabase.from('leads').select('*');
+                
+                if (consultantId) {
+                    query = query.eq('assigned_consultant_id', consultantId);
+                }
+
+                const { data: allLeads } = await query;
+                
+                if (allLeads) {
+                    // PRIORIDADE 1: Match por ID exato (sempre prefira o exato)
+                    leadData = allLeads.find(l => leadId && (
+                        l.id === leadId || 
+                        (l as any).lead_id === leadId
+                    ));
+
+                    // PRIORIDADE 2: Match por NOME (Âncora de segurança absoluta para Fabio vs Nathalya)
+                    if (!leadData && leadName) {
+                        const searchName = leadName.split(' ')[0].toLowerCase();
+                        leadData = allLeads.find(l => l.name && l.name.toLowerCase().includes(searchName));
+                    }
+
+                    // PRIORIDADE 3: Match por fragmento de ID (Apenas se o nome falhar)
+                    // SEGURANÇA: Só aceita se for o INÍCIO do ID (evita Nathalya e Natasha no meio do UUID)
+                    if (!leadData && leadId && leadId.length >= 3) {
+                        leadData = allLeads.find(l => 
+                            l.id.toString().startsWith(leadId) ||
+                            ((l as any).lead_id && (l as any).lead_id.toString().startsWith(leadId))
+                        );
+                    }
+                }
+            }
+            
+            if (leadData) {
+                setSelectedLead(leadData as Lead);
+            } else {
+                console.warn("Lead não localizado:", { leadId, leadName });
+            }
+        } catch (error) {
+            console.error("Erro ao abrir lead:", error);
+        } finally {
+            setIsLoadingLead(false);
+        }
+    };
+
     const metricStrip = [
         { label: 'Leads Ativos', value: metrics.leadCount, icon: Users, color: 'blue' },
         { label: 'Vendas hoje', value: metrics.salesCount, icon: Target, color: 'red' },
@@ -67,13 +147,12 @@ export default function DashboardClient({ metrics, userName, aiInsights, salesTo
         },
     ];
 
-    // ── 8 atalhos rápidos ─────────────────────────────────────────────────────
     const shortcuts = [
         {
             label: 'Pipeline de Vendas',
             desc: 'Kanban do funil',
             icon: KanbanSquare,
-            href: '/v2/pipeline',
+            href: '/pipeline',
             badge: null,
             accent: 'red',
         },
@@ -81,7 +160,7 @@ export default function DashboardClient({ metrics, userName, aiInsights, salesTo
             label: 'Painel de Ações',
             desc: 'Cockpit IA',
             icon: Activity,
-            href: '/v2/pulse',
+            href: '/pulse',
             badge: aiCount > 0 ? aiCount : null,
             accent: 'amber',
         },
@@ -89,7 +168,7 @@ export default function DashboardClient({ metrics, userName, aiInsights, salesTo
             label: 'Central de Leads',
             desc: 'Todos os contatos',
             icon: Users,
-            href: '/v2/leads',
+            href: '/leads',
             badge: null,
             accent: 'blue',
         },
@@ -97,7 +176,7 @@ export default function DashboardClient({ metrics, userName, aiInsights, salesTo
             label: 'Follow-ups IA',
             desc: 'Alertas pendentes',
             icon: Bot,
-            href: '/v2/pulse',
+            href: '/pulse',
             badge: aiCount > 0 ? aiCount : null,
             accent: 'amber',
         },
@@ -105,7 +184,7 @@ export default function DashboardClient({ metrics, userName, aiInsights, salesTo
             label: 'Leads IA Hoje',
             desc: 'Score ≥ 70 ou Hot',
             icon: Brain,
-            href: '/v2/pipeline?filter=ai',
+            href: '/pipeline?filter=ai',
             badge: null,
             accent: 'purple',
         },
@@ -113,7 +192,7 @@ export default function DashboardClient({ metrics, userName, aiInsights, salesTo
             label: 'Risco de Churn',
             desc: 'Leads em risco',
             icon: AlertTriangle,
-            href: '/v2/pulse',
+            href: '/pulse',
             badge: null,
             accent: 'orange',
         },
@@ -121,7 +200,7 @@ export default function DashboardClient({ metrics, userName, aiInsights, salesTo
             label: 'Nova Proposta',
             desc: 'Gerar financiamento',
             icon: FileText,
-            href: '/v2/leads',
+            href: '/leads',
             badge: null,
             accent: 'emerald',
         },
@@ -129,7 +208,7 @@ export default function DashboardClient({ metrics, userName, aiInsights, salesTo
             label: 'Agenda',
             desc: 'Agendamentos hoje',
             icon: CalendarCheck,
-            href: '/v2/pipeline?filter=scheduled',
+            href: '/pipeline?filter=scheduled',
             badge: null,
             accent: 'sky',
         },
@@ -147,8 +226,6 @@ export default function DashboardClient({ metrics, userName, aiInsights, salesTo
 
     return (
         <div className="w-full space-y-8 pb-24 pt-0 px-2 md:px-8 flex flex-col items-start">
-
-            {/* ── Header compacto ────────────────────────────────────────────── */}
             <header className="w-full flex flex-col md:flex-row md:items-center justify-between gap-4 pt-2">
                 <div className="space-y-1">
                     <div className="flex items-center gap-2">
@@ -192,7 +269,6 @@ export default function DashboardClient({ metrics, userName, aiInsights, salesTo
                 </div>
             </header>
 
-            {/* ── Métricas em strip ─────────────────────────────────────────── */}
             <div className="w-full grid grid-cols-2 md:grid-cols-4 gap-3">
                 {metricStrip.map((m) => (
                     <div
@@ -208,7 +284,6 @@ export default function DashboardClient({ metrics, userName, aiInsights, salesTo
                 ))}
             </div>
 
-            {/* ── 8 atalhos rápidos ─────────────────────────────────────────── */}
             <div className="w-full">
                 <p className="text-[10px] font-black uppercase tracking-[0.25em] text-white/25 mb-3">Atalhos rápidos</p>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -244,7 +319,6 @@ export default function DashboardClient({ metrics, userName, aiInsights, salesTo
                 </div>
             </div>
 
-            {/* ── Sugestões da IA (compactas) ───────────────────────────────── */}
             <div className="w-full">
                 <div className="flex items-center justify-between mb-3">
                     <p className="text-[10px] font-black uppercase tracking-[0.25em] text-white/25 flex items-center gap-2">
@@ -257,25 +331,39 @@ export default function DashboardClient({ metrics, userName, aiInsights, salesTo
                 </div>
                 <div className="space-y-2">
                     {aiInsights.map((insight, i) => (
-                        <div
+                        <button
                             key={i}
-                            className={`flex items-start gap-3 px-4 py-3 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-white/[0.09] transition-colors`}
+                            onClick={() => handleOpenLead(insight.leadId, insight.leadName)}
+                            className={`w-full flex items-start text-left gap-3 px-4 py-3 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-red-500/30 hover:bg-white/[0.04] transition-all group disabled:opacity-50`}
+                            disabled={isLoadingLead}
                         >
-                            <ShieldCheck size={14} className={`text-${insight.color}-400 shrink-0 mt-0.5`} />
+                            <ShieldCheck size={14} className={`text-${insight.color}-400 shrink-0 mt-0.5 group-hover:scale-110 transition-transform`} />
                             <div className="min-w-0 flex-1">
                                 <div className="flex items-center gap-2 flex-wrap">
-                                    <span className="text-[12px] font-bold text-white truncate">{insight.title}</span>
+                                    <span className="text-[12px] font-bold text-white truncate group-hover:text-red-400 transition-colors">{insight.title}</span>
                                     <span className={`text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-${insight.color}-500/10 text-${insight.color}-400 shrink-0`}>
                                         {insight.time}
                                     </span>
+                                    {insight.leadId && (
+                                        <ArrowUpRight size={10} className="text-white/20 group-hover:text-red-500 ml-auto" />
+                                    )}
                                 </div>
                                 <p className="text-[11px] text-white/40 mt-0.5 leading-relaxed">{insight.desc}</p>
                             </div>
-                        </div>
+                        </button>
                     ))}
                 </div>
-            </div>
 
+                {selectedLead && (
+                    <LeadProfileModalV2 
+                        lead={selectedLead}
+                        userName={userName}
+                        onClose={() => setSelectedLead(null)}
+                        setLeads={setLeads}
+                        isManagement={false}
+                    />
+                )}
+            </div>
         </div>
     );
 }

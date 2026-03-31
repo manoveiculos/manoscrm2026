@@ -6,15 +6,54 @@ export const maxDuration = 120;
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+// SLA padrão de follow-up por estágio (fallback quando sla_config não tem registro)
+const DEFAULT_FOLLOWUP_SLA: Record<string, number> = {
+    ataque:      6,
+    triagem:     6,
+    fechamento:  3,
+    confirmed:   6,
+    scheduled:   6,
+    negotiation: 3,
+    proposed:    3,
+};
+
+type SlaRow = { origem: string; stage: string; followup_hours: number | null };
+type FollowupMap = Map<string, number>; // key: "origem|stage"
+
+async function loadFollowupMap(admin: ReturnType<typeof createClient>): Promise<FollowupMap> {
+    const { data } = await admin
+        .from('sla_config')
+        .select('origem, stage, followup_hours')
+        .not('followup_hours', 'is', null);
+    const map: FollowupMap = new Map();
+    for (const row of (data as SlaRow[] || [])) {
+        if (row.followup_hours !== null) {
+            map.set(`${row.origem}|${row.stage}`, row.followup_hours);
+        }
+    }
+    return map;
+}
+
+function getFollowupHours(origem: string | null | undefined, status: string, map: FollowupMap): number {
+    // Normaliza o status para o stage canônico
+    const stageMap: Record<string, string> = {
+        confirmed: 'ataque', scheduled: 'ataque',
+        negotiation: 'fechamento', proposed: 'fechamento',
+    };
+    const stage = stageMap[status] || status;
+    const key = `${origem || ''}|${stage}`;
+    if (map.has(key)) return map.get(key)!;
+    const defKey = `default|${stage}`;
+    if (map.has(defKey)) return map.get(defKey)!;
+    return DEFAULT_FOLLOWUP_SLA[status] ?? 6;
+}
+
 /**
  * GET /api/cron/followup-ai
  * Executa a cada 3 horas.
  * Para leads em estágios decisivos sem contato recente, gera mensagem de
  * reengajamento personalizada com GPT-4o mini e cria follow_up com type='ai_auto'.
- *
- * SLA de inatividade para trigger:
- *  - ataque / triagem: 6h
- *  - fechamento:       3h
+ * Janela de inatividade é dinâmica por origem (tabela sla_config).
  */
 export async function GET(request: Request) {
     const authHeader = request.headers.get('authorization');
@@ -28,23 +67,12 @@ export async function GET(request: Request) {
     let generated = 0;
     let skipped = 0;
 
-    // Estágios que merecem follow-up automático e seus SLAs (em horas)
-    const STAGE_SLA: Record<string, number> = {
-        ataque:     6,
-        triagem:    6,
-        fechamento: 3,
-        // aliases V1
-        confirmed:  6,
-        scheduled:  6,
-        negotiation: 3,
-        proposed:   3,
-    };
-
-    const activeStatuses = Object.keys(STAGE_SLA);
+    const followupMap = await loadFollowupMap(admin);
+    const activeStatuses = Object.keys(DEFAULT_FOLLOWUP_SLA);
 
     const { data: leads, error } = await admin
         .from('leads_manos_crm')
-        .select('id, name, vehicle_interest, proxima_acao, next_step, status, updated_at, assigned_consultant_id, valor_investimento, carro_troca')
+        .select('id, name, vehicle_interest, proxima_acao, next_step, status, updated_at, assigned_consultant_id, valor_investimento, carro_troca, origem, source')
         .in('status', activeStatuses)
         .order('updated_at', { ascending: true })
         .limit(30);
@@ -53,9 +81,10 @@ export async function GET(request: Request) {
         return NextResponse.json({ success: false, error: error.message }, { status: 500 });
     }
 
-    // Filtra apenas leads que ultrapassaram o SLA de inatividade
+    // Filtra apenas leads que ultrapassaram o SLA de inatividade (dinâmico por origem)
     const eligible = (leads || []).filter(l => {
-        const slaH = STAGE_SLA[l.status] ?? 6;
+        const leadOrigem = l.origem || l.source || null;
+        const slaH = getFollowupHours(leadOrigem, l.status, followupMap);
         const hoursInactive = (now - new Date(l.updated_at || 0).getTime()) / 3_600_000;
         return hoursInactive >= slaH;
     });
@@ -106,14 +135,14 @@ export async function GET(request: Request) {
                 status: 'pending',
             });
 
-            // Registra na timeline
-            await admin.from('interactions_manos_crm').insert({
+            // Registra na timeline (fire-and-forget)
+            void admin.from('interactions_manos_crm').insert({
                 lead_id: lead.id,
                 notes: `[IA AUTO] Follow-up gerado: "${msg}"`,
                 new_status: lead.status,
                 type: 'ai_followup',
                 created_at: new Date().toISOString(),
-            }).catch(() => {});
+            }).then(null, () => {});
 
             generated++;
             log.push(`✅ ${lead.name} (${lead.status}) → "${msg.slice(0, 60)}..."`);

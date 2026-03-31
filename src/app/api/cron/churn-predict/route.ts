@@ -1,13 +1,17 @@
 import { createClient } from '@/lib/supabase/admin';
 import { NextResponse } from 'next/server';
+import { OpenAI } from 'openai';
 
 export const maxDuration = 120;
+
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 /**
  * GET /api/cron/churn-predict
  * Executa diariamente às 06:00 UTC (03:00 BRT).
- * Calcula churn_probability para todos os leads ativos e notifica admin
- * quando um consultor está sobrecarregado (> 15 leads ativos).
+ * - Leads com ai_score >= 50: churn analisado por GPT-4o-mini (comportamental)
+ * - Leads com ai_score < 50: heurístico rápido (sem custo de API)
+ * Notifica admin quando consultor está sobrecarregado (> 15 leads ativos).
  */
 export async function GET(request: Request) {
     const authHeader = request.headers.get('authorization');
@@ -19,13 +23,14 @@ export async function GET(request: Request) {
     const now = Date.now();
     const log: string[] = [];
     let updated = 0;
+    let aiAnalyzed = 0;
 
     const ACTIVE_STATUSES = ['new', 'received', 'attempt', 'contacted', 'triagem', 'ataque',
         'confirmed', 'scheduled', 'negotiation', 'proposed', 'fechamento'];
 
     const { data: leads, error } = await admin
         .from('leads_manos_crm')
-        .select('id, status, updated_at, created_at, ai_score, ai_classification, assigned_consultant_id')
+        .select('id, nome, status, updated_at, created_at, ai_score, ai_classification, assigned_consultant_id, ai_summary, next_step, interesse, origem')
         .in('status', ACTIVE_STATUSES)
         .limit(500);
 
@@ -35,19 +40,85 @@ export async function GET(request: Request) {
 
     const allLeads = leads || [];
 
-    // Calcula churn_probability para cada lead
-    for (const lead of allLeads) {
-        const churn = calcChurn(lead, now);
+    // Separa leads quentes (ai_score >= 50) dos frios
+    const hotLeads = allLeads.filter(l => (Number(l.ai_score) || 0) >= 50);
+    const coldLeads = allLeads.filter(l => (Number(l.ai_score) || 0) < 50);
 
+    // Cold leads: heurístico puro (sem custo de API)
+    for (const lead of coldLeads) {
+        const churn = calcChurn(lead, now);
         await admin
             .from('leads_manos_crm')
             .update({ churn_probability: churn })
             .eq('id', lead.id);
-
         updated++;
     }
 
-    log.push(`📊 ${updated} leads atualizados com churn_probability`);
+    // Hot leads: análise comportamental via GPT-4o-mini em lotes de 8
+    const BATCH_SIZE = 8;
+    for (let i = 0; i < hotLeads.length; i += BATCH_SIZE) {
+        const batch = hotLeads.slice(i, i + BATCH_SIZE);
+
+        const analysisPromises = batch.map(async (lead) => {
+            const hoursInactive = Math.round(
+                (now - new Date(lead.updated_at || lead.created_at).getTime()) / 3_600_000
+            );
+            const heuristicScore = calcChurn(lead, now);
+
+            try {
+                const res = await openai.chat.completions.create({
+                    model: 'gpt-4o-mini',
+                    temperature: 0.2,
+                    response_format: { type: 'json_object' },
+                    messages: [
+                        {
+                            role: 'system',
+                            content: 'Você é um especialista em predição de churn de leads automotivos. Analise o perfil do lead e retorne APENAS um JSON com "churn_probability" (0-99) e "churn_reason" (string curta em pt-BR, máx 120 chars).'
+                        },
+                        {
+                            role: 'user',
+                            content: `Lead: ${lead.nome || 'Sem nome'}
+Status atual: ${lead.status}
+Horas sem interação: ${hoursInactive}h
+Score IA: ${lead.ai_score}%
+Classificação: ${lead.ai_classification || 'warm'}
+Interesse: ${lead.interesse || 'Não informado'}
+Origem: ${lead.origem || 'Não informada'}
+Resumo IA: ${lead.ai_summary || 'Sem resumo'}
+Próximo passo sugerido: ${lead.next_step || 'Não definido'}
+Score heurístico base: ${heuristicScore}
+
+Avalie o risco real de churn considerando o contexto comportamental. Retorne JSON: {"churn_probability": number, "churn_reason": "string"}`
+                        }
+                    ],
+                    max_tokens: 120,
+                }, { timeout: 15000 });
+
+                const parsed = JSON.parse(res.choices[0]?.message?.content || '{}');
+                return {
+                    id: lead.id,
+                    churn_probability: Math.max(0, Math.min(99, Math.round(Number(parsed.churn_probability) || heuristicScore))),
+                    churn_reason: String(parsed.churn_reason || '').slice(0, 120) || null,
+                };
+            } catch {
+                // Fallback para heurístico se a IA falhar
+                return { id: lead.id, churn_probability: heuristicScore, churn_reason: null };
+            }
+        });
+
+        const results = await Promise.all(analysisPromises);
+
+        for (const r of results) {
+            await admin
+                .from('leads_manos_crm')
+                .update({ churn_probability: r.churn_probability, churn_reason: r.churn_reason })
+                .eq('id', r.id);
+            updated++;
+            if (r.churn_reason) aiAnalyzed++;
+        }
+    }
+
+    log.push(`📊 ${updated} leads atualizados (${aiAnalyzed} com análise IA, ${updated - aiAnalyzed} heurístico)`);
 
     // 3.3 — DETECÇÃO DE CONSULTOR SOBRECARREGADO
     const OVERLOAD_THRESHOLD = 15;
@@ -100,11 +171,12 @@ export async function GET(request: Request) {
 }
 
 function calcChurn(lead: {
-    updated_at?: string;
+    updated_at?: string | null;
     created_at: string;
-    ai_score?: number;
-    ai_classification?: string;
+    ai_score?: number | null;
+    ai_classification?: string | null;
     status: string;
+    [key: string]: unknown;
 }, now: number): number {
     let score = 30;
 

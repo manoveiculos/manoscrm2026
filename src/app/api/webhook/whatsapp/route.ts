@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
+import { pickNextConsultant } from '@/lib/services/consultantService';
 
 // Handler para Verificação do Webhook (GET)
 export async function GET(req: NextRequest) {
@@ -34,6 +35,7 @@ export async function POST(req: NextRequest) {
         const senderName = payload.name || payload.pushName || 'Lead WhatsApp';
 
         if (!phoneRaw || !messageText) {
+            console.error(`[Webhook WA] Rejeitado: Campos obrigatórios faltando. Phone: ${phoneRaw}, Msg: ${messageText}`);
             return NextResponse.json({ success: false, error: 'Campos phone e message são obrigatórios' }, { status: 400 });
         }
 
@@ -41,6 +43,7 @@ export async function POST(req: NextRequest) {
         const cleanPhone = String(phoneRaw).replace(/\D/g, '');
 
         if (!cleanPhone) {
+            console.error(`[Webhook WA] Rejeitado: Telefone inválido pós-limpeza. Raw: ${phoneRaw}`);
             return NextResponse.json({ success: false, error: 'Telefone inválido' }, { status: 400 });
         }
 
@@ -74,6 +77,21 @@ export async function POST(req: NextRequest) {
 
         // 2. Cria o lead caso não exista
         if (!leadId) {
+            // ATRIBUIÇÃO AUTOMÁTICA (ROUND ROBIN)
+            let assignedId = null;
+            let assignedName = null;
+            
+            try {
+                const nextCons = await pickNextConsultant(senderName);
+                if (nextCons) {
+                    assignedId = nextCons.id;
+                    assignedName = nextCons.name;
+                    console.log(`[Webhook WA] Atribuindo novo lead ${senderName} para ${assignedName}`);
+                }
+            } catch (err) {
+                console.error('[Webhook WA] Erro na atribuição automática:', err);
+            }
+
             const { data: newLead, error: insertLeadError } = await supabase
                 .from('leads_distribuicao_crm_26')
                 .insert({
@@ -82,7 +100,10 @@ export async function POST(req: NextRequest) {
                     status: 'received',
                     origem: 'WhatsApp Ativo',
                     ai_classification: 'warm', // Classificação padrão até a IA atuar
-                    ai_score: 50
+                    ai_score: 50,
+                    assigned_consultant_id: assignedId,
+                    vendedor: assignedName, // Campo legado string
+                    primeiro_vendedor: assignedName // Rastreabilidade do primeiro dono
                 })
                 .select('id')
                 .single();
@@ -140,7 +161,17 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ success: true, lead_id: leadId, message: 'Processado com sucesso' });
 
     } catch (error: any) {
-        console.error('Webhook Error:', error);
+        const payloadStr = 'payload' in error ? JSON.stringify(error.payload || {}).slice(0, 500) : 'N/A';
+        const errorMsg = `[Webhook WA] Falha crítica: ${error.message}`;
+        console.error(errorMsg, error);
+        
+        try {
+            const fs = require('fs');
+            const logPath = 'c:/Users/Usuario/OneDrive/Documentos/crm-manos/webhook_errors.log';
+            const logEntry = `${new Date().toISOString()} - ${errorMsg} - payload: ${payloadStr}\n`;
+            fs.appendFileSync(logPath, logEntry);
+        } catch (e) {}
+
         return NextResponse.json({ success: false, error: 'Erro interno no webhook', details: error.message }, { status: 500 });
     }
 }

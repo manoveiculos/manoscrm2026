@@ -20,6 +20,7 @@ import {
 import { createClient } from '@/lib/supabase/client';
 import { getConsultantPerformance } from '@/lib/services/analyticsService';
 import { adminUpdateUserEmail, adminUpdateUserPassword, adminDeleteUser } from '@/app/actions/admin-auth';
+import { ConsultantDashboard } from '@/components/ConsultantDashboard';
 
 interface Consultant {
     id: string; // Consultant DB ID
@@ -47,6 +48,7 @@ export default function TeamManagementPage() {
     const [newEmail, setNewEmail] = useState('');
     const [newPass, setNewPass] = useState('');
     const [confirmPass, setConfirmPass] = useState('');
+    const [showPerformanceModal, setShowPerformanceModal] = useState(false);
     const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error', text: string } | null>(null);
 
     const fetchData = async () => {
@@ -183,7 +185,11 @@ export default function TeamManagementPage() {
                         <motion.div 
                             key={c.id} 
                             variants={itemVariants}
-                            className={`group relative bg-white/[0.03] border border-white/[0.08] rounded-2xl p-5 hover:bg-white/[0.05] hover:border-white/[0.15] transition-all cursor-default ${!c.is_active ? 'opacity-60 grayscale' : ''}`}
+                            onClick={() => {
+                                setSelectedConsultant(c);
+                                setShowPerformanceModal(true);
+                            }}
+                            className={`group relative bg-white/[0.03] border border-white/[0.08] rounded-2xl p-5 hover:bg-white/[0.05] hover:border-red-500/30 transition-all cursor-pointer ${!c.is_active ? 'opacity-60 grayscale' : ''}`}
                         >
                             <div className="flex items-start justify-between mb-4">
                                 <div className="flex items-center gap-4">
@@ -220,7 +226,8 @@ export default function TeamManagementPage() {
                             {/* Actions Overlay */}
                             <div className="flex items-center gap-2 pt-4 border-t border-white/[0.05]">
                                 <button 
-                                    onClick={() => {
+                                    onClick={(e) => {
+                                        e.stopPropagation();
                                         setSelectedConsultant(c);
                                         setEditMode('email');
                                         setNewEmail(c.email);
@@ -232,7 +239,8 @@ export default function TeamManagementPage() {
                                     E-mail
                                 </button>
                                 <button 
-                                    onClick={() => {
+                                    onClick={(e) => {
+                                        e.stopPropagation();
                                         setSelectedConsultant(c);
                                         setEditMode('password');
                                         setNewPass('');
@@ -245,7 +253,8 @@ export default function TeamManagementPage() {
                                     Senha
                                 </button>
                                 <button 
-                                    onClick={() => {
+                                    onClick={(e) => {
+                                        e.stopPropagation();
                                         setSelectedConsultant(c);
                                         setEditMode('delete');
                                         setShowEditModal(true);
@@ -377,6 +386,52 @@ export default function TeamManagementPage() {
                                         </div>
                                     </div>
                                 )}
+                            </div>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
+
+            {/* Modal de Performance do Consultor (Para Admin) */}
+            <AnimatePresence>
+                {showPerformanceModal && selectedConsultant && (
+                    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 sm:p-6">
+                        <motion.div 
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            onClick={() => setShowPerformanceModal(false)}
+                            className="absolute inset-0 bg-black/90 backdrop-blur-md"
+                        />
+                        <motion.div 
+                            initial={{ opacity: 0, scale: 0.98, y: 10 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.98, y: 10 }}
+                            className="relative w-full max-w-6xl max-h-[90vh] bg-[#0a0a0c] border border-white/10 rounded-[2.5rem] overflow-hidden shadow-2xl flex flex-col"
+                        >
+                            <div className="flex items-center justify-between p-6 border-b border-white/5 bg-white/[0.02]">
+                                <div className="flex items-center gap-4">
+                                    <div className="h-10 w-10 rounded-xl bg-red-500 flex items-center justify-center text-white font-black">
+                                        {selectedConsultant.name[0]}
+                                    </div>
+                                    <div>
+                                        <h2 className="text-xl font-bold uppercase tracking-tight">{selectedConsultant.name}</h2>
+                                        <p className="text-[10px] font-black text-white/30 uppercase tracking-[0.2em]">{selectedConsultant.email}</p>
+                                    </div>
+                                </div>
+                                <button 
+                                    onClick={() => setShowPerformanceModal(false)}
+                                    className="h-10 w-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center hover:bg-white/10 transition-all"
+                                >
+                                    <XCircle size={20} className="text-white/40" />
+                                </button>
+                            </div>
+                            
+                            <div className="flex-1 overflow-y-auto p-6 sm:p-10 custom-scrollbar">
+                                <ConsultantDashboard 
+                                    consultantId={selectedConsultant.id} 
+                                    consultantName={selectedConsultant.name} 
+                                />
                             </div>
                         </motion.div>
                     </div>

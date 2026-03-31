@@ -1,0 +1,310 @@
+import { createClient } from '@supabase/supabase-js';
+import { OpenAI } from 'openai';
+import { getAIContext } from '@/lib/services/aiFeedbackService';
+import { generateLeadStrategy, LeadAnalysisPayload } from '@/lib/services/leadStrategyService';
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+
+const openai = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+});
+
+export interface ScriptOption {
+    tipo: 'cobrança' | 'agendamento' | 'contorno';
+    label: string;
+    mensagem: string;
+}
+
+export interface AnalysisResult {
+    success: boolean;
+    diagnostico: string;
+    orientacao: string;
+    scriptWhatsApp: string;
+    scriptOptions: ScriptOption[];
+    urgencyScore: number;
+    temperature: string;
+    modelUsed: string;
+}
+
+export async function runEliteCloser(leadId: string, messages: any[] = [], consultantName?: string): Promise<AnalysisResult> {
+    let table = 'leads_manos_crm';
+    let cleanId = leadId.replace(/^(main_|crm26_|dist_|lead_|crm25_|master_)/, '');
+
+    if (leadId.startsWith('crm26_')) {
+        table = 'leads_distribuicao_crm_26';
+    } else if (leadId.startsWith('main_')) {
+        table = 'leads_manos_crm';
+    } else if (!leadId.includes('-')) {
+        // IDs sem hífen costumam ser master (v1)
+        table = 'leads_master';
+    }
+
+    // 1. Fetch Lead Details & Inventory
+    const [{ data: lead }, { data: inventory }] = await Promise.all([
+        supabaseAdmin.from(table).select('*').eq('id', cleanId).maybeSingle(),
+        supabaseAdmin.from('inventory_manos_crm')
+            .select('id, marca, modelo, ano, preco, km, cambio, combustivel, status')
+            .not('status', 'eq', 'vendido')
+            .limit(50)
+    ]);
+
+    if (!lead) throw new Error('Lead não encontrado para análise');
+
+    const consultor = consultantName || 'Consultor Especialista';
+    const feedbackContext = await getAIContext(cleanId).catch(() => '');
+    const leadScore = lead.ai_score || 0;
+    const isHot = leadScore >= 50 || leadScore === 0;
+
+    // MEMÓRIA DE AÇÕES — busca análises anteriores para NÃO repetir
+    let memoriaAcoes = '';
+    try {
+        const isUUIDCheck = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(cleanId);
+        const { data: prevAnalyses } = await supabaseAdmin
+            .from('interactions_manos_crm')
+            .select('notes, created_at')
+            .eq(isUUIDCheck ? 'lead_id' : 'lead_id_v1', cleanId)
+            .eq('type', 'ai_analysis')
+            .order('created_at', { ascending: false })
+            .limit(5);
+
+        if (prevAnalyses && prevAnalyses.length > 0) {
+            const acoes = prevAnalyses.map((a: any) => {
+                const dateStr = new Date(a.created_at).toLocaleDateString('pt-BR');
+                // Extrai apenas a linha de orientação de cada análise anterior
+                const match = (a.notes || '').match(/→ ORIENTAÇÃO:\s*(.+)/);
+                const ori = match?.[1]?.trim() || '';
+                if (!ori) return null;
+                return `[${dateStr}] ${ori.slice(0, 150)}`;
+            }).filter(Boolean);
+
+            if (acoes.length > 0) {
+                memoriaAcoes = `\n\nHISTÓRICO DE AÇÕES JÁ RECOMENDADAS (NÃO REPITA — proponha abordagem DIFERENTE):\n${acoes.join('\n')}`;
+            }
+        }
+    } catch { /* silencioso */ }
+
+    let diagnostico = '';
+    let orientacao = '';
+    let scriptWhatsApp = '';
+    let urgencyScore = 0;
+    let temperature = 'morno';
+    let modelUsed = 'gpt-4o-mini';
+
+    // CAMINHO A: Claude (leads quentes com histórico)
+    if (messages.length > 0 && isHot) {
+        try {
+            const payload: LeadAnalysisPayload = {
+                lead_id: cleanId,
+                lead_name: lead.nome || lead.name || 'Cliente',
+                interesse: lead.interesse || lead.vehicle_interest || '',
+                investimento: lead.valor_investimento || null,
+                troca: lead.carro_troca || null,
+                historico_whatsapp: messages.map((m: any) => ({
+                    direction: m.direction as 'inbound' | 'outbound',
+                    content: m.content || m.message_text || '',
+                    created_at: m.created_at,
+                })),
+                notas_consultor: [feedbackContext, memoriaAcoes].filter(Boolean).join('\n\n') || '',
+                ultimo_contato: lead.updated_at || null,
+                estoque_disponivel: inventory || [],
+                consultant_name: consultor,
+                lead_status: lead.status || '',
+            };
+
+            const claudeResult = await generateLeadStrategy(payload);
+            diagnostico = claudeResult.analise_perfil;
+            orientacao = claudeResult.proxima_acao_imediata;
+            scriptWhatsApp = claudeResult.script_whatsapp;
+            urgencyScore = Math.min(99, Math.max(1, claudeResult.probabilidade_fechamento || 50));
+            temperature = urgencyScore >= 70 ? 'hot' : urgencyScore >= 40 ? 'warm' : 'cold';
+            modelUsed = 'claude';
+        } catch (e) {
+            console.warn('[AI Service] Claude falhou, tentando GPT-4o:', e);
+        }
+    }
+
+    // CAMINHO B: GPT-4o (Backup ou Frio)
+    if (!diagnostico) {
+        const hoursInactive = Math.round(
+            (Date.now() - new Date(lead.updated_at || lead.created_at).getTime()) / 3_600_000
+        );
+
+        const inventorySummary = (inventory || [])
+            .slice(0, 20)
+            .map((i: any) => `- ${i.marca} ${i.modelo} ${i.ano} | R$ ${Number(i.preco).toLocaleString('pt-BR')} | ${i.km ? i.km + 'km' : 'km n/d'} | ${i.cambio || ''} ${i.combustivel || ''}`)
+            .join('\n');
+
+        // Contexto comportamental (behavioral_profile é JSONB)
+        let behavioralCtx = '';
+        if (lead.behavioral_profile) {
+            try {
+                const bp = typeof lead.behavioral_profile === 'string'
+                    ? JSON.parse(lead.behavioral_profile)
+                    : lead.behavioral_profile;
+                if (bp && typeof bp === 'object') {
+                    behavioralCtx = `
+PERFIL COMPORTAMENTAL:
+- Sentimento: ${bp.sentiment || 'neutro'}
+- Urgência: ${bp.urgency || 'baixa'}
+- Intenções detectadas: ${Array.isArray(bp.intentions) ? bp.intentions.slice(0,3).join(', ') : bp.intentions || 'não mapeado'}
+- Probabilidade de fechamento (IA): ${bp.closing_probability || 0}%`;
+                }
+            } catch { /* behavioral_profile inválido — ignora */ }
+        }
+
+        // Buscar últimas interações quando sem mensagens WhatsApp
+        let recentInteractions = '';
+        if (messages.length === 0) {
+            try {
+                const { data: interactions } = await supabaseAdmin
+                    .from('interactions_manos_crm')
+                    .select('type, notes, created_at')
+                    .eq('lead_id', cleanId)
+                    .order('created_at', { ascending: false })
+                    .limit(4);
+                if (interactions && interactions.length > 0) {
+                    recentInteractions = '\nÚLTIMAS INTERAÇÕES NO CRM:\n' + interactions.map((i: any) =>
+                        `[${new Date(i.created_at).toLocaleDateString('pt-BR')}] ${i.type}: ${(i.notes || '').replace(/\[.*?\]\s*/g, '').slice(0, 150)}`
+                    ).join('\n');
+                }
+            } catch { /* silencioso */ }
+        }
+
+        const chatText = messages.length > 0
+            ? messages.slice(-30).map((m: any) =>
+                `[${m.created_at ? new Date(m.created_at).toLocaleString('pt-BR') : 'Agora'}] ${m.direction === 'inbound' ? '👤 CLIENTE' : '🟢 VENDEDOR'}: ${m.content || m.message_text || ''}`
+              ).join('\n')
+            : 'Nenhuma mensagem WhatsApp sincronizada.';
+
+        const prompt = `Você é o Especialista Elite de Vendas da Manos Veículos (Rio do Sul/SC). Faça uma análise CIRÚRGICA deste lead e responda em JSON.
+
+DADOS DO LEAD:
+- Nome: ${lead.nome || lead.name}
+- Interesse: ${lead.interesse || lead.vehicle_interest || 'não informado'}
+- Investimento: ${lead.valor_investimento || 'não informado'}
+- Troca: ${lead.carro_troca || 'não informado'}
+- Status atual: ${lead.status || 'não informado'}
+- Origem: ${lead.origem || lead.source || 'não informado'}
+- Score IA atual: ${lead.ai_score || 0}%
+- Risco de abandono (churn): ${lead.churn_probability || 0}%
+- Inativo há: ${hoursInactive}h
+${behavioralCtx}
+
+HISTÓRICO DE CONVERSA:
+${chatText}
+${recentInteractions}
+
+ESTOQUE DISPONÍVEL:
+${inventorySummary || 'Nenhum veículo no estoque no momento.'}
+${memoriaAcoes}
+
+MISSÃO:
+1. Diagnostique a situação REAL do lead (o que está travando, qual a objeção provável, nível de interesse verdadeiro)
+2. Dê uma orientação tática ESPECÍFICA e DIFERENTE das anteriores para o consultor fechar ou avançar o lead HOJE (canal, horário, argumento inédito)
+3. Escreva um script WhatsApp de 2-3 frases que o consultor pode copiar e enviar AGORA
+4. Se há histórico de ações anteriores que não funcionaram, mude o canal (ex: ligação em vez de WhatsApp) ou o argumento
+4. Calcule score de 0-100 baseado no comportamento, não no status
+
+Retorne JSON: { "diagnostico": "texto preciso em 2-3 frases", "orientacao": "ação específica com horário/canal", "script": "mensagem WhatsApp pronta", "score": 0-100 }`;
+
+        const response = await openai.chat.completions.create({
+            model: isHot ? 'gpt-4o' : 'gpt-4o-mini',
+            messages: [
+                { role: 'system', content: 'Você é um mestre fechador de vendas de veículos. Analise friamente os dados e dê orientação cirúrgica. Sem rodeios. Responda APENAS com JSON válido.' },
+                { role: 'user', content: prompt }
+            ],
+            response_format: { type: 'json_object' },
+            temperature: 0.25,
+            max_tokens: 600,
+        });
+
+        const iaResult = JSON.parse(response.choices[0]?.message?.content || '{}');
+        diagnostico = iaResult.diagnostico || '';
+        orientacao = iaResult.orientacao || '';
+        scriptWhatsApp = iaResult.script || '';
+        urgencyScore = Math.min(99, Math.max(1, Number(iaResult.score) || 50));
+        temperature = urgencyScore >= 70 ? 'hot' : urgencyScore >= 40 ? 'warm' : 'cold';
+        modelUsed = isHot ? 'gpt-4o' : 'gpt-4o-mini';
+    }
+
+    // GERAR 3 OPÇÕES DE SCRIPT (cobrança, agendamento, contorno)
+    const leadFirstName = (lead.nome || lead.name || 'Cliente').split(' ')[0];
+    const vehicleInterest = lead.interesse || lead.vehicle_interest || 'veículo de interesse';
+    let scriptOptions: ScriptOption[] = [];
+
+    try {
+        const scriptRes = await openai.chat.completions.create({
+            model: 'gpt-4o-mini',
+            temperature: 0.4,
+            response_format: { type: 'json_object' },
+            messages: [{
+                role: 'system',
+                content: 'Você é um especialista em vendas automotivas da Manos Veículos. Gere scripts de WhatsApp curtos, diretos, sem gerundismo e sem "tudo bem?". Retorne APENAS JSON válido.'
+            }, {
+                role: 'user',
+                content: `Cliente: ${leadFirstName} | Interesse: ${vehicleInterest} | Diagnóstico: ${diagnostico || 'Lead sem histórico'} | Score: ${urgencyScore}%
+
+Gere 3 mensagens prontas para o consultor copiar e enviar agora. Cada uma com no máximo 2 frases. Comece sempre pelo primeiro nome.
+
+JSON: {
+  "cobranca": "mensagem para retomar contato sem soar desesperado",
+  "agendamento": "mensagem para propor uma visita ou ligação específica",
+  "contorno": "mensagem para contornar a principal objeção e criar urgência"
+}`
+            }],
+            max_tokens: 300,
+        }, { timeout: 12000 });
+
+        const parsed = JSON.parse(scriptRes.choices[0]?.message?.content || '{}');
+        scriptOptions = ([
+            { tipo: 'cobrança' as const,    label: 'Retomar contato',  mensagem: String(parsed.cobranca   || '').slice(0, 200) },
+            { tipo: 'agendamento' as const, label: 'Propor visita',     mensagem: String(parsed.agendamento || '').slice(0, 200) },
+            { tipo: 'contorno' as const,    label: 'Contornar objeção', mensagem: String(parsed.contorno   || '').slice(0, 200) },
+        ] as ScriptOption[]).filter(s => s.mensagem.length > 5);
+    } catch {
+        // Fallback: scripts genéricos baseados nos dados do lead
+        scriptOptions = [
+            { tipo: 'cobrança' as const,    label: 'Retomar contato',  mensagem: `${leadFirstName}, ainda tenho aquele ${vehicleInterest} reservado. Posso te mostrar as condições agora?` },
+            { tipo: 'agendamento' as const, label: 'Propor visita',     mensagem: `${leadFirstName}, que tal vir amanhã dar uma olhada no ${vehicleInterest}? Tenho horário pela manhã.` },
+            { tipo: 'contorno' as const,    label: 'Contornar objeção', mensagem: `${leadFirstName}, entendo a dúvida. Mas essa oportunidade no ${vehicleInterest} não vai durar — te ligo agora para explicar.` },
+        ];
+    }
+
+    // PERSISTÊNCIA
+    const timestamp = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+    const timelineNote = `[${timestamp}] 🤖 ANÁLISE ${modelUsed.toUpperCase()}:\n${diagnostico}\n\nORIENTAÇÃO: ${orientacao}`;
+
+    const updateData: any = {
+        [table === 'leads_distribuicao_crm_26' ? 'resumo_consultor' : 'ai_reason']: `${diagnostico} | ORIENTAÇÃO: ${orientacao}`,
+        [table === 'leads_distribuicao_crm_26' ? 'resumo' : 'ai_summary']: timelineNote + (lead?.ai_summary || lead?.resumo || ''),
+        ai_score: urgencyScore,
+        ai_classification: temperature as any,
+        next_step: scriptWhatsApp,
+        proxima_acao: scriptWhatsApp,
+    };
+
+    await supabaseAdmin.from(table).update(updateData).eq('id', cleanId);
+
+    // REGISTRO NA TIMELINE como ai_analysis (aparece no filtro "Orientação IA")
+    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(cleanId);
+    await supabaseAdmin.from('interactions_manos_crm').insert({
+        [isUUID ? 'lead_id' : 'lead_id_v1']: cleanId,
+        type: 'ai_analysis',
+        notes: `🧠 ANÁLISE ELITE CLOSER (${modelUsed.toUpperCase()}):\n\n${diagnostico}\n\n→ ORIENTAÇÃO: ${orientacao}\n\n📱 SCRIPT: ${scriptWhatsApp}`,
+        created_at: new Date().toISOString(),
+        user_name: 'SISTEMA (IA)'
+    });
+
+    return {
+        success: true,
+        diagnostico,
+        orientacao,
+        scriptWhatsApp,
+        scriptOptions,
+        urgencyScore,
+        temperature,
+        modelUsed
+    };
+}

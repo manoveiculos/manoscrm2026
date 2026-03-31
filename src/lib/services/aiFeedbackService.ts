@@ -1,4 +1,11 @@
-import { supabaseAdmin as supabase } from '@/lib/supabase';
+import { createClient } from '@supabase/supabase-js';
+
+// Cliente admin seguro para uso server-side (API routes / crons)
+const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { persistSession: false, autoRefreshToken: false } }
+);
 
 const CAT_NAMES: Record<string, string> = {
     'score_alto_demais': 'IA inflando score de leads desengajados',

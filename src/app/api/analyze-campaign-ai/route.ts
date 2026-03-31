@@ -118,7 +118,8 @@ RESPONDA APENAS NESTE FORMATO JSON (TODOS os campos são obrigatórios):
 }`
                 }
             ],
-            response_format: { type: "json_object" }
+            response_format: { type: "json_object" },
+            temperature: 0.3
         });
 
         const output = response.choices[0]?.message?.content;

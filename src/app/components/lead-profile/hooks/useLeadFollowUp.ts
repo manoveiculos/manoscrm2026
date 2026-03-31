@@ -90,14 +90,14 @@ export function useLeadFollowUp(lead: any, activeTab: string, userName: string) 
         }
     }, [lead, followUpForm, userName, fetchFollowUps]);
 
-    const handleCompleteFollowUp = useCallback(async () => {
+    const handleCompleteFollowUp = useCallback(async (result: 'positive' | 'neutral' | 'negative' = 'positive') => {
         if (!selectedFollowUpId) return;
         setLoadingFollowUps(true);
         try {
             const fu = historicoFollowUps.find(f => f.id === selectedFollowUpId) || proximoFollowUp;
             if (!fu) return;
 
-            await leadService.followUp.completeFollowUp(undefined, selectedFollowUpId, 'positive', completionNote);
+            await leadService.followUp.completeFollowUp(undefined, selectedFollowUpId, result, completionNote);
 
             const cleanId = cleanUUID(lead.id);
             if (cleanId) {
@@ -128,6 +128,21 @@ export function useLeadFollowUp(lead: any, activeTab: string, userName: string) 
         }
     }, [lead, selectedFollowUpId, historicoFollowUps, proximoFollowUp, completionNote, userName, fetchFollowUps, supabase]);
 
+    const handleSaveCallLog = useCallback(async (note: string): Promise<void> => {
+        const cleanId = cleanUUID(lead.id);
+        if (!cleanId) return;
+        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(cleanId);
+        const timestamp = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+        await supabase.from('interactions_manos_crm').insert({
+            [isUUID ? 'lead_id' : 'lead_id_v1']: cleanId,
+            type: 'call',
+            notes: `[${userName || 'CONSULTOR'}] LIGAÇÃO EFETUADA (${timestamp}):\n${note || 'Sem observações.'}`,
+            created_at: new Date().toISOString(),
+            user_name: userName || 'Consultor',
+        });
+        window.dispatchEvent(new CustomEvent('update-lead-timeline', { detail: lead.id }));
+    }, [lead, userName, supabase]);
+
     return {
         proximoFollowUp,
         historicoFollowUps,
@@ -144,6 +159,7 @@ export function useLeadFollowUp(lead: any, activeTab: string, userName: string) 
         setFollowUpForm,
         handleCreateFollowUp,
         handleCompleteFollowUp,
+        handleSaveCallLog,
         refresh: fetchFollowUps
     };
 }

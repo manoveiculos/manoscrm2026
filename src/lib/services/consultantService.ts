@@ -83,8 +83,27 @@ export async function assignConsultant(leadId: string, consultantId: string) {
     if (table === 'leads_manos_crm') {
         await logHistory(realId, 'contacted', undefined, `Lead ${consultantId ? 'atribuído para ' + consultantName : 'desatribuído'} manualmente.`);
     }
+
+    if (consultantId) {
+        await markConsultantAsAssigned(consultantId);
+    }
     
     cacheInvalidate('leads_');
+}
+
+export async function markConsultantAsAssigned(consultantId: string) {
+    if (!consultantId) return;
+    
+    const { error } = await supabase
+        .from('consultants_manos_crm')
+        .update({ last_lead_assigned_at: new Date().toISOString() })
+        .eq('id', consultantId);
+
+    if (error) {
+        console.error("Error updating consultant assignment timestamp:", error);
+    } else {
+        cacheInvalidate('consultants_all');
+    }
 }
 
 
@@ -184,84 +203,32 @@ export async function resolveConsultantIdByName(name: string): Promise<string | 
     return exactMatch ? exactMatch.id : consultants[0].id;
 }
 
-export async function getConsultantMetrics(consultantId: string) {
-    const now = new Date();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+import { getFinancialMetrics as getUnifiedMetrics } from './analyticsService';
 
-    const { data: consultant } = await supabase
-        .from('consultants_manos_crm')
-        .select('name')
-        .eq('id', consultantId)
-        .single();
+// ... (outras funções dadas)
 
-    let totalLeads = 0;
-    let statusCounts: Record<string, number> = {};
+export async function getConsultantMetrics(consultantId: string, period: 'today' | 'week' | 'month' | 'all' = 'month') {
+    const periodMap: Record<string, 'today' | 'this_week' | 'this_month' | 'all'> = {
+        'today': 'today',
+        'week': 'this_week',
+        'month': 'this_month',
+        'all': 'all'
+    };
 
-    if (consultantId) {
-        const { data: leads26 } = await supabase
-            .from('leads_distribuicao_crm_26')
-            .select('status, resumo, nome, telefone')
-            .eq('assigned_consultant_id', consultantId);
+    const metrics = await getUnifiedMetrics({
+        period: periodMap[period],
+        consultantId
+    });
 
-        if (leads26) {
-            const validLeads = (leads26 as any[]).filter(l => l.nome && l.nome.trim() !== '' && l.telefone && l.telefone.trim() !== '');
-            totalLeads = validLeads.length;
-            validLeads.forEach(l => {
-                let status = l.status || (l.resumo?.match(/\[STATUS:(.*?)\]/)?.[1]) || 'received';
-                statusCounts[status] = (statusCounts[status] || 0) + 1;
-            });
-        }
-    }
-
-    const { data: salesMonth } = await supabase
-        .from('sales_manos_crm')
-        .select('sale_value, profit_margin')
-        .eq('consultant_id', consultantId)
-        .gte('created_at', startOfMonth);
-
-    const { data: salesAll } = await supabase
-        .from('sales_manos_crm')
-        .select('sale_value, profit_margin')
-        .eq('consultant_id', consultantId);
-
-    const salesCount = salesMonth?.length || 0;
-    const totalRevenue = salesAll?.reduce((acc, s) => acc + (Number(s.sale_value) || 0), 0) || 0;
-    const monthlyRevenue = salesMonth?.reduce((acc, s) => acc + (Number(s.sale_value) || 0), 0) || 0;
-
-    const conversionRate = totalLeads > 0 ? (salesCount / totalLeads) * 100 : 0;
-
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    let scheduledLeads: any[] = [];
-    if (consultantId) {
-        const { data: crm26Scheduled } = await supabase
-            .from('leads_distribuicao_crm_26')
-            .select('*')
-            .eq('assigned_consultant_id', consultantId)
-            .neq('resumo', null)
-            .ilike('resumo', '%STATUS:scheduled%');
-
-        if (crm26Scheduled) {
-            scheduledLeads = crm26Scheduled.map(item => ({
-                id: `crm26_${item.id}`,
-                name: item.nome,
-                phone: item.telefone,
-                vehicle_interest: item.interesse || '',
-                status: 'scheduled',
-                ai_summary: (item.resumo || '').split('||IA_DATA||')[0].replace(/\[STATUS:.*?\]\s*/g, ''),
-                scheduled_at: new Date().toISOString()
-            }));
-        }
-    }
-
+    // Formatar para o contrato esperado pelo ConsultantDashboard
     return {
-        leadCount: totalLeads,
-        salesCount,
-        totalRevenue,
-        monthlyRevenue,
-        conversionRate,
-        statusCounts: statusCounts || {},
-        scheduledLeads: scheduledLeads || []
+        leadCount: metrics.leadCount,
+        salesCount: metrics.salesCount,
+        totalRevenue: metrics.totalRevenue,
+        monthlyRevenue: metrics.totalRevenue, // No contexto unificado, totalRevenue respeita o período
+        conversionRate: metrics.conversionRate,
+        statusCounts: metrics.funnelData || {},
+        scheduledLeads: metrics.tactical?.scheduled_leads || [],
+        avgResponseMin: metrics.avgResponseTime || 0
     };
 }

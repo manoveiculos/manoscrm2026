@@ -23,16 +23,17 @@ export const metricsService = {
     ): Promise<FinancialMetrics> {
         const mappedPeriod = period === 'daily' ? 'today' : 'this_month';
         
+        // Fonte Única da Verdade: Todas as métricas vêm do analyticsService (Fase 3)
         const metrics = await getFinancialMetrics({
             period: mappedPeriod,
             consultantId
         });
 
-        // Garantir mapeamento para o tipo esperado pela V1/Dashboard Legado
+        // Mapeamento estrito para o dashboard
         return {
             leadCount: metrics.leadCount,
             salesCount: metrics.salesCount,
-            inventoryCount: metrics.inventoryCount, // Novo campo real
+            inventoryCount: metrics.inventoryCount,
             totalSpend: 0,
             totalRevenue: metrics.totalRevenue,
             totalProfit: metrics.totalProfit,

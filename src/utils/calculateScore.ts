@@ -10,6 +10,10 @@ interface ScoreInput {
 }
 
 export function calculateLeadScore(input: ScoreInput): number {
+  // REGRA INEGOCIÁVEL: Se PERDIDO ou VENDIDO, retorna direto (são estados finais)
+  if (input.status === 'perdido') return 0;
+  if (input.status === 'vendido') return 100;
+
   let score = 0;
 
   // 1. BASE POR STATUS (peso mais alto — 40 pontos max)
@@ -18,14 +22,8 @@ export function calculateLeadScore(input: ScoreInput): number {
     'triagem': 35,
     'ataque': 55,
     'fechamento': 75,
-    'vendido': 100,
-    'perdido': 0,  // PERDIDO = 0. Sempre. Sem exceção.
   };
   score += statusBase[input.status] || 10;
-
-  // Se PERDIDO ou VENDIDO, retorna direto (são estados finais)
-  if (input.status === 'perdido') return 0;
-  if (input.status === 'vendido') return 100;
 
   // 2. ENGAJAMENTO — interações reais (+20 pontos max)
   if (input.totalInteracoes >= 10) score += 20;
@@ -57,11 +55,8 @@ export function calculateLeadScore(input: ScoreInput): number {
     score -= 20;
   }
 
-  // Clamp entre 0-100 (Mas 100% é reservado EXCLUSIVAMENTE para VENDIDO)
+  // Clamp entre 1-99 (100% é reservado EXCLUSIVAMENTE para VENDIDO, 0 para PERDIDO)
   const final = Math.max(1, Math.round(score));
-  if (input.status === 'vendido') return 100;
-  if (input.status === 'perdido') return 0;
-  
   return Math.min(99, final);
 }
 

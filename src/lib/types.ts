@@ -131,6 +131,7 @@ export interface Lead {
   real_id?: string | number;
   source_table?: string;
   vendedor?: string;
+  cpf?: string;
 }
 
 export interface InventoryItem {

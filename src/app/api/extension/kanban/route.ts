@@ -14,9 +14,12 @@ export async function GET(req: NextRequest) {
     try {
         // Buscar em todas as tabelas (Main, CRM26 e Master/V2)
         const [mainResponse, crm26Response, masterResponse] = await Promise.all([
-            supabaseAdmin.from('leads_manos_crm').select('id, name, status, ai_classification, vehicle_interest'),
-            supabaseAdmin.from('leads_distribuicao_crm_26').select('id, nome, status, ai_classification, interesse'),
+            supabaseAdmin.from('leads_manos_crm').select('id, name, status, ai_classification, vehicle_interest')
+                .neq('status', 'lost').neq('status', 'lost_redistributed'),
+            supabaseAdmin.from('leads_distribuicao_crm_26').select('id, nome, status, ai_classification, interesse')
+                .neq('status', 'lost').neq('status', 'lost_redistributed'),
             supabaseAdmin.from('leads_master').select('id, name, status, ai_classification, vehicle_interest')
+                .neq('status', 'lost').neq('status', 'lost_redistributed')
         ]);
 
         if (mainResponse.error) throw mainResponse.error;

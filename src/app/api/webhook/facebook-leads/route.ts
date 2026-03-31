@@ -1,27 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
-import { OpenAI } from 'openai';
 import { dataService } from '@/lib/dataService';
-
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-});
+import { runEliteCloser } from '@/lib/services/ai-closer-service';
+import { runGenerateProposal } from '@/lib/services/proposal-service';
 
 /**
  * Facebook Lead Ads Webhook
- * Receives real-time lead notifications from Facebook Lead Ads.
- * 
- * Setup:
- * 1. Go to Meta Developers → Your App → Webhooks
- * 2. Subscribe to "leadgen" notifications
- * 3. Set callback URL to: https://your-domain.com/api/webhook/facebook-leads
- * 4. Set verify token to the value in FACEBOOK_VERIFY_TOKEN env var
- * 
- * When a lead submits a form on Facebook, Meta sends a notification here.
- * We then fetch the lead data from the Graph API and save it to the CRM.
+ * Automado com Elite Closer & Proposta Automática (V3)
  */
 
-// GET: Webhook verification (required by Meta)
 export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const mode = searchParams.get('hub.mode');
@@ -33,37 +20,22 @@ export async function GET(req: NextRequest) {
     if (mode === 'subscribe' && token === VERIFY_TOKEN) {
         return new NextResponse(challenge, { status: 200 });
     }
-
     return new NextResponse('Forbidden', { status: 403 });
 }
 
-// POST: Receive lead notification
 export async function POST(req: NextRequest) {
     try {
         const payload = await req.json();
 
-        // Meta sends notifications with object: "page" and entry array
         if (payload.object !== 'page') {
             return NextResponse.json({ received: true });
         }
 
         const META_TOKEN = process.env.META_ACCESS_TOKEN || process.env.NEXT_PUBLIC_META_ACCESS_TOKEN;
         if (!META_TOKEN) {
-            console.error('META_ACCESS_TOKEN not configured for lead webhook');
+            console.error('META_ACCESS_TOKEN not configured');
             return NextResponse.json({ error: 'Token missing' }, { status: 500 });
         }
-
-        const supabase = createServerClient(
-            process.env.NEXT_PUBLIC_SUPABASE_URL!,
-            process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-            {
-                cookies: {
-                    get: () => undefined,
-                    set: () => { },
-                    remove: () => { }
-                }
-            }
-        );
 
         const entries = payload.entry || [];
 
@@ -76,16 +48,10 @@ export async function POST(req: NextRequest) {
                 const leadgenId = change.value?.leadgen_id;
                 if (!leadgenId) continue;
 
-                // Fetch lead details from Graph API
                 const leadUrl = `https://graph.facebook.com/v19.0/${leadgenId}?fields=id,created_time,field_data,campaign_id,ad_id,form_id,platform&access_token=${META_TOKEN}`;
-                const leadRes = await fetch(leadUrl).catch(err => {
-                    console.error('Network error fetching lead from Meta:', err);
-                    return null;
-                });
-                if (!leadRes || !leadRes.ok) {
-                    if (leadRes) console.error('Failed to fetch lead from Meta:', await leadRes.text());
-                    continue;
-                }
+                const leadRes = await fetch(leadUrl).catch(() => null);
+                
+                if (!leadRes || !leadRes.ok) continue;
 
                 const leadData = await leadRes.json();
 
@@ -111,7 +77,6 @@ export async function POST(req: NextRequest) {
                 const cleanPhone = phone.replace(/\D/g, '');
                 if (!cleanPhone || cleanPhone.length < 8) continue;
 
-                // Get campaign name if possible
                 let campaignName = 'Facebook Leads';
                 if (leadData.campaign_id) {
                     try {
@@ -123,66 +88,45 @@ export async function POST(req: NextRequest) {
                     } catch { }
                 }
 
-                // Determine platform correctly
                 const platform = leadData.platform || 'facebook';
                 const finalSource = platform.toLowerCase() === 'instagram' ? 'Instagram' : campaignName;
 
-                // Hyper-AI V2: CTA Pronto (1-Click Sell)
-                let aiClassification = 'warm';
-                let aiResumo = `[LEAD ${platform.toUpperCase()}] Real-time | Campanha: ${campaignName}`;
-                let summarizedInterest = interest || campaignName;
-                let recomendacaoCTA = `Olá ${name}, sou da Manos Veículos. Vi seu interesse no ${summarizedInterest}. Posso te ligar rapidinho pra te passar uma condição exclusiva?`;
-
-                if (process.env.OPENAI_API_KEY) {
-                    try {
-                        const aiResponse = await openai.chat.completions.create({
-                            model: 'gpt-4o-mini',
-                            messages: [{
-                                role: 'system',
-                                content: 'Você é um Analista Comercial Sênior da Manos Veículos. Analise este novo chumbo (lead) quente do Meta Ads e crie o SCRIPT MATADOR EXATO que o vendedor deve copiar e colar no WhatsApp.\nRetorne um JSON:\n{ "classification": "hot" | "warm" | "cold", "summarized_interest": "1-2 palavras sobre o veículo ou intenção", "short_strategy": "Resumo de 1 linha do perfil do lead", "recomendacao_abordagem": "O SCRIPT EXATO E MATADOR para o vendedor enviar AGORA mesmo. Nada de olá genérico. Ex: Fala [NOME], vi que curtiu o [CARRO]. Consegui segurar a taxa do feirão pra você hoje. Quando pode vir ver a nave?" }'
-                            }, {
-                                role: 'user',
-                                content: `Lead: ${name}\nInteresse Capturado (Público): ${interest}\nOrigem/Campanha: ${campaignName}\nCidade: ${city}`
-                            }],
-                            response_format: { type: 'json_object' }
-                        });
-                        const aiData = JSON.parse(aiResponse.choices[0]?.message?.content || '{}');
-                        if (aiData.classification) aiClassification = aiData.classification;
-                        if (aiData.summarized_interest) summarizedInterest = aiData.summarized_interest;
-                        if (aiData.short_strategy) aiResumo = aiData.short_strategy;
-                        if (aiData.recomendacao_abordagem) recomendacaoCTA = aiData.recomendacao_abordagem;
-                    } catch (e) {
-                        console.error("AI Enrichment error in webhook:", e);
-                    }
-                }
-
-                // Insert into CRM using unified logic (Deduplication & Reactivation)
+                // 1. Criar Lead no CRM
                 try {
-                    await dataService.createLead({
+                    const newLead = await dataService.createLead({
                         name: name || 'Lead Meta Form',
                         phone: cleanPhone,
                         source: finalSource,
-                        vehicle_interest: summarizedInterest,
+                        vehicle_interest: interest || campaignName,
                         region: city || '',
                         status: 'received',
                         created_at: leadData.created_time || new Date().toISOString(),
-                        id_meta: leadData.id,
-                        id_formulario: leadData.form_id,
-                        plataforma_meta: platform,
-                        ai_summary: `[${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}] 🤖 ENTRADA META ADS:\nEstratégia: ${aiResumo}\nScript Recomendado: ${recomendacaoCTA}\n`,
-                        ai_classification: aiClassification as any,
-                        ai_reason: recomendacaoCTA,
-                        next_step: recomendacaoCTA,
-                        proxima_acao: recomendacaoCTA,
-                        ai_score: aiClassification === 'hot' ? 85 : aiClassification === 'warm' ? 60 : 30
                     });
-                } catch (insertError: any) {
-                    console.error('Error processing Facebook lead:', insertError.message);
+
+                    if (newLead && newLead.id) {
+                        const fullId = `main_` + newLead.id;
+                        
+                        // 2. Disparar Elite Closer Automático (IA Proativa)
+                        console.log(`[Webhook] Iniciando análise Elite Closer para lead: ${fullId}`);
+                        const analysis = await runEliteCloser(fullId, [], 'SISTEMA').catch(e => {
+                            console.error('[Webhook] Erro na análise automática:', e);
+                            return null;
+                        });
+
+                        // 3. Gerar Proposta Automática se o Score for > 60
+                        if (analysis && analysis.urgencyScore > 60) {
+                            console.log(`[Webhook] Score alto detectado (${analysis.urgencyScore}). Gerando proposta automática...`);
+                            await runGenerateProposal(fullId).catch(e => {
+                                console.error('[Webhook] Erro na proposta automática:', e);
+                            });
+                        }
+                    }
+                } catch (err) {
+                    console.error('Error processing Facebook lead in webhook:', err);
                 }
             }
         }
 
-        // Must return 200 quickly to avoid Meta retries
         return NextResponse.json({ received: true });
 
     } catch (error: any) {

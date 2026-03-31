@@ -2,7 +2,7 @@ import { supabase } from './supabaseClients';
 import { cacheGet, cacheSet, TTL, cacheInvalidate } from './cacheLayer';
 import { stripPrefix, getTableForLead } from './leadRouter';
 import { logHistory, getLeadMessages } from './interactionService';
-import { pickNextConsultant, resolveConsultantIdByName } from './consultantService';
+import { pickNextConsultant, resolveConsultantIdByName, markConsultantAsAssigned } from './consultantService';
 import { Lead, LeadStatus, AIClassification } from '@/lib/types';
 import { sendMetaConversion } from '@/lib/meta-service';
 
@@ -23,9 +23,10 @@ export async function getLeads(consultantId?: string, leadId?: string) {
                          .neq('status', 'lost_redistributed');
         }
         if (leadId) query = query.eq('id', leadId);
-        query = query.order('created_at', { ascending: false });
-
-        const { data, error } = await query;
+        const { data, count, error } = await query
+            .order('created_at', { ascending: false })
+            .range(0, 2000); // Força a busca de até 2000 registros (contornando o limite default de 1000 do Supabase)
+        
         if (error) throw error;
         
         let leads = data as Lead[];
@@ -146,12 +147,28 @@ export async function createLead(leadData: Partial<Lead>) {
             updated_at: new Date().toISOString()
         };
 
+        // [CORREÇÃO CRÍTICA] Se o lead existente não tem consultor, forçar atribuição agora
+        if (!existing.assigned_consultant_id) {
+            const consultants = await getConsultantNamesCached();
+            const nextCons = await pickNextConsultant(updatePayload.name);
+            if (nextCons) {
+                updatePayload.assigned_consultant_id = nextCons.id;
+                updatePayload.primeiro_vendedor = nextCons.name;
+                await markConsultantAsAssigned(nextCons.id);
+            }
+        }
+
         // Mapeamento para nomes de colunas CRM26 se necessário
         if (table === 'leads_distribuicao_crm_26') {
             updatePayload.atualizado_em = updatePayload.updated_at;
             delete updatePayload.updated_at;
             if (leadData.name) updatePayload.nome = leadData.name;
             if (leadData.vehicle_interest) updatePayload.interesse = leadData.vehicle_interest;
+            if (updatePayload.assigned_consultant_id) {
+                const consultants = await getConsultantNamesCached();
+                const cons = consultants.find(c => c.id === updatePayload.assigned_consultant_id);
+                updatePayload.vendedor = cons?.name || 'Desconhecido';
+            }
         }
 
         const { data: updated, error } = await supabase
@@ -170,9 +187,10 @@ export async function createLead(leadData: Partial<Lead>) {
     const payload = sanitizeLeadPayload(leadData, cleanPhone);
     
     try {
-        // Se já temos o ID do consultor, apenas garantimos que o nome (primeiro_vendedor) esteja preenchido
+        const consultants = await getConsultantNamesCached();
+        
+        // Se já temos o ID do consultor, apenas garantimos que o nome esteja preenchido
         if (payload.assigned_consultant_id) {
-            const consultants = await getConsultantNamesCached();
             const consultant = consultants.find(c => c.id === payload.assigned_consultant_id);
             if (consultant) {
                 payload.primeiro_vendedor = consultant.name;
@@ -193,8 +211,23 @@ export async function createLead(leadData: Partial<Lead>) {
                 }
             }
         }
+
+        // [REGRA DE OURO] Proibição de Lead Órfão - Contingência Final
+        if (!payload.assigned_consultant_id) {
+            console.warn("Round Robin falhou. Atribuindo lead ao Alexandre (Gerente) por contingência.");
+            const backup = consultants.find(c => c.name.toLowerCase().includes('alexandre')) || consultants[0];
+            if (backup) {
+                payload.assigned_consultant_id = backup.id;
+                payload.primeiro_vendedor = backup.name;
+            }
+        }
+
+        // Atualizar timestamp de atribuição para o consultor escolhido
+        if (payload.assigned_consultant_id) {
+            await markConsultantAsAssigned(payload.assigned_consultant_id);
+        }
     } catch (atribError) {
-        console.error("Erro na atribuição de consultor:", atribError);
+        console.error("Erro crítico na atribuição de consultor:", atribError);
     }
 
     const { data, error } = await supabase.from('leads_manos_crm').insert([payload]).select().single();
@@ -251,6 +284,29 @@ export async function updateLeadDetails(leadId: string, details: Partial<Lead>) 
     cacheInvalidate('leads_');
 }
 
+/**
+ * Registra uma consulta de crédito na tabela de auditoria.
+ */
+export async function logCreditConsultation(log: {
+    consultant_id: string;
+    lead_id: string;
+    cpf_consultado: string;
+    status_consulta: 'sucesso' | 'falha';
+    score_original?: number;
+    score_com_redutor?: number;
+}) {
+    const { error } = await supabase.from('audit_credit_consultations').insert([{
+        ...log,
+        cost: log.status_consulta === 'sucesso' ? 2.00 : 0,
+        created_at: new Date().toISOString()
+    }]);
+
+    if (error) {
+        console.error("Erro ao registrar auditoria de crédito:", error);
+        throw error;
+    }
+}
+
 export async function deleteLead(leadId: string) {
     const table = getTableForLead(leadId);
     const realId = stripPrefix(leadId);
@@ -285,7 +341,8 @@ function normalizeCRM26(i: any, consultants: any[]) {
         ai_summary: (i.resumo || '').split('||IA_DATA||')[0].trim(),
         status: i.status === 'NOVO' ? 'received' : i.status,
         consultant_name: consultant?.name || i.vendedor || i.primeiro_vendedor || 'Pendente',
-        carro_troca: i.carro_troca || i.troca
+        carro_troca: i.carro_troca || i.troca,
+        cpf: i.cpf
     };
 }
 
@@ -316,6 +373,7 @@ function mapToCRM26(details: any) {
     if (details.vehicle_interest) obj.interesse = details.vehicle_interest;
     if (details.valor_investimento) obj.valor_investimento = details.valor_investimento;
     if (details.assigned_consultant_id) obj.assigned_consultant_id = details.assigned_consultant_id;
+    if (details.cpf) obj.cpf = details.cpf;
     
     return obj;
 }

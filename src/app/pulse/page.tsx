@@ -8,6 +8,7 @@ import {
     Flame,
     Target,
     TrendingUp,
+    TrendingDown,
     AlertCircle,
     ChevronRight,
     Phone,
@@ -190,6 +191,12 @@ export default function Pulse() {
         autoDismissed: number;
         alertCompra: number;
     } | null>(null);
+
+    const [lossInsight, setLossInsight] = useState<{
+        total: number;
+        top: { category: string; count: number; pct: number }[];
+        weekAgo: string;
+    } | null>(null);
     const [overloadAlerts, setOverloadAlerts] = useState<Array<{
         id: string;
         consultantId: string;
@@ -217,7 +224,8 @@ export default function Pulse() {
                 const [leadsResult, metricsResult] = await Promise.all([
                     leadService.getLeadsPaginated(undefined, {
                         consultantId: isAdmin ? undefined : consultant.id,
-                        limit: 300
+                        role: isAdmin ? 'admin' : 'consultant',
+                        limit: 2000 // Aumentado para cobrir a base total de 1106+ leads
                     }),
                     getFinancialMetrics({
                         period: 'this_month',
@@ -287,6 +295,28 @@ export default function Pulse() {
                         autoDismissed: autoList.filter((f: any) => f.result === 'negative').length,
                         alertCompra:   compraRes.count || 0,
                     });
+
+                    // Causa-raiz de perdas — últimos 7 dias
+                    const { data: lostLeads } = await supabase
+                        .from('leads_manos_crm')
+                        .select('loss_category')
+                        .in('status', ['perdido', 'lost', 'desqualificado'])
+                        .gte('updated_at', weekAgo)
+                        .not('loss_category', 'is', null);
+
+                    if (lostLeads && lostLeads.length > 0) {
+                        const counts: Record<string, number> = {};
+                        for (const l of lostLeads) {
+                            const cat = l.loss_category || 'outro';
+                            counts[cat] = (counts[cat] || 0) + 1;
+                        }
+                        const total = lostLeads.length;
+                        const top = Object.entries(counts)
+                            .sort(([, a], [, b]) => b - a)
+                            .slice(0, 4)
+                            .map(([category, count]) => ({ category, count, pct: Math.round((count / total) * 100) }));
+                        setLossInsight({ total, top, weekAgo });
+                    }
                 }
             }
         } catch (err) {
@@ -314,22 +344,34 @@ export default function Pulse() {
 
     const leadsWithScores = useMemo(() => {
         const now = new Date();
-        return leads.map(l => {
-            // Prioridade: ai_score real do banco; fallback para heurístico local
-            const aiScore = Number(l.ai_score);
-            const score = aiScore > 0 ? aiScore : (() => {
-                const tempoFunilH = Math.max(0, (now.getTime() - new Date(l.created_at).getTime()) / (1000 * 60 * 60));
-                return calculateLeadScore({
-                    status: normalizeStatus(l.status),
-                    tempoFunilHoras: tempoFunilH,
-                    totalInteracoes: 0,
-                    ultimaInteracaoH: tempoFunilH,
-                    temValorDefinido: !!l.valor_investimento && l.valor_investimento !== '0',
-                    temVeiculoInteresse: !!l.vehicle_interest && l.vehicle_interest !== '---'
-                });
-            })();
-            return { ...l, tactical_score: score };
-        });
+        const FINAL_STATUSES = ['perdido', 'vendido'];
+        return leads
+            .filter(l => !FINAL_STATUSES.includes(normalizeStatus(l.status)))
+            .map(l => {
+                // Prioridade: ai_score real do banco; fallback para heurístico local
+                const aiScore = Number(l.ai_score);
+                const baseScore = aiScore > 0 ? aiScore : (() => {
+                    const tempoFunilH = Math.max(0, (now.getTime() - new Date(l.created_at).getTime()) / (1000 * 60 * 60));
+                    return calculateLeadScore({
+                        status: normalizeStatus(l.status),
+                        tempoFunilHoras: tempoFunilH,
+                        totalInteracoes: 0,
+                        ultimaInteracaoH: tempoFunilH,
+                        temValorDefinido: !!l.valor_investimento && l.valor_investimento !== '0',
+                        temVeiculoInteresse: !!l.vehicle_interest && l.vehicle_interest !== '---'
+                    });
+                })();
+
+                // Decaimento de score para exibição — leads sem interação há 30+ dias
+                const daysInactive = (now.getTime() - new Date((l as any).updated_at || l.created_at).getTime()) / 86_400_000;
+                const stalenessPenalty = daysInactive > 30
+                    ? Math.min(40, Math.round((daysInactive - 30) * 1.5))
+                    : 0;
+                const tactical_score = Math.max(0, baseScore - stalenessPenalty);
+                const is_stale = daysInactive > 30;
+
+                return { ...l, tactical_score, is_stale };
+            });
     }, [leads]);
 
     // ── Lead buckets ───────────────────────────────────────────
@@ -348,7 +390,12 @@ export default function Pulse() {
 
     const closingLeads = useMemo(() =>
         leadsWithScores
-            .filter(l => l.tactical_score >= 80 && l.tactical_score < 100)
+            .filter(l =>
+                l.tactical_score >= 80 &&
+                l.tactical_score < 100 &&
+                !['perdido', 'vendido'].includes(normalizeStatus(l.status)) &&
+                !(l as any).is_stale
+            )
             .sort((a, b) => b.tactical_score - a.tactical_score)
             .slice(0, 5),
         [leadsWithScores]
@@ -402,27 +449,11 @@ export default function Pulse() {
             {/* ── HUD HEADER ──────────────────────────────── */}
             <header className="border-b border-white/5 bg-[#050101]/80 backdrop-blur-xl flex flex-wrap items-center justify-between gap-3 px-6 py-3 -mx-2 md:-mx-0 shadow-[0_4px_20px_rgba(0,0,0,0.5)]">
                 {/* Left: identity + stats */}
-                <div className="flex items-center gap-4 px-4 py-2.5 bg-white/[0.03] border border-white/10 rounded-2xl shadow-sm">
-                    <div className="flex flex-col">
-                        <div className="flex items-center gap-2.5">
-                            <Zap size={14} className="text-red-500" />
-                            <h1 className="text-xs font-black uppercase tracking-[0.3em] text-white/95 whitespace-nowrap">
-                                Painel <span className="text-red-500">de Elite</span>
-                            </h1>
-                        </div>
-                    </div>
-
-                    <div className="hidden sm:flex items-center gap-4 pl-4 border-l border-white/10 ml-2">
-                        <div className="flex items-baseline gap-1.5">
-                            <span className="text-xs font-black text-white/80 tabular-nums">{leads.length}</span>
-                            <span className="text-[8px] font-bold text-white/20 uppercase tracking-widest leading-none">PIPELINE</span>
-                        </div>
-                        <div className="w-px h-3 bg-white/10" />
-                        <div className="flex items-baseline gap-1.5">
-                            <span className="text-xs font-black text-emerald-400 tabular-nums">{metrics?.salesCount || 0}</span>
-                            <span className="text-[8px] font-bold text-white/20 uppercase tracking-widest leading-none">VENDAS</span>
-                        </div>
-                    </div>
+                <div className="flex items-center gap-3 px-3 py-1.5 bg-white/[0.03] border border-white/10 rounded-xl">
+                    <Users size={12} className="text-white/40" />
+                    <span className="text-[10px] font-black text-white/60 uppercase tracking-widest">
+                        {leads.length} <span className="text-white/20">Leads Unificados</span>
+                    </span>
                 </div>
 
                 {/* Right: Status */}
@@ -684,7 +715,9 @@ export default function Pulse() {
                                                                 ? `${hoursAgo}h`
                                                                 : `${Math.round(hoursAgo / 24)}d`}
                                                     </p>
-                                                    {(lead.ai_score || 0) > 0 && (
+                                                    {(lead as any).is_stale ? (
+                                                        <p className="text-[9px] font-black text-white/20 italic">desatualizado</p>
+                                                    ) : (lead.ai_score || 0) > 0 && (
                                                         <p className="text-[9px] font-black text-white/20">
                                                             IA {lead.ai_score}%
                                                         </p>
@@ -959,6 +992,43 @@ export default function Pulse() {
                         </motion.div>
 
                         {/* ── IA PERFORMANCE (ADMIN ONLY) ────────────── */}
+                        {/* ── CAUSA-RAIZ DE PERDAS (ADMIN ONLY) ─────── */}
+                        {userRole === 'admin' && lossInsight && lossInsight.total > 0 && (
+                            <motion.div variants={fadeUp}
+                                className="rounded-2xl border border-red-500/15 bg-[#0d0d10] overflow-hidden"
+                            >
+                                <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.05]"
+                                    style={{ background: 'linear-gradient(90deg, rgba(239,68,68,0.06), transparent)' }}>
+                                    <div className="flex items-center gap-2">
+                                        <TrendingDown size={13} className="text-red-400" />
+                                        <h3 className="text-[10px] font-black text-white/60 uppercase tracking-[0.3em]">Perdas — Últimos 7 dias</h3>
+                                    </div>
+                                    <span className="text-[10px] font-black text-red-400">{lossInsight.total} leads</span>
+                                </div>
+                                <div className="p-4 space-y-2.5">
+                                    {lossInsight.top.map(({ category, count, pct }) => (
+                                        <div key={category}>
+                                            <div className="flex items-center justify-between mb-1">
+                                                <span className="text-[11px] text-white/60 capitalize">{category}</span>
+                                                <span className="text-[11px] font-black text-white/50">{count}x <span className="text-white/25">({pct}%)</span></span>
+                                            </div>
+                                            <div className="h-1.5 bg-white/[0.05] rounded-full overflow-hidden">
+                                                <div
+                                                    className="h-full rounded-full bg-red-500/60"
+                                                    style={{ width: `${pct}%` }}
+                                                />
+                                            </div>
+                                        </div>
+                                    ))}
+                                    {lossInsight.top[0]?.pct >= 40 && (
+                                        <p className="text-[10px] text-red-300/60 pt-1 border-t border-white/[0.04]">
+                                            ⚠ <strong>{lossInsight.top[0].pct}%</strong> das perdas por <em>{lossInsight.top[0].category}</em> — considere ação corretiva.
+                                        </p>
+                                    )}
+                                </div>
+                            </motion.div>
+                        )}
+
                         {userRole === 'admin' && aiMetrics && (
                             <motion.div variants={fadeUp}
                                 className="rounded-2xl border border-purple-500/15 bg-[#0d0d10] overflow-hidden"

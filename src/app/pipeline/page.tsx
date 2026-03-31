@@ -6,6 +6,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { leadService } from '@/lib/leadService';
 import { createClient } from '@/lib/supabase/client';
 import { Lead, LeadStatus } from '@/lib/types';
+import { HUDSelect } from '../../components/shared_leads/HUDSelect';
+import { calculateLeadScore } from '@/utils/calculateScore';
+import { isLeadQualified } from '@/utils/leadQualification';
 import { normalizeStatus } from '@/constants/status';
 import { KanbanBoardV2 } from './components/KanbanBoardV2';
 import { LeadListV2 } from './components/LeadListV2';
@@ -29,63 +32,11 @@ import {
     Globe,
     Calendar,
     Plus,
-    X
+    X,
+    Sparkles
 } from 'lucide-react';
 import { dataService } from '@/lib/dataService';
 
-function HUDSelect({ label, value, options, onChange, minWidth = '120px', disabled = false }: { 
-    label: string, 
-    value: string, 
-    options: { id: string, label: string }[], 
-    onChange: (val: string) => void,
-    minWidth?: string,
-    disabled?: boolean
-}) {
-    const [isOpen, setIsOpen] = useState(false);
-    const selectedOption = options.find(opt => opt.id === value) || options[0];
-
-    return (
-        <div className={`flex flex-col relative ${disabled ? 'opacity-30 pointer-events-none' : ''}`} onMouseLeave={() => setIsOpen(false)}>
-            <span className="text-[7px] font-black text-red-500 uppercase tracking-widest mb-0.5">{label}</span>
-            <button 
-                onClick={() => !disabled && setIsOpen(!isOpen)}
-                disabled={disabled}
-                className="flex items-center justify-between gap-2 bg-transparent text-[9px] font-black text-white/60 outline-none uppercase cursor-pointer hover:text-white transition-colors text-left"
-                style={{ minWidth }}
-            >
-                <span className="truncate">{selectedOption.label}</span>
-                <ChevronDown size={8} className={isOpen ? 'text-red-500' : 'text-white/20'} />
-            </button>
-
-            <AnimatePresence>
-                {isOpen && (
-                    <motion.div 
-                        initial={{ opacity: 0, y: -5 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -5 }}
-                        className="absolute top-full left-0 bg-[#0a0a0a]/95 border border-white/10 rounded-lg shadow-[0_20px_50px_rgba(0,0,0,0.95)] py-1.5 z-[100] min-w-[200px] backdrop-blur-3xl"
-                    >
-                        <div className="max-h-[300px] overflow-y-auto custom-scrollbar">
-                            {options.map(opt => (
-                                <button
-                                    key={opt.id}
-                                    onClick={() => {
-                                        onChange(opt.id);
-                                        setIsOpen(false);
-                                    }}
-                                    className={`w-full text-left px-4 py-2 text-[8px] font-black uppercase tracking-widest hover:bg-red-600/10 hover:text-white transition-all flex items-center justify-between group ${value === opt.id ? 'text-red-500 bg-red-600/5' : 'text-white/40'}`}
-                                >
-                                    {opt.label}
-                                    {value === opt.id && <div className="w-1 h-1 rounded-full bg-red-600 shadow-[0_0_8px_rgba(220,38,38,0.8)]" />}
-                                </button>
-                            ))}
-                        </div>
-                    </motion.div>
-                )}
-            </AnimatePresence>
-        </div>
-    );
-}
 
 function PipelineContent() {
     const supabase = createClient();
@@ -94,6 +45,7 @@ function PipelineContent() {
     const leadIdFromUrl = searchParams.get('id');
 
     const [leads, setLeads] = useState<Lead[]>([]);
+    const [serverTotalCount, setServerTotalCount] = useState(0);
     const [page, setPage] = useState(1);
     const [hasMore, setHasMore] = useState(true);
     const [loading, setLoading] = useState(true);
@@ -123,6 +75,10 @@ function PipelineContent() {
     const [consultantId, setConsultantId] = useState<string | undefined>(undefined);
 
     const [filterAI, setFilterAI] = useState(false);
+
+    // Busca semântica — ativa quando query tem 4+ palavras
+    const [semanticIds, setSemanticIds] = useState<Set<string> | null>(null);
+    const [isSemanticLoading, setIsSemanticLoading] = useState(false);
 
     // Briefing Matinal IA
     const [dailyBrief, setDailyBrief] = useState<{
@@ -161,31 +117,16 @@ function PipelineContent() {
                     .maybeSingle();
 
                 if (consultant) {
-                    setUserName(consultant.name.split(' ')[0]);
-                    setRole(isAdmin ? 'admin' : (consultant.role || 'consultant'));
-                    if (!isAdmin && consultant.role !== 'admin') {
+                    const cName = consultant.name.split(' ')[0];
+                    const cRole = isAdmin ? 'admin' : (consultant.role || 'consultant');
+                    setUserName(cName);
+                    setRole(cRole);
+                    if (cRole !== 'admin') {
                         setConsultantId(consultant.id);
                         setFilterConsultant(consultant.id);
                     }
                 } else if (isAdmin) {
                     setRole('admin');
-                }
-
-                // Fallback: if not in consultants_manos_crm, try new consultants table (future-proof)
-                if (!consultant && !isAdmin) {
-                    const { data: consultantV2 } = await supabase
-                        .from('consultants_manos_crm')
-                        .select('id, name, role')
-                        .eq('auth_id', session.user.id)
-                        .maybeSingle();
-                    if (consultantV2) {
-                        setUserName(consultantV2.name.split(' ')[0]);
-                        setRole(consultantV2.role || 'consultant');
-                        if (consultantV2.role !== 'admin') {
-                            setConsultantId(consultantV2.id);
-                            setFilterConsultant(consultantV2.id);
-                        }
-                    }
                 }
             } catch (err) {
                 console.error("Auth/Data init error:", err);
@@ -208,20 +149,24 @@ function PipelineContent() {
         else setLoading(true);
 
         try {
+            const limit = 2000; // MASSIVE LOAD to cover the entire unified database (1106+ leads)
             const result = await leadService.getLeadsPaginated(supabase, {
                 page: pageNum,
-                limit: 200, // MASSIVE LOAD
+                limit, 
                 consultantId,
-                searchTerm: debouncedSearchTerm || undefined
+                searchTerm: debouncedSearchTerm || undefined,
+                role: role as 'admin' | 'consultant' // ISOLAMENTO DE DADOS
             });
 
             if (isNewSearch) {
                 setLeads(result.leads);
+                setServerTotalCount(result.totalCount);
             } else {
                 setLeads(prev => [...prev, ...result.leads]);
+                setServerTotalCount(result.totalCount);
             }
             
-            setHasMore(result.leads.length === 200);
+            setHasMore(result.leads.length === limit);
         } catch (err) {
             console.error("Error loading leads:", err);
         } finally {
@@ -247,6 +192,15 @@ function PipelineContent() {
                     body: JSON.stringify({ leadId }),
                 }).catch(() => {});
             }
+
+            // Briefing pré-visita: quando lead é agendado, gera resumo tático para o consultor
+            if (newStatus === 'ataque' || newStatus === 'scheduled' || newStatus === 'confirmed') {
+                fetch('/api/lead/pre-visit-brief', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ leadId }),
+                }).catch(() => {});
+            }
         } catch (err) {
             console.error("Error updating lead status:", err);
             setLeads(oldLeads); // Revert on error
@@ -261,6 +215,31 @@ function PipelineContent() {
         return () => clearTimeout(timer);
     }, [searchTerm]);
 
+    // Busca semântica — dispara quando query tem 4+ palavras
+    useEffect(() => {
+        const words = debouncedSearchTerm.trim().split(/\s+/).filter(Boolean);
+        if (words.length < 4) {
+            setSemanticIds(null);
+            return;
+        }
+        setIsSemanticLoading(true);
+        fetch('/api/ai/semantic-search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: debouncedSearchTerm, limit: 100 }),
+        })
+            .then(r => r.json())
+            .then(data => {
+                if (data.results && Array.isArray(data.results)) {
+                    setSemanticIds(new Set(data.results.map((r: { id: string }) => r.id)));
+                } else {
+                    setSemanticIds(null);
+                }
+            })
+            .catch(() => setSemanticIds(null))
+            .finally(() => setIsSemanticLoading(false));
+    }, [debouncedSearchTerm]);
+
     // Re-fetch on filter/search change
     useEffect(() => {
         setPage(1);
@@ -268,10 +247,21 @@ function PipelineContent() {
     }, [debouncedSearchTerm, consultantId, filterFromUrl]);
 
     const filteredLeads = useMemo(() => {
-        // Normalize status before filtering so V1 statuses ('perda total', 'venda realizada', etc.) are handled
+        const fifteenDaysAgo = Date.now() - 15 * 24 * 60 * 60 * 1000;
+
         let filtered = leads.filter(l => {
             const norm = normalizeStatus(l.status);
-            return norm !== 'vendido' && norm !== 'perdido';
+            // Somente leads qualificados (com nome real) entram no Pipeline
+            if (!isLeadQualified(l)) return false;
+            
+            // Regra: Ocultar Vendidos e Perdidos do Pipeline
+            if (norm === 'vendido' || norm === 'perdido') return false;
+
+            // Regra: Ocultar leads sem atividade há mais de 15 dias
+            const lastActivity = new Date(l.updated_at || l.created_at || 0).getTime();
+            if (lastActivity < fifteenDaysAgo) return false;
+
+            return true;
         });
         
         // Date Filter (Aligned with Central de Leads)
@@ -304,21 +294,28 @@ function PipelineContent() {
             filtered = filtered.filter(l => (l.origem || l.source) === filterOrigin);
         }
 
-        // Improved Search Filter
+        // Busca semântica (4+ palavras) ou filtro de texto simples
         if (searchTerm) {
-            const terms = searchTerm.toLowerCase().split(/\s+/).filter(t => t.length > 0);
-            filtered = filtered.filter(l => {
-                const searchableText = [
-                    l.name,
-                    l.phone,
-                    l.vehicle_interest,
-                    l.source,
-                    l.origem,
-                    l.region
-                ].join(' ').toLowerCase();
-                
-                return terms.every(term => searchableText.includes(term));
-            });
+            if (semanticIds !== null) {
+                // Modo IA: retorna apenas IDs vindos do vector search
+                filtered = filtered.filter(l => semanticIds.has(l.id));
+            } else {
+                const terms = searchTerm.toLowerCase().split(/\s+/).filter(t => t.length > 0);
+                filtered = filtered.filter(l => {
+                    const searchableText = [
+                        l.name,
+                        l.phone,
+                        l.vehicle_interest,
+                        l.source,
+                        l.origem,
+                        l.region,
+                        l.cpf,
+                        l.id,
+                        l.real_id?.toString()
+                    ].join(' ').toLowerCase();
+                    return terms.every(term => searchableText.includes(term));
+                });
+            }
         }
 
         // Status Filter
@@ -326,10 +323,20 @@ function PipelineContent() {
             filtered = filtered.filter(l => normalizeStatus(l.status) === filterStatus);
         }
 
-        // Score Filter
+        // Score Filter — Unify logic with Display (ai_score or calculated fallback)
         if (filterScore !== 'all') {
+            const now = new Date();
             filtered = filtered.filter(l => {
-                const s = l.ai_score || 0;
+                const aiScore = Number(l.ai_score);
+                const s = aiScore > 0 ? aiScore : calculateLeadScore({
+                    status: normalizeStatus(l.status),
+                    tempoFunilHoras: Math.max(0, (now.getTime() - new Date(l.created_at || 0).getTime()) / (1000 * 60 * 60)),
+                    totalInteracoes: 0,
+                    ultimaInteracaoH: Math.max(0, (now.getTime() - new Date(l.created_at || 0).getTime()) / (1000 * 60 * 60)),
+                    temValorDefinido: !!l.valor_investimento && l.valor_investimento !== '0',
+                    temVeiculoInteresse: !!l.vehicle_interest && l.vehicle_interest !== '---'
+                });
+
                 if (filterScore === 'quente') return s >= 80;
                 if (filterScore === 'morno') return s >= 60 && s < 80;
                 if (filterScore === 'frio') return s >= 30 && s < 60;
@@ -362,7 +369,7 @@ function PipelineContent() {
             const dateB = new Date(b.created_at || 0).getTime();
             return dateB - dateA;
         });
-    }, [leads, searchTerm, filterStatus, filterScore, filterDate, filterConsultant, filterInterest, filterOrigin, sortBy, filterAI]);
+    }, [leads, searchTerm, filterStatus, filterScore, filterDate, filterConsultant, filterInterest, filterOrigin, sortBy, filterAI, semanticIds]);
 
     // Briefing Matinal — busca 1x por sessão após leads carregados
     useEffect(() => {
@@ -403,29 +410,45 @@ function PipelineContent() {
             return isHot && lastTouch < cutoff;
         }).length;
         return { total: filteredLeads.length, elite, emergency, aiHoje };
-    }, [filteredLeads]);
+    }, [filteredLeads, leads]);
 
-    const handleConsultantChange = async (leadId: string, consultantId: string) => {
+    const handleConsultantChange = async (leadId: string, newConsultantId: string) => {
         if (role !== 'admin') return;
         try {
-            const consultant = consultants.find(c => c.id === consultantId);
+            const consultant = consultants.find(c => c.id === newConsultantId);
+            const previousConsultantId = leads.find(l => l.id === leadId)?.assigned_consultant_id;
+
             const { error } = await supabase
                 .from('leads_manos_crm')
-                .update({ 
-                    assigned_consultant_id: consultantId,
+                .update({
+                    assigned_consultant_id: newConsultantId,
                     primeiro_vendedor: consultant?.name,
-                    updated_at: new Date().toISOString() 
+                    updated_at: new Date().toISOString()
                 })
                 .eq('id', leadId);
 
             if (error) throw error;
 
-            setLeads(prev => prev.map(l => l.id === leadId ? { 
-                ...l, 
-                assigned_consultant_id: consultantId,
+            setLeads(prev => prev.map(l => l.id === leadId ? {
+                ...l,
+                assigned_consultant_id: newConsultantId,
                 consultant_name: consultant?.name,
                 primeiro_vendedor: consultant?.name
             } : l));
+
+            // Handoff inteligente — gera briefing para o novo consultor (fire-and-forget)
+            if (previousConsultantId && previousConsultantId !== newConsultantId) {
+                fetch('/api/lead/handoff-brief', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        leadId,
+                        newConsultantId,
+                        newConsultantName: consultant?.name,
+                        previousConsultantId,
+                    }),
+                }).catch(() => {});
+            }
         } catch (error) {
             console.error("Error updating consultant:", error);
         }
@@ -448,7 +471,7 @@ function PipelineContent() {
                     <div className="flex items-center gap-4 px-4 py-2 bg-white/[0.03] border border-white/10 rounded-2xl shadow-sm">
                         <div className="flex flex-col">
                             <h1 className="text-sm font-black text-white uppercase tracking-tight leading-none whitespace-nowrap">
-                                Central <span className="text-red-500">de Vendas</span>
+                                Pipeline <span className="text-red-500">de Vendas</span>
                             </h1>
                         </div>
 
@@ -481,9 +504,11 @@ function PipelineContent() {
                     {/* Ações */}
                     <div className="flex items-center gap-2">
                         {/* Busca */}
-                        <div className="flex items-center bg-[#141418] border border-white/[0.07] rounded-lg px-3 py-2 w-28 sm:w-36 lg:w-44 xl:w-56 focus-within:border-white/20 transition-all">
-                            {loading ? (
-                                <div className="h-3.5 w-3.5 border-2 border-white/20 border-t-white/80 rounded-full animate-spin shrink-0" />
+                        <div className={`flex items-center bg-[#141418] border rounded-lg px-3 py-2 w-28 sm:w-36 lg:w-44 xl:w-56 focus-within:border-white/20 transition-all ${semanticIds !== null ? 'border-violet-500/40' : 'border-white/[0.07]'}`}>
+                            {loading || isSemanticLoading ? (
+                                <div className={`h-3.5 w-3.5 border-2 rounded-full animate-spin shrink-0 ${isSemanticLoading ? 'border-violet-500/30 border-t-violet-400' : 'border-white/20 border-t-white/80'}`} />
+                            ) : semanticIds !== null ? (
+                                <Sparkles size={13} className="text-violet-400 shrink-0" />
                             ) : (
                                 <Search size={13} className="text-white/30 shrink-0" />
                             )}
@@ -494,7 +519,17 @@ function PipelineContent() {
                                 onChange={(e) => setSearchTerm(e.target.value)}
                                 className="bg-transparent border-none outline-none text-[12px] text-white/80 w-full ml-2 placeholder:text-white/20"
                             />
+                            {searchTerm && (
+                                <button onClick={() => setSearchTerm('')} className="text-white/20 hover:text-white/50 ml-1 shrink-0">
+                                    <X size={11} />
+                                </button>
+                            )}
                         </div>
+                        {semanticIds !== null && (
+                            <div className="hidden lg:flex items-center gap-1 text-[10px] text-violet-400/70 font-semibold bg-violet-500/[0.07] border border-violet-500/20 rounded-md px-2 py-1 shrink-0">
+                                <Sparkles size={9} /> IA semântica
+                            </div>
+                        )}
 
                         {/* Toggle lista/kanban */}
                         <div className="flex bg-[#141418] p-0.5 rounded-lg border border-white/[0.07]">
@@ -532,7 +567,7 @@ function PipelineContent() {
             </header>
 
             {/* FILTROS — linha 2: compacta e organizada (HUD Style) */}
-            <div className="w-full bg-[#0C0C0F] border-b border-white/[0.05] px-3 sm:px-6 py-2.5 flex items-center gap-6 overflow-x-auto custom-scrollbar shrink-0 z-[60]">
+            <div className="w-full bg-[#0C0C0F] border-b border-white/[0.05] px-3 sm:px-6 py-2.5 flex items-center gap-6 overflow-visible custom-scrollbar shrink-0 z-[70]">
                 
                 <HUDSelect 
                     label="Período"

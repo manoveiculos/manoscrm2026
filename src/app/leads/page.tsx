@@ -23,6 +23,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { dataService } from '@/lib/dataService';
 import { Lead, Consultant, InventoryItem, LeadStatus } from '@/lib/types';
+import { leadService } from '@/lib/leadService';
 import { LeadListV2 } from '../pipeline/components/LeadListV2';
 import { LeadProfileModalV2 } from '../components/lead-profile/LeadProfileModalV2';
 import { NewLeadModalV2 } from '../pipeline/components/NewLeadModalV2';
@@ -30,60 +31,9 @@ import { KanbanBoardV2 } from '../pipeline/components/KanbanBoardV2';
 import { supabase } from '@/lib/supabase';
 import { ALL_STATUS, normalizeStatus } from '@/constants/status';
 import { calculateLeadScore } from '@/utils/calculateScore';
+import { isLeadQualified } from '@/utils/leadQualification';
+import { HUDSelect } from '../../components/shared_leads/HUDSelect';
 
-function HUDSelect({ label, value, options, onChange, minWidth = '120px', disabled = false }: { 
-    label: string, 
-    value: string, 
-    options: { id: string, label: string }[], 
-    onChange: (val: string) => void,
-    minWidth?: string,
-    disabled?: boolean
-}) {
-    const [isOpen, setIsOpen] = useState(false);
-    const selectedOption = options.find(opt => opt.id === value) || options[0];
-
-    return (
-        <div className={`flex flex-col relative ${disabled ? 'opacity-30 pointer-events-none' : ''}`} onMouseLeave={() => setIsOpen(false)}>
-            <span className="text-[7px] font-black text-red-500 uppercase tracking-widest mb-0.5">{label}</span>
-            <button 
-                onClick={() => !disabled && setIsOpen(!isOpen)}
-                disabled={disabled}
-                className="flex items-center justify-between gap-2 bg-transparent text-[9px] font-black text-white/60 outline-none uppercase cursor-pointer hover:text-white transition-colors text-left"
-                style={{ minWidth }}
-            >
-                <span className="truncate">{selectedOption.label}</span>
-                <ArrowUpDown size={8} className={isOpen ? 'text-red-500' : 'text-white/20'} />
-            </button>
-
-            <AnimatePresence>
-                {isOpen && (
-                    <motion.div 
-                        initial={{ opacity: 0, y: -5 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -5 }}
-                        className="absolute top-full left-0 bg-[#0a0a0a]/95 border border-white/10 rounded-lg shadow-[0_20px_50px_rgba(0,0,0,0.95)] py-1.5 z-[100] min-w-[200px] backdrop-blur-3xl"
-                    >
-                        <div className="max-h-[300px] overflow-y-auto custom-scrollbar">
-                            {options.map(opt => (
-                                <button
-                                    key={opt.id}
-                                    onClick={() => {
-                                        onChange(opt.id);
-                                        setIsOpen(false);
-                                    }}
-                                    className={`w-full text-left px-4 py-2 text-[8px] font-black uppercase tracking-widest hover:bg-red-600/10 hover:text-white transition-all flex items-center justify-between group ${value === opt.id ? 'text-red-500 bg-red-600/5' : 'text-white/40'}`}
-                                >
-                                    {opt.label}
-                                    {value === opt.id && <div className="w-1 h-1 rounded-full bg-red-600 shadow-[0_0_8px_rgba(220,38,38,0.8)]" />}
-                                </button>
-                            ))}
-                        </div>
-                    </motion.div>
-                )}
-            </AnimatePresence>
-        </div>
-    );
-}
 
 export default function CentralLeadsV2() {
     return (
@@ -95,6 +45,7 @@ export default function CentralLeadsV2() {
 
 function LeadsContent() {
     const [leads, setLeads] = useState<Lead[]>([]);
+    const [totalLeadsCount, setTotalLeadsCount] = useState(0);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [viewMode, setViewMode] = useState<'list' | 'kanban'>('list');
@@ -143,27 +94,32 @@ function LeadsContent() {
                         .eq('auth_id', session.user.id)
                         .maybeSingle();
                     
+                    let consultantParamId: string | undefined = undefined;
                     if (profile) {
                         setUserName(profile.name.split(' ')[0]);
+                        consultantParamId = profile.id;
                         if (!isAdmin) {
-                            currentConsultantId = profile.id;
                             setConsultantId(profile.id);
-                            setFilterConsultant(profile.id);
                         }
                     } else if (isAdmin) {
                         setUserName('Admin');
                     }
+
+                    const [leadsResult, consultantsData, inventoryData] = await Promise.all([
+                        leadService.getLeadsPaginated(undefined, {
+                            consultantId: userRole === 'admin' ? undefined : (consultantParamId || session.user.id),
+                            role: userRole,
+                            limit: 2000 
+                        }),
+                        dataService.getConsultants(),
+                        dataService.getInventory()
+                    ]);
+
+                    setLeads(leadsResult.leads || []);
+                    setTotalLeadsCount(leadsResult.totalCount || 0);
+                    setConsultants(consultantsData || []);
+                    setInventory(inventoryData || []);
                 }
-
-                const [leadsData, consultantsData, inventoryData] = await Promise.all([
-                    dataService.getLeads(currentConsultantId || undefined),
-                    dataService.getConsultants(),
-                    dataService.getInventory()
-                ]);
-
-                setLeads(leadsData || []);
-                setConsultants(consultantsData || []);
-                setInventory(inventoryData || []);
             } catch (error) {
                 console.error("Error loading Central de Leads data:", error);
             } finally {
@@ -179,9 +135,12 @@ function LeadsContent() {
             const matchesSearch = !searchTerm || 
                 lead.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                 lead.phone.includes(searchTerm) ||
+                (lead.cpf && lead.cpf.includes(searchTerm)) ||
+                (lead.id && lead.id.toLowerCase().includes(searchTerm.toLowerCase())) ||
                 (lead.vehicle_interest && lead.vehicle_interest.toLowerCase().includes(searchTerm.toLowerCase()));
             
             const matchesConsultant = 
+                role === 'consultant' ? lead.assigned_consultant_id === consultantId :
                 filterConsultant === 'all' ? true : 
                 filterConsultant === 'none' ? !lead.assigned_consultant_id : 
                 lead.assigned_consultant_id === filterConsultant;
@@ -226,6 +185,17 @@ function LeadsContent() {
                 filterScore === 'gelado' ? currentScore < 30 :
                 true
             );
+
+            // ── REGRA DE ACESSO (CIRÚRGICA) ──────────────────────────
+            // Se não for admin, o consultor só pode ver:
+            // 1. Leads atribuídos a ele mesmo
+            // 2. Leads que ainda não têm consultor atribuído (para triagem/resgate)
+            if (role !== 'admin' && consultantId) {
+                const isMine = lead.assigned_consultant_id === consultantId;
+                const isOrphan = !lead.assigned_consultant_id || lead.assigned_consultant_id === '';
+                if (!isMine && !isOrphan) return false;
+            }
+            // ──────────────────────────────────────────────────────────
 
             return matchesSearch && matchesConsultant && matchesStatus && matchesInterest && matchesOrigin && matchesScore && matchesDate;
         })
@@ -308,32 +278,57 @@ function LeadsContent() {
                     body: JSON.stringify({ leadId }),
                 }).catch(() => {});
             }
+
+            // Briefing pré-visita ao agendar
+            if (newStatus === 'ataque' || newStatus === 'scheduled' || newStatus === 'confirmed') {
+                fetch('/api/lead/pre-visit-brief', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ leadId }),
+                }).catch(() => {});
+            }
         } catch (error) {
             console.error("Error updating status:", error);
         }
     };
 
-    const handleConsultantChange = async (leadId: string, consultantId: string) => {
+    const handleConsultantChange = async (leadId: string, newConsultantId: string) => {
         if (role !== 'admin') return;
         try {
-            const consultant = consultants.find(c => c.id === consultantId);
+            const consultant = consultants.find(c => c.id === newConsultantId);
+            const previousConsultantId = leads.find(l => l.id === leadId)?.assigned_consultant_id;
+
             const { error } = await supabase
                 .from('leads_manos_crm')
-                .update({ 
-                    assigned_consultant_id: consultantId,
+                .update({
+                    assigned_consultant_id: newConsultantId,
                     primeiro_vendedor: consultant?.name,
-                    updated_at: new Date().toISOString() 
+                    updated_at: new Date().toISOString()
                 })
                 .eq('id', leadId);
 
             if (error) throw error;
 
-            setLeads(prev => prev.map(l => l.id === leadId ? { 
-                ...l, 
-                assigned_consultant_id: consultantId,
+            setLeads(prev => prev.map(l => l.id === leadId ? {
+                ...l,
+                assigned_consultant_id: newConsultantId,
                 consultant_name: consultant?.name,
                 primeiro_vendedor: consultant?.name
             } : l));
+
+            // Handoff inteligente — gera briefing para o novo consultor (fire-and-forget)
+            if (previousConsultantId && previousConsultantId !== newConsultantId) {
+                fetch('/api/lead/handoff-brief', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        leadId,
+                        newConsultantId,
+                        newConsultantName: consultant?.name,
+                        previousConsultantId,
+                    }),
+                }).catch(() => {});
+            }
         } catch (error) {
             console.error("Error updating consultant:", error);
         }
@@ -357,14 +352,15 @@ function LeadsContent() {
                         <div className="flex items-center gap-2.5">
                             <Users size={14} className="text-red-600" />
                             <h1 className="text-xs font-black uppercase tracking-[0.3em] text-white/95 whitespace-nowrap">
-                                Central de <span className="text-red-500">Leads</span>
+                                Central <span className="text-red-500 font-black">DA IA</span>
                             </h1>
+                            <div className="text-[6px] font-bold text-white/10 uppercase tracking-[0.2em] -mt-1">Visibility: FULL DATABASE</div>
                         </div>
                     </div>
 
                     <div className="hidden sm:flex items-center gap-4 pl-4 border-l border-white/10 ml-2">
                         <div className="flex items-baseline gap-1.5">
-                            <span className="text-xs font-black text-white/80 tabular-nums">{leads.length}</span>
+                            <span className="text-xs font-black text-white/80 tabular-nums">{totalLeadsCount || leads.length}</span>
                             <span className="text-[8px] font-bold text-white/20 uppercase tracking-widest">TOTAL</span>
                         </div>
                         <div className="w-px h-3 bg-white/10" />
@@ -471,6 +467,7 @@ function LeadsContent() {
                     </motion.div>
                 )}
             </AnimatePresence>
+
 
             {/* QUICK FILTERS BAR - OPTIMIZED FOR 100% SCREEN */}
             <div className="shrink-0 min-h-12 border-b border-white/5 bg-[#03060b] flex flex-wrap items-center gap-x-2 gap-y-2 px-3 sm:px-6 py-2.5 z-[60] relative">
@@ -579,8 +576,13 @@ function LeadsContent() {
                     <button 
                         onClick={() => {
                             setLoading(true);
-                            dataService.getLeads().then((data: Lead[]) => {
-                                setLeads(data || []);
+                            leadService.getLeadsPaginated(undefined, {
+                                consultantId: role === 'admin' ? undefined : (consultantId || undefined),
+                                role: role,
+                                limit: 2000
+                            }).then((result) => {
+                                setLeads(result.leads || []);
+                                setTotalLeadsCount(result.totalCount || 0);
                                 setLoading(false);
                             });
                         }}

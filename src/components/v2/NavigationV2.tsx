@@ -18,6 +18,9 @@ import {
     Trophy, // Icone para Ranking
     ClipboardCheck, // Icone para Gestão de Vendas
     LayoutDashboard,
+    Database, // Icone para Nutrição/Banco de Dados
+    SlidersHorizontal, // Calibração da IA
+    DollarSign,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
@@ -35,15 +38,17 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
     { label: 'Visão Geral', icon: LayoutDashboard, href: '/' },
     { label: 'Painel de Elite', icon: Activity, href: '/pulse' },
-    { label: 'Pipeline de leads', icon: KanbanSquare, href: '/pipeline' },
+    { label: 'Pipeline de Vendas', icon: KanbanSquare, href: '/pipeline' },
     { label: 'Central da IA', icon: Bot, href: '/leads' },
     { label: 'Arsenal de Veículos', icon: CarFront, href: '/inventory' },
     { label: 'Ranking de Vendas', icon: Trophy, href: '/ranking' },
     { label: 'Análise Inteligente', icon: BarChart3, href: '/analytics' },
     { label: 'Campanhas Meta/Google', icon: Target, href: '/marketing', adminOnly: true },
     { label: 'Gestão de Vendas', icon: ClipboardCheck, href: '/admin/sales', adminOnly: true },
+    { label: 'Faturamento de Crédito', icon: DollarSign, href: '/admin/cobranca', adminOnly: true },
     { label: 'Gerenciar Equipe', icon: Shield, href: '/admin/equipe', adminOnly: true },
     { label: 'Cowork IA', icon: Bot, href: '/admin/cowork', adminOnly: true },
+    { label: 'Calibração da IA', icon: SlidersHorizontal, href: '/admin/ai-calibration', adminOnly: true },
 ];
 
 interface NavUser {

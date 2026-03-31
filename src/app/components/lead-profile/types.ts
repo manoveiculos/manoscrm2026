@@ -27,6 +27,15 @@ export interface Lead {
   vendedor?: string;
   consultant_name?: string;
   primeiro_vendedor?: string;
+  last_proposal_json?: {
+    titulo: string;
+    pitch: string;
+    cenarios: { label: string; entrada: string; parcela: string; obs: string }[];
+    cta: string;
+  } | null;
+  last_proposal_at?: string | null;
+  handoff_summary?: string | null;
+  handoff_at?: string | null;
 }
 
 export interface TimelineEvent {

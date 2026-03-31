@@ -8,6 +8,7 @@ import { extractWhatsAppScript } from '@/lib/aiParser';
 import { motion, AnimatePresence } from 'framer-motion';
 import { normalizeStatus, getStatusConfig } from '@/constants/status';
 import { calculateLeadScore, getScoreLabel } from '@/utils/calculateScore';
+import { getLeadUnqualifiedReason } from '@/utils/leadQualification';
 import { MoveMenu } from '@/components/shared_leads/MoveMenu';
 
 interface LeadListV2Props {
@@ -105,7 +106,7 @@ export function LeadListV2({
                             <button
                                 onClick={(e) => handleQuickStrike(e, lead)}
                                 className={`shrink-0 h-10 w-10 rounded-lg flex items-center justify-center border transition-all ${
-                                    score >= 70
+                                    score >= 80
                                         ? 'bg-red-600/15 border-red-500/25 text-red-400 active:bg-red-600 active:text-white'
                                         : 'bg-white/[0.04] border-white/[0.06] text-white/30 active:bg-white/10'
                                 }`}
@@ -147,6 +148,16 @@ export function LeadListV2({
                                         </>
                                     )}
                                 </div>
+                                {(() => {
+                                    const reason = getLeadUnqualifiedReason(lead);
+                                    if (!reason) return null;
+                                    return (
+                                        <div className="flex items-center gap-1.5 mt-1.5">
+                                            <div className="h-1 w-1 rounded-full bg-amber-500/40" />
+                                            <span className="text-[9px] font-black text-amber-500/40 uppercase tracking-widest">{reason}</span>
+                                        </div>
+                                    );
+                                })()}
                             </div>
 
                             {/* Score + data */}
@@ -208,7 +219,7 @@ export function LeadListV2({
                                             <button
                                                 onClick={(e) => handleQuickStrike(e, lead)}
                                                 className={`h-7 w-7 rounded-lg flex items-center justify-center transition-all border ${
-                                                    score >= 70
+                                                    score >= 80
                                                         ? 'bg-red-600/15 border-red-500/25 text-red-400 hover:bg-red-600 hover:text-white'
                                                         : 'bg-white/[0.04] border-white/[0.06] text-white/20 hover:bg-white/10 hover:text-white/60'
                                                 }`}
@@ -221,9 +232,21 @@ export function LeadListV2({
                                                 <span className="text-[13px] font-semibold text-white/85 group-hover:text-white transition-colors truncate">
                                                     {lead.name.split(' ')[0]}{lead.name.split(' ').length > 1 ? ' ' + lead.name.split(' ')[1][0] + '.' : ''}
                                                 </span>
-                                                <span className="text-[11px] text-white/30 tabular-nums">
-                                                    {formatPhoneBR(lead.phone)}
-                                                </span>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-[11px] text-white/30 tabular-nums">
+                                                        {formatPhoneBR(lead.phone)}
+                                                    </span>
+                                                    {(() => {
+                                                        const reason = getLeadUnqualifiedReason(lead);
+                                                        if (!reason) return null;
+                                                        return (
+                                                            <>
+                                                                <span className="h-2 w-[1px] bg-white/10" />
+                                                                <span className="text-[8px] font-black text-amber-500/30 uppercase tracking-[0.15em] whitespace-nowrap">{reason}</span>
+                                                            </>
+                                                        );
+                                                    })()}
+                                                </div>
                                             </div>
                                         </td>
                                         <td className="px-4 py-3">
@@ -323,7 +346,7 @@ export function LeadListV2({
                                         </td>
                                         <td className="px-4 py-3">
                                             <div className="flex items-center gap-2">
-                                                <span className="text-[12px] font-bold tabular-nums" style={{ color: score >= 70 ? info.color : 'rgba(255,255,255,0.35)' }}>
+                                                <span className="text-[12px] font-bold tabular-nums" style={{ color: score >= 80 ? info.color : 'rgba(255,255,255,0.35)' }}>
                                                     {score}%
                                                 </span>
                                                 <div className="h-1 w-10 bg-white/[0.06] rounded-full overflow-hidden">

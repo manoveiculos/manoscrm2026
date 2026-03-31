@@ -195,12 +195,13 @@ export function useLeadTimeline(leadId: string | null, leadPhone?: string) {
       let aiSummary = '';
       let dateToUse = '';
 
+      // FONTE REAL: Busca segura sem campos explícitos que podem não existir (evita 406)
       const { data: lm } = await supabase
         .from('leads_master')
-        .select('ai_summary, updated_at, created_at')
+        .select('*')
         .or(`id.eq.${cleanId},id.eq.${leadId}`)
         .limit(1)
-        .single();
+        .maybeSingle();
 
       if (lm?.ai_summary) {
         aiSummary = lm.ai_summary;
@@ -208,10 +209,10 @@ export function useLeadTimeline(leadId: string | null, leadPhone?: string) {
       } else {
         const { data: lmc } = await supabase
           .from('leads_manos_crm')
-          .select('ai_summary, updated_at, created_at')
+          .select('*')
           .or(`id.eq.${cleanId},id.eq.${leadId}`)
           .limit(1)
-          .single();
+          .maybeSingle();
         if (lmc?.ai_summary) {
           aiSummary = lmc.ai_summary;
           dateToUse = lmc.updated_at || lmc.created_at;
@@ -241,6 +242,13 @@ export function useLeadTimeline(leadId: string | null, leadPhone?: string) {
   }, [leadId, leadPhone]);
 
   useEffect(() => { fetchTimeline(); }, [fetchTimeline]);
+
+  // Recarrega quando outro hook/componente disparar o evento de atualização
+  useEffect(() => {
+    const handler = () => fetchTimeline();
+    window.addEventListener('update-lead-timeline', handler);
+    return () => window.removeEventListener('update-lead-timeline', handler);
+  }, [fetchTimeline]);
 
   const filteredEvents = useMemo(() => {
     if (filter === 'all') return events;

@@ -68,6 +68,14 @@ export async function POST(req: NextRequest) {
 
         await admin.from('leads_manos_crm').update(updatePayload).eq('id', cleanId);
 
+        // Indexar embedding em background (busca semântica)
+        const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000';
+        fetch(`${siteUrl}/api/ai/embed-lead`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ lead_id: cleanId }),
+        }).catch(() => {});
+
         return NextResponse.json({ success: true, leadId: cleanId, ...updatePayload });
     } catch (err: any) {
         console.error('[init-score]', err);

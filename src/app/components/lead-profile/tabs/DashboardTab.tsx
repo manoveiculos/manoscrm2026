@@ -22,15 +22,16 @@ interface DashboardTabProps {
     setVehicleDetails: (val: string) => void;
     lossReason: string;
     setLossReason: (val: string) => void;
-    handleSaveFinish: () => void;
-    isAnalyzing: boolean;
+    handleSaveFinish: () => Promise<void>;
+    loadingStatus: 'idle' | 'analyzing' | 'matching' | 'finalizing';
     recalculateStrategy: () => void;
     handleExecuteAIDirective: () => void;
     onTabChange: (tab: any) => void;
-    getAcaoTaticaFallback: (lead: Lead) => any;
+    getAcaoTaticaFallback: (lead: any) => any;
     calcularTempoFunil: (date: string) => string;
     calcularDiffHoras: (date: string) => number;
     onSaveField: (field: string, value: string) => Promise<void>;
+    scriptOptions?: { tipo: string; label: string; mensagem: string }[];
 }
 
 export const DashboardTab: React.FC<DashboardTabProps> = ({
@@ -51,14 +52,15 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
     lossReason,
     setLossReason,
     handleSaveFinish,
-    isAnalyzing,
+    loadingStatus,
     recalculateStrategy,
     handleExecuteAIDirective,
     onTabChange,
     getAcaoTaticaFallback,
     calcularTempoFunil,
     calcularDiffHoras,
-    onSaveField
+    onSaveField,
+    scriptOptions = [],
 }) => {
     // ── TELA DE CONCLUSÃO DE MISSÃO (estilo poker app) ──
     if (showFinishing) {
@@ -165,7 +167,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                             onClick={handleSaveFinish}
                             className="w-full py-3.5 bg-red-600 hover:bg-red-500 text-white font-semibold text-[13px] rounded-xl transition-colors active:scale-[0.98]"
                         >
-                            Confirmar
+                            {loadingStatus === 'finalizing' ? 'Salvando...' : 'Confirmar'}
                         </button>
                     </div>
                 )}
@@ -206,11 +208,12 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
 
             <TacticalAction
                 lead={lead}
-                isAnalyzing={isAnalyzing}
+                loadingStatus={loadingStatus}
                 recalculateStrategy={recalculateStrategy}
                 handleExecuteAIDirective={handleExecuteAIDirective}
                 onTabChange={onTabChange}
                 fallbackAction={getAcaoTaticaFallback(lead)}
+                scriptOptions={scriptOptions}
             />
 
             {/* ── RISCO DE CHURN ── (exibe quando churn > 0) */}
@@ -248,13 +251,13 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
             )}
 
             {/* Agendamentos ativos */}
-            {lead?.followups && (lead.followups as any[]).filter((f: any) => f?.status === 'pending').length > 0 && (
+            {(lead as any)?.followups && ((lead as any).followups as any[]).filter((f: any) => f?.status === 'pending').length > 0 && (
                 <div className="bg-[#141418] border border-white/[0.07] rounded-xl overflow-hidden">
                     <div className="flex items-center gap-2 px-4 py-3 border-b border-white/[0.05]">
                         <Clock size={13} className="text-white/30" />
                         <span className="text-[11px] font-semibold text-white/50 uppercase tracking-widest">Agendamentos</span>
                     </div>
-                    {lead.followups.filter((f: any) => f?.status === 'pending').map((fu: any) => (
+                    {((lead as any).followups as any[]).filter((f: any) => f?.status === 'pending').map((fu: any) => (
                         <div key={fu.id} className="flex items-center justify-between px-4 py-3 border-b border-white/[0.04] last:border-0">
                             <div className="flex items-center gap-3">
                                 <div className="h-8 w-8 rounded-lg bg-amber-400/10 border border-amber-400/20 flex items-center justify-center shrink-0">
@@ -280,19 +283,39 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                 <div className="bg-[#141418] border border-white/[0.07] rounded-xl overflow-hidden">
                     <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.05]">
                         <div className="flex items-center gap-2">
-                            <div className="h-1.5 w-1.5 rounded-full bg-white/20" />
+                            <div className={`h-1.5 w-1.5 rounded-full ${
+                                ultimaInteracao.type?.includes('whatsapp_in') ? 'bg-emerald-400' :
+                                ultimaInteracao.type?.includes('whatsapp') ? 'bg-sky-400' :
+                                ultimaInteracao.type?.includes('call') ? 'bg-purple-400' :
+                                'bg-white/20'
+                            }`} />
                             <span className="text-[11px] font-semibold text-white/40 uppercase tracking-widest">Último contato</span>
                         </div>
                         <span className="text-[11px] text-white/25 tabular-nums">
-                            {new Date(ultimaInteracao.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                            {ultimaInteracao.created_at
+                                ? new Date(ultimaInteracao.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+                                : '—'}
                         </span>
                     </div>
                     <div className="px-4 py-3">
-                        <p className="text-[13px] text-white/60 leading-relaxed italic">
-                            "{ultimaInteracao.notes?.replace(/\[.*?\]\s*/, '') || 'Sem observações registradas.'}"
-                        </p>
+                        {(() => {
+                            // TimelineEvent usa .description; interações legadas usam .notes
+                            const raw = (ultimaInteracao.description || ultimaInteracao.notes || '').trim();
+                            // Remove prefixos de sistema: [WILSON] bla, [IA AUTO] bla, [HANDOFF] bla
+                            const clean = raw.replace(/^\[.*?\]\s*/g, '').trim();
+                            return (
+                                <p className="text-[13px] text-white/60 leading-relaxed italic">
+                                    "{clean || (ultimaInteracao.title !== 'Evento' ? ultimaInteracao.title : 'Sem conteúdo registrado.')}"
+                                </p>
+                            );
+                        })()}
                         <span className="text-[10px] text-white/25 uppercase tracking-wider mt-1.5 block">
-                            {ultimaInteracao.type.replace(/_/g, ' ')}
+                            {ultimaInteracao.type === 'whatsapp_in'  ? 'WHATSAPP — Cliente'  :
+                             ultimaInteracao.type === 'whatsapp_out' ? 'WHATSAPP — Consultor' :
+                             ultimaInteracao.type === 'note'         ? 'Nota interna'        :
+                             ultimaInteracao.type === 'call'         ? 'Ligação'             :
+                             ultimaInteracao.type === 'ai_analysis'  ? 'Análise IA'          :
+                             (ultimaInteracao.type || 'Interação').replace(/_/g, ' ')}
                         </span>
                     </div>
                 </div>

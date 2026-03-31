@@ -72,7 +72,11 @@ export async function getFinancialMetrics(params?: {
         conversionRate: metrics.conversion_rate,
         funnelData: metrics.funnel_data,
         tactical: metrics.tactical,
-        avgResponseTime: await getAverageResponseTime(startDate, consultantId),
+        avgResponseTime: await getAverageResponseTime(
+            // Limita a janela de cálculo a no máximo 30 dias para evitar distorção com leads antigos
+            new Date(Math.max(new Date(startDate).getTime(), Date.now() - 30 * 86_400_000)).toISOString(),
+            consultantId
+        ),
         responseRate: metrics.total_leads > 0 ? await getResponseRate(startDate, consultantId) : 0,
         cac: 0,
         roi: 0

@@ -194,7 +194,8 @@ export async function POST(req: NextRequest) {
                 const response = await openai.chat.completions.create({
                     model: 'gpt-4o-mini',
                     messages: messages,
-                    response_format: { type: "json_object" }
+                    response_format: { type: "json_object" },
+                    temperature: 0.3
                 }, { timeout: 45000 });
 
                 const output_text = response.choices[0]?.message?.content;

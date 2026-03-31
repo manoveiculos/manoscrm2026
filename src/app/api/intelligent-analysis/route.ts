@@ -146,7 +146,13 @@ RETORNE EXATAMENTE ESTE JSON:
 
     // --- STEP 2: INDIVIDUAL ANALYSIS (PER CONSULTANT) ---
     const individualAnalysesResults = await Promise.all((consultants as any[]).map(async (consultant) => {
-      const consultantLeads = activeLeads.filter((l: any) => l.assigned_consultant_id === consultant.id);
+      // FILTRAGEM ESTRITA: Wilson só analisa leads do Wilson. Sergio só analisa leads do Sergio.
+      const consultantLeads = activeLeads.filter((l: any) => 
+        l.assigned_consultant_id && (
+          l.assigned_consultant_id === consultant.id || 
+          l.assigned_consultant_id.toString().includes(consultant.id)
+        )
+      );
 
       if (consultantLeads.length === 0) return null;
 
@@ -163,27 +169,29 @@ DADOS DO CONSULTOR ${firstName.toUpperCase()}:
 - Leads mornos (score 40-69): ${warmLeads.length}
 
 LEADS PARA ANÁLISE:
-${consultantLeads.slice(0, 20).map((l: any) => `- [ID: ${l.id}] ${l.name} | Score: ${l.ai_score || 0} | Status: ${statusMap[l.status] || l.status} | Interesse: ${l.vehicle_interest || 'N/D'}`).join('\n')}
+${consultantLeads.slice(0, 30).map((l: any) => `- [UUID: ${l.id}] ${l.name} | Score: ${l.ai_score || 0} | Status: ${statusMap[l.status] || l.status} | Interesse: ${l.vehicle_interest || 'N/D'}`).join('\n')}
 
 ESTOQUE DISPONÍVEL:
 ${inventorySummary}
 
 REGRAS:
 1. Responda apenas em PT-BR.
-2. Use APENAS IDs de leads listados acima em lead_id.
-3. Score (ai_score) só acima de 70 se o lead está em negociação/proposta com interesse explícito. Dados insuficientes = score máximo 50.
-4. Status em português: ${Object.values(statusMap).join(', ')}.
-5. Para leads com poucos dados, seja honesto: "histórico insuficiente para análise aprofundada".
+2. Use APENAS o UUID COMPLETO (36 caracteres) do lead em lead_id. NUNCA resuma o ID.
+3. SEMPRE inclua o lead_name exato da lista acima.
+4. Score (ai_score) só acima de 70 se o lead está em negociação/proposta com interesse explícito. Dados insuficientes = score máximo 50.
+5. Status em português: ${Object.values(statusMap).join(', ')}.
+6. Para leads com poucos dados, seja honesto: "histórico insuficiente para análise aprofundada".
 
 RETORNE EXATAMENTE ESTE JSON:
 {
   "daily_guide": "Mensagem direta para ${firstName} baseada nos dados reais: quantos leads quentes, quais são as prioridades do dia.",
   "recommended_actions": [
-    { "task": "Ação concreta e imediata", "reason": "Baseada em dado real do lead", "lead_id": "ID real da lista acima" }
+    { "task": "Ação concreta e imediata", "reason": "Baseada em dado real do lead", "lead_id": "UUID REAL de 36 caracteres", "lead_name": "Nome Completo" }
   ],
   "leads_analysis": [
     {
-      "lead_id": "ID real da lista",
+      "lead_id": "UUID REAL de 36 caracteres",
+      "lead_name": "Nome Completo",
       "is_closing_opportunity": false,
       "closing_reason": "Justificativa baseada em dados reais ou 'dados insuficientes'",
       "closing_probability": 0,

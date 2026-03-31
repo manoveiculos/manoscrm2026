@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, LayoutDashboard, History, Edit3, Car, Trash2, Loader2 } from 'lucide-react';
@@ -63,6 +63,18 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
     const followup = useLeadFollowUp(lead, activeTab, userName);
     const score = useLeadScore(lead, timeline.totalCount, timeline.allEvents[0]?.created_at);
 
+    // Seleciona o evento mais recente com conteúdo real para "Último contato"
+    const ultimaInteracao = React.useMemo(() => {
+        const SKIP_TYPES = ['followup_created', 'followup_missed', 'system', 'vehicle_linked'];
+        const withContent = timeline.allEvents.find(e =>
+            !SKIP_TYPES.includes(e.type) &&
+            ((e.description && e.description.trim().length > 3) ||
+             (e as any).notes?.trim()?.length > 3 ||
+             e.type === 'call' || e.type === 'visit')
+        );
+        return withContent || timeline.allEvents[0] || null;
+    }, [timeline.allEvents]);
+
     // Local State for Tabs
     const [searchTerm, setSearchTerm] = useState('');
     const [showAllArsenal, setShowAllArsenal] = useState(false);
@@ -70,7 +82,11 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
     const [newNote, setNewNote] = useState('');
     const [isSavingNote, setIsSavingNote] = useState(false);
     const [timelineFilter, setTimelineFilter] = useState('all');
-    const [isAnalyzing, setIsAnalyzing] = useState(false);
+    const [loadingStatus, setLoadingStatus] = useState<'idle' | 'analyzing' | 'matching' | 'finalizing'>('idle');
+    const isAnalyzing = loadingStatus !== 'idle';
+    const [scriptOptions, setScriptOptions] = useState<{ tipo: string; label: string; mensagem: string }[]>([]);
+    const [diagnostico, setDiagnostico] = useState('');
+    const [orientacao, setOrientacao] = useState('');
     const [showFinishing, setShowFinishing] = useState(false);
     const [finishType, setFinishType] = useState<'venda' | 'compra' | 'perda' | null>(null);
     const [vehicleDetails, setVehicleDetails] = useState('');
@@ -78,6 +94,8 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
     const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
     const [editedTemplates, setEditedTemplates] = useState<Record<string, string>>({});
     const [isDeleting, setIsDeleting] = useState(false);
+    // Controla auto-trigger único por sessão do modal
+    const hasAutoTriggered = useRef(false);
 
     // Client-side rendering check for Portal
     const [mounted, setMounted] = useState(false);
@@ -96,7 +114,7 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
                     .from('consultants_manos_crm')
                     .select('role')
                     .eq('email', user.email)
-                    .single();
+                    .maybeSingle(); // Troquei .single() por .maybeSingle() para evitar erro se não achar
                 if (consultant) setIsManagement(['admin', 'manager', 'owner'].includes(consultant.role));
             }
         };
@@ -111,6 +129,28 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
         };
         if (activeTab === 'arsenal') fetchInventory();
     }, [activeTab, supabase]);
+
+    // Auto-trigger análise IA ao abrir aba Geral se análise stale (> 8h) e lead tem WhatsApp
+    useEffect(() => {
+        if (
+            activeTab !== 'dashboard' ||
+            hasAutoTriggered.current ||
+            loadingStatus !== 'idle' ||
+            !lead.phone
+        ) return;
+
+        const lastUpdate = new Date(lead.updated_at || lead.created_at).getTime();
+        const hoursStale = (Date.now() - lastUpdate) / 3_600_000;
+
+        // Só dispara se análise for antiga (> 8h) ou nunca foi feita
+        if (hoursStale > 8 || !lead.next_step) {
+            hasAutoTriggered.current = true;
+            // Pequeno delay para o modal terminar de abrir antes de disparar
+            const timer = setTimeout(() => recalculateStrategy(), 1200);
+            return () => clearTimeout(timer);
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [activeTab]);
 
     // Note Action
     const handleAddNote = useCallback(async (customNote?: string) => {
@@ -140,7 +180,7 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
                 .from('interactions_manos_crm')
                 .insert(insertData)
                 .select()
-                .single();
+                .maybeSingle();
 
             if (error) throw error;
 
@@ -179,16 +219,36 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
 
     // IA Action (Elite Closer v3)
     const recalculateStrategy = async () => {
-        setIsAnalyzing(true);
+        setLoadingStatus('analyzing');
         try {
-            const { data: messages } = await supabase
-                .from('whatsapp_messages')
-                .select('*')
-                .eq('lead_id', lead.id.replace(/main_|crm26_|dist_/, ''))
-                .order('created_at', { ascending: true });
+            // Pequeno delay artificial para o usuário ler o status se a rede estiver rápida demais
+            // No caso do GPT-4o-mini (2s), isso garante que o vendedor veja a "mágica" acontecendo
+            const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+            
+            // Limpa o ID de qualquer prefixo antes de buscar mensagens
+            const rawId = lead.id.toString();
+            const cleanLeadId = rawId.replace(/^(main_|crm26_|dist_|lead_|crm25_|master_)/, '');
+            const isNumericId = /^\d+$/.test(cleanLeadId);
+            
+            // Query resiliente: tenta filtros que funcionam para ambos os tipos (int/uuid)
+            let query = supabase.from('whatsapp_messages').select('*');
+            
+            if (isNumericId) {
+                // Se for numérico, busca pelo ID limpo ou pelo ID original se este for numérico
+                query = query.or(`lead_id_v1.eq.${cleanLeadId},lead_id_v1.eq.${rawId}`);
+            } else {
+                // Se for UUID, busca pela coluna lead_id padrão
+                query = query.or(`lead_id.eq.${cleanLeadId},lead_id.eq.${rawId}`);
+            }
+
+            const { data: messages } = await query.order('created_at', { ascending: true });
+
+            await sleep(800);
+            setLoadingStatus('matching');
 
             const res = await fetch('/api/lead/next-steps', {
                 method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     leadId: lead.id,
                     messages: messages || [],
@@ -196,22 +256,38 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
                 })
             });
 
+            setLoadingStatus('finalizing');
+            await sleep(500);
+
             if (res.ok) {
                 const data = await res.json();
-                // O backend já persiste no banco, basta dar refresh local
-                setLead((prev: any) => ({ 
-                    ...prev, 
+                // Atualiza estado local com todos os campos retornados pela análise
+                setLead((prev: any) => ({
+                    ...prev,
                     ai_score: data.urgency_score,
                     ai_classification: data.temperature === 'quente' ? 'hot' : data.temperature === 'morno' ? 'warm' : 'cold',
-                    next_step: data.proximos_passos[0],
-                    status: data.status
+                    next_step: data.proximos_passos?.[0] || prev.next_step,
+                    proxima_acao: data.proximos_passos?.[0] || prev.proxima_acao,
+                    ai_reason: data.diagnostico && data.orientacao
+                        ? `${data.diagnostico} | ORIENTAÇÃO: ${data.orientacao}`
+                        : prev.ai_reason,
                 }));
+                if (Array.isArray(data.script_options) && data.script_options.length > 0) {
+                    setScriptOptions(data.script_options);
+                }
+                if (data.diagnostico) setDiagnostico(data.diagnostico);
+                if (data.orientacao)  setOrientacao(data.orientacao);
                 await timeline.refresh();
+            } else {
+                const text = await res.text().catch(() => '');
+                let errMsg = 'Erro desconhecido';
+                try { errMsg = JSON.parse(text)?.error || text.slice(0, 200); } catch { errMsg = text.slice(0, 200); }
+                console.error('[IA] Análise falhou:', res.status, errMsg);
             }
         } catch (err) {
             console.error('Falha na mentoría IA:', err);
         } finally {
-            setIsAnalyzing(false);
+            setLoadingStatus('idle');
         }
     };
 
@@ -221,7 +297,7 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
 
     const handleSaveFinish = async () => {
         if (!finishType) return;
-        setIsAnalyzing(true); // Usando loading genérico do modal
+        setLoadingStatus('finalizing'); // Usando loading genérico do modal
         try {
             const { recordSaleAction, recordPurchaseAction, updateLeadStatusAction } = await import('@/app/actions/leads');
 
@@ -229,7 +305,7 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
             if (finishType === 'venda') {
                 result = await recordSaleAction(
                     { ...lead, status: 'closed', vehicle_interest: vehicleDetails || lead.vehicle_interest },
-                    { consultant_id: lead.assigned_consultant_id, vehicle_details: vehicleDetails, sale_value: 0 }
+                    { consultant_id: lead.assigned_consultant_id, vehicle_name: vehicleDetails, sale_value: 0 }
                 );
             } else if (finishType === 'compra') {
                 result = await recordPurchaseAction(
@@ -273,7 +349,7 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
             console.error('[handleSaveFinish]', err);
             alert('Erro ao salvar conclusão: ' + (err.message || 'Tente novamente.'));
         } finally {
-            setIsAnalyzing(false);
+            setLoadingStatus('idle');
         }
     };
 
@@ -426,6 +502,14 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
                 interesse: nomeVeiculo,
                 valor_investimento: updates.valor_investimento || prev.valor_investimento
             }));
+            if (setLeads) {
+                setLeads((prev: any[]) => prev.map(l => l.id === lead.id ? { 
+                    ...l, 
+                    vehicle_interest: nomeVeiculo,
+                    interesse: nomeVeiculo,
+                    valor_investimento: updates.valor_investimento || l.valor_investimento
+                } : l));
+            }
             alert(`✅ Veículo "${nomeVeiculo}" vinculado com sucesso!`);
             setActiveTab('dashboard'); // Volta para o cockpit para ver a mudança
         } else {
@@ -557,7 +641,7 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
                                             isManagement={isManagement}
                                             setIsEditing={setIsEditing}
                                             handleUpdateLead={handleUpdateLead}
-                                            ultimaInteracao={timeline.allEvents[0]}
+                                            ultimaInteracao={ultimaInteracao}
                                             showFinishing={showFinishing}
                                             setShowFinishing={setShowFinishing}
                                             finishType={finishType}
@@ -567,7 +651,7 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
                                             lossReason={lossReason}
                                             setLossReason={setLossReason}
                                             handleSaveFinish={handleSaveFinish}
-                                            isAnalyzing={isAnalyzing}
+                                            loadingStatus={loadingStatus}
                                             recalculateStrategy={recalculateStrategy}
                                             handleExecuteAIDirective={handleExecuteAIDirective}
                                             onTabChange={setActiveTab}
@@ -575,6 +659,7 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
                                             calcularTempoFunil={calcularTempoFunil}
                                             calcularDiffHoras={calcularDiffHoras}
                                             onSaveField={handleSaveField}
+                                            scriptOptions={scriptOptions}
                                         />
                                     )}
                                     {activeTab === 'timeline' && (
@@ -587,7 +672,7 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
                                             setNewNote={setNewNote}
                                             isSavingNote={isSavingNote}
                                             handleAddNote={() => handleAddNote()}
-                                            isAnalyzing={isAnalyzing}
+                                            loadingStatus={loadingStatus}
                                             recalculateStrategy={recalculateStrategy}
                                         />
                                     )}
@@ -619,6 +704,13 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
                                                 const cleanPhone = lead.phone.replace(/\D/g, '');
                                                 window.open(`https://wa.me/55${cleanPhone}?text=${encodeURIComponent(text)}`, '_blank');
                                             }}
+                                            recalculateStrategy={recalculateStrategy}
+                                            loadingStatus={loadingStatus}
+                                            scriptOptions={scriptOptions}
+                                            diagnostico={diagnostico}
+                                            orientacao={orientacao}
+                                            onTabChange={setActiveTab}
+                                            handleSaveCallLog={followup.handleSaveCallLog}
                                         />
                                     )}
                                     {activeTab === 'arsenal' && (
@@ -640,7 +732,10 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
                                         />
                                     )}
                                     {activeTab === 'financiamento' && (
-                                        <FinancingTab />
+                                        <FinancingTab 
+                                            lead={lead} 
+                                            onSaveField={handleSaveField} 
+                                        />
                                     )}
                                 </motion.div>
                             </AnimatePresence>

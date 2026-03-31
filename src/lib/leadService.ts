@@ -50,6 +50,7 @@ export const leadService = {
         startDate?: string;
         origin?: string;
         minScore?: number;
+        role?: 'admin' | 'consultant'; // Novo para isolamento
     }) {
         const { 
             page = 1, 
@@ -59,10 +60,11 @@ export const leadService = {
             searchTerm,
             startDate,
             origin,
-            minScore
+            minScore,
+            role = 'consultant'
         } = params || {};
         
-        const cacheKey = `leads_p${page}_l${limit}_c${consultantId || 'all'}_s${status || 'all'}_t${searchTerm || 'none'}_d${startDate || 'no'}_o${origin || 'all'}_sc${minScore || 0}`;
+        const cacheKey = `leads_p${page}_l${limit}_c${consultantId || 'all'}_s${status || 'all'}_t${searchTerm || 'none'}_d${startDate || 'no'}_o${origin || 'all'}_sc${minScore || 0}_r${role}`;
         
         const cached = cacheGet<{ leads: Lead[], totalCount: number }>(cacheKey);
         if (cached) return cached;
@@ -73,19 +75,23 @@ export const leadService = {
                 .from('leads')
                 .select('*', { count: 'exact' });
 
-            if (consultantId) {
+            // ISOLAMENTO DE DADOS (SINGLE SOURCE OF TRUTH)
+            // Se for consultor, filtra APENAS seus leads. Se for admin e tiver consultantId, filtra por ele.
+            if (role === 'consultant' && consultantId) {
+                query = query.eq('assigned_consultant_id', consultantId);
+            } else if (role === 'admin' && consultantId) {
                 if (consultantId === 'unassigned' || consultantId === 'none') {
                     query = query.is('assigned_consultant_id', null);
-                } else {
+                } else if (consultantId !== 'all') {
                     query = query.eq('assigned_consultant_id', consultantId);
                 }
             }
+
             if (status && status !== 'all') {
                 query = query.eq('status', status);
             }
             if (searchTerm) {
-                // Busca por nome, telefone ou interesse
-                query = query.or(`name.ilike.%${searchTerm}%,phone.ilike.%${searchTerm}%,vehicle_interest.ilike.%${searchTerm}%`);
+                query = query.or(`name.ilike.%${searchTerm}%,phone.ilike.%${searchTerm}%,vehicle_interest.ilike.%${searchTerm}%,cpf.ilike.%${searchTerm}%,id.ilike.%${searchTerm}%`);
             }
             if (startDate) {
                 query = query.gte('created_at', startDate);

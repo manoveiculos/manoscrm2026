@@ -50,7 +50,7 @@ export const LeadCardV2: React.FC<LeadCardV2Props> = ({
     });
 
     const scoreInfo = getScoreLabel(scoreVal);
-    const isHot = scoreVal >= 70;
+    const isHot = scoreVal >= 80;
     const isEmergency = scoreVal >= 90;
     const churnRisk = Number(lead.churn_probability) || 0;
     const isChurnRisk = churnRisk > 70;
@@ -122,7 +122,7 @@ export const LeadCardV2: React.FC<LeadCardV2Props> = ({
     };
 
     // Score dot color
-    const scoreDotColor = scoreVal >= 70 ? '#E31E24' : scoreVal >= 40 ? '#F59E0B' : '#55555F';
+    const scoreDotColor = scoreVal >= 80 ? '#E31E24' : scoreVal >= 40 ? '#F59E0B' : '#55555F';
 
     // ── SLA do estágio atual ──────────────────────────────────
     function normalizeToStageId(status: string): string {

@@ -5,10 +5,8 @@ import {
     Users,
     Target,
     TrendingUp,
-    DollarSign,
     Car,
     Clock,
-    CheckCircle2,
     Calendar,
     MessageSquare,
     Zap,
@@ -19,7 +17,7 @@ import {
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 import { dataService } from '@/lib/dataService';
-import { Lead, AIClassification } from '@/lib/types';
+import { Lead } from '@/lib/types';
 import { StatsCard } from './StatsCard';
 
 const container = {
@@ -43,23 +41,28 @@ interface ConsultantMetrics {
     totalRevenue: number;
     conversionRate: number;
     statusCounts: Record<string, number>;
-    scheduledLeads: Lead[];
+    scheduledLeads: any[];
+    avgResponseMin: number;
 }
+
+type Period = 'today' | 'week' | 'month' | 'all';
 
 export function ConsultantDashboard({ consultantId, consultantName }: { consultantId: string; consultantName: string }) {
     const [metrics, setMetrics] = useState<ConsultantMetrics | null>(null);
     const [recentLeads, setRecentLeads] = useState<Lead[]>([]);
     const [loading, setLoading] = useState(true);
+    const [period, setPeriod] = useState<Period>('month');
 
     useEffect(() => {
         async function loadData() {
+            setLoading(true);
             try {
                 const [m, leads] = await Promise.all([
-                    dataService.getConsultantMetrics(consultantId),
+                    dataService.getConsultantMetrics(consultantId, period),
                     dataService.getLeads(consultantId)
                 ]);
                 setMetrics(m as ConsultantMetrics);
-                setRecentLeads((leads as Lead[])?.slice(0, 5) || []);
+                setRecentLeads((leads as Lead[])?.slice(0, 8) || []);
             } catch (error) {
                 console.error("Error loading consultant dashboard data:", error);
             } finally {
@@ -67,18 +70,9 @@ export function ConsultantDashboard({ consultantId, consultantName }: { consulta
             }
         }
         loadData();
-    }, [consultantId]);
+    }, [consultantId, period]);
 
-    const getAIClassLabel = (classification: AIClassification) => {
-        const labels: { [key: string]: string } = {
-            'hot': 'Qualificado',
-            'warm': 'Potencial',
-            'cold': 'Frio'
-        };
-        return labels[classification] || classification;
-    };
-
-    if (loading) {
+    if (loading && !metrics) {
         return (
             <div className="flex h-[60vh] items-center justify-center">
                 <div className="h-12 w-12 border-4 border-red-500 border-t-transparent rounded-full animate-spin" />
@@ -89,33 +83,7 @@ export function ConsultantDashboard({ consultantId, consultantName }: { consulta
     const uncontactedCount = (metrics?.statusCounts?.['new'] || 0) + (metrics?.statusCounts?.['received'] || 0);
     const inProgressCount = (metrics?.statusCounts?.['attempt'] || 0) + (metrics?.statusCounts?.['contacted'] || 0);
     const allScheduledLeads = metrics?.scheduledLeads || [];
-    const scheduledToday = allScheduledLeads.filter(l => {
-        const d = new Date(l.scheduled_at!);
-        const today = new Date();
-        return d.toDateString() === today.toDateString();
-    });
-
-    const upcomingScheduled = allScheduledLeads.filter(l => {
-        const d = new Date(l.scheduled_at!);
-        const today = new Date();
-        today.setHours(23, 59, 59, 999);
-        return d > today;
-    });
-
-    const scheduledThisWeek = metrics?.scheduledLeads.filter(l => {
-        const d = new Date(l.scheduled_at!);
-        const now = new Date();
-        const startOfWeek = new Date(now.setDate(now.getDate() - now.getDay()));
-        const endOfWeek = new Date(now.setDate(now.getDate() - now.getDay() + 6));
-        return d >= startOfWeek && d <= endOfWeek;
-    }) || [];
-
-    const scheduledThisMonth = metrics?.scheduledLeads.filter(l => {
-        const d = new Date(l.scheduled_at!);
-        const now = new Date();
-        return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-    }) || [];
-
+    
     return (
         <div className="space-y-10 pb-20">
             {/* Welcome Header */}
@@ -123,28 +91,28 @@ export function ConsultantDashboard({ consultantId, consultantName }: { consulta
                 <div className="space-y-2">
                     <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/10 w-fit text-[10px] font-bold uppercase tracking-wider shadow-md shadow-emerald-500/5">
                         <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                        Online & Disponível
+                        Performance Individual
                     </div>
                     <h1 className="text-3xl sm:text-4xl md:text-5xl font-black tracking-tighter text-white font-outfit">
                         Olá, <span className="bg-clip-text text-transparent bg-gradient-to-r from-red-500 via-white to-red-600">{consultantName.split(' ')[0]}!</span>
                     </h1>
-                    <p className="text-white/40 font-medium italic">Seu desempenho comercial e pipeline de hoje.</p>
+                    <p className="text-white/40 font-medium italic">Seus números consolidados (Fonte Única da Verdade).</p>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-4 bg-white/5 p-3 rounded-2xl border border-white/10 shadow-lg shadow-black/20">
-                    <div className="flex items-center gap-3 px-4 py-1.5 border-r border-white/10 group cursor-help">
-                        <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-500 group-hover:bg-emerald-500 group-hover:text-white transition-all">
-                            <Sparkles size={12} className="animate-pulse" />
-                        </div>
-                        <div className="flex-col">
-                            <span className="text-[8px] font-black text-white/30 uppercase tracking-[0.2em]">Segurança & IA</span>
-                            <span className="text-[10px] font-black text-white uppercase tracking-tight">MONITORADO POR IA</span>
-                        </div>
-                    </div>
-                    <div className="flex-col px-4 text-left">
-                        <span className="text-[8px] font-black text-red-500 uppercase tracking-[0.2em]">Otimização Ativa</span>
-                        <span className="text-[10px] font-medium text-white/60 lowercase italic">Seu sistema está sendo monitorado por inteligência artificial</span>
-                    </div>
+                <div className="flex items-center bg-white/[0.03] border border-white/10 p-1.5 rounded-2xl shadow-xl backdrop-blur-md self-start md:self-auto">
+                    {(['today', 'week', 'month', 'all'] as Period[]).map((p) => (
+                        <button
+                            key={p}
+                            onClick={() => setPeriod(p)}
+                            className={`px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all duration-300 ${
+                                period === p 
+                                ? 'bg-red-600 text-white shadow-[0_8px_20px_rgba(239,68,68,0.3)]' 
+                                : 'text-white/30 hover:text-white/60 hover:bg-white/5'
+                            }`}
+                        >
+                            {p === 'today' ? 'Hoje' : p === 'week' ? 'Semana' : p === 'month' ? 'Mês' : 'Geral'}
+                        </button>
+                    ))}
                 </div>
             </header>
 
@@ -156,30 +124,28 @@ export function ConsultantDashboard({ consultantId, consultantName }: { consulta
                 className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6"
             >
                 <StatsCard
-                    title="Meus Leads"
+                    title="Pipeline Total"
                     value={metrics?.leadCount || 0}
                     icon={Users}
                     color="blue"
-                    href="/leads?view=list"
+                    href={`/pipeline?consultant=${consultantId}`}
                 />
                 <StatsCard
-                    title="Vendas (Mês)"
+                    title="Vendas"
                     value={metrics?.salesCount || 0}
                     icon={Target}
                     color="red"
-                    href="/leads?view=kanban"
+                    href={`/pipeline?consultant=${consultantId}&status=sold`}
                 />
                 <StatsCard
-                    title="Agendamentos do Dia"
-                    value={scheduledToday.length}
-                    trend={upcomingScheduled.length > 0 ? undefined : 0}
-                    trendLabel={upcomingScheduled.length > 0 ? `${upcomingScheduled.length} próximos` : undefined}
+                    title="Agendados"
+                    value={allScheduledLeads.length}
                     icon={Calendar}
                     color="amber"
-                    href="/leads?view=kanban"
+                    href={`/pipeline?consultant=${consultantId}&status=scheduled`}
                 />
                 <StatsCard
-                    title="Minha Conversão"
+                    title="Conversão"
                     value={`${metrics?.conversionRate.toFixed(1) || '0.0'}%`}
                     icon={TrendingUp}
                     color="emerald"
@@ -194,57 +160,10 @@ export function ConsultantDashboard({ consultantId, consultantName }: { consulta
                     animate="show"
                     className="lg:col-span-8 space-y-8"
                 >
-                    {/* Schedule Section */}
-                    {allScheduledLeads.length > 0 && (
-                        <div className="space-y-4">
-                            <div className="flex items-center justify-between px-2">
-                                <h2 className="text-xl font-bold flex items-center gap-3">
-                                    <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-500/10 text-amber-500">
-                                        <Calendar size={18} />
-                                    </span>
-                                    Sua Agenda
-                                </h2>
-                                <span className="text-[10px] font-black text-amber-500 uppercase tracking-widest">
-                                    {scheduledToday.length > 0 ? `${scheduledToday.length} hoje` : `${upcomingScheduled.length} próximos`}
-                                </span>
-                            </div>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                {(scheduledToday.length > 0 ? scheduledToday : upcomingScheduled.slice(0, 4)).map(lead => (
-                                    <Link
-                                        key={lead.id}
-                                        href={`/leads?id=${lead.id}`}
-                                        className="glass-card p-4 border-amber-500/20 bg-amber-500/[0.02] flex items-center justify-between group hover:bg-amber-500/5 transition-all"
-                                    >
-                                        <div className="flex items-center gap-3">
-                                            <div className="h-10 w-10 rounded-xl bg-amber-500/10 flex items-center justify-center text-amber-500 font-bold flex-col leading-tight">
-                                                <span className="text-[10px]">
-                                                    {scheduledToday.includes(lead)
-                                                        ? new Date(lead.scheduled_at!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                                                        : new Date(lead.scheduled_at!).toLocaleDateString([], { day: '2-digit', month: '2-digit' })
-                                                    }
-                                                </span>
-                                                {!scheduledToday.includes(lead) && (
-                                                    <span className="text-[8px] opacity-60">
-                                                        {new Date(lead.scheduled_at!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                                    </span>
-                                                )}
-                                            </div>
-                                            <div>
-                                                <h4 className="text-sm font-bold text-white leading-none">{lead.name}</h4>
-                                                <p className="text-[10px] text-white/40 mt-1">{lead.vehicle_interest || 'Visita Loja'}</p>
-                                            </div>
-                                        </div>
-                                        <ArrowUpRight size={14} className="text-white/20 group-hover:text-amber-500 transition-colors" />
-                                    </Link>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-
                     {/* Action Cards */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <Link
-                            href="/leads?view=kanban&stage=new"
+                            href={`/pipeline?consultant=${consultantId}&status=new`}
                             className="glass-card p-6 flex items-center justify-between border-blue-500/20 bg-blue-500/5 group hover:bg-blue-500/10 transition-all cursor-pointer"
                         >
                             <div className="flex items-center gap-4">
@@ -252,9 +171,9 @@ export function ConsultantDashboard({ consultantId, consultantName }: { consulta
                                     <Clock size={24} />
                                 </div>
                                 <div>
-                                    <h4 className="font-bold text-white leading-none">{uncontactedCount > 0 ? `${uncontactedCount} Novos Leads` : 'Nenhum Lead Novo'}</h4>
+                                    <h4 className="font-bold text-white leading-none">{uncontactedCount} Novos Leads</h4>
                                     <p className="text-[10px] text-white/40 mt-1 uppercase font-black tracking-widest">
-                                        {uncontactedCount > 0 ? 'Aguardando Primeiro Contato' : 'Aguardando novos leads chegar'}
+                                        Aguardando Primeiro Contato
                                     </p>
                                 </div>
                             </div>
@@ -264,7 +183,7 @@ export function ConsultantDashboard({ consultantId, consultantName }: { consulta
                         </Link>
 
                         <Link
-                            href="/leads?view=kanban"
+                            href={`/pipeline?consultant=${consultantId}&status=contacted`}
                             className="glass-card p-6 flex items-center justify-between border-amber-500/20 bg-amber-500/5 group hover:bg-amber-500/10 transition-all cursor-pointer"
                         >
                             <div className="flex items-center gap-4">
@@ -289,17 +208,17 @@ export function ConsultantDashboard({ consultantId, consultantName }: { consulta
                                 <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-red-500/10 text-red-500">
                                     <Star size={18} />
                                 </span>
-                                Leads Prioritários (Hot)
+                                Leads Recentes
                             </h2>
-                            <Link href="/leads" className="text-xs font-black text-red-500 uppercase tracking-widest hover:text-red-400 transition-colors">Ver Pipeline Completo</Link>
+                            <Link href={`/pipeline?consultant=${consultantId}`} className="text-xs font-black text-red-500 uppercase tracking-widest hover:text-red-400 transition-colors">Ver Pipeline Completo</Link>
                         </div>
 
                         <div className="space-y-3">
-                            {recentLeads.filter(l => (l.ai_score || 0) >= 60).length > 0 ? (
-                                recentLeads.filter(l => (l.ai_score || 0) >= 60).map((lead) => (
+                            {recentLeads.length > 0 ? (
+                                recentLeads.map((lead) => (
                                     <Link
                                         key={lead.id}
-                                        href={`/leads?id=${lead.id}`}
+                                        href={`/pipeline?id=${lead.id}`}
                                         className="glass-card p-5 flex items-center justify-between group hover:border-red-500/30 transition-all"
                                     >
                                         <div className="flex items-center gap-5">
@@ -312,7 +231,7 @@ export function ConsultantDashboard({ consultantId, consultantName }: { consulta
                                                     <span className="text-[9px] font-black text-white/20 uppercase tracking-widest">{lead.phone}</span>
                                                     <div className="h-1 w-1 rounded-full bg-white/10" />
                                                     <span className="flex items-center gap-1 text-[9px] font-bold text-red-500/60 uppercase">
-                                                        <Car size={10} /> {lead.vehicle_interest || 'Sem Carro Definido'}
+                                                        <Car size={10} /> {lead.vehicle_interest || 'Interesse Geral'}
                                                     </span>
                                                 </div>
                                             </div>
@@ -320,7 +239,7 @@ export function ConsultantDashboard({ consultantId, consultantName }: { consulta
                                         <div className="flex items-center gap-6">
                                             <div className="text-right flex-col items-end">
                                                 <div className="flex items-center gap-1.5 text-rose-500">
-                                                    <span className="text-xl font-black">{lead.ai_score}</span>
+                                                    <span className="text-xl font-black">{lead.ai_score || 0}</span>
                                                     <span className="text-[10px] font-bold mt-1">%</span>
                                                 </div>
                                                 <p className="text-[8px] font-black text-white/20 uppercase tracking-widest leading-none">Score IA</p>
@@ -334,7 +253,7 @@ export function ConsultantDashboard({ consultantId, consultantName }: { consulta
                                 ))
                             ) : (
                                 <div className="glass-card p-12 text-center border-dashed border-white/10">
-                                    <p className="text-white/20 font-medium font-outfit uppercase tracking-tighter">Nenhum lead quente no momento. Continue no pipeline!</p>
+                                    <p className="text-white/20 font-medium font-outfit uppercase tracking-tighter">Nenhum lead no momento. Continue no pipeline!</p>
                                 </div>
                             )}
                         </div>
@@ -399,7 +318,7 @@ export function ConsultantDashboard({ consultantId, consultantName }: { consulta
                         </div>
 
                         <p className="text-sm text-white/80 leading-relaxed font-outfit font-medium">
-                            &quot;Você tem <b>{uncontactedCount} leads</b> sem contato. O tempo médio de resposta ideal é abaixo de 5 minutos para aumentar sua taxa de conversão em até 20%.&quot;
+                            &quot;Seu tempo médio de resposta é de <b>{metrics?.avgResponseMin.toFixed(0)} min</b>. O ideal é abaixo de 5 minutos para aumentar sua taxa de conversão em até 20%.&quot;
                         </p>
 
                         <button className="mt-6 sm:mt-8 w-full py-3 sm:py-4 rounded-2xl bg-white/5 border border-white/10 text-[10px] font-black text-white hover:bg-white/10 transition-all uppercase tracking-[0.2em]">
@@ -425,3 +344,4 @@ export function ConsultantDashboard({ consultantId, consultantName }: { consulta
         </div>
     );
 }
+

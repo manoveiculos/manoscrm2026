@@ -1,7 +1,14 @@
+'use client';
 import React, { useState } from 'react';
-import { Zap, Calendar, Check, X, MessageSquare, History, ChevronDown, ChevronUp, Clock, AlertCircle, Phone, Car, Bot, ShoppingCart, Send } from 'lucide-react';
+import {
+    Zap, Calendar, Check, X, MessageSquare, History, ChevronDown, ChevronUp,
+    Clock, AlertCircle, Phone, Car, Bot, ShoppingCart, Send,
+    Sparkles, Copy, FileText
+} from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getStatusConfig, normalizeStatus } from '@/constants/status';
+
+interface ScriptOpt { tipo: string; label: string; mensagem: string; }
 
 interface FollowUpTabProps {
     lead: any;
@@ -27,6 +34,14 @@ interface FollowUpTabProps {
     editedTemplates: Record<string, string>;
     setEditedTemplates: (val: any) => void;
     handleSendTemplate: (template: any, text: string) => void;
+    // IA props
+    recalculateStrategy?: () => void;
+    loadingStatus?: 'idle' | 'analyzing' | 'matching' | 'finalizing';
+    scriptOptions?: ScriptOpt[];
+    diagnostico?: string;
+    orientacao?: string;
+    onTabChange?: (tab: any) => void;
+    handleSaveCallLog?: (note: string) => Promise<void>;
 }
 
 const CHANNEL_OPTIONS = [
@@ -47,8 +62,8 @@ const FUNNEL_STEPS = [
 
 const RESULT_OPTIONS = [
     { value: 'positive', label: 'Positivo', color: '#22c55e' },
-    { value: 'neutral', label: 'Neutro', color: '#3b82f6' },
-    { value: 'negative', label: 'Negativo', color: '#ef4444' },
+    { value: 'neutral',  label: 'Neutro',   color: '#3b82f6' },
+    { value: 'negative', label: 'Negativo',  color: '#ef4444' },
 ] as const;
 
 function getStatusColor(status: string, result?: string) {
@@ -80,46 +95,258 @@ export const FollowUpTab: React.FC<FollowUpTabProps> = ({
     handleCompleteFollowUp,
     getTemplatesForStage,
     fillTemplate,
-    editingTemplateId,
-    setEditingTemplateId,
-    editedTemplates,
-    setEditedTemplates,
-    handleSendTemplate
+    handleSendTemplate,
+    recalculateStrategy,
+    loadingStatus = 'idle',
+    scriptOptions = [],
+    diagnostico,
+    orientacao,
+    onTabChange,
+    handleSaveCallLog,
 }) => {
     const [expandedId, setExpandedId] = useState<string | null>(null);
+    const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
+    const [showCallModal, setShowCallModal] = useState(false);
+    const [callNote, setCallNote] = useState('');
+    const [callSaving, setCallSaving] = useState(false);
+    const [callSaved, setCallSaved] = useState(false);
+
+    const isAnalyzing = loadingStatus !== 'idle';
+    const loadingMsg =
+        loadingStatus === 'analyzing'  ? 'Lendo histórico...' :
+        loadingStatus === 'matching'   ? 'Cruzando estoque...' :
+        loadingStatus === 'finalizing' ? 'Montando diagnóstico...' : 'Analisando...';
 
     const normStatus = normalizeStatus(lead.status);
     const currentStepIndex = FUNNEL_STEPS.findIndex(s => s.id === normStatus);
 
-    // Alertas gerados pela IA que aguardam ação do vendedor
     const aiAlerts = historicoFollowUps.filter(f =>
         f.status === 'pending' && (f.type === 'ai_auto' || f.type === 'ai_alert_compra')
     );
 
+    const phone = (lead.phone || '').replace(/\D/g, '');
+
+    const copyScript = (mensagem: string, idx: number) => {
+        navigator.clipboard.writeText(mensagem).then(() => {
+            setCopiedIdx(idx);
+            setTimeout(() => setCopiedIdx(null), 2000);
+        }).catch(() => {});
+    };
+
+    const handleCallSave = async () => {
+        if (!callNote.trim() || !handleSaveCallLog) return;
+        setCallSaving(true);
+        try {
+            await handleSaveCallLog(callNote.trim());
+            setCallSaved(true);
+            setTimeout(() => {
+                setShowCallModal(false);
+                setCallNote('');
+                setCallSaved(false);
+            }, 1200);
+        } catch { /* silencioso */ } finally {
+            setCallSaving(false);
+        }
+    };
+
     const handleSendViaWhatsApp = (fu: any) => {
-        const phone = (lead.phone || '').replace(/\D/g, '');
         if (phone.length >= 10) {
-            const url = `https://wa.me/55${phone}?text=${encodeURIComponent(fu.note || '')}`;
-            window.open(url, '_blank');
-            // Marca como concluído após abrir
+            window.open(`https://wa.me/55${phone}?text=${encodeURIComponent(fu.note || '')}`, '_blank');
             setSelectedFollowUpId(fu.id);
             handleCompleteFollowUp('positive');
         }
     };
 
+    // Diagnóstico: usa estado da análise IA ou campo persistido no lead
+    // Formato salvo: "${diagnostico} | ORIENTAÇÃO: ${orientacao}"
+    const aiReasonParts = (lead.ai_reason || '').split('| ORIENTAÇÃO:');
+    const diagFromDb = aiReasonParts[0]?.trim() || '';
+    const oriFromDb  = aiReasonParts[1]?.trim() || '';
+
+    const diagText = diagnostico || diagFromDb;
+    const oriText  = orientacao  || oriFromDb || '';
+
     return (
         <div className="space-y-4 pb-10">
 
-            {/* ── Alertas IA (safety gate) ─────────────────── */}
+            {/* ══════════════════════════════════════════════
+                PAINEL IA CIRÚRGICA
+            ══════════════════════════════════════════════ */}
+            <div className="bg-[#141418] border border-amber-500/20 rounded-xl overflow-hidden">
+                {/* Header */}
+                <div className="flex items-center justify-between px-4 py-3 border-b border-amber-500/10 bg-amber-500/[0.04]">
+                    <div className="flex items-center gap-2">
+                        <Bot size={13} className="text-amber-400" />
+                        <span className="text-[11px] font-black text-amber-400/90 uppercase tracking-widest">
+                            Análise Elite Closer
+                        </span>
+                    </div>
+                    <button
+                        onClick={recalculateStrategy}
+                        disabled={isAnalyzing || !recalculateStrategy}
+                        className="flex items-center gap-1.5 text-[10px] text-amber-400/60 hover:text-amber-300 transition-colors disabled:opacity-40"
+                    >
+                        <Sparkles size={11} className={isAnalyzing ? 'animate-spin' : ''} />
+                        {isAnalyzing ? loadingMsg : (diagText ? 'Reanalisar' : 'Analisar')}
+                    </button>
+                </div>
+
+                {/* Corpo */}
+                <div className="px-4 py-3 space-y-3">
+                    {isAnalyzing ? (
+                        <div className="flex items-center gap-3 py-2">
+                            <div className="flex gap-1">
+                                <span className="h-1.5 w-1.5 rounded-full bg-amber-400/50 animate-bounce" style={{ animationDelay: '0ms' }} />
+                                <span className="h-1.5 w-1.5 rounded-full bg-amber-400/50 animate-bounce" style={{ animationDelay: '150ms' }} />
+                                <span className="h-1.5 w-1.5 rounded-full bg-amber-400/50 animate-bounce" style={{ animationDelay: '300ms' }} />
+                            </div>
+                            <p className="text-[12px] text-white/40 italic">{loadingMsg}</p>
+                        </div>
+                    ) : diagText ? (
+                        <>
+                            <div>
+                                <p className="text-[9px] font-black text-amber-400/60 uppercase tracking-widest mb-1">Diagnóstico</p>
+                                <p className="text-[12px] text-white/75 leading-relaxed">{diagText}</p>
+                            </div>
+                            {oriText && (
+                                <div className="border-t border-white/[0.05] pt-3">
+                                    <p className="text-[9px] font-black text-emerald-400/60 uppercase tracking-widest mb-1">→ Ação recomendada</p>
+                                    <p className="text-[12px] text-emerald-300/80 leading-relaxed font-medium">{oriText}</p>
+                                </div>
+                            )}
+                        </>
+                    ) : (
+                        <div className="py-3 text-center">
+                            <p className="text-[12px] text-white/30 mb-3">Clique em "Analisar" para diagnóstico cirúrgico deste lead</p>
+                            <button
+                                onClick={recalculateStrategy}
+                                disabled={isAnalyzing || !recalculateStrategy}
+                                className="inline-flex items-center gap-2 px-5 py-2.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-30 text-white text-[12px] font-bold rounded-xl transition-colors shadow-lg shadow-amber-900/20"
+                            >
+                                <Sparkles size={13} />
+                                Solicitar Análise IA
+                            </button>
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {/* ══════════════════════════════════════════════
+                SCRIPTS PRONTOS (quando análise foi feita)
+            ══════════════════════════════════════════════ */}
+            {scriptOptions.length > 0 && (
+                <div className="bg-[#141418] border border-white/[0.07] rounded-xl overflow-hidden">
+                    <div className="flex items-center gap-2 px-4 py-3 border-b border-white/[0.05]">
+                        <MessageSquare size={13} className="text-emerald-400" />
+                        <span className="text-[11px] font-semibold text-emerald-300/80 uppercase tracking-widest">Scripts Prontos</span>
+                        <span className="ml-auto text-[9px] text-white/20 border border-white/[0.08] rounded px-1.5 py-0.5">copie e envie</span>
+                    </div>
+                    <div className="divide-y divide-white/[0.04]">
+                        {scriptOptions.map((opt, i) => (
+                            <div key={i} className="px-4 py-3 flex items-start gap-3">
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-[10px] font-bold text-white/30 uppercase tracking-widest mb-1">{opt.label}</p>
+                                    <p className="text-[12px] text-white/65 leading-relaxed">{opt.mensagem}</p>
+                                </div>
+                                <div className="flex flex-col gap-2 shrink-0 mt-0.5">
+                                    <button
+                                        onClick={() => copyScript(opt.mensagem, i)}
+                                        title="Copiar"
+                                        className="h-7 w-7 rounded-lg border flex items-center justify-center transition-all"
+                                        style={copiedIdx === i
+                                            ? { borderColor: 'rgba(34,197,94,0.4)', backgroundColor: 'rgba(34,197,94,0.08)' }
+                                            : { borderColor: 'rgba(255,255,255,0.08)', backgroundColor: 'transparent' }
+                                        }
+                                    >
+                                        {copiedIdx === i
+                                            ? <Check size={11} className="text-emerald-400" />
+                                            : <Copy size={11} className="text-white/30" />
+                                        }
+                                    </button>
+                                    {phone.length >= 10 && (
+                                        <button
+                                            onClick={() => window.open(`https://wa.me/55${phone}?text=${encodeURIComponent(opt.mensagem)}`, '_blank')}
+                                            title="Enviar no WhatsApp"
+                                            className="h-7 w-7 rounded-lg border border-[#25D366]/20 bg-[#25D366]/08 flex items-center justify-center transition-all hover:bg-[#25D366]/15"
+                                        >
+                                            <Send size={10} className="text-[#25D366]" />
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/* ══════════════════════════════════════════════
+                AÇÕES RÁPIDAS
+            ══════════════════════════════════════════════ */}
+            <div className="bg-[#141418] border border-white/[0.07] rounded-xl overflow-hidden">
+                <div className="flex items-center gap-2 px-4 py-3 border-b border-white/[0.05]">
+                    <Zap size={12} className="text-red-400" />
+                    <span className="text-[11px] font-semibold text-white/40 uppercase tracking-widest">Ações rápidas</span>
+                </div>
+                <div className="grid grid-cols-4 gap-0 divide-x divide-white/[0.05]">
+                    {/* WhatsApp */}
+                    <button
+                        onClick={() => phone.length >= 10 && window.open(`https://wa.me/55${phone}`, '_blank')}
+                        disabled={phone.length < 10}
+                        className="flex flex-col items-center gap-1.5 py-4 hover:bg-white/[0.04] transition-colors disabled:opacity-30"
+                    >
+                        <div className="h-9 w-9 rounded-xl bg-[#25D366]/10 border border-[#25D366]/20 flex items-center justify-center">
+                            <MessageSquare size={16} className="text-[#25D366]" />
+                        </div>
+                        <span className="text-[10px] text-white/40 font-medium">WhatsApp</span>
+                    </button>
+
+                    {/* Ligar */}
+                    <button
+                        onClick={() => setShowCallModal(true)}
+                        disabled={phone.length < 10}
+                        className="flex flex-col items-center gap-1.5 py-4 hover:bg-white/[0.04] transition-colors disabled:opacity-30"
+                    >
+                        <div className="h-9 w-9 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center">
+                            <Phone size={16} className="text-purple-400" />
+                        </div>
+                        <span className="text-[10px] text-white/40 font-medium">Ligar</span>
+                    </button>
+
+                    {/* Agendar */}
+                    <button
+                        onClick={() => setShowFollowUpForm(true)}
+                        className="flex flex-col items-center gap-1.5 py-4 hover:bg-white/[0.04] transition-colors"
+                    >
+                        <div className="h-9 w-9 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
+                            <Calendar size={16} className="text-amber-400" />
+                        </div>
+                        <span className="text-[10px] text-white/40 font-medium">Agendar</span>
+                    </button>
+
+                    {/* Proposta */}
+                    <button
+                        onClick={() => onTabChange?.('dashboard')}
+                        className="flex flex-col items-center gap-1.5 py-4 hover:bg-white/[0.04] transition-colors"
+                    >
+                        <div className="h-9 w-9 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center">
+                            <FileText size={16} className="text-blue-400" />
+                        </div>
+                        <span className="text-[10px] text-white/40 font-medium">Proposta</span>
+                    </button>
+                </div>
+            </div>
+
+            {/* ══════════════════════════════════════════════
+                ALERTAS IA (compra / reengajamento)
+            ══════════════════════════════════════════════ */}
             {aiAlerts.length > 0 && (
                 <div className="bg-[#141418] border border-amber-500/20 rounded-xl overflow-hidden">
-                    <div className="flex items-center gap-2 px-4 py-3 border-b border-amber-500/10 bg-amber-500/[0.04]">
+                    <div className="flex items-center gap-2 px-4 py-3 border-b border-amber-500/10 bg-amber-500/[0.03]">
                         <Bot size={13} className="text-amber-400" />
                         <span className="text-[11px] font-semibold text-amber-400/90 uppercase tracking-widest">
                             Alertas IA — {aiAlerts.length} pendente{aiAlerts.length > 1 ? 's' : ''}
                         </span>
                     </div>
-
                     <div className="divide-y divide-white/[0.04]">
                         {aiAlerts.map((fu) => {
                             const isCompra = fu.type === 'ai_alert_compra';
@@ -133,14 +360,10 @@ export const FollowUpTab: React.FC<FollowUpTabProps> = ({
                                             }
                                         </div>
                                         <div className="flex-1 min-w-0">
-                                            <div className="flex items-center gap-2 mb-1">
-                                                <span className={`text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded ${isCompra ? 'bg-red-500/10 text-red-400' : 'bg-amber-500/10 text-amber-400'}`}>
-                                                    {isCompra ? 'Sinal de compra' : 'Reengajamento IA'}
-                                                </span>
-                                            </div>
-                                            <p className="text-[12px] text-white/70 leading-relaxed">
-                                                {fu.note}
-                                            </p>
+                                            <span className={`text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded inline-block mb-1 ${isCompra ? 'bg-red-500/10 text-red-400' : 'bg-amber-500/10 text-amber-400'}`}>
+                                                {isCompra ? 'Sinal de compra' : 'Reengajamento IA'}
+                                            </span>
+                                            <p className="text-[12px] text-white/70 leading-relaxed">{fu.note}</p>
                                         </div>
                                     </div>
                                     <div className="flex items-center gap-2">
@@ -151,19 +374,13 @@ export const FollowUpTab: React.FC<FollowUpTabProps> = ({
                                             <Send size={11} /> Enviar via WhatsApp
                                         </button>
                                         <button
-                                            onClick={() => {
-                                                setSelectedFollowUpId(fu.id);
-                                                setShowCompletionModal(true);
-                                            }}
+                                            onClick={() => { setSelectedFollowUpId(fu.id); setShowCompletionModal(true); }}
                                             className="flex items-center gap-1.5 px-3 py-2 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] text-white/40 hover:text-white/70 text-[11px] font-medium rounded-lg transition-colors"
                                         >
                                             <Check size={11} /> Concluir
                                         </button>
                                         <button
-                                            onClick={() => {
-                                                setSelectedFollowUpId(fu.id);
-                                                handleCompleteFollowUp('negative');
-                                            }}
+                                            onClick={() => { setSelectedFollowUpId(fu.id); handleCompleteFollowUp('negative'); }}
                                             className="flex items-center gap-1.5 px-3 py-2 bg-white/[0.03] hover:bg-white/[0.06] border border-white/[0.05] text-white/25 hover:text-white/50 text-[11px] rounded-lg transition-colors"
                                         >
                                             <X size={11} /> Dispensar
@@ -176,7 +393,9 @@ export const FollowUpTab: React.FC<FollowUpTabProps> = ({
                 </div>
             )}
 
-            {/* Progresso no funil */}
+            {/* ══════════════════════════════════════════════
+                PROGRESSO NO FUNIL
+            ══════════════════════════════════════════════ */}
             <div className="bg-[#141418] border border-white/[0.07] rounded-xl px-4 py-3">
                 <div className="flex items-center justify-between mb-3">
                     <span className="text-[10px] font-semibold text-white/30 uppercase tracking-widest">Progresso no funil</span>
@@ -185,7 +404,6 @@ export const FollowUpTab: React.FC<FollowUpTabProps> = ({
                     </span>
                 </div>
                 <div className="relative flex items-center justify-between">
-                    {/* linha de fundo */}
                     <div className="absolute left-3 right-3 h-px bg-white/[0.06]" />
                     {FUNNEL_STEPS.map((step, i) => {
                         const isActive = i <= currentStepIndex;
@@ -208,7 +426,9 @@ export const FollowUpTab: React.FC<FollowUpTabProps> = ({
                 </div>
             </div>
 
-            {/* Próximo agendamento / CTA */}
+            {/* ══════════════════════════════════════════════
+                PRÓXIMO AGENDAMENTO / CTA
+            ══════════════════════════════════════════════ */}
             {!showFollowUpForm && (
                 <div className="bg-[#141418] border border-white/[0.07] rounded-xl overflow-hidden">
                     <div className="flex items-center gap-2 px-4 py-3 border-b border-white/[0.05]">
@@ -217,7 +437,6 @@ export const FollowUpTab: React.FC<FollowUpTabProps> = ({
                             {proximoFollowUp ? 'Próximo agendamento' : 'Nenhum agendamento'}
                         </span>
                     </div>
-
                     <div className="px-4 py-4">
                         {proximoFollowUp ? (
                             <div className="space-y-4">
@@ -239,10 +458,7 @@ export const FollowUpTab: React.FC<FollowUpTabProps> = ({
                                 </div>
                                 <div className="flex gap-2">
                                     <button
-                                        onClick={() => {
-                                            setSelectedFollowUpId(proximoFollowUp.id);
-                                            setShowCompletionModal(true);
-                                        }}
+                                        onClick={() => { setSelectedFollowUpId(proximoFollowUp.id); setShowCompletionModal(true); }}
                                         className="flex items-center gap-1.5 px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-[12px] font-semibold rounded-lg transition-colors"
                                     >
                                         <Check size={13} /> Concluir
@@ -270,7 +486,9 @@ export const FollowUpTab: React.FC<FollowUpTabProps> = ({
                 </div>
             )}
 
-            {/* Formulário de agendamento */}
+            {/* ══════════════════════════════════════════════
+                FORMULÁRIO DE AGENDAMENTO
+            ══════════════════════════════════════════════ */}
             <AnimatePresence>
                 {showFollowUpForm && (
                     <motion.div
@@ -286,7 +504,6 @@ export const FollowUpTab: React.FC<FollowUpTabProps> = ({
                                 <X size={15} />
                             </button>
                         </div>
-
                         <div className="px-4 py-4 space-y-3">
                             <div className="grid grid-cols-2 gap-3">
                                 <div className="space-y-1.5">
@@ -312,7 +529,6 @@ export const FollowUpTab: React.FC<FollowUpTabProps> = ({
                                     </select>
                                 </div>
                             </div>
-
                             <div className="space-y-1.5">
                                 <label className="text-[10px] text-white/30 uppercase tracking-widest">Observação</label>
                                 <textarea
@@ -323,7 +539,6 @@ export const FollowUpTab: React.FC<FollowUpTabProps> = ({
                                     className="w-full bg-[#0E0E11] border border-white/[0.08] rounded-lg px-3 py-2 text-white text-[12px] outline-none focus:border-white/20 transition-colors resize-none"
                                 />
                             </div>
-
                             <button
                                 onClick={handleCreateFollowUp}
                                 disabled={loadingFollowUps || !followUpForm.scheduled_at}
@@ -336,9 +551,9 @@ export const FollowUpTab: React.FC<FollowUpTabProps> = ({
                 )}
             </AnimatePresence>
 
-            {/* Formulário de agendamento ... (mantido igual) */}
-
-            {/* Agendamentos Pendentes (Painel de Ações) — exclui alertas IA já mostrados acima */}
+            {/* ══════════════════════════════════════════════
+                OUTROS AGENDAMENTOS PENDENTES
+            ══════════════════════════════════════════════ */}
             {historicoFollowUps.filter(f => f.status === 'pending' && f.id !== proximoFollowUp?.id && f.type !== 'ai_auto' && f.type !== 'ai_alert_compra').length > 0 && (
                 <div className="bg-[#141418] border border-white/[0.07] rounded-xl overflow-hidden">
                     <div className="flex items-center gap-2 px-4 py-3 border-b border-white/[0.05]">
@@ -361,10 +576,7 @@ export const FollowUpTab: React.FC<FollowUpTabProps> = ({
                                     {new Date(fu.scheduled_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
                                 </span>
                                 <button
-                                    onClick={() => {
-                                        setSelectedFollowUpId(fu.id);
-                                        setShowCompletionModal(true);
-                                    }}
+                                    onClick={() => { setSelectedFollowUpId(fu.id); setShowCompletionModal(true); }}
                                     className="p-1.5 hover:bg-white/5 rounded-md text-white/40 hover:text-white transition-colors"
                                 >
                                     <Check size={14} />
@@ -375,18 +587,18 @@ export const FollowUpTab: React.FC<FollowUpTabProps> = ({
                 </div>
             )}
 
-            {/* Histórico de follow-ups (Concluídos e Outros) */}
+            {/* ══════════════════════════════════════════════
+                HISTÓRICO DE FOLLOW-UPS (Concluídos)
+            ══════════════════════════════════════════════ */}
             {historicoFollowUps.filter(f => f.status !== 'pending').length > 0 && (
                 <div className="bg-[#141418] border border-white/[0.07] rounded-xl overflow-hidden">
                     <div className="flex items-center gap-2 px-4 py-3 border-b border-white/[0.05]">
                         <History size={12} className="text-white/25" />
                         <span className="text-[11px] font-semibold text-white/40 uppercase tracking-widest">Histórico de Contatos</span>
                     </div>
-
                     {historicoFollowUps.filter(f => f.status !== 'pending').map((fu) => {
                         const isExpanded = expandedId === fu.id;
                         const statusColor = getStatusColor(fu.status, fu.result);
-
                         return (
                             <div key={fu.id} className="border-b border-white/[0.04] last:border-0">
                                 <button
@@ -394,10 +606,7 @@ export const FollowUpTab: React.FC<FollowUpTabProps> = ({
                                     className="w-full flex items-center justify-between px-4 py-3 hover:bg-white/[0.02] transition-colors text-left"
                                 >
                                     <div className="flex items-center gap-3">
-                                        <div
-                                            className="h-2 w-2 rounded-full shrink-0"
-                                            style={{ backgroundColor: statusColor }}
-                                        />
+                                        <div className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: statusColor }} />
                                         <div>
                                             <div className="flex items-center gap-2">
                                                 <span className="text-[12px] font-semibold text-white/75 uppercase">
@@ -407,9 +616,7 @@ export const FollowUpTab: React.FC<FollowUpTabProps> = ({
                                                     {fu.result || fu.status}
                                                 </span>
                                             </div>
-                                            {fu.note && (
-                                                <p className="text-[11px] text-white/30 mt-0.5 truncate max-w-[200px]">{fu.note}</p>
-                                            )}
+                                            {fu.note && <p className="text-[11px] text-white/30 mt-0.5 truncate max-w-[200px]">{fu.note}</p>}
                                         </div>
                                     </div>
                                     <div className="flex items-center gap-2 shrink-0">
@@ -419,8 +626,6 @@ export const FollowUpTab: React.FC<FollowUpTabProps> = ({
                                         {isExpanded ? <ChevronUp size={13} className="text-white/20" /> : <ChevronDown size={13} className="text-white/20" />}
                                     </div>
                                 </button>
-                                {/* ... Resto do AnimatePresence mantido ... */}
-
                                 <AnimatePresence>
                                     {isExpanded && (
                                         <motion.div
@@ -467,7 +672,97 @@ export const FollowUpTab: React.FC<FollowUpTabProps> = ({
                 </div>
             )}
 
-            {/* Modal de conclusão */}
+            {/* ══════════════════════════════════════════════
+                MODAL DE LIGAÇÃO
+            ══════════════════════════════════════════════ */}
+            <AnimatePresence>
+                {showCallModal && (
+                    <div className="fixed inset-0 z-[200] flex items-center justify-center p-5">
+                        <motion.div
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            onClick={() => { setShowCallModal(false); setCallNote(''); setCallSaved(false); }}
+                            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+                        />
+                        <motion.div
+                            initial={{ scale: 0.95, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            exit={{ scale: 0.95, opacity: 0 }}
+                            transition={{ duration: 0.15 }}
+                            className="relative w-full max-w-sm bg-[#141418] border border-white/[0.09] rounded-2xl p-5 shadow-2xl"
+                        >
+                            {/* Header */}
+                            <div className="flex items-center justify-between mb-4">
+                                <div className="flex items-center gap-2.5">
+                                    <div className="h-8 w-8 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center">
+                                        <Phone size={15} className="text-purple-400" />
+                                    </div>
+                                    <div>
+                                        <p className="text-[14px] font-bold text-white leading-tight">{lead.nome || lead.name}</p>
+                                        <p className="text-[11px] text-white/35">+55 {phone}</p>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => { setShowCallModal(false); setCallNote(''); setCallSaved(false); }}
+                                    className="text-white/25 hover:text-white/60 transition-colors"
+                                >
+                                    <X size={16} />
+                                </button>
+                            </div>
+
+                            {/* Botão de ligar */}
+                            <button
+                                onClick={() => window.open(`tel:+55${phone}`)}
+                                className="w-full flex items-center justify-center gap-2 py-3 mb-4 bg-purple-600 hover:bg-purple-500 text-white font-bold text-[13px] rounded-xl transition-colors"
+                            >
+                                <Phone size={14} />
+                                Iniciar Ligação
+                            </button>
+
+                            {/* Resumo */}
+                            <div className="space-y-1.5 mb-4">
+                                <label className="text-[10px] font-semibold text-white/30 uppercase tracking-widest">
+                                    Resumo da ligação
+                                </label>
+                                <textarea
+                                    value={callNote}
+                                    onChange={e => setCallNote(e.target.value)}
+                                    placeholder="O que foi combinado? Qual foi o resultado da ligação? O cliente tem interesse? Próximo passo..."
+                                    rows={4}
+                                    className="w-full bg-[#0E0E11] border border-white/[0.08] rounded-xl px-3 py-2.5 text-white text-[12px] outline-none resize-none focus:border-purple-500/40 transition-colors"
+                                />
+                            </div>
+
+                            {/* Botão salvar */}
+                            <button
+                                onClick={handleCallSave}
+                                disabled={!callNote.trim() || callSaving || callSaved || !handleSaveCallLog}
+                                className="w-full py-2.5 rounded-xl font-bold text-[13px] transition-all flex items-center justify-center gap-2"
+                                style={{
+                                    backgroundColor: callSaved ? 'rgba(34,197,94,0.15)' : 'rgba(168,85,247,0.9)',
+                                    color: callSaved ? '#22c55e' : 'white',
+                                    borderWidth: 1,
+                                    borderColor: callSaved ? 'rgba(34,197,94,0.3)' : 'transparent',
+                                    opacity: (!callNote.trim() || callSaving) ? 0.35 : 1,
+                                }}
+                            >
+                                {callSaved ? (
+                                    <><Check size={14} /> Salvo com sucesso!</>
+                                ) : callSaving ? (
+                                    'Salvando...'
+                                ) : (
+                                    <><History size={14} /> Salvar registro da ligação</>
+                                )}
+                            </button>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
+
+            {/* ══════════════════════════════════════════════
+                MODAL DE CONCLUSÃO
+            ══════════════════════════════════════════════ */}
             <AnimatePresence>
                 {showCompletionModal && (
                     <div className="fixed inset-0 z-[200] flex items-center justify-center p-5">

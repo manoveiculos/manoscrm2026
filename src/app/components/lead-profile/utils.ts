@@ -33,11 +33,22 @@ export const fillTemplate = (msg: string, lead: any) => {
         .replace(/{consultant}/g, 'Consultor');
 };
 
-export const getAcaoTaticaFallback = (lead: any) => ({
-    emoji: '🎯',
-    titulo: 'REENGATE IMEDIATO',
-    descricao: `O lead ${lead.name} está sem interação humana há mais de 24h. Recomendado envio de script de "Acompanhamento" via WhatsApp para manter o radar ativo.`
-});
+export const getAcaoTaticaFallback = (lead: any) => {
+    const firstName = lead.name?.split(' ')[0] || 'Cliente';
+    const vehicle   = lead.vehicle_interest ? ` (${lead.vehicle_interest})` : '';
+    const hoursStr  = lead.updated_at
+        ? Math.round((Date.now() - new Date(lead.updated_at).getTime()) / 3_600_000)
+        : null;
+    const tempoSemContato = hoursStr && hoursStr > 1
+        ? ` há ${hoursStr >= 48 ? Math.floor(hoursStr / 24) + ' dias' : hoursStr + 'h'}`
+        : '';
+
+    return {
+        emoji: '🎯',
+        titulo: 'REENGATE IMEDIATO',
+        descricao: `${firstName}${vehicle} está sem interação${tempoSemContato}. Clique em "Recalcular" para gerar uma análise IA personalizada — ou use o script de reengajamento abaixo.`,
+    };
+};
 
 export const calcularTempoFunil = (createdAt: string) => {
     const diff = Date.now() - new Date(createdAt).getTime();

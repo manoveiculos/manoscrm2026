@@ -97,7 +97,7 @@ export async function POST(req: NextRequest) {
                     new_status: 'received',
                     created_at: new Date().toISOString(),
                 }])
-                .catch((e: any) => console.warn('[Extension] Timeline insert failed:', e.message));
+                .then(null, (e: any) => console.warn('[Extension] Timeline insert failed:', e?.message));
         }
 
         // IA Background
