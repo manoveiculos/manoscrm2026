@@ -26,6 +26,7 @@ export async function POST(req: NextRequest) {
             urgency_score: result.urgencyScore,
             temperature: result.temperature === 'hot' ? 'quente' : result.temperature === 'warm' ? 'morno' : 'frio',
             model_used: result.modelUsed,
+            detected_name: result.detectedName || null,
         });
 
     } catch (err: any) {

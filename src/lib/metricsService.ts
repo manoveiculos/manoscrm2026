@@ -19,14 +19,16 @@ export const metricsService = {
     async getFinancialMetrics(
         supabase?: SupabaseClient, 
         consultantId?: string, 
-        period: 'daily' | 'monthly' = 'daily'
+        period: 'daily' | 'monthly' = 'daily',
+        customRange?: { start: string, end: string }
     ): Promise<FinancialMetrics> {
         const mappedPeriod = period === 'daily' ? 'today' : 'this_month';
         
         // Fonte Única da Verdade: Todas as métricas vêm do analyticsService (Fase 3)
         const metrics = await getFinancialMetrics({
             period: mappedPeriod,
-            consultantId
+            consultantId,
+            customRange
         });
 
         // Mapeamento estrito para o dashboard

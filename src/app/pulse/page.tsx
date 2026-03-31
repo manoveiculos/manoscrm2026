@@ -106,6 +106,12 @@ export default function Pulse() {
     const [userName, setUserName] = useState('');
     const [userRole, setUserRole] = useState<'admin' | 'consultant'>('consultant');
     const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+    const [period, setPeriod] = useState<'Hoje' | 'Esta Semana' | 'Este Mês' | 'Personalizado'>('Este Mês');
+    const [customDates, setCustomDates] = useState({
+        start: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0],
+        end: new Date().toISOString().split('T')[0]
+    });
+    const [isFiltering, setIsFiltering] = useState(false);
     // ── Redistribuição ────────────────────────────────────────────────────────
     type RedistSuggestion = {
         leadsToMove: Array<{ id: string; name: string }>;
@@ -221,15 +227,26 @@ export default function Pulse() {
                 setUserRole(consultant.role === 'admin' ? 'admin' : 'consultant');
 
                 const isAdmin = consultant.role === 'admin';
+                
+                // Mapeamento de período para o analyticsService
+                const mappedPeriod = 
+                    period === 'Hoje' ? 'today' : 
+                    period === 'Esta Semana' ? 'this_week' : 
+                    'this_month';
+
                 const [leadsResult, metricsResult] = await Promise.all([
                     leadService.getLeadsPaginated(undefined, {
                         consultantId: isAdmin ? undefined : consultant.id,
                         role: isAdmin ? 'admin' : 'consultant',
-                        limit: 2000 // Aumentado para cobrir a base total de 1106+ leads
+                        limit: 3000 // Aumentado para garantir visibilidade total da base
                     }),
                     getFinancialMetrics({
-                        period: 'this_month',
-                        consultantId: isAdmin ? undefined : consultant.id
+                        period: mappedPeriod,
+                        consultantId: isAdmin ? undefined : consultant.id,
+                        customRange: period === 'Personalizado' ? {
+                            start: `${customDates.start}T00:00:00`,
+                            end: `${customDates.end}T23:59:59`
+                        } : undefined
                     }),
                 ]);
 
@@ -377,9 +394,22 @@ export default function Pulse() {
     // ── Lead buckets ───────────────────────────────────────────
     const uncontacted = useMemo(() =>
         leadsWithScores
-            .filter(l => ['received', 'new', 'entrada'].includes(normalizeStatus(l.status)))
-            .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-            .slice(0, 8),
+            .filter(l => 
+                // 1. Status inicial
+                ['received', 'new', 'entrada'].includes(normalizeStatus(l.status)) &&
+                // 2. Filtro Cirúrgico de Interação: ZERO interações registradas
+                (Number(l.total_interactions || 0) === 0) &&
+                // 3. Filtro de Pipeline Ativo: Garante que o lead não seja apenas um registro 'órfão' da migração
+                (l.id.startsWith('main_') || l.id.startsWith('crm26_'))
+            )
+            .sort((a, b) => {
+                // Priorização por atividade de integração recente (cliques/origem)
+                const scoreA = (a as any).integration_priority || 0;
+                const scoreB = (b as any).integration_priority || 0;
+                if (scoreA !== scoreB) return scoreB - scoreA;
+                return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+            })
+            .slice(0, 12), // Exibe um pouco mais de volume se necessário
         [leadsWithScores]
     );
 
@@ -456,12 +486,61 @@ export default function Pulse() {
                     </span>
                 </div>
 
-                {/* Right: Status */}
-                <div className="flex items-center gap-3">
-                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-red-600/10 border border-red-500/20">
-                        <div className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
-                        <span className="text-[9px] font-black text-red-500 uppercase tracking-widest">LIVE OPS</span>
+                {/* Right: Filtro Temporal */}
+                <div className="flex flex-wrap items-center gap-2 p-1 bg-white/[0.03] border border-white/10 rounded-xl">
+                    <div className="flex items-center gap-1">
+                        {(['Hoje', 'Esta Semana', 'Este Mês', 'Personalizado'] as const).map((p) => (
+                            <button
+                                key={p}
+                                onClick={() => {
+                                    setPeriod(p);
+                                    if (p !== 'Personalizado') loadData(); 
+                                }}
+                                className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${
+                                    period === p 
+                                    ? 'bg-red-600 text-white shadow-lg shadow-red-600/20' 
+                                    : 'text-white/40 hover:text-white/60 hover:bg-white/5'
+                                }`}
+                            >
+                                {p}
+                            </button>
+                        ))}
                     </div>
+
+                    {period === 'Personalizado' && (
+                        <motion.div 
+                            initial={{ opacity: 0, x: 20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            className="flex items-center gap-2 pr-2 border-l border-white/10 pl-3"
+                        >
+                            <div className="flex items-center gap-2">
+                                <input 
+                                    type="date" 
+                                    value={customDates.start}
+                                    onChange={(e) => setCustomDates({...customDates, start: e.target.value})}
+                                    className="bg-black/40 border border-white/10 rounded-lg px-2 py-1 text-[9px] text-white focus:outline-none focus:ring-1 focus:ring-red-500/50"
+                                />
+                                <span className="text-[10px] text-white/20">até</span>
+                                <input 
+                                    type="date" 
+                                    value={customDates.end}
+                                    onChange={(e) => setCustomDates({...customDates, end: e.target.value})}
+                                    className="bg-black/40 border border-white/10 rounded-lg px-2 py-1 text-[9px] text-white focus:outline-none focus:ring-1 focus:ring-red-500/50"
+                                />
+                            </div>
+                            <button 
+                                onClick={async () => {
+                                    setIsFiltering(true);
+                                    await loadData();
+                                    setIsFiltering(false);
+                                }}
+                                disabled={isFiltering}
+                                className="px-3 py-1.5 bg-white/5 hover:bg-red-600 border border-white/10 hover:border-red-500 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all disabled:opacity-50"
+                            >
+                                {isFiltering ? '...' : 'Filtrar'}
+                            </button>
+                        </motion.div>
+                    )}
                 </div>
             </header>
             {/* ── DAILY MISSION HEADER ─────────────────────────── */}

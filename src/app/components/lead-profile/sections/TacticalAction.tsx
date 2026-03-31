@@ -231,52 +231,200 @@ export const TacticalAction: React.FC<TacticalActionProps> = ({
             </div>
         )}
 
-        {/* Painel de proposta inline — renderizado fora do card principal */}
+        {/* ── PAINEL DE PROPOSTA COMPLETO ── */}
         {proposta && (
-            <div className="bg-[#141418] border border-blue-500/15 rounded-xl overflow-hidden mt-3">
-                <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.05]">
-                    <div className="flex items-center gap-2">
-                        <FileText size={13} className="text-blue-400" />
-                        <span className="text-[11px] font-semibold text-blue-300/80 uppercase tracking-widest">{proposta.titulo}</span>
-                        {propostaFromCache && (
-                            <span className="text-[9px] text-white/25 border border-white/10 rounded px-1 py-0.5">cache</span>
-                        )}
-                    </div>
-                    <button onClick={() => { setProposta(null); setPropostaFromCache(false); }} className="text-white/20 hover:text-white/50 transition-colors">
-                        <X size={12} />
-                    </button>
-                </div>
-
-                {proposta.pitch && (
-                    <div className="px-4 py-3 border-b border-white/[0.05]">
-                        <p className="text-[12px] text-white/60 leading-relaxed italic">"{proposta.pitch}"</p>
-                    </div>
-                )}
-
-                <div className="divide-y divide-white/[0.04]">
-                    {proposta.cenarios.map((c, i) => (
-                        <div key={i} className="flex items-center gap-4 px-4 py-3">
-                            <div className="h-8 w-8 rounded-lg bg-blue-500/10 border border-blue-500/15 flex items-center justify-center shrink-0">
-                                <span className="text-[10px] font-black text-blue-400">{c.label}</span>
-                            </div>
-                            <div className="flex-1 min-w-0">
-                                <div className="flex items-baseline gap-2">
-                                    <span className="text-[13px] font-bold text-white/85">{c.parcela}</span>
-                                    <span className="text-[10px] text-white/30">entrada {c.entrada}</span>
-                                </div>
-                                {c.obs && <p className="text-[10px] text-white/35 mt-0.5 leading-snug">{c.obs}</p>}
-                            </div>
-                        </div>
-                    ))}
-                </div>
-
-                {proposta.cta && (
-                    <div className="px-4 py-3 border-t border-white/[0.05] bg-blue-500/[0.04]">
-                        <p className="text-[11px] text-blue-300/70 font-medium leading-snug">→ {proposta.cta}</p>
-                    </div>
-                )}
-            </div>
+            <ProposalPanel
+                proposta={proposta}
+                propostaFromCache={propostaFromCache}
+                phone={(lead.phone || '').replace(/\D/g, '')}
+                onClose={() => { setProposta(null); setPropostaFromCache(false); }}
+                onRegenerate={gerarProposta}
+                loading={propostaLoading}
+            />
         )}
         </>
     );
 };
+
+// ─── Sub-componente: painel de proposta ───────────────────────────────────────
+interface ProposalPanelProps {
+    proposta: Proposta & { cenarios: any[] };
+    propostaFromCache: boolean;
+    phone: string;
+    onClose: () => void;
+    onRegenerate: () => void;
+    loading: boolean;
+}
+
+function ProposalPanel({ proposta, propostaFromCache, phone, onClose, onRegenerate, loading }: ProposalPanelProps) {
+    const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
+    const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
+
+    const copy = (text: string, idx: number) => {
+        navigator.clipboard.writeText(text).then(() => {
+            setCopiedIdx(idx);
+            setTimeout(() => setCopiedIdx(null), 2000);
+        }).catch(() => {});
+    };
+
+    const COLORS = [
+        { bg: 'rgba(16,185,129,0.08)', border: 'rgba(16,185,129,0.2)', text: '#34d399', badge: 'rgba(16,185,129,0.15)' },
+        { bg: 'rgba(59,130,246,0.08)', border: 'rgba(59,130,246,0.2)', text: '#60a5fa', badge: 'rgba(59,130,246,0.15)' },
+        { bg: 'rgba(139,92,246,0.08)', border: 'rgba(139,92,246,0.2)', text: '#a78bfa', badge: 'rgba(139,92,246,0.15)' },
+    ];
+
+    return (
+        <div className="bg-[#0E0E12] border border-blue-500/20 rounded-xl overflow-hidden mt-3">
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.05] bg-blue-500/[0.04]">
+                <div className="flex items-center gap-2.5">
+                    <FileText size={13} className="text-blue-400" />
+                    <span className="text-[11px] font-black text-blue-300/90 uppercase tracking-widest">{proposta.titulo}</span>
+                    {propostaFromCache && (
+                        <span className="text-[8px] text-white/25 border border-white/10 rounded px-1.5 py-0.5 uppercase">cache</span>
+                    )}
+                </div>
+                <div className="flex items-center gap-2">
+                    <button
+                        onClick={onRegenerate}
+                        disabled={loading}
+                        className="text-[10px] text-blue-400/50 hover:text-blue-300 transition-colors disabled:opacity-30 flex items-center gap-1"
+                    >
+                        <Sparkles size={9} className={loading ? 'animate-spin' : ''} />
+                        Regerar
+                    </button>
+                    <button onClick={onClose} className="text-white/20 hover:text-white/50 transition-colors ml-1">
+                        <X size={13} />
+                    </button>
+                </div>
+            </div>
+
+            {/* Preço do veículo + configuração */}
+            {(proposta as any).veiculo_preco && (
+                <div className="px-4 py-2.5 border-b border-white/[0.05] bg-white/[0.02] flex items-center gap-4">
+                    <div>
+                        <span className="text-[9px] font-bold text-white/25 uppercase tracking-widest">Valor do veículo</span>
+                        <p className="text-[14px] font-black text-white/80">{(proposta as any).veiculo_preco}</p>
+                    </div>
+                    <div className="h-6 w-px bg-white/[0.07]" />
+                    <div>
+                        <span className="text-[9px] font-bold text-white/25 uppercase tracking-widest">Taxa</span>
+                        <p className="text-[12px] font-bold text-amber-400/80">2,00% a.m.</p>
+                    </div>
+                    <div className="h-6 w-px bg-white/[0.07]" />
+                    <div>
+                        <span className="text-[9px] font-bold text-white/25 uppercase tracking-widest">Prazo</span>
+                        <p className="text-[12px] font-bold text-white/60">48x</p>
+                    </div>
+                </div>
+            )}
+
+            {/* Pitch do consultor */}
+            {proposta.pitch && (
+                <div className="px-4 py-3 border-b border-white/[0.05]">
+                    <p className="text-[10px] font-bold text-white/25 uppercase tracking-widest mb-1">Argumento de abertura</p>
+                    <p className="text-[12px] text-white/55 leading-relaxed italic">"{proposta.pitch}"</p>
+                </div>
+            )}
+
+            {/* Cenários */}
+            <div className="divide-y divide-white/[0.05]">
+                {proposta.cenarios.map((c: any, i: number) => {
+                    const col = COLORS[i] || COLORS[0];
+                    const isExpanded = expandedIdx === i;
+                    const hasMensagem = !!c.mensagem_whatsapp;
+
+                    return (
+                        <div key={i} className="px-4 py-3">
+                            {/* Linha principal do cenário */}
+                            <div className="flex items-start gap-3">
+                                {/* Badge entrada % */}
+                                <div
+                                    className="h-10 w-10 rounded-xl flex flex-col items-center justify-center shrink-0 mt-0.5 gap-0"
+                                    style={{ backgroundColor: col.badge, border: `1px solid ${col.border}` }}
+                                >
+                                    <span className="text-[9px] font-black leading-tight" style={{ color: col.text }}>
+                                        {c.label?.replace('Entrada ', '') || `${i === 0 ? '20%' : i === 1 ? '30%' : '40%'}`}
+                                    </span>
+                                    <span className="text-[8px] text-white/30 leading-tight">{(c as any).prazo || '48x'}</span>
+                                </div>
+
+                                {/* Info principal */}
+                                <div className="flex-1 min-w-0">
+                                    <div className="flex items-baseline gap-2 flex-wrap">
+                                        <span className="text-[15px] font-bold text-white/90">{c.parcela}</span>
+                                        <span className="text-[11px] text-white/35">entrada {c.entrada}</span>
+                                    </div>
+                                    <div className="flex items-center gap-3 mt-0.5 flex-wrap">
+                                        {(c as any).financiado && <span className="text-[10px] text-white/25">financiado {(c as any).financiado}</span>}
+                                        {c.total && <span className="text-[10px] text-white/25">· total {c.total}</span>}
+                                    </div>
+                                    {c.obs && <p className="text-[10px] italic mt-0.5" style={{ color: col.text + 'bb' }}>{c.obs}</p>}
+                                </div>
+
+                                {/* Botões de ação */}
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                    {/* Copiar mensagem completa */}
+                                    {hasMensagem && (
+                                        <button
+                                            onClick={() => copy(c.mensagem_whatsapp, i)}
+                                            title="Copiar mensagem completa"
+                                            className="h-7 w-7 rounded-lg border flex items-center justify-center transition-all"
+                                            style={copiedIdx === i
+                                                ? { borderColor: 'rgba(34,197,94,0.4)', backgroundColor: 'rgba(34,197,94,0.08)' }
+                                                : { borderColor: col.border, backgroundColor: col.bg }
+                                            }
+                                        >
+                                            {copiedIdx === i
+                                                ? <Check size={11} className="text-emerald-400" />
+                                                : <Copy size={11} style={{ color: col.text }} />
+                                            }
+                                        </button>
+                                    )}
+                                    {/* Enviar WhatsApp */}
+                                    {hasMensagem && phone.length >= 10 && (
+                                        <button
+                                            onClick={() => window.open(`https://wa.me/55${phone}?text=${encodeURIComponent(c.mensagem_whatsapp)}`, '_blank')}
+                                            title="Enviar via WhatsApp"
+                                            className="h-7 w-7 rounded-lg border border-[#25D366]/25 bg-[#25D366]/08 flex items-center justify-center transition-all hover:bg-[#25D366]/20"
+                                        >
+                                            <MessageSquare size={11} className="text-[#25D366]" />
+                                        </button>
+                                    )}
+                                    {/* Expandir mensagem */}
+                                    {hasMensagem && (
+                                        <button
+                                            onClick={() => setExpandedIdx(isExpanded ? null : i)}
+                                            title="Ver mensagem completa"
+                                            className="h-7 w-7 rounded-lg border border-white/[0.07] bg-transparent flex items-center justify-center transition-all hover:bg-white/[0.04]"
+                                        >
+                                            <ChevronRight size={11} className={`text-white/25 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Mensagem expandida */}
+                            {isExpanded && hasMensagem && (
+                                <div
+                                    className="mt-3 rounded-xl p-3 text-[11px] leading-relaxed whitespace-pre-wrap"
+                                    style={{ backgroundColor: col.bg, border: `1px solid ${col.border}`, color: 'rgba(255,255,255,0.6)' }}
+                                >
+                                    {c.mensagem_whatsapp}
+                                </div>
+                            )}
+                        </div>
+                    );
+                })}
+            </div>
+
+            {/* CTA do consultor */}
+            {proposta.cta && (
+                <div className="px-4 py-3 border-t border-white/[0.05] bg-gradient-to-r from-blue-500/[0.06] to-transparent">
+                    <p className="text-[10px] font-bold text-white/25 uppercase tracking-widest mb-1">Fechamento sugerido</p>
+                    <p className="text-[12px] text-blue-300/70 font-medium leading-snug">→ {proposta.cta}</p>
+                </div>
+            )}
+        </div>
+    );
+}

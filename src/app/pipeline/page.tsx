@@ -33,7 +33,12 @@ import {
     Calendar,
     Plus,
     X,
-    Sparkles
+    Sparkles,
+    AlertTriangle,
+    RefreshCw,
+    Timer,
+    Eye,
+    Lock
 } from 'lucide-react';
 import { dataService } from '@/lib/dataService';
 
@@ -412,6 +417,44 @@ function PipelineContent() {
         return { total: filteredLeads.length, elite, emergency, aiHoje };
     }, [filteredLeads, leads]);
 
+    // ── ELITE ALERTS (computados dos leads já carregados) ─────────────────────
+    const eliteAlerts = useMemo(() => {
+        if (loading || leads.length === 0) return { red: [] as Lead[], orange: 0, orangeLeads: [] as Lead[], yellow: [] as Lead[] };
+        const H24 = 24 * 3_600_000;
+        const H48 = 48 * 3_600_000;
+        const D7  =  7 * 24 * 3_600_000;
+        const now = Date.now();
+
+        // Vermelho: leads perdidos recentemente com score alto (reversível)
+        const red = leads.filter(l => {
+            const norm = normalizeStatus(l.status);
+            const score = Number(l.ai_score) || 0;
+            const age = now - new Date(l.updated_at || l.created_at).getTime();
+            return norm === 'perdido' && score >= 70 && age < D7;
+        }).slice(0, 3);
+
+        // Laranja: leads ativos sem contato > 24h
+        const orangeLeads = filteredLeads.filter(l => {
+            const norm = normalizeStatus(l.status);
+            if (['perdido', 'vendido'].includes(norm)) return false;
+            const age = now - new Date(l.updated_at || l.created_at).getTime();
+            return age > H24;
+        });
+
+        // Amarelo: leads em fechamento travados > 48h
+        const yellow = filteredLeads.filter(l => {
+            const norm = normalizeStatus(l.status);
+            if (norm !== 'fechamento') return false;
+            const age = now - new Date(l.updated_at || l.created_at).getTime();
+            return age > H48;
+        }).slice(0, 2);
+
+        return { red, orange: orangeLeads.length, orangeLeads, yellow };
+    }, [leads, filteredLeads, loading]);
+
+    // Banner visível se há alertas OU briefing (alertas vermelhos ignoram dismissed)
+    const showEliteBanner = !briefDismissed || eliteAlerts.red.length > 0;
+
     const handleConsultantChange = async (leadId: string, newConsultantId: string) => {
         if (role !== 'admin') return;
         try {
@@ -641,41 +684,155 @@ function PipelineContent() {
                 )}
             </div>
 
-            {/* BRIEFING MATINAL IA */}
-            {dailyBrief && !briefDismissed && (
-                <div className="w-full px-3 sm:px-5 py-2 bg-[#0C0C0F] border-b border-white/[0.05] shrink-0">
-                    <div className="flex items-start gap-3 bg-[#141418] border border-amber-500/15 rounded-xl px-4 py-3">
-                        <Brain size={14} className="text-amber-400 mt-0.5 shrink-0" />
-                        <div className="flex-1 min-w-0">
-                            <div className="flex items-start justify-between gap-2">
-                                <p className="text-[11px] font-bold text-amber-300 leading-snug">{dailyBrief.saudacao}</p>
+            {/* ── ELITE ALERT BANNER ──────────────────────────────────────────── */}
+            {showEliteBanner && !loading && (eliteAlerts.red.length > 0 || eliteAlerts.orange > 0 || eliteAlerts.yellow.length > 0 || dailyBrief) && (
+                <div className="w-full px-3 sm:px-5 py-2.5 bg-[#0C0C0F] border-b border-white/[0.05] shrink-0">
+                    <div className="flex items-stretch gap-2 overflow-x-auto pb-0.5" style={{ scrollbarWidth: 'none' }}>
+
+                        {/* 🔴 NÍVEL VERMELHO — Perdas críticas (score ≥ 70 nos últimos 7 dias) */}
+                        {eliteAlerts.red.map(lead => (
+                            <div key={lead.id} className="flex-none bg-red-950/50 border border-red-500/40 rounded-xl px-3 py-2.5 min-w-[240px] max-w-[280px] flex flex-col">
+                                <div className="flex items-start gap-2 mb-1.5">
+                                    <AlertTriangle size={12} className="text-red-400 mt-0.5 shrink-0" />
+                                    <div className="min-w-0">
+                                        <p className="text-[9px] font-black text-red-400 uppercase tracking-widest leading-none mb-0.5">⚠ PERDA CRÍTICA</p>
+                                        <p className="text-[11px] font-bold text-white truncate">{(lead as any).nome || lead.name}</p>
+                                        <p className="text-[9px] text-white/35 truncate">{(lead as any).interesse || lead.vehicle_interest || 'Interesse n/d'}</p>
+                                    </div>
+                                </div>
+                                <p className="text-[9px] text-red-300/70 mb-2 leading-snug flex-1">
+                                    Score <span className="font-bold text-red-300">{lead.ai_score}%</span> quando perdido. Reversão ainda possível.
+                                </p>
+                                <div className="flex gap-1.5">
+                                    <button
+                                        onClick={() => { setIsManagement(false); setSelectedLead(lead); }}
+                                        className="flex-1 flex items-center justify-center gap-1 bg-white/5 hover:bg-white/10 text-white/50 hover:text-white text-[9px] font-semibold rounded-lg px-2 py-1.5 transition-colors"
+                                    >
+                                        <Eye size={9} /> VER CONTEXTO
+                                    </button>
+                                    <button
+                                        onClick={async () => {
+                                            await handleStatusChange(lead.id, 'ataque' as LeadStatus);
+                                            setIsManagement(false);
+                                            setSelectedLead({ ...lead, status: 'ataque' as LeadStatus });
+                                        }}
+                                        className="flex-1 flex items-center justify-center gap-1 bg-red-500/25 hover:bg-red-500/40 text-red-300 text-[9px] font-black rounded-lg px-2 py-1.5 transition-colors"
+                                    >
+                                        <RefreshCw size={9} /> RETOMAR AGORA
+                                    </button>
+                                </div>
+                            </div>
+                        ))}
+
+                        {/* 🟠 NÍVEL LARANJA — SLA estourado > 24h */}
+                        {eliteAlerts.orange > 0 && (
+                            <div className="flex-none bg-orange-950/40 border border-orange-500/30 rounded-xl px-3 py-2.5 min-w-[210px] max-w-[250px] flex flex-col">
+                                <div className="flex items-start gap-2 mb-1.5">
+                                    <Clock size={12} className="text-orange-400 mt-0.5 shrink-0" />
+                                    <div>
+                                        <p className="text-[9px] font-black text-orange-400 uppercase tracking-widest leading-none mb-0.5">🚨 SLA ESTOURADO</p>
+                                        <p className="text-[11px] font-bold text-white">{eliteAlerts.orange} lead{eliteAlerts.orange > 1 ? 's' : ''} parado{eliteAlerts.orange > 1 ? 's' : ''}</p>
+                                    </div>
+                                </div>
+                                <p className="text-[9px] text-orange-300/65 mb-2 leading-snug flex-1">
+                                    Sem contato há mais de 24h. A conversão cai 50% a cada hora de atraso.
+                                </p>
                                 <button
                                     onClick={() => {
-                                        setBriefDismissed(true);
-                                        const today = new Date().toISOString().split('T')[0];
-                                        sessionStorage.setItem(`brief_dismissed_${today}`, 'true');
+                                        // Filtra para mostrar apenas leads sem contato > 24h
+                                        const worstId = eliteAlerts.orangeLeads[0]?.id;
+                                        if (worstId) {
+                                            const worst = eliteAlerts.orangeLeads[0];
+                                            setIsManagement(false);
+                                            setSelectedLead(worst);
+                                        }
                                     }}
-                                    className="text-white/20 hover:text-white/50 transition-colors shrink-0 mt-0.5"
+                                    className="w-full flex items-center justify-center gap-1.5 bg-orange-500/15 hover:bg-orange-500/30 text-orange-300 text-[9px] font-bold rounded-lg px-2 py-1.5 transition-colors"
                                 >
-                                    <X size={11} />
+                                    <Eye size={9} /> VER O MAIS URGENTE
                                 </button>
                             </div>
-                            {dailyBrief.resumo && (
-                                <p className="text-[10px] text-white/45 mt-0.5 leading-snug">{dailyBrief.resumo}</p>
-                            )}
-                            {dailyBrief.prioridades.length > 0 && (
-                                <div className="flex flex-wrap gap-x-5 gap-y-0.5 mt-1.5">
-                                    {dailyBrief.prioridades.map((p, i) => (
-                                        <span key={i} className="text-[10px] text-white/55 leading-snug">
-                                            <span className="text-amber-500/50 mr-1">→</span>{p}
-                                        </span>
-                                    ))}
+                        )}
+
+                        {/* 🟡 NÍVEL AMARELO — Fechamento travado > 48h */}
+                        {eliteAlerts.yellow.map(lead => {
+                            const hoursStuck = Math.floor((Date.now() - new Date(lead.updated_at || lead.created_at).getTime()) / 3_600_000);
+                            return (
+                                <div key={lead.id} className="flex-none bg-amber-950/30 border border-amber-500/20 rounded-xl px-3 py-2.5 min-w-[230px] max-w-[270px] flex flex-col">
+                                    <div className="flex items-start gap-2 mb-1.5">
+                                        <Timer size={12} className="text-amber-400 mt-0.5 shrink-0" />
+                                        <div className="min-w-0">
+                                            <p className="text-[9px] font-black text-amber-500 uppercase tracking-widest leading-none mb-0.5">⏱ FECHAMENTO TRAVADO</p>
+                                            <p className="text-[11px] font-bold text-white truncate">{(lead as any).nome || lead.name}</p>
+                                            <p className="text-[9px] text-white/35 truncate">{(lead as any).interesse || lead.vehicle_interest}</p>
+                                        </div>
+                                    </div>
+                                    <p className="text-[9px] text-amber-300/60 mb-2 leading-snug flex-1">
+                                        {hoursStuck}h sem movimento em Fechamento. Proposta esfriando.
+                                    </p>
+                                    <div className="flex gap-1.5">
+                                        <button
+                                            onClick={() => { setIsManagement(false); setSelectedLead(lead); }}
+                                            className="flex-1 flex items-center justify-center gap-1 bg-white/5 hover:bg-white/10 text-white/50 hover:text-white text-[9px] font-semibold rounded-lg px-2 py-1.5 transition-colors"
+                                        >
+                                            <Eye size={9} /> VER
+                                        </button>
+                                        <button
+                                            onClick={() => { setIsManagement(false); setSelectedLead(lead); }}
+                                            className="flex-1 flex items-center justify-center gap-1 bg-amber-500/15 hover:bg-amber-500/30 text-amber-300 text-[9px] font-black rounded-lg px-2 py-1.5 transition-colors"
+                                        >
+                                            <Zap size={9} /> RETOMAR AGORA
+                                        </button>
+                                    </div>
                                 </div>
-                            )}
-                            {dailyBrief.aviso && (
-                                <p className="text-[10px] text-red-400/75 mt-1.5 font-semibold leading-snug">⚠ {dailyBrief.aviso}</p>
-                            )}
+                            );
+                        })}
+
+                        {/* 🟢 NÍVEL VERDE — Oportunidades do dia (só aparece sem alertas vermelhos) */}
+                        {dailyBrief && eliteAlerts.red.length === 0 && (
+                            <div className="flex-none bg-[#141418] border border-amber-500/10 rounded-xl px-3 py-2.5 min-w-[250px] max-w-[340px] flex flex-col">
+                                <div className="flex items-start gap-2 mb-1.5">
+                                    <Brain size={12} className="text-amber-400/70 mt-0.5 shrink-0" />
+                                    <div>
+                                        <p className="text-[9px] font-black text-amber-500/50 uppercase tracking-widest leading-none mb-0.5">IA HOJE</p>
+                                        <p className="text-[10px] font-semibold text-white/70 leading-snug">{dailyBrief.saudacao}</p>
+                                    </div>
+                                </div>
+                                {dailyBrief.prioridades.length > 0 && (
+                                    <div className="flex flex-col gap-0.5 flex-1">
+                                        {dailyBrief.prioridades.slice(0, 3).map((p, i) => (
+                                            <span key={i} className="text-[9px] text-white/40 leading-snug">
+                                                <span className="text-amber-500/40 mr-1">→</span>{p}
+                                            </span>
+                                        ))}
+                                    </div>
+                                )}
+                                {dailyBrief.aviso && (
+                                    <p className="text-[9px] text-red-400/60 mt-1.5 font-semibold leading-snug">⚠ {dailyBrief.aviso}</p>
+                                )}
+                            </div>
+                        )}
+
+                        {/* Botão de fechar — bloqueado se há alertas vermelhos */}
+                        <div className="flex-none flex items-start self-start ml-auto pl-1">
+                            <button
+                                onClick={() => {
+                                    if (eliteAlerts.red.length > 0) return;
+                                    setBriefDismissed(true);
+                                    const today = new Date().toISOString().split('T')[0];
+                                    sessionStorage.setItem(`brief_dismissed_${today}`, 'true');
+                                }}
+                                title={eliteAlerts.red.length > 0 ? 'Resolva as perdas críticas antes de fechar' : 'Minimizar'}
+                                className={`p-1.5 rounded-lg transition-colors ${
+                                    eliteAlerts.red.length > 0
+                                        ? 'text-red-500/30 cursor-not-allowed'
+                                        : 'text-white/20 hover:text-white/50 hover:bg-white/5'
+                                }`}
+                            >
+                                {eliteAlerts.red.length > 0 ? <Lock size={10} /> : <X size={10} />}
+                            </button>
                         </div>
+
                     </div>
                 </div>
             )}

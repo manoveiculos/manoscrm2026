@@ -84,9 +84,21 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
     const [timelineFilter, setTimelineFilter] = useState('all');
     const [loadingStatus, setLoadingStatus] = useState<'idle' | 'analyzing' | 'matching' | 'finalizing'>('idle');
     const isAnalyzing = loadingStatus !== 'idle';
-    const [scriptOptions, setScriptOptions] = useState<{ tipo: string; label: string; mensagem: string }[]>([]);
-    const [diagnostico, setDiagnostico] = useState('');
-    const [orientacao, setOrientacao] = useState('');
+    const [scriptOptions, setScriptOptions] = useState<{ tipo: string; label: string; mensagem: string }[]>(() => {
+        // Carrega scripts salvos no banco ao abrir o modal
+        if (Array.isArray(lead?.last_scripts_json) && lead.last_scripts_json.length > 0) {
+            return lead.last_scripts_json;
+        }
+        return [];
+    });
+    const [diagnostico, setDiagnostico] = useState(() => {
+        const parts = (lead?.ai_reason || '').split('| ORIENTAÇÃO:');
+        return parts[0]?.trim() || '';
+    });
+    const [orientacao, setOrientacao] = useState(() => {
+        const parts = (lead?.ai_reason || '').split('| ORIENTAÇÃO:');
+        return parts[1]?.trim() || '';
+    });
     const [showFinishing, setShowFinishing] = useState(false);
     const [finishType, setFinishType] = useState<'venda' | 'compra' | 'perda' | null>(null);
     const [vehicleDetails, setVehicleDetails] = useState('');
@@ -225,23 +237,20 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
             // No caso do GPT-4o-mini (2s), isso garante que o vendedor veja a "mágica" acontecendo
             const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
             
-            // Limpa o ID de qualquer prefixo antes de buscar mensagens
+            // Busca mensagens WhatsApp — lead_id em whatsapp_messages é bigint, só funciona com IDs numéricos
             const rawId = lead.id.toString();
             const cleanLeadId = rawId.replace(/^(main_|crm26_|dist_|lead_|crm25_|master_)/, '');
             const isNumericId = /^\d+$/.test(cleanLeadId);
-            
-            // Query resiliente: tenta filtros que funcionam para ambos os tipos (int/uuid)
-            let query = supabase.from('whatsapp_messages').select('*');
-            
-            if (isNumericId) {
-                // Se for numérico, busca pelo ID limpo ou pelo ID original se este for numérico
-                query = query.or(`lead_id_v1.eq.${cleanLeadId},lead_id_v1.eq.${rawId}`);
-            } else {
-                // Se for UUID, busca pela coluna lead_id padrão
-                query = query.or(`lead_id.eq.${cleanLeadId},lead_id.eq.${rawId}`);
-            }
 
-            const { data: messages } = await query.order('created_at', { ascending: true });
+            let messages: any[] = [];
+            if (isNumericId) {
+                const { data } = await supabase
+                    .from('whatsapp_messages')
+                    .select('*')
+                    .eq('lead_id', parseInt(cleanLeadId))
+                    .order('created_at', { ascending: true });
+                messages = data || [];
+            }
 
             await sleep(800);
             setLoadingStatus('matching');
@@ -271,6 +280,7 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
                     ai_reason: data.diagnostico && data.orientacao
                         ? `${data.diagnostico} | ORIENTAÇÃO: ${data.orientacao}`
                         : prev.ai_reason,
+                    ...(data.detected_name ? { name: data.detected_name, nome: data.detected_name } : {}),
                 }));
                 if (Array.isArray(data.script_options) && data.script_options.length > 0) {
                     setScriptOptions(data.script_options);

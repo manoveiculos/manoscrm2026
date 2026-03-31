@@ -6,10 +6,12 @@ import {
     Trophy, 
     Award,
     Zap,
-    Crown
+    Crown,
+    X,
+    BarChart3
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
-import { getSalesRanking } from '@/lib/services/analyticsService';
+import { getSalesRanking, getFinancialMetrics } from '@/lib/services/analyticsService';
 
 const supabase = createClient();
 
@@ -20,8 +22,9 @@ interface ConsultantRanking {
     leadCount: number;
     conversion: number;
     avgResponseMin: number;
+    eliteScore: number;
+    topSource: string;
     trend: 'up' | 'down' | 'stable';
-    lastSale: string | null;
 }
 
 const container = {
@@ -41,6 +44,10 @@ export function RankingPageClient() {
     const [ranking, setRanking] = useState<ConsultantRanking[]>([]);
     const [loading, setLoading] = useState(true);
     const [period, setPeriod] = useState<'today' | 'week' | 'month' | 'all'>('month');
+    const [selectedConsultant, setSelectedConsultant] = useState<ConsultantRanking | null>(null);
+    const [isAnalysisOpen, setIsAnalysisOpen] = useState(false);
+    const [funnelData, setFunnelData] = useState<any>(null);
+    const [loadingAnalysis, setLoadingAnalysis] = useState(false);
 
     const loadRanking = async () => {
         setLoading(true);
@@ -52,19 +59,18 @@ export function RankingPageClient() {
             else if (period === 'month') { startDate = new Date(now); startDate.setDate(now.getDate() - 30); }
 
             const startDateISO = startDate?.toISOString();
-
-            // CHAMADA UNIFICADA (Fase 3: Fonte Única da Verdade)
             const rankingData = await getSalesRanking(startDateISO);
 
             const processed: ConsultantRanking[] = rankingData.map((r: any) => ({
-                id: r.id || r.name,
+                id: r.id,
                 name: r.name,
-                salesCount: r.count || 0,
-                leadCount: r.leads || 0,
+                salesCount: r.salesCount || 0,
+                leadCount: r.leadCount || 0,
                 conversion: r.conversion || 0,
                 avgResponseMin: r.avgResponseMin || 0,
-                trend: 'up' as const,
-                lastSale: null
+                eliteScore: r.eliteScore || 0,
+                topSource: r.topSource || 'Meta',
+                trend: 'up' as const
             }));
 
             setRanking(processed);
@@ -72,6 +78,23 @@ export function RankingPageClient() {
             console.error('Error loading ranking:', error);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const openAnalysis = async (consultant: ConsultantRanking) => {
+        setSelectedConsultant(consultant);
+        setIsAnalysisOpen(true);
+        setLoadingAnalysis(true);
+        try {
+            const metrics = await getFinancialMetrics({
+                period: period === 'today' ? 'today' : period === 'week' ? 'this_week' : 'this_month',
+                consultantId: consultant.id
+            });
+            setFunnelData(metrics.funnelData);
+        } catch (error) {
+            console.error("Error loading analysis data:", error);
+        } finally {
+            setLoadingAnalysis(false);
         }
     };
 
@@ -144,7 +167,7 @@ export function RankingPageClient() {
                             transition={{ delay: idx * 0.1 }}
                             className={`relative overflow-hidden rounded-[2.5rem] border p-8 flex flex-col items-center text-center transition-all group ${
                                 isFirst 
-                                ? 'bg-gradient-to-b from-amber-500/10 via-transparent to-transparent border-amber-500/30 md:scale-105 z-10' 
+                                ? 'bg-gradient-to-b from-amber-500/10 via-transparent to-transparent border-amber-500/30 md:scale-105 z-10 shadow-[0_20px_50px_rgba(245,158,11,0.1)]' 
                                 : isSecond
                                 ? 'bg-gradient-to-b from-slate-400/10 via-transparent to-transparent border-slate-400/20'
                                 : 'bg-gradient-to-b from-orange-800/10 via-transparent to-transparent border-orange-800/20'
@@ -171,9 +194,10 @@ export function RankingPageClient() {
                                 </div>
                             </div>
 
-                            <h3 className={`text-lg font-black text-white uppercase tracking-tight mb-2 group-hover:text-amber-500 transition-colors`}>
+                            <h3 className="text-lg font-black text-white uppercase tracking-tight mb-1 group-hover:text-amber-500 transition-colors">
                                 {consultant.name.split(' ').slice(0, 2).join(' ')}
                             </h3>
+                            <p className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest mb-6">Foco: {consultant.topSource}</p>
                             
                             <div className="flex items-center gap-4 mb-8">
                                 <div className="text-center px-4 py-2 bg-white/5 rounded-2xl border border-white/5">
@@ -187,10 +211,25 @@ export function RankingPageClient() {
                                 </div>
                             </div>
 
+                            {/* Progress to Goal */}
+                            <div className="w-full space-y-2 mb-8">
+                                <div className="flex justify-between text-[8px] font-black uppercase tracking-widest text-white/30">
+                                    <span>Progresso Meta</span>
+                                    <span className="text-white/60">{consultant.salesCount}/15</span>
+                                </div>
+                                <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+                                    <motion.div 
+                                        initial={{ width: 0 }}
+                                        animate={{ width: `${Math.min(100, (consultant.salesCount / 15) * 100)}%` }}
+                                        className={`h-full ${isFirst ? 'bg-amber-500' : 'bg-red-600'}`}
+                                    />
+                                </div>
+                            </div>
+
                             <div className="grid grid-cols-2 gap-3 w-full">
                                 <div className="bg-white/5 p-3 rounded-2xl text-left border border-white/5">
-                                    <p className="text-[14px] font-black text-white/80">{consultant.leadCount}</p>
-                                    <p className="text-[8px] font-bold text-white/20 uppercase tracking-widest">Leads</p>
+                                    <p className="text-[14px] font-black text-white/80">{consultant.eliteScore}%</p>
+                                    <p className="text-[8px] font-bold text-white/20 uppercase tracking-widest">Score Elite</p>
                                 </div>
                                 <div className="bg-white/5 p-3 rounded-2xl text-left border border-white/5">
                                     <p className="text-[14px] font-black text-white/80">{consultant.avgResponseMin}m</p>
@@ -271,19 +310,143 @@ export function RankingPageClient() {
                 </div>
                 <div className="flex items-center gap-3">
                     <button 
-                        onClick={() => window.location.href = '/pipeline'}
+                        onClick={() => window.location.href = '/pulse'}
                         className="px-8 py-3.5 rounded-2xl bg-white text-black text-[11px] font-black uppercase tracking-[0.2em] shadow-xl hover:scale-105 active:scale-95 transition-all"
                     >
                         Puxar Novo Lead
                     </button>
                     <button 
-                        onClick={() => window.location.href = '/analytics'}
-                        className="px-8 py-3.5 rounded-2xl bg-white/5 border border-white/10 text-white text-[11px] font-black uppercase tracking-[0.2em] hover:bg-white/10 transition-all"
+                        onClick={() => ranking[0] && openAnalysis(ranking[0])}
+                        className="px-8 py-3.5 rounded-2xl bg-white/5 border border-white/10 text-white text-[11px] font-black uppercase tracking-[0.2em] hover:bg-white/10 transition-all font-outfit"
                     >
-                        Análise Full
+                        Análise Full (1º Lugar)
                     </button>
                 </div>
             </div>
+
+            {/* Analysis Full Modal */}
+            {isAnalysisOpen && selectedConsultant && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+                    <motion.div 
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        onClick={() => setIsAnalysisOpen(false)}
+                        className="absolute inset-0 bg-black/90 backdrop-blur-xl" 
+                    />
+                    
+                    <motion.div 
+                        initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        className="relative w-full max-w-4xl bg-[#0F0F12] border border-white/10 rounded-[3rem] overflow-hidden shadow-[0_0_100px_rgba(239,68,68,0.1)] p-8 md:p-12"
+                    >
+                        <button 
+                            onClick={() => setIsAnalysisOpen(false)}
+                            className="absolute top-8 right-8 h-12 w-12 rounded-2xl bg-white/5 flex items-center justify-center text-white/40 hover:text-white transition-all"
+                        >
+                            <X size={20} />
+                        </button>
+
+                        <div className="flex flex-col md:flex-row items-start gap-12">
+                            <div className="w-full md:w-1/3 space-y-8">
+                                <div className="space-y-4">
+                                    <div className="h-20 w-20 rounded-[2rem] bg-red-600/20 flex items-center justify-center text-red-500 border border-red-500/20 font-black text-3xl">
+                                        {selectedConsultant.name[0]}
+                                    </div>
+                                    <div>
+                                        <h2 className="text-3xl font-black text-white uppercase tracking-tighter">{selectedConsultant.name}</h2>
+                                        <p className="text-[10px] font-black text-emerald-400 uppercase tracking-[0.3em]">Performance Individual</p>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-6">
+                                    <div className="p-6 rounded-3xl bg-white/5 border border-white/5">
+                                        <div className="flex justify-between items-end mb-4">
+                                            <div>
+                                                <p className="text-[9px] font-black text-white/20 uppercase tracking-widest leading-none mb-1">Score Elite</p>
+                                                <p className="text-4xl font-black text-white tabular-nums">{selectedConsultant.eliteScore}%</p>
+                                            </div>
+                                            <div className="text-right">
+                                                <p className="text-[9px] font-black text-white/20 uppercase tracking-widest leading-none mb-1">Canal Top</p>
+                                                <p className="text-sm font-black text-red-500 uppercase">{selectedConsultant.topSource}</p>
+                                            </div>
+                                        </div>
+                                        <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+                                            <motion.div 
+                                                initial={{ width: 0 }}
+                                                animate={{ width: `${selectedConsultant.eliteScore}%` }}
+                                                className="h-full bg-gradient-to-r from-red-600 to-rose-400"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="p-4 rounded-2xl bg-white/5 border border-white/5">
+                                            <p className="text-[9px] font-black text-white/20 uppercase tracking-widest mb-1">Vendas</p>
+                                            <p className="text-2xl font-black text-white">{selectedConsultant.salesCount}</p>
+                                        </div>
+                                        <div className="p-4 rounded-2xl bg-white/5 border border-white/5">
+                                            <p className="text-[9px] font-black text-white/20 uppercase tracking-widest mb-1">Conv.</p>
+                                            <p className="text-2xl font-black text-emerald-400">{selectedConsultant.conversion.toFixed(1)}%</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="flex-1 w-full space-y-8">
+                                <div className="flex items-center gap-3">
+                                    <BarChart3 className="text-red-500" size={20} />
+                                    <h3 className="font-black text-white uppercase tracking-widest text-sm">Saúde do Funil (Espelho Admin)</h3>
+                                </div>
+
+                                {loadingAnalysis ? (
+                                    <div className="h-64 flex items-center justify-center">
+                                        <div className="h-8 w-8 border-2 border-red-500 border-t-transparent rounded-full animate-spin" />
+                                    </div>
+                                ) : (
+                                    <div className="space-y-6">
+                                        {funnelData ? (
+                                            Object.entries(funnelData).map(([status, count]: [any, any], i) => {
+                                                const maxVal = Math.max(...Object.values(funnelData) as number[]);
+                                                const percentage = Math.round((count / maxVal) * 100);
+                                                const statusMap: Record<string, string> = {
+                                                    'new': 'Novos',
+                                                    'received': 'Recebidos',
+                                                    'contacted': 'Contatados',
+                                                    'scheduled': 'Agendados',
+                                                    'visited': 'Visitas',
+                                                    'proposal': 'Propostas',
+                                                    'closed': 'Vendidos',
+                                                    'sold': 'Vendidos'
+                                                };
+                                                if (count === 0 && !['new', 'closed', 'sold'].includes(status)) return null;
+
+                                                return (
+                                                    <div key={status} className="space-y-2">
+                                                        <div className="flex justify-between text-[10px] font-black uppercase tracking-widest">
+                                                            <span className="text-white/40">{statusMap[status] || status}</span>
+                                                            <span className="text-white">{count}</span>
+                                                        </div>
+                                                        <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden">
+                                                            <motion.div 
+                                                                initial={{ width: 0 }}
+                                                                animate={{ width: `${percentage}%` }}
+                                                                className={`h-full ${status === 'closed' || status === 'sold' ? 'bg-emerald-500' : status === 'new' ? 'bg-blue-500' : 'bg-red-600/50'}`}
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })
+                                        ) : (
+                                            <p className="text-white/20 text-xs italic">Sem dados de funil para este consultor no período.</p>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </motion.div>
+                </div>
+            )}
         </div>
     );
 }

@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { OpenAI } from 'openai';
 import { getAIContext } from '@/lib/services/aiFeedbackService';
 import { generateLeadStrategy, LeadAnalysisPayload } from '@/lib/services/leadStrategyService';
+import { getTableForLead, stripPrefix } from '@/lib/services/leadRouter';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -26,31 +27,158 @@ export interface AnalysisResult {
     urgencyScore: number;
     temperature: string;
     modelUsed: string;
+    detectedName?: string | null;
 }
 
 export async function runEliteCloser(leadId: string, messages: any[] = [], consultantName?: string): Promise<AnalysisResult> {
-    let table = 'leads_manos_crm';
-    let cleanId = leadId.replace(/^(main_|crm26_|dist_|lead_|crm25_|master_)/, '');
+    // Usa o router oficial para determinar tabela e ID limpo
+    const primaryTable = getTableForLead(leadId);
+    const cleanId = stripPrefix(leadId) || leadId;
 
-    if (leadId.startsWith('crm26_')) {
-        table = 'leads_distribuicao_crm_26';
-    } else if (leadId.startsWith('main_')) {
-        table = 'leads_manos_crm';
-    } else if (!leadId.includes('-')) {
-        // IDs sem hífen costumam ser master (v1)
-        table = 'leads_master';
+    // Tenta a tabela primária; se não encontrar, percorre as demais
+    const ALL_TABLES = ['leads_master', 'leads_manos_crm', 'leads_distribuicao_crm_26'];
+    const tablePriority = [primaryTable, ...ALL_TABLES.filter(t => t !== primaryTable)];
+
+    let lead: any = null;
+    let usedTable = primaryTable;
+    for (const t of tablePriority) {
+        const { data } = await supabaseAdmin.from(t).select('*').eq('id', cleanId).maybeSingle();
+        if (data) { lead = data; usedTable = t; break; }
     }
 
-    // 1. Fetch Lead Details & Inventory
-    const [{ data: lead }, { data: inventory }] = await Promise.all([
-        supabaseAdmin.from(table).select('*').eq('id', cleanId).maybeSingle(),
-        supabaseAdmin.from('inventory_manos_crm')
-            .select('id, marca, modelo, ano, preco, km, cambio, combustivel, status')
-            .not('status', 'eq', 'vendido')
-            .limit(50)
-    ]);
+    const { data: inventory } = await supabaseAdmin.from('inventory_manos_crm')
+        .select('id, marca, modelo, ano, preco, km, cambio, combustivel, status')
+        .not('status', 'eq', 'vendido')
+        .limit(50);
 
-    if (!lead) throw new Error('Lead não encontrado para análise');
+    if (!lead) throw new Error(`Lead não encontrado (ID: ${cleanId}, testado em: ${tablePriority.join(', ')})`);
+
+    // ── DETECÇÃO AUTOMÁTICA DE NOME ─────────────────────────────────────────────
+    const GENERIC_NAMES = /^(lead\s*whatsapp|lead\s*wb|lead|cliente|novo lead|whatsapp lead|sem nome|unknown|#|[-_\d]+)$/i;
+    const currentName: string = lead.nome || lead.name || '';
+    let detectedName: string | null = null;
+    if (GENERIC_NAMES.test(currentName.trim())) {
+        try {
+            // Monta amostra de conversa: usa mensagens passadas OU busca de fontes V1
+            let convSample = messages.slice(0, 15).map((m: any) => {
+                const dir = m.direction === 'inbound' ? 'CLIENTE' : 'VENDEDOR';
+                return `${dir}: ${m.content || m.message_text || ''}`;
+            }).filter((l: string) => l.length > 8);
+
+            // Se sem mensagens do frontend, tenta buscar via telefone em dados_cliente / concessionaria_mensagens (V1)
+            if (convSample.length === 0 && lead.phone) {
+                const phoneSuffix = (lead.phone || '').replace(/\D/g, '').slice(-8);
+                if (phoneSuffix.length >= 8) {
+                    let sessionId: string | null = null;
+                    let directName: string | null = null;
+
+                    // Primeiro tenta dados_cliente — pode ter nome diretamente
+                    const { data: cli } = await supabaseAdmin
+                        .from('dados_cliente')
+                        .select('sessionid, nome, name')
+                        .ilike('telefone', `%${phoneSuffix}%`)
+                        .limit(1);
+                    if (cli?.[0]) {
+                        sessionId = cli[0].sessionid || null;
+                        const rawName = cli[0].nome || cli[0].name || '';
+                        if (rawName && rawName.length >= 2 && !GENERIC_NAMES.test(rawName.trim())) {
+                            directName = rawName.trim().split(/\s+/)[0]; // Só primeiro nome
+                        }
+                    }
+
+                    // Fallback: tracking_leads pelo whatsapp
+                    if (!sessionId && !directName) {
+                        const { data: trackers } = await supabaseAdmin
+                            .from('tracking_leads')
+                            .select('details, nome, name')
+                            .ilike('whatsapp', `%${phoneSuffix}%`)
+                            .limit(1);
+                        if (trackers?.[0]) {
+                            sessionId = trackers[0].details ? (trackers[0].details as any).session_id : null;
+                            const tName = trackers[0].nome || trackers[0].name || '';
+                            if (tName && tName.length >= 2 && !GENERIC_NAMES.test(tName.trim())) {
+                                directName = tName.trim().split(/\s+/)[0];
+                            }
+                        }
+                    }
+
+                    // Se achou nome direto, usa sem precisar analisar conversa
+                    if (directName) {
+                        const capitalized = directName.charAt(0).toUpperCase() + directName.slice(1).toLowerCase();
+                        await supabaseAdmin.from(usedTable).update({ name: capitalized, nome: capitalized }).eq('id', cleanId);
+                        lead.name = capitalized;
+                        lead.nome = capitalized;
+                        detectedName = capitalized;
+                        console.log(`[AI] Nome detectado diretamente: "${capitalized}" (era: "${currentName}")`);
+                    } else if (sessionId) {
+                        // Busca mensagens para GPT detectar o nome
+                        const { data: msgs } = await supabaseAdmin
+                            .from('concessionaria_mensagens')
+                            .select('message, remetente')
+                            .eq('session_id', sessionId)
+                            .limit(20);
+                        if (msgs) {
+                            convSample = msgs.map((m: any) => {
+                                const text = m.message?.content || m.message?.text || m.message?.body || (typeof m.message === 'string' ? m.message : '') || '';
+                                const dir = (m.remetente || '').toLowerCase().includes('cliente') ? 'CLIENTE' : 'VENDEDOR';
+                                return text.trim() ? `${dir}: ${text.trim()}` : '';
+                            }).filter((l: string) => l.length > 8);
+                        }
+                    }
+                }
+            }
+
+            // Também tenta interactions_manos_crm como fallback
+            if (convSample.length === 0) {
+                const isUUIDCheck = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(cleanId);
+                const { data: interactions } = await supabaseAdmin
+                    .from('interactions_manos_crm')
+                    .select('notes, type')
+                    .eq(isUUIDCheck ? 'lead_id' : 'lead_id_v1', cleanId)
+                    .in('type', ['whatsapp_in', 'whatsapp_out', 'call', 'note'])
+                    .order('created_at', { ascending: true })
+                    .limit(15);
+                if (interactions) {
+                    convSample = interactions.map((i: any) => i.notes || '').filter((n: string) => n.length > 5);
+                }
+            }
+
+            if (convSample.length > 0) {
+                const nameRes = await openai.chat.completions.create({
+                    model: 'gpt-4o-mini',
+                    messages: [{
+                        role: 'user',
+                        content: `Analise esta conversa de WhatsApp e responda APENAS com o primeiro nome do CLIENTE (pessoa que quer comprar).
+Se não conseguir identificar com certeza, responda exatamente: null
+
+Conversa:
+${convSample.slice(0, 15).join('\n')}
+
+Responda SOMENTE o primeiro nome (ex: "Carlos") ou null:`
+                    }],
+                    max_tokens: 20,
+                    temperature: 0,
+                });
+
+                const gptDetectedName = nameRes.choices[0]?.message?.content?.trim().replace(/['".,!?\s]/g, '') || '';
+                const isValidName = gptDetectedName &&
+                    gptDetectedName.toLowerCase() !== 'null' &&
+                    /^[a-záéíóúàâêôãõçA-ZÁÉÍÓÚÀÂÊÔÃÕÇ]{2,30}$/.test(gptDetectedName);
+
+                if (isValidName) {
+                    const capitalized = gptDetectedName.charAt(0).toUpperCase() + gptDetectedName.slice(1).toLowerCase();
+                    await supabaseAdmin.from(usedTable).update({ name: capitalized, nome: capitalized }).eq('id', cleanId);
+                    lead.name = capitalized;
+                    lead.nome = capitalized;
+                    detectedName = capitalized;
+                    console.log(`[AI] Nome detectado via GPT: "${capitalized}" (era: "${currentName}")`);
+                }
+            }
+        } catch (e) {
+            console.warn('[AI] Detecção de nome falhou:', e);
+        }
+    }
+    // ────────────────────────────────────────────────────────────────────────────
 
     const consultor = consultantName || 'Consultor Especialista';
     const feedbackContext = await getAIContext(cleanId).catch(() => '');
@@ -277,15 +405,17 @@ JSON: {
     const timelineNote = `[${timestamp}] 🤖 ANÁLISE ${modelUsed.toUpperCase()}:\n${diagnostico}\n\nORIENTAÇÃO: ${orientacao}`;
 
     const updateData: any = {
-        [table === 'leads_distribuicao_crm_26' ? 'resumo_consultor' : 'ai_reason']: `${diagnostico} | ORIENTAÇÃO: ${orientacao}`,
-        [table === 'leads_distribuicao_crm_26' ? 'resumo' : 'ai_summary']: timelineNote + (lead?.ai_summary || lead?.resumo || ''),
+        [usedTable === 'leads_distribuicao_crm_26' ? 'resumo_consultor' : 'ai_reason']: `${diagnostico} | ORIENTAÇÃO: ${orientacao}`,
+        [usedTable === 'leads_distribuicao_crm_26' ? 'resumo' : 'ai_summary']: timelineNote + (lead?.ai_summary || lead?.resumo || ''),
         ai_score: urgencyScore,
         ai_classification: temperature as any,
         next_step: scriptWhatsApp,
         proxima_acao: scriptWhatsApp,
+        last_scripts_json: scriptOptions,
+        last_scripts_at: new Date().toISOString(),
     };
 
-    await supabaseAdmin.from(table).update(updateData).eq('id', cleanId);
+    await supabaseAdmin.from(usedTable).update(updateData).eq('id', cleanId);
 
     // REGISTRO NA TIMELINE como ai_analysis (aparece no filtro "Orientação IA")
     const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(cleanId);
@@ -304,6 +434,7 @@ JSON: {
         scriptWhatsApp,
         scriptOptions,
         urgencyScore,
+        detectedName,
         temperature,
         modelUsed
     };

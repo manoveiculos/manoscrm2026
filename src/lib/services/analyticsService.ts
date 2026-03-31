@@ -226,30 +226,63 @@ export async function getSalesRanking(startDate?: string, endDate?: string) {
         const now = new Date();
         const defaultStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
         const effectiveStart = startDate || defaultStart;
+        const effectiveEnd = endDate || now.toISOString();
 
-        // Buscar de ambas as tabelas para garantir precisão
-        const [salesLegRes, salesV2Res] = await Promise.all([
-            supabase.from('sales').select('consultant_name, sale_value').gte('sale_date', effectiveStart),
-            supabase.from('sales_manos_crm').select('consultant_name, sale_value').gte('created_at', effectiveStart)
-        ]);
+        // 1. Buscar Consultores Ativos
+        const { data: consultants } = await supabase
+            .from('consultants_manos_crm')
+            .select('id, name, email')
+            .eq('is_active', true);
         
-        const combined = [...(salesLegRes.data || []), ...(salesV2Res.data || [])];
+        if (!consultants) return [];
 
-        const rankingMap = new Map<string, { name: string, count: number, revenue: number }>();
-        combined.forEach(s => {
-            const name = s.consultant_name || 'Vendedor Externo';
-            const val = parseFloat(s.sale_value) || 0;
-            if (rankingMap.has(name)) {
-                const existing = rankingMap.get(name)!;
-                existing.count++;
-                existing.revenue += val;
-            } else {
-                rankingMap.set(name, { name, count: 1, revenue: val });
-            }
-        });
+        // 2. Buscar Performance Individual usando a Fonte Única da Verdade (getFinancialMetrics/RPC)
+        const ranking = await Promise.all(consultants.map(async (c) => {
+            const metrics = await getFinancialMetrics({
+                customRange: { start: effectiveStart, end: effectiveEnd },
+                consultantId: c.id
+            });
 
-        return Array.from(rankingMap.values())
-            .sort((a, b) => b.count - a.count);
+            // Score de Elite baseado na saúde do funil (Leads em etapas avançadas vs total)
+            // Calculado na RPC ou via funnelData
+            const funnel = metrics.funnelData || {};
+            const total = metrics.leadCount || 0;
+            const advanced = (funnel.contacted || 0) + (funnel.scheduled || 0) + (funnel.visited || 0) + (funnel.proposed || 0) + (funnel.negotiation || 0) + (funnel.closed || 0) + (funnel.comprado || 0);
+            const eliteScore = total > 0 ? (advanced / total) * 100 : 0;
+
+            // Origem Principal (Busca simples no lead)
+            const { data: sourceData } = await supabase
+                .from('leads')
+                .select('source, origem')
+                .eq('assigned_consultant_id', c.id)
+                .gte('created_at', effectiveStart)
+                .lte('created_at', effectiveEnd)
+                .limit(100);
+            
+            const sources: Record<string, number> = {};
+            (sourceData || []).forEach(l => {
+                const s = l.source || l.origem || 'Meta';
+                sources[s] = (sources[s] || 0) + 1;
+            });
+            const topSource = Object.entries(sources).sort((a,b) => b[1] - a[1])[0]?.[0] || 'Meta';
+
+            return {
+                id: c.id,
+                name: c.name,
+                salesCount: metrics.salesCount || 0,
+                leadCount: metrics.leadCount || 0,
+                conversion: metrics.conversionRate || 0,
+                eliteScore: Math.round(eliteScore),
+                topSource,
+                avgResponseMin: metrics.avgResponseTime || 0
+            };
+        }));
+
+        // 3. Garantir que a soma do ranking bate com o Total da Gestão Vendas (Admin)
+        // Se houver discrepância por 'Vendedor Externo' ou 'Sem Vendedor', o admin mostra o global.
+        // O ranking aqui é por consultor cadastrado.
+        
+        return ranking.sort((a, b) => b.salesCount - a.salesCount || b.conversion - a.conversion);
     } catch (err) {
         console.error("Error in getSalesRanking:", err);
         return [];

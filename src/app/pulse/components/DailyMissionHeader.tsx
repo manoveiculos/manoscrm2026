@@ -113,14 +113,17 @@ function useAnimatedCounter(value: number, duration = 1500) {
 export const DailyMissionHeader: React.FC<DailyMissionHeaderProps> = ({
     userName, salesCount, leadCount, avgResponseTime, responseRate, userRole = 'consultant'
 }) => {
-    const monthlyGoal = userRole === 'admin' ? 20 : 5;
+    const monthlyGoal = userRole === 'admin' ? 50 : 15; // Metas ajustadas para a escala real da Manos
     const progress = Math.min(100, (salesCount / monthlyGoal) * 100);
     const salesLeft = Math.max(0, monthlyGoal - salesCount);
     const goalMet = salesLeft === 0;
 
+    // Cálculo da Taxa de Conversão Real (Vendas / Total de Leads * 100)
+    const realConversionRate = leadCount > 0 ? (salesCount / leadCount) * 100 : 0;
+
     const animatedSales = useAnimatedCounter(salesCount, 1200);
     const animatedLeads = useAnimatedCounter(leadCount, 1000);
-    const animatedRate = useAnimatedCounter(responseRate || 0, 1400);
+    const animatedRate = useAnimatedCounter(Math.round(realConversionRate), 1400);
 
     const capitalizedName = userName
         ? userName.charAt(0).toUpperCase() + userName.slice(1).toLowerCase()
@@ -353,7 +356,7 @@ export const DailyMissionHeader: React.FC<DailyMissionHeaderProps> = ({
                         />
                     </div>
                     <p className="text-[9px] font-black text-white/20 uppercase tracking-widest">
-                        Conversão
+                        Taxa Conv.
                     </p>
                 </motion.div>
 

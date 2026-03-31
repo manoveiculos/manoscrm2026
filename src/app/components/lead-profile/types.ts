@@ -34,6 +34,8 @@ export interface Lead {
     cta: string;
   } | null;
   last_proposal_at?: string | null;
+  last_scripts_json?: { tipo: string; label: string; mensagem: string }[] | null;
+  last_scripts_at?: string | null;
   handoff_summary?: string | null;
   handoff_at?: string | null;
 }

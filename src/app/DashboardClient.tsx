@@ -26,21 +26,28 @@ import { LeadProfileModalV2 } from './components/lead-profile/LeadProfileModalV2
 import { Lead } from '@/lib/types';
 import { dataService } from '@/lib/dataService';
 import { supabase } from '@/lib/supabase';
+import { metricsService } from '@/lib/metricsService';
+
+interface AIInsight {
+    title: string;
+    desc: string;
+    time: string;
+    color: string;
+    leadId?: string;
+    leadName?: string;
+}
 
 interface DashboardClientProps {
     metrics: FinancialMetrics;
     userName: string;
     consultantId?: string; // NOVO: ID dinâmico vindo da sessão
-    aiInsights: Array<{ 
-        title: string; 
-        desc: string; 
-        time: string; 
-        color: string;
-        leadId?: string;
-        leadName?: string;
-    }>;
+    aiInsights: AIInsight[];
     salesToTop: number;
+    leadsTotalMes?: number; // Contador fixo do acumulado do mês
+    vendasTotalMes?: number; // Contador de vendas fechadas no mês
 }
+
+type PeriodPreset = 'hoje' | 'semana' | 'mes' | 'personalizado';
 
 const getGreeting = () => {
     const h = new Date().getHours();
@@ -63,6 +70,115 @@ export default function DashboardClient({ metrics, userName, consultantId, aiIns
     const [phrase, setPhrase] = useState(PHRASES[new Date().getDate() % PHRASES.length]);
     const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
     const [isLoadingLead, setIsLoadingLead] = useState(false);
+    const [period, setPeriod] = useState<PeriodPreset>('mes');
+    const [customDates, setCustomDates] = useState({
+        start: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0],
+        end: new Date().toISOString().split('T')[0]
+    });
+    const [currentMetrics, setCurrentMetrics] = useState<FinancialMetrics>(metrics);
+    const [currentAIInsights, setCurrentAIInsights] = useState<AIInsight[]>(aiInsights);
+    const [isSyncing, setIsSyncing] = useState(false);
+
+    const fetchAIInsights = async (start?: string, end?: string) => {
+        try {
+            // Busca as sugestões da IA baseadas no contexto (Admin ou Consultor) dentro do período
+            // Como as análises são salvas em tabelas específicas, buscamos as que foram geradas nesse intervalo
+            const isAdmin = metrics.leadCount > 100; // Heurística simples ou prop role se disponível
+            
+            let query;
+            if (isAdmin) {
+                query = supabase
+                    .from('intelligent_analysis_results')
+                    .select('*')
+                    .order('created_at', { ascending: false });
+                if (start) query = query.gte('created_at', start);
+                if (end) query = query.lte('created_at', end);
+            } else {
+                query = supabase
+                    .from('crm_daily_analysis')
+                    .select('*')
+                    .eq('consultor_id', consultantId)
+                    .order('generated_at', { ascending: false });
+                if (start) query = query.gte('generated_at', start);
+                if (end) query = query.lte('generated_at', end);
+            }
+
+            const { data } = await query.limit(1).maybeSingle();
+
+            if (data) {
+                const actions = isAdmin ? data.recommended_actions : data.analysis_json?.recommended_actions;
+                if (actions) {
+                    const mapped = (actions as any[]).map(action => ({
+                        title: action.title || action.task || 'Ação IA',
+                        desc: action.description || action.reason || 'Análise disponível.',
+                        time: period === 'hoje' ? 'Agora' : 'Filtro',
+                        color: action.priority === 'high' ? 'red' : 'blue',
+                        leadId: action.lead_id,
+                        leadName: action.lead_name
+                    }));
+                    setCurrentAIInsights(mapped.slice(0, 3));
+                    return;
+                }
+            }
+            
+            // Fallback se não encontrar análise no período
+            setCurrentAIInsights(aiInsights);
+        } catch (error) {
+            console.error("Erro ao buscar AI Insights:", error);
+        }
+    };
+
+    // Efeito para sincronizar métricas e IA quando o período muda
+    useEffect(() => {
+        const syncData = async () => {
+            if (period === 'personalizado') return;
+            
+            setIsSyncing(true);
+            try {
+                const mappedPeriod = period === 'hoje' ? 'daily' : 'monthly';
+                const newMetrics = await metricsService.getFinancialMetrics(
+                    supabase as any,
+                    consultantId,
+                    mappedPeriod
+                );
+                setCurrentMetrics(newMetrics);
+                
+                // Buscar IA para o período preset
+                await fetchAIInsights();
+            } catch (error) {
+                console.error("Erro ao sincronizar dados:", error);
+            } finally {
+                setIsSyncing(false);
+            }
+        };
+
+        syncData();
+    }, [period, consultantId]);
+
+    const handleFilterCustom = async () => {
+        if (period !== 'personalizado') return;
+        
+        setIsSyncing(true);
+        try {
+            const startStr = `${customDates.start}T00:00:00`;
+            const endStr = `${customDates.end}T23:59:59`;
+            
+            const newMetrics = await metricsService.getFinancialMetrics(
+                supabase as any,
+                consultantId,
+                'monthly',
+                { start: startStr, end: endStr }
+            );
+            setCurrentMetrics(newMetrics);
+            
+            // Buscar IA para o range personalizado
+            await fetchAIInsights(startStr, endStr);
+        } catch (error) {
+            console.error("Erro ao filtrar datas personalizadas:", error);
+        } finally {
+            setIsSyncing(false);
+        }
+    };
 
     useEffect(() => {
         setPhrase(PHRASES[Math.floor(Math.random() * PHRASES.length)]);
@@ -135,13 +251,17 @@ export default function DashboardClient({ metrics, userName, consultantId, aiIns
         }
     };
 
+    // Taxa de Conversão: (Vendas do Mês / Total de Leads do Mês) * 100
+    // O backend já deve retornar o conversionRate calculado, mas aqui garantimos o arredondamento conforme prompt.
+    const conversionDisplay = (currentMetrics.conversionRate || 0).toFixed(1) + '%';
+
     const metricStrip = [
-        { label: 'Leads Ativos', value: metrics.leadCount, icon: Users, color: 'blue' },
-        { label: 'Vendas hoje', value: metrics.salesCount, icon: Target, color: 'red' },
-        { label: 'Receita', value: `R$\u00a0${metrics.totalRevenue.toLocaleString('pt-BR')}`, icon: TrendingUp, color: 'emerald' },
+        { label: 'Leads Ativos', value: currentMetrics.leadCount, icon: Users, color: 'blue' },
+        { label: 'Vendas', value: currentMetrics.salesCount, icon: Target, color: 'red' },
+        { label: 'Receita', value: `R$\u00a0${currentMetrics.totalRevenue.toLocaleString('pt-BR')}`, icon: TrendingUp, color: 'emerald' },
         {
             label: 'Conversão',
-            value: `${(metrics.conversionRate || 0).toFixed(1)}%`,
+            value: conversionDisplay,
             icon: Zap,
             color: 'amber',
         },
@@ -260,12 +380,54 @@ export default function DashboardClient({ metrics, userName, consultantId, aiIns
                             <CheckCircle size={12} /> Você lidera o ranking!
                         </span>
                     )}
-                    <Link
-                        href="/pipeline"
-                        className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-black text-sm uppercase tracking-wide transition-all active:scale-95 shadow-lg shadow-red-600/20"
-                    >
-                        Pipeline <ArrowUpRight size={15} />
-                    </Link>
+                    <div className="flex flex-wrap items-center gap-3 p-1 bg-white/[0.03] border border-white/10 rounded-xl">
+                        <div className="flex items-center gap-1">
+                            {(['hoje', 'semana', 'mes', 'personalizado'] as PeriodPreset[]).map((p) => (
+                                <button
+                                    key={p}
+                                    onClick={() => setPeriod(p)}
+                                    className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
+                                        period === p 
+                                        ? 'bg-red-600 text-white shadow-lg shadow-red-600/20' 
+                                        : 'text-white/40 hover:text-white/60 hover:bg-white/5'
+                                    }`}
+                                >
+                                    {p === 'mes' ? 'Mês' : p.charAt(0).toUpperCase() + p.slice(1)}
+                                </button>
+                            ))}
+                        </div>
+
+                        {period === 'personalizado' && (
+                            <motion.div 
+                                initial={{ opacity: 0, x: 20 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                className="flex items-center gap-2 pr-2 border-l border-white/10 pl-3"
+                            >
+                                <div className="flex items-center gap-2">
+                                    <input 
+                                        type="date" 
+                                        value={customDates.start}
+                                        onChange={(e) => setCustomDates({...customDates, start: e.target.value})}
+                                        className="bg-black/40 border border-white/10 rounded-lg px-2 py-1 text-[10px] text-white focus:outline-none focus:ring-1 focus:ring-red-500/50"
+                                    />
+                                    <span className="text-[10px] text-white/20">até</span>
+                                    <input 
+                                        type="date" 
+                                        value={customDates.end}
+                                        onChange={(e) => setCustomDates({...customDates, end: e.target.value})}
+                                        className="bg-black/40 border border-white/10 rounded-lg px-2 py-1 text-[10px] text-white focus:outline-none focus:ring-1 focus:ring-red-500/50"
+                                    />
+                                </div>
+                                <button 
+                                    onClick={handleFilterCustom}
+                                    disabled={isSyncing}
+                                    className="px-3 py-1.5 bg-white/5 hover:bg-red-600 border border-white/10 hover:border-red-500 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all disabled:opacity-50"
+                                >
+                                    {isSyncing ? '...' : 'Filtrar'}
+                                </button>
+                            </motion.div>
+                        )}
+                    </div>
                 </div>
             </header>
 
@@ -330,7 +492,7 @@ export default function DashboardClient({ metrics, userName, consultantId, aiIns
                     </Link>
                 </div>
                 <div className="space-y-2">
-                    {aiInsights.map((insight, i) => (
+                    {currentAIInsights.map((insight, i) => (
                         <button
                             key={i}
                             onClick={() => handleOpenLead(insight.leadId, insight.leadName)}

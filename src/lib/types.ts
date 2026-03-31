@@ -127,11 +127,14 @@ export interface Lead {
   consultant_name?: string;
   lead_id?: string;
   
-  // View Metadata
+  // View Metadata & Interactions
   real_id?: string | number;
   source_table?: string;
   vendedor?: string;
   cpf?: string;
+  total_interactions?: number;
+  integration_priority?: number;
+  pipeline_id?: string;
 }
 
 export interface InventoryItem {
