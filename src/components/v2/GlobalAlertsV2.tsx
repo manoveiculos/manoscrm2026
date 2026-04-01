@@ -22,13 +22,13 @@ export const GlobalAlertsV2 = () => {
     useEffect(() => {
         async function fetchAlerts() {
             try {
-                const { data: { session } } = await supabase.auth.getSession();
-                if (!session?.user) return;
+                const { data: { user } } = await supabase.auth.getUser();
+                if (!user) return;
 
                 const { data: consultant } = await supabase
                     .from('consultants_manos_crm')
                     .select('name')
-                    .eq('auth_id', session.user.id)
+                    .eq('auth_id', user.id)
                     .single();
 
                 if (consultant) {

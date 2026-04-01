@@ -7,7 +7,7 @@ import { cacheGet, cacheSet, cacheInvalidate, TTL } from './cacheLayer';
  */
 
 export async function getFinancialMetrics(params?: { 
-    period?: 'today' | 'yesterday' | 'this_week' | 'this_month' | 'all',
+    period?: 'today' | 'yesterday' | 'this_week' | 'this_month' | 'last_month' | 'this_year' | 'all',
     consultantId?: string,
     customRange?: { start: string, end: string } 
 }) {
@@ -38,6 +38,13 @@ export async function getFinancialMetrics(params?: {
                 const day = now.getDay();
                 const diff = now.getDate() - day + (day === 0 ? -6 : 1);
                 startDate = new Date(now.getFullYear(), now.getMonth(), diff).toISOString();
+                break;
+            case 'last_month':
+                startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString();
+                endDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999).toISOString();
+                break;
+            case 'this_year':
+                startDate = new Date(now.getFullYear(), 0, 1).toISOString();
                 break;
             case 'all':
                 startDate = new Date(2024, 0, 1).toISOString();
@@ -86,57 +93,52 @@ export async function getFinancialMetrics(params?: {
     return result;
 }
 
-// Helpers internos para métricas reais (sem hardcode)
+// Fase 2: RPC server-side com fallback heurístico caso a RPC não exista
 async function getAverageResponseTime(since: string, consultantId?: string) {
     try {
-        // 1. Buscar leads criados no período
-        let leadsQuery = supabase.from('leads').select('id, created_at').gte('created_at', since);
-        if (consultantId) leadsQuery = leadsQuery.eq('assigned_consultant_id', consultantId);
-        
-        const { data: leads } = await leadsQuery;
-        if (!leads || leads.length === 0) return 0;
-
-        const leadIds = leads.map(l => l.id);
-
-        // 2. Buscar a primeira interação de cada lead (excluindo sistema/AI se possível)
-        // O campo 'interaction_type' ou 'source' pode indicar se foi humano.
-        // Aqui assumimos que qualquer interação em interactions_manos_crm após o lead ser criado conta.
-        const { data: interactions } = await supabase
-            .from('interactions_manos_crm')
-            .select('lead_id, created_at')
-            .in('lead_id', leadIds)
-            .order('created_at', { ascending: true });
-
-        if (!interactions || interactions.length === 0) return 0;
-
-        // Mapear primeira interação
-        const firstInteractions = new Map<string, string>();
-        interactions.forEach(i => {
-            if (!firstInteractions.has(i.lead_id)) {
-                firstInteractions.set(i.lead_id, i.created_at);
-            }
+        // Tenta RPC otimizada (requer migration_fase2_dieta_dados.sql)
+        const { data, error } = await supabase.rpc('get_avg_response_time', {
+            p_since: since,
+            p_consultant_id: consultantId || null
         });
 
-        // 3. Calcular média
-        let totalDiffMin = 0;
-        let count = 0;
+        if (!error) return data ?? 0;
 
-        leads.forEach(l => {
-            const firstInteractionAt = firstInteractions.get(l.id);
-            if (firstInteractionAt) {
-                const start = new Date(l.created_at).getTime();
-                const end = new Date(firstInteractionAt).getTime();
-                const diffMin = (end - start) / (1000 * 60);
-                if (diffMin > 0) {
-                    totalDiffMin += diffMin;
-                    count++;
-                }
-            }
-        });
-
-        return count > 0 ? Math.round(totalDiffMin / count) : 0;
+        // Fallback: heurística client-side (caso RPC não exista ainda)
+        console.warn('[Analytics] RPC indisponível, usando fallback heurístico');
+        return await getAverageResponseTimeFallback(since, consultantId);
     } catch (err) {
-        console.error("Error calculating avg response time:", err);
+        return await getAverageResponseTimeFallback(since, consultantId);
+    }
+}
+
+// Fallback: calcula tempo médio de resposta via query simples
+async function getAverageResponseTimeFallback(since: string, consultantId?: string): Promise<number> {
+    try {
+        let query = supabase
+            .from('leads')
+            .select('created_at,first_contact_at,response_time_seconds')
+            .gte('created_at', since)
+            .not('first_contact_at', 'is', null);
+
+        if (consultantId) query = query.eq('assigned_consultant_id', consultantId);
+
+        const { data } = await query.limit(200);
+        if (!data || data.length === 0) return 0;
+
+        const times = data
+            .map(l => {
+                if (l.response_time_seconds) return l.response_time_seconds / 60;
+                if (l.first_contact_at && l.created_at) {
+                    return (new Date(l.first_contact_at).getTime() - new Date(l.created_at).getTime()) / 60_000;
+                }
+                return null;
+            })
+            .filter((t): t is number => t !== null && t > 0 && t < 1440); // Descarta outliers > 24h
+
+        if (times.length === 0) return 0;
+        return Math.round(times.reduce((a, b) => a + b, 0) / times.length);
+    } catch {
         return 0;
     }
 }
@@ -158,10 +160,9 @@ export async function getCampaigns() {
     const cached = cacheGet<any[]>(cacheKey);
     if (cached) return cached;
 
-    console.log("MARKETING: Fetching campaigns from campaigns_manos_crm...");
     const { data, error } = await supabase
         .from('campaigns_manos_crm')
-        .select('*')
+        .select('id, name, platform, status, total_spend, meta_results, updated_at')
         .order('name');
 
     if (error) {
@@ -293,7 +294,7 @@ export async function getRecentSales(limit: number = 5) {
     try {
         const { data, error } = await supabase
             .from('sales')
-            .select('*')
+            .select('id, vehicle_name, consultant_name, sale_value, sale_date')
             .order('sale_date', { ascending: false })
             .limit(limit);
 
@@ -320,11 +321,15 @@ export async function getConsultantPerformance() {
 
     if (error) throw error;
 
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+
     const performance = await Promise.all((consultants || []).map(async (c: any) => {
         const { count } = await supabase
             .from('leads')
             .select('*', { count: 'exact', head: true })
-            .eq('assigned_consultant_id', c.id);
+            .eq('assigned_consultant_id', c.id)
+            .gte('created_at', startOfMonth);
 
         return {
             ...c,
@@ -340,7 +345,7 @@ export async function getDailyMarketingReport() {
     try {
         const { data, error } = await supabase
             .from('marketing_daily_reports_manos_crm')
-            .select('*')
+            .select('report_date, summary, recommendations')
             .order('report_date', { ascending: false })
             .limit(1)
             .maybeSingle();

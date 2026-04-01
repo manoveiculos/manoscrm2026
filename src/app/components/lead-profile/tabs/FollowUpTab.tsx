@@ -181,14 +181,12 @@ export const FollowUpTab: React.FC<FollowUpTabProps> = ({
                             Análise Elite Closer
                         </span>
                     </div>
-                    <button
-                        onClick={recalculateStrategy}
-                        disabled={isAnalyzing || !recalculateStrategy}
-                        className="flex items-center gap-1.5 text-[10px] text-amber-400/60 hover:text-amber-300 transition-colors disabled:opacity-40"
-                    >
-                        <Sparkles size={11} className={isAnalyzing ? 'animate-spin' : ''} />
-                        {isAnalyzing ? loadingMsg : (diagText ? 'Reanalisar' : 'Analisar')}
-                    </button>
+                    {isAnalyzing && (
+                        <span className="flex items-center gap-1.5 text-[10px] text-amber-400/60">
+                            <Sparkles size={11} className="animate-spin" />
+                            {loadingMsg}
+                        </span>
+                    )}
                 </div>
 
                 {/* Corpo */}
@@ -216,16 +214,8 @@ export const FollowUpTab: React.FC<FollowUpTabProps> = ({
                             )}
                         </>
                     ) : (
-                        <div className="py-3 text-center">
-                            <p className="text-[12px] text-white/30 mb-3">Clique em "Analisar" para diagnóstico cirúrgico deste lead</p>
-                            <button
-                                onClick={recalculateStrategy}
-                                disabled={isAnalyzing || !recalculateStrategy}
-                                className="inline-flex items-center gap-2 px-5 py-2.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-30 text-white text-[12px] font-bold rounded-xl transition-colors shadow-lg shadow-amber-900/20"
-                            >
-                                <Sparkles size={13} />
-                                Solicitar Análise IA
-                            </button>
+                        <div className="py-4 text-center">
+                            <p className="text-[12px] text-white/25">A análise IA será gerada automaticamente.</p>
                         </div>
                     )}
                 </div>

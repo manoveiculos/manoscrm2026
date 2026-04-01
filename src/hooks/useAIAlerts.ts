@@ -31,13 +31,16 @@ export function useAIAlerts(): UseAIAlertsResult {
 
     // ── Resolve o ID do consultor logado ──────────────────────────────────────
     useEffect(() => {
-        supabase.auth.getSession().then(({ data: { session } }) => {
-            if (!session?.user) { setLoading(false); return; }
+        supabase.auth.getUser().then(({ data: { user } }) => {
+            if (!user) { 
+                setLoading(false); 
+                return; 
+            }
 
             supabase
                 .from('consultants_manos_crm')
                 .select('id')
-                .eq('auth_id', session.user.id)
+                .eq('auth_id', user.id)
                 .maybeSingle()
                 .then(({ data }) => {
                     if (data?.id) setConsultantId(data.id);

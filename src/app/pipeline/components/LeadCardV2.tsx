@@ -5,6 +5,7 @@ import { Lead, LeadStatus } from '@/lib/types';
 import { motion } from 'framer-motion';
 import { CarFront, Zap, Activity, Target, ArrowRight, AlertTriangle } from 'lucide-react';
 import { formatPhoneBR } from '@/lib/shared_utils/helpers';
+import { safeDisplayName, safeFirstName, safeWhatsAppUrl, safeVendorFirstName } from '@/lib/shared_utils/safeLead';
 import { extractWhatsAppScript } from '@/lib/aiParser';
 import { normalizeStatus, STAGE_SLA_HOURS } from '@/constants/status';
 import { calculateLeadScore, getScoreLabel } from '@/utils/calculateScore';
@@ -112,13 +113,10 @@ export const LeadCardV2: React.FC<LeadCardV2Props> = ({
 
     const handleQuickStrike = (e: React.MouseEvent) => {
         e.stopPropagation();
-        const phone = lead.phone.replace(/\D/g, '');
-        if (phone.length >= 10) {
-            const script = lead.proxima_acao || lead.next_step || `Olá ${lead.name.split(' ')[0]}, sou da Manos Veículos.`;
-            const extracted = extractWhatsAppScript(script) || script;
-            const url = `https://wa.me/55${phone}?text=${encodeURIComponent(extracted)}`;
-            window.open(url, '_blank');
-        }
+        const script = lead.proxima_acao || lead.next_step || `Olá ${safeFirstName(lead.name)}, sou da Manos Veículos.`;
+        const extracted = extractWhatsAppScript(script) || script;
+        const url = safeWhatsAppUrl(lead.phone, extracted);
+        if (url) window.open(url, '_blank');
     };
 
     // Score dot color
@@ -188,22 +186,16 @@ export const LeadCardV2: React.FC<LeadCardV2Props> = ({
                             </div>
                             <div className="min-w-0">
                                 <h4 className="font-semibold text-[11px] text-white/90 truncate leading-tight">
-                                    {lead.name.split(' ')[0]}{lead.name.split(' ').length > 1 ? ' ' + lead.name.split(' ')[1][0] + '.' : ''}
+                                    {safeDisplayName(lead.name)}
                                 </h4>
                                 {/* Tempo por extenso + consultor */}
                                 <div className="flex items-center gap-1 mt-0">
                                     <span className={`text-[9px] font-medium ${timeColor}`}>
                                         {tempoInteiro}
                                     </span>
-                                    {(() => {
-                                        const vendorName = lead.vendedor || lead.consultant_name;
-                                        if (!vendorName) return null;
-                                        return (
-                                            <span className="text-[9px] font-medium text-blue-400 bg-blue-400/10 border border-blue-400/20 px-1 py-px rounded leading-none">
-                                                {vendorName.split(' ')[0]}
-                                            </span>
-                                        );
-                                    })()}
+                                    <span className="text-[9px] font-medium text-blue-400 bg-blue-400/10 border border-blue-400/20 px-1 py-px rounded leading-none">
+                                        {lead.cidade || 'Não informado'}
+                                    </span>
                                 </div>
                             </div>
                         </div>

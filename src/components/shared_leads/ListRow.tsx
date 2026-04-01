@@ -2,6 +2,7 @@ import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Phone, ArrowRight, Zap } from 'lucide-react';
 import { Lead } from '@/lib/types';
+import { safeName, safePhone, safeClassification } from '@/lib/shared_utils/safeLead';
 import { SourceIcon } from './SourceIcon';
 import { MoveMenu } from './MoveMenu';
 import { formatPhoneBR, getStatusColor, getStatusLabel } from '../utils/helpers';
@@ -36,29 +37,29 @@ export const ListRow = ({
             className={`glass-card rounded-[1.5rem] md:rounded-[2.2rem] border border-white/5 transition-all group relative flex items-stretch bg-[#050608]/40 backdrop-blur-3xl hover:shadow-[0_20px_60px_rgba(0,0,0,0.5)] cursor-pointer select-none ${activeMoveMenu === lead.id ? 'z-[200] border-red-500/30 shadow-[0_20px_60px_rgba(0,0,0,0.7)]' : 'z-auto'}`}
         >
             {/* Faixa Lateral de Status (Luz Neon) */}
-            <div className={`w-1.5 shrink-0 rounded-l-[1.5rem] md:rounded-l-[2.2rem] ${lead.ai_classification === 'hot' ? 'bg-red-500 shadow-[0_0_15px_rgba(239,68,68,0.5)]' :
-                lead.ai_classification === 'warm' ? 'bg-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.5)]' :
+            <div className={`w-1.5 shrink-0 rounded-l-[1.5rem] md:rounded-l-[2.2rem] ${safeClassification(lead.ai_classification) === 'hot' ? 'bg-red-500 shadow-[0_0_15px_rgba(239,68,68,0.5)]' :
+                safeClassification(lead.ai_classification) === 'warm' ? 'bg-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.5)]' :
                     'bg-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.5)]'
                 }`} />
 
             <div className="flex-1 flex flex-col md:flex-row items-center p-4 md:p-6 gap-6 w-full">
                 {/* Seção de Identidade */}
                 <div className="flex-1 min-w-[250px] flex items-center gap-4 w-full">
-                    <div className={`relative h-12 w-12 rounded-2xl flex items-center justify-center transition-all bg-white/[0.02] border-2 ${lead.ai_classification === 'hot' ? 'border-red-500/20' :
-                        lead.ai_classification === 'warm' ? 'border-amber-500/20' :
+                    <div className={`relative h-12 w-12 rounded-2xl flex items-center justify-center transition-all bg-white/[0.02] border-2 ${safeClassification(lead.ai_classification) === 'hot' ? 'border-red-500/20' :
+                        safeClassification(lead.ai_classification) === 'warm' ? 'border-amber-500/20' :
                             'border-white/10'
                         }`}>
                         <SourceIcon source={lead.source} name={lead.name} plataforma_meta={lead.plataforma_meta} />
                     </div>
                     <div className="overflow-hidden">
                         <h3 className="font-black text-white text-[15px] tracking-tight leading-none mb-1 group-hover:text-red-400 transition-colors truncate uppercase font-outfit">
-                            {lead.name}
+                            {safeName(lead.name)}
                         </h3>
                         <div className="flex items-center gap-3">
                             <div className="flex items-center gap-1.5">
                                 <Phone size={10} className="text-red-500/50" />
                                 <span className="text-sm font-bold text-white/80 tracking-wider">
-                                    {formatPhoneBR(lead.phone)}
+                                    {formatPhoneBR(safePhone(lead.phone))}
                                 </span>
                             </div>
                             <span className="text-[9px] font-black text-white/10 uppercase tracking-widest hidden sm:block">

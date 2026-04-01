@@ -135,6 +135,7 @@ export interface Lead {
   total_interactions?: number;
   integration_priority?: number;
   pipeline_id?: string;
+  cidade?: string;
 }
 
 export interface InventoryItem {

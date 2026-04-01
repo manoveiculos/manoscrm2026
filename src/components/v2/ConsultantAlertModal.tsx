@@ -78,13 +78,13 @@ export const ConsultantAlertModal = () => {
 
     useEffect(() => {
         const init = async () => {
-            const { data: { session } } = await supabase.auth.getSession();
-            if (!session?.user) return;
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
 
             const { data: cons } = await supabase
                 .from('consultants_manos_crm')
                 .select('id, name, role')
-                .eq('auth_id', session.user.id)
+                .eq('auth_id', user.id)
                 .maybeSingle();
 
             if (!cons) return;

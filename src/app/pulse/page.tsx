@@ -213,13 +213,13 @@ export default function Pulse() {
     const loadData = useCallback(async () => {
         setLoading(true);
         try {
-            const { data: { session } } = await supabase.auth.getSession();
-            if (!session?.user) return;
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
 
             const { data: consultant } = await supabase
                 .from('consultants_manos_crm')
                 .select('id, name, role')
-                .eq('auth_id', session.user.id)
+                .eq('auth_id', user.id)
                 .single();
 
             if (consultant) {
@@ -234,11 +234,15 @@ export default function Pulse() {
                     period === 'Esta Semana' ? 'this_week' : 
                     'this_month';
 
+                // Injeção do 1º dia do mês atual para filtrar leads recebidos EXCLUSIVAMENTE neste mês
+                const firstDayOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
+
                 const [leadsResult, metricsResult] = await Promise.all([
                     leadService.getLeadsPaginated(undefined, {
                         consultantId: isAdmin ? undefined : consultant.id,
                         role: isAdmin ? 'admin' : 'consultant',
-                        limit: 3000 // Aumentado para garantir visibilidade total da base
+                        startDate: firstDayOfMonth, // Trava a busca nos leads deste mês
+                        limit: 3000
                     }),
                     getFinancialMetrics({
                         period: mappedPeriod,
@@ -413,6 +417,14 @@ export default function Pulse() {
         [leadsWithScores]
     );
 
+    const latestLeads = useMemo(() => {
+        // Pega os leads mais recentes carregados (já filtrados pelo mês atual no fetch)
+        return [...leads]
+            .filter(l => !['perdido', 'vendido'].includes(normalizeStatus(l.status)))
+            .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+            .slice(0, 5);
+    }, [leads]);
+
     const orphanedLeads = useMemo(() => 
         leads.filter(l => !l.assigned_consultant_id),
         [leads]
@@ -476,73 +488,6 @@ export default function Pulse() {
             animate="show"
             className="w-full space-y-6 pb-24 pt-0 px-2 md:px-0"
         >
-            {/* ── HUD HEADER ──────────────────────────────── */}
-            <header className="border-b border-white/5 bg-[#050101]/80 backdrop-blur-xl flex flex-wrap items-center justify-between gap-3 px-6 py-3 -mx-2 md:-mx-0 shadow-[0_4px_20px_rgba(0,0,0,0.5)]">
-                {/* Left: identity + stats */}
-                <div className="flex items-center gap-3 px-3 py-1.5 bg-white/[0.03] border border-white/10 rounded-xl">
-                    <Users size={12} className="text-white/40" />
-                    <span className="text-[10px] font-black text-white/60 uppercase tracking-widest">
-                        {leads.length} <span className="text-white/20">Leads Unificados</span>
-                    </span>
-                </div>
-
-                {/* Right: Filtro Temporal */}
-                <div className="flex flex-wrap items-center gap-2 p-1 bg-white/[0.03] border border-white/10 rounded-xl">
-                    <div className="flex items-center gap-1">
-                        {(['Hoje', 'Esta Semana', 'Este Mês', 'Personalizado'] as const).map((p) => (
-                            <button
-                                key={p}
-                                onClick={() => {
-                                    setPeriod(p);
-                                    if (p !== 'Personalizado') loadData(); 
-                                }}
-                                className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${
-                                    period === p 
-                                    ? 'bg-red-600 text-white shadow-lg shadow-red-600/20' 
-                                    : 'text-white/40 hover:text-white/60 hover:bg-white/5'
-                                }`}
-                            >
-                                {p}
-                            </button>
-                        ))}
-                    </div>
-
-                    {period === 'Personalizado' && (
-                        <motion.div 
-                            initial={{ opacity: 0, x: 20 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            className="flex items-center gap-2 pr-2 border-l border-white/10 pl-3"
-                        >
-                            <div className="flex items-center gap-2">
-                                <input 
-                                    type="date" 
-                                    value={customDates.start}
-                                    onChange={(e) => setCustomDates({...customDates, start: e.target.value})}
-                                    className="bg-black/40 border border-white/10 rounded-lg px-2 py-1 text-[9px] text-white focus:outline-none focus:ring-1 focus:ring-red-500/50"
-                                />
-                                <span className="text-[10px] text-white/20">até</span>
-                                <input 
-                                    type="date" 
-                                    value={customDates.end}
-                                    onChange={(e) => setCustomDates({...customDates, end: e.target.value})}
-                                    className="bg-black/40 border border-white/10 rounded-lg px-2 py-1 text-[9px] text-white focus:outline-none focus:ring-1 focus:ring-red-500/50"
-                                />
-                            </div>
-                            <button 
-                                onClick={async () => {
-                                    setIsFiltering(true);
-                                    await loadData();
-                                    setIsFiltering(false);
-                                }}
-                                disabled={isFiltering}
-                                className="px-3 py-1.5 bg-white/5 hover:bg-red-600 border border-white/10 hover:border-red-500 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all disabled:opacity-50"
-                            >
-                                {isFiltering ? '...' : 'Filtrar'}
-                            </button>
-                        </motion.div>
-                    )}
-                </div>
-            </header>
             {/* ── DAILY MISSION HEADER ─────────────────────────── */}
             <DailyMissionHeader
                 userName={userName}
@@ -700,15 +645,83 @@ export default function Pulse() {
                 {/* ── LEFT COLUMN (main content) ─────────────────── */}
                 <div className="lg:col-span-8 space-y-6">
 
-                    {/* LEADS AGUARDANDO CONTATO */}
-                    {uncontacted.length > 0 && (
-                        <motion.section variants={fadeUp} className="space-y-1">
+                     {/* ÚLTIMOS LEADS RECEBIDOS — Sempre visível se houver leads no mês */}
+                     <motion.section variants={fadeUp} className="space-y-1">
                             <SectionTitle
-                                icon={Zap}
-                                label="Aguardando Contato"
-                                count={uncontacted.length}
-                                accent="#f97316"
+                                icon={Users}
+                                label="Últimos Leads Recebidos"
+                                count={latestLeads.length}
+                                accent="#3b82f6"
                             />
+
+                            <div className="rounded-2xl border border-blue-500/10 bg-[#0d0d10] overflow-hidden mb-6">
+                                <div className="divide-y divide-white/[0.04]">
+                                    {latestLeads.map((lead, i) => {
+                                        const now = new Date();
+                                        const created = new Date(lead.created_at);
+                                        const diffMs = now.getTime() - created.getTime();
+                                        const diffMins = Math.floor(diffMs / 60000);
+                                        const diffHours = Math.floor(diffMs / 3600000);
+                                        
+                                        const timeLabel = diffMins < 60 
+                                            ? `${diffMins}min atrás` 
+                                            : diffHours < 24 
+                                                ? `${diffHours}h atrás` 
+                                                : `${Math.floor(diffHours/24)}d atrás`;
+
+                                        const src = getSourceIcon(lead.source || lead.origem);
+                                        const IconComp = src.icon;
+
+                                        return (
+                                            <motion.div
+                                                key={lead.id}
+                                                initial={{ opacity: 0, x: -10 }}
+                                                animate={{ opacity: 1, x: 0 }}
+                                                transition={{ delay: i * 0.05 }}
+                                                onClick={() => setSelectedLead(lead)}
+                                                className="flex items-center gap-4 px-4 py-3 hover:bg-white/[0.03] cursor-pointer group transition-colors"
+                                            >
+                                                <div className="h-9 w-9 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 font-black text-sm shrink-0">
+                                                    {(lead.name?.[0] || 'U').toUpperCase()}
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex items-center gap-2">
+                                                        <p className="text-sm font-bold text-white/90 truncate">{lead.name || 'Novo Lead'}</p>
+                                                        <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-white/5 border border-white/10 shrink-0">
+                                                            <IconComp size={10} style={{ color: src.color }} />
+                                                            <span className="text-[9px] font-bold text-white/40 uppercase tracking-tighter">{lead.source || lead.origem || 'Geral'}</span>
+                                                        </div>
+                                                    </div>
+                                                    <p className="text-[11px] text-white/30 truncate">{lead.vehicle_interest || 'Interesse não definido'}</p>
+                                                </div>
+                                                <div className="text-right shrink-0">
+                                                    <p className="text-[10px] font-black text-blue-500/80 uppercase tracking-widest">{timeLabel}</p>
+                                                    <p className="text-[9px] text-white/20 font-medium">{new Date(lead.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</p>
+                                                </div>
+                                                <ChevronRight size={13} className="text-white/15 group-hover:text-white/40 shrink-0 transition-colors" />
+                                            </motion.div>
+                                        );
+                                    })}
+
+                                    {latestLeads.length === 0 && (
+                                        <div className="py-12 flex flex-col items-center justify-center text-center opacity-20">
+                                            <Target size={24} className="mb-2" />
+                                            <p className="text-[10px] font-black uppercase tracking-widest">Aguardando novos leads</p>
+                                            <p className="text-[9px]">O radar do mês atual está limpo.</p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </motion.section>
+
+                        {uncontacted.length > 0 && (
+                            <motion.section variants={fadeUp} className="space-y-1">
+                                <SectionTitle
+                                    icon={Zap}
+                                    label="Aguardando Contato"
+                                    count={uncontacted.length}
+                                    accent="#f97316"
+                                />
 
                             <div className="rounded-2xl border border-orange-500/10 bg-[#0d0d10] overflow-hidden">
                                 {/* Alert banner */}

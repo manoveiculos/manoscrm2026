@@ -2,6 +2,7 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { Zap, ArrowRight } from 'lucide-react';
 import { Lead, LeadStatus } from '@/lib/types';
+import { safeInitials, safeName } from '@/lib/shared_utils/safeLead';
 import { SourceIcon } from './SourceIcon';
 import { MoveMenu } from './MoveMenu';
 
@@ -50,7 +51,7 @@ export const KanbanCard = ({
             <div className="flex justify-between items-start mb-3 relative z-10">
                 <div className="flex items-center gap-3">
                     <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-red-600 to-red-900 flex items-center justify-center text-[10px] font-black text-white shadow-lg shrink-0">
-                        {(lead.name || '?')[0]}
+                        {safeInitials(lead.name)}
                     </div>
                     {(() => {
                         if (!lead.created_at) return null;
@@ -120,7 +121,7 @@ export const KanbanCard = ({
                 <div className="h-7 w-7 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center shrink-0">
                     <SourceIcon source={lead.source} name={lead.name} plataforma_meta={lead.plataforma_meta} className="text-[10px] font-black text-white/40" />
                 </div>
-                <h4 className="text-sm font-black text-white tracking-tight leading-tight truncate">{lead.name}</h4>
+                <h4 className="text-sm font-black text-white tracking-tight leading-tight truncate">{safeName(lead.name)}</h4>
             </div>
             <p className="text-[10px] font-bold text-white/40 mb-3 truncate italic">
                 {lead.vehicle_interest?.split('|')[0]?.trim() || 'Interesse em Compra'}

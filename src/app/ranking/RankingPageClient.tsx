@@ -43,23 +43,20 @@ const item = {
 export function RankingPageClient() {
     const [ranking, setRanking] = useState<ConsultantRanking[]>([]);
     const [loading, setLoading] = useState(true);
-    const [period, setPeriod] = useState<'today' | 'week' | 'month' | 'all'>('month');
+    const [loadingAnalysis, setLoadingAnalysis] = useState(false);
     const [selectedConsultant, setSelectedConsultant] = useState<ConsultantRanking | null>(null);
     const [isAnalysisOpen, setIsAnalysisOpen] = useState(false);
     const [funnelData, setFunnelData] = useState<any>(null);
-    const [loadingAnalysis, setLoadingAnalysis] = useState(false);
+
+    // Mês Atual Automático
+    const now = new Date();
+    const startDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+    const endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999).toISOString();
 
     const loadRanking = async () => {
         setLoading(true);
         try {
-            const now = new Date();
-            let startDate: Date | null = null;
-            if (period === 'today') { startDate = new Date(now); startDate.setHours(0,0,0,0); }
-            else if (period === 'week') { startDate = new Date(now); startDate.setDate(now.getDate() - 7); }
-            else if (period === 'month') { startDate = new Date(now); startDate.setDate(now.getDate() - 30); }
-
-            const startDateISO = startDate?.toISOString();
-            const rankingData = await getSalesRanking(startDateISO);
+            const rankingData = await getSalesRanking(startDate, endDate);
 
             const processed: ConsultantRanking[] = rankingData.map((r: any) => ({
                 id: r.id,
@@ -87,7 +84,7 @@ export function RankingPageClient() {
         setLoadingAnalysis(true);
         try {
             const metrics = await getFinancialMetrics({
-                period: period === 'today' ? 'today' : period === 'week' ? 'this_week' : 'this_month',
+                period: 'this_month',
                 consultantId: consultant.id
             });
             setFunnelData(metrics.funnelData);
@@ -100,7 +97,7 @@ export function RankingPageClient() {
 
     useEffect(() => {
         loadRanking();
-    }, [period]);
+    }, []);
 
     if (loading) {
         return (
@@ -137,20 +134,12 @@ export function RankingPageClient() {
                     </p>
                 </div>
 
-                <div className="flex items-center bg-white/[0.03] border border-white/10 p-1.5 rounded-2xl shadow-xl backdrop-blur-md self-start md:self-auto">
-                    {(['today', 'week', 'month', 'all'] as const).map((p) => (
-                        <button
-                            key={p}
-                            onClick={() => setPeriod(p)}
-                            className={`px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all duration-300 ${
-                                period === p 
-                                ? 'bg-red-600 text-white shadow-[0_8px_20px_rgba(239,68,68,0.3)]' 
-                                : 'text-white/30 hover:text-white/60 hover:bg-white/5'
-                            }`}
-                        >
-                            {p === 'today' ? 'Hoje' : p === 'week' ? 'Semana' : p === 'month' ? 'Mês' : 'Geral'}
+                <div className="flex items-center gap-2">
+                    <div className="flex items-center bg-white/[0.03] border border-white/10 p-1.5 rounded-2xl shadow-xl backdrop-blur-md">
+                        <button className="px-6 py-2.5 rounded-xl text-[9px] font-black uppercase tracking-widest bg-red-600 text-white shadow-[0_8px_20px_rgba(239,68,68,0.3)]">
+                            Performance Mes Atual
                         </button>
-                    ))}
+                    </div>
                 </div>
             </div>
 
@@ -269,7 +258,7 @@ export function RankingPageClient() {
 
                                 <div className="flex-1 min-w-0">
                                     <p className="text-[14px] font-black text-white/90 group-hover:text-red-500 transition-colors uppercase tracking-tight">{consultant.name}</p>
-                                    <p className="text-[10px] text-white/20 font-bold uppercase tracking-widest">{consultant.leadCount} leads atendidos</p>
+                                    <p className="text-[10px] text-white/20 font-bold uppercase tracking-widest">Atendimento Ativo</p>
                                 </div>
 
                                 <div className="flex items-center gap-8 shrink-0">

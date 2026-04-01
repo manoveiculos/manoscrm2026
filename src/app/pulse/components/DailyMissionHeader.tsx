@@ -113,7 +113,7 @@ function useAnimatedCounter(value: number, duration = 1500) {
 export const DailyMissionHeader: React.FC<DailyMissionHeaderProps> = ({
     userName, salesCount, leadCount, avgResponseTime, responseRate, userRole = 'consultant'
 }) => {
-    const monthlyGoal = userRole === 'admin' ? 50 : 15; // Metas ajustadas para a escala real da Manos
+    const monthlyGoal = userRole === 'admin' ? 20 : 5; // Metas: admin=20 total, consultor=5 individual
     const progress = Math.min(100, (salesCount / monthlyGoal) * 100);
     const salesLeft = Math.max(0, monthlyGoal - salesCount);
     const goalMet = salesLeft === 0;
@@ -188,6 +188,12 @@ export const DailyMissionHeader: React.FC<DailyMissionHeaderProps> = ({
             {/* TOP ROW: greeting + phrase + AI tip */}
             <div className="relative px-6 pt-6 pb-5 flex flex-col sm:flex-row sm:items-start justify-between gap-4 border-b border-white/[0.05]">
                 <div className="space-y-2">
+                    <div className="flex items-center gap-3 px-3 py-1.5 bg-white/[0.03] border border-white/10 rounded-xl w-fit mb-2">
+                        <Users size={12} className="text-white/40" />
+                        <span className="text-[10px] font-black text-white/60 uppercase tracking-widest">
+                            {leadCount} <span className="text-white/20">Leads no Mês</span>
+                        </span>
+                    </div>
                     {/* Greeting badge */}
                     <motion.div
                         initial={{ opacity: 0, x: -10 }}
@@ -369,7 +375,7 @@ export const DailyMissionHeader: React.FC<DailyMissionHeaderProps> = ({
                 >
                     <div className="flex items-center gap-2">
                         <Users size={12} className="text-white/25" />
-                        <span className="text-[9px] font-black text-white/25 uppercase tracking-[0.3em]">Leads</span>
+                        <span className="text-[9px] font-black text-white/25 uppercase tracking-[0.3em]">Leads no Mês</span>
                     </div>
                     <div className="flex items-baseline gap-1.5">
                         <span
@@ -392,7 +398,7 @@ export const DailyMissionHeader: React.FC<DailyMissionHeaderProps> = ({
                         />
                     </div>
                     <p className="text-[9px] font-black text-white/20 uppercase tracking-widest">
-                        Pipeline Ativo
+                        Meta de Leads
                     </p>
                 </motion.div>
             </div>

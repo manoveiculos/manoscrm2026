@@ -26,7 +26,7 @@ export function useLeadTimeline(leadId: string | null, leadPhone?: string) {
     setLoading(true);
     const all: TimelineEvent[] = [];
 
-    const cleanId = leadId.replace(/^(main_|crm26_|dist_|lead_|crm25_)/, '');
+    const cleanId = leadId.replace(/^(main_|crm26_|dist_|lead_|crm25_|master_)/, '');
     const phoneClean = (leadPhone || '').replace(/\D/g, '');
     const phoneSuffix = phoneClean.slice(-8);
 
@@ -34,10 +34,16 @@ export function useLeadTimeline(leadId: string | null, leadPhone?: string) {
     // FONTE 1: interactions_manos_crm (V2)
     // ══════════════════════════════════════
     try {
-      const { data, error } = await supabase
-        .from('interactions_manos_crm')
-        .select('*')
-        .or(`lead_id.eq.${cleanId},lead_id_v1.eq.${cleanId},lead_id.eq.${leadId}`)
+      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(cleanId);
+      let query = supabase.from('interactions_manos_crm').select('*');
+      
+      if (isUUID) {
+        query = query.or(`lead_id.eq.${cleanId},lead_id_v1.eq.${cleanId}`);
+      } else {
+        query = query.eq('lead_id_v1', cleanId);
+      }
+
+      const { data, error } = await query
         .order('created_at', { ascending: false })
         .limit(500);
 
@@ -176,10 +182,11 @@ export function useLeadTimeline(leadId: string | null, leadPhone?: string) {
     // FONTE 5: follow_ups
     // ══════════════════════════════════════
     try {
+      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(cleanId);
       const { data } = await supabase
         .from('follow_ups')
         .select('*')
-        .or(`lead_id.eq.${cleanId},lead_id.eq.${leadId}`)
+        .eq('lead_id', cleanId)
         .order('created_at', { ascending: false })
         .limit(100);
 
@@ -196,10 +203,12 @@ export function useLeadTimeline(leadId: string | null, leadPhone?: string) {
       let dateToUse = '';
 
       // FONTE REAL: Busca segura sem campos explícitos que podem não existir (evita 406)
+      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(cleanId);
+
       const { data: lm } = await supabase
         .from('leads_master')
         .select('*')
-        .or(`id.eq.${cleanId},id.eq.${leadId}`)
+        .eq('id', cleanId)
         .limit(1)
         .maybeSingle();
 
@@ -210,7 +219,7 @@ export function useLeadTimeline(leadId: string | null, leadPhone?: string) {
         const { data: lmc } = await supabase
           .from('leads_manos_crm')
           .select('*')
-          .or(`id.eq.${cleanId},id.eq.${leadId}`)
+          .eq('id', cleanId)
           .limit(1)
           .maybeSingle();
         if (lmc?.ai_summary) {
@@ -259,7 +268,7 @@ export function useLeadTimeline(leadId: string | null, leadPhone?: string) {
 
   const addNote = async (text: string, userName: string): Promise<boolean> => {
     if (!leadId || !text.trim()) return false;
-    const cleanId = leadId.replace(/^(main_|crm26_|dist_|lead_|crm25_)/, '');
+    const cleanId = leadId.replace(/^(main_|crm26_|dist_|lead_|crm25_|master_)/, '');
     const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(cleanId);
 
     const insertData: any = {

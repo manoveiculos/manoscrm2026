@@ -109,7 +109,6 @@ export async function runEliteCloser(leadId: string, messages: any[] = [], consu
                         lead.name = capitalized;
                         lead.nome = capitalized;
                         detectedName = capitalized;
-                        console.log(`[AI] Nome detectado diretamente: "${capitalized}" (era: "${currentName}")`);
                     } else if (sessionId) {
                         // Busca mensagens para GPT detectar o nome
                         const { data: msgs } = await supabaseAdmin
@@ -171,7 +170,6 @@ Responda SOMENTE o primeiro nome (ex: "Carlos") ou null:`
                     lead.name = capitalized;
                     lead.nome = capitalized;
                     detectedName = capitalized;
-                    console.log(`[AI] Nome detectado via GPT: "${capitalized}" (era: "${currentName}")`);
                 }
             }
         } catch (e) {

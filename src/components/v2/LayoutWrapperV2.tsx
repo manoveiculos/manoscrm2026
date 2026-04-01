@@ -14,7 +14,7 @@ export const LayoutWrapperV2 = ({ children }: { children: React.ReactNode }) => 
         return (
             <div className="flex min-h-screen bg-[#03060b] font-inter text-white overflow-hidden w-full max-w-[100vw]">
                 <BackgroundDecor />
-                <main className="flex-1 min-h-screen w-full relative z-10">
+                <main className="flex-1 min-h-screen w-full relative">
                     <div className="h-full w-full">
                         {children}
                     </div>
@@ -28,7 +28,7 @@ export const LayoutWrapperV2 = ({ children }: { children: React.ReactNode }) => 
             <BackgroundDecor />
             <NavigationV2 />
             <ConsultantAlertModal />
-            <main className="flex-1 min-h-screen w-full relative z-10 flex justify-start items-start">
+            <main className="flex-1 min-h-screen w-full relative flex justify-start items-start">
                 <div className="h-full w-full p-4 md:p-0 mt-14 md:mt-0 pt-16 md:pt-0 flex flex-col items-start justify-start overflow-x-hidden">
                     {children}
                 </div>

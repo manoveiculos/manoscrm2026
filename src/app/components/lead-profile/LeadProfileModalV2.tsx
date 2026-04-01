@@ -170,7 +170,7 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
         if (!noteToSave.trim()) return;
         setIsSavingNote(true);
         try {
-            const cleanId = lead.id.toString().replace(/main_|crm26_|dist_|lead_|crm25_/, '');
+            const cleanId = lead.id.toString().replace(/main_|crm26_|dist_|lead_|crm25_|master_/, '');
             
             // Determinar se o ID é UUID para selecionar a tabela correta (opcional, interactions_manos_crm aceita ambos)
             const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(cleanId);
@@ -178,7 +178,7 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
             const insertData: any = {
                 type: 'note',
                 notes: `[${userName}] ${noteToSave}`,
-                consultant_id: lead.assigned_consultant_id?.replace(/main_|crm26_|dist_|lead_|crm25_/, ''),
+                consultant_id: lead.assigned_consultant_id?.replace(/main_|crm26_|dist_|lead_|crm25_|master_/, ''),
                 created_at: new Date().toISOString()
             };
 

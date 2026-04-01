@@ -4,8 +4,12 @@ import React, { useState } from 'react';
 import { Lead, LeadStatus } from '@/lib/types';
 import { motion, AnimatePresence } from 'framer-motion';
 import { LeadCardV2 } from './LeadCardV2';
-import { Activity, Target, Zap, ShieldAlert } from 'lucide-react';
+import { SafeLeadCard } from '@/components/shared_leads/SafeLeadCard';
+import { Activity, Target, Zap, ShieldAlert, ChevronDown } from 'lucide-react';
 import { PIPELINE_STAGES, normalizeStatus } from '@/constants/status';
+
+const INITIAL_VISIBLE = 20;
+const LOAD_MORE_STEP = 20;
 
 const STAGE_ICONS: Record<string, any> = {
     'entrada': Zap,
@@ -34,6 +38,7 @@ export const KanbanBoardV2: React.FC<KanbanBoardV2Props> = ({
     const [draggingLeadId, setDraggingLeadId] = useState<string | null>(null);
     const [isOverColumnId, setIsOverColumnId] = useState<string | null>(null);
     const [columnWithMenuOpen, setColumnWithMenuOpen] = useState<string | null>(null);
+    const [columnVisibleCount, setColumnVisibleCount] = useState<Record<string, number>>({});
 
     const columns = PIPELINE_STAGES.map(s => ({
         id: s.id,
@@ -70,6 +75,9 @@ export const KanbanBoardV2: React.FC<KanbanBoardV2Props> = ({
             <div className="flex h-full w-full gap-2 px-2 pt-2 pb-2 antialiased items-stretch overflow-x-auto custom-scrollbar-h min-h-0">
                 {columns.map((col, index) => {
                     const colLeads = getColumnLeads(col.id);
+                    const visibleLimit = columnVisibleCount[col.id] || INITIAL_VISIBLE;
+                    const visibleLeads = colLeads.slice(0, visibleLimit);
+                    const hasMore = colLeads.length > visibleLimit;
                     const isClosingStage = col.id === 'fechamento';
                     const isOver = isOverColumnId === col.id;
                     const hasMenuOpen = columnWithMenuOpen === col.id;
@@ -123,16 +131,17 @@ export const KanbanBoardV2: React.FC<KanbanBoardV2Props> = ({
                             >
                                 <AnimatePresence mode="popLayout" initial={false}>
                                     {colLeads.length > 0 ? (
-                                        colLeads.map(lead => (
-                                            <LeadCardV2
-                                                key={lead.id}
-                                                lead={lead}
-                                                onView={onView}
-                                                onManage={onManage}
-                                                onStatusChange={onStatusChange}
-                                                setDraggingLeadId={setDraggingLeadId}
-                                                onMenuOpenChange={(isOpen) => setColumnWithMenuOpen(isOpen ? col.id : null)}
-                                            />
+                                        visibleLeads.map(lead => (
+                                            <SafeLeadCard key={lead.id} leadId={lead.id} leadName={lead.name} onView={() => onView(lead)}>
+                                                <LeadCardV2
+                                                    lead={lead}
+                                                    onView={onView}
+                                                    onManage={onManage}
+                                                    onStatusChange={onStatusChange}
+                                                    setDraggingLeadId={setDraggingLeadId}
+                                                    onMenuOpenChange={(isOpen) => setColumnWithMenuOpen(isOpen ? col.id : null)}
+                                                />
+                                            </SafeLeadCard>
                                         ))
                                     ) : (
                                         <div className="h-24 flex flex-col items-center justify-center border border-dashed border-white/[0.05] rounded-xl opacity-30 group-hover/col:opacity-50 transition-opacity">
@@ -141,6 +150,22 @@ export const KanbanBoardV2: React.FC<KanbanBoardV2Props> = ({
                                         </div>
                                     )}
                                 </AnimatePresence>
+
+                                {hasMore && (
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            setColumnVisibleCount(prev => ({
+                                                ...prev,
+                                                [col.id]: visibleLimit + LOAD_MORE_STEP
+                                            }));
+                                        }}
+                                        className="w-full py-2 mt-1 rounded-xl border border-dashed border-white/[0.08] text-[10px] font-semibold text-white/30 hover:text-white/50 hover:border-white/15 transition-colors flex items-center justify-center gap-1"
+                                    >
+                                        <ChevronDown size={10} />
+                                        Mais {colLeads.length - visibleLimit} leads
+                                    </button>
+                                )}
 
                                 {isOver && (
                                     <motion.div

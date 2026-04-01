@@ -48,5 +48,9 @@ export const SourceIcon = ({ source, name, className, plataforma_meta }: SourceI
 
     if (s.includes('site') || s.includes('web')) return <Globe size={iconSize} className="text-indigo-400 group-hover:scale-110 transition-transform" strokeWidth={2.5} />;
 
+    if (!name || typeof name !== 'string' || name.length === 0) {
+        return <Globe size={iconSize} className="text-white/20 group-hover:scale-110 transition-transform" strokeWidth={1.5} />;
+    }
+
     return <span className={className}>{name[0]}</span>;
 };

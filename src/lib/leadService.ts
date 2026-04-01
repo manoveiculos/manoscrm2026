@@ -50,74 +50,115 @@ export const leadService = {
         startDate?: string;
         origin?: string;
         minScore?: number;
-        role?: 'admin' | 'consultant'; // Novo para isolamento
+        role?: 'admin' | 'consultant';
+        pipelineOnly?: boolean; // Fase 2: só status ativos do pipeline
+        endDate?: string;
     }) {
-        const { 
-            page = 1, 
-            limit = 50, 
-            consultantId, 
-            status, 
+        const {
+            page = 1,
+            limit = 50,
+            consultantId,
+            status,
             searchTerm,
             startDate,
             origin,
             minScore,
-            role = 'consultant'
+            role = 'consultant',
+            pipelineOnly = false,
+            endDate
         } = params || {};
-        
-        const cacheKey = `leads_p${page}_l${limit}_c${consultantId || 'all'}_s${status || 'all'}_t${searchTerm || 'none'}_d${startDate || 'no'}_o${origin || 'all'}_sc${minScore || 0}_r${role}`;
-        
+
+        const cacheKey = `leads_p${page}_l${limit}_c${consultantId || 'all'}_s${status || 'all'}_t${searchTerm || 'none'}_d${startDate || 'no'}_e${endDate || 'no'}_o${origin || 'all'}_sc${minScore || 0}_r${role}_pl${pipelineOnly ? 1 : 0}`;
+
         const cached = cacheGet<{ leads: Lead[], totalCount: number }>(cacheKey);
         if (cached) return cached;
 
+        // Colunas lean para pipeline (evita select('*') com 50+ colunas)
+        // Colunas que EXISTEM na VIEW 'leads' (fix_view_include_master.sql)
+        // Não incluir: plataforma_meta, consultant_name, primeiro_vendedor, churn_probability, next_step, cidade
+        const LEAN_COLS = 'id,name,phone,email,source,origem,status,ai_score,ai_classification,ai_summary,vehicle_interest,assigned_consultant_id,created_at,updated_at,vendedor,proxima_acao,valor_investimento,observacoes,carro_troca,region,source_table';
+
         try {
             const client = this.getClient(supabase);
-            let query = client
-                .from('leads')
-                .select('*', { count: 'exact' });
 
-            // ISOLAMENTO DE DADOS (SINGLE SOURCE OF TRUTH)
-            // Se for consultor, filtra APENAS seus leads. Se for admin e tiver consultantId, filtra por ele.
-            if (role === 'consultant' && consultantId) {
-                query = query.eq('assigned_consultant_id', consultantId);
-            } else if (role === 'admin' && consultantId) {
-                if (consultantId === 'unassigned' || consultantId === 'none') {
-                    query = query.is('assigned_consultant_id', null);
-                } else if (consultantId !== 'all') {
-                    query = query.eq('assigned_consultant_id', consultantId);
+            // Helper: monta a query com filtros (reutilizado para fallback)
+            const buildQuery = (selectCols: string) => {
+                let q = client
+                    .from('leads')
+                    .select(selectCols, { count: 'exact' });
+
+                if (role === 'consultant' && consultantId) {
+                    q = q.eq('assigned_consultant_id', consultantId);
+                } else if (role === 'admin' && consultantId) {
+                    if (consultantId === 'unassigned' || consultantId === 'none') {
+                        q = q.is('assigned_consultant_id', null);
+                    } else if (consultantId !== 'all') {
+                        q = q.eq('assigned_consultant_id', consultantId);
+                    }
                 }
-            }
 
-            if (status && status !== 'all') {
-                query = query.eq('status', status);
-            }
-            if (searchTerm) {
-                query = query.or(`name.ilike.%${searchTerm}%,phone.ilike.%${searchTerm}%,vehicle_interest.ilike.%${searchTerm}%,cpf.ilike.%${searchTerm}%,id.ilike.%${searchTerm}%`);
-            }
-            if (startDate) {
-                query = query.gte('created_at', startDate);
-            }
-            if (origin && origin !== 'all') {
-                query = query.or(`origem.eq.${origin},source.eq.${origin}`);
-            }
-            if (minScore) {
-                query = query.gte('ai_score', minScore);
-            }
+                if (pipelineOnly) {
+                    q = q.in('status', [
+                        'new', 'received', 'entrada', 'novo',
+                        'attempt', 'contacted', 'triagem',
+                        'confirmed', 'scheduled', 'visited', 'ataque',
+                        'test_drive', 'proposed', 'negotiation', 'fechamento'
+                    ]);
+                } else if (status && status !== 'all') {
+                    q = q.eq('status', status);
+                }
+                if (searchTerm) {
+                    q = q.or(`name.ilike.%${searchTerm}%,phone.ilike.%${searchTerm}%,vehicle_interest.ilike.%${searchTerm}%,cpf.ilike.%${searchTerm}%,id.ilike.%${searchTerm}%`);
+                }
+                if (startDate) {
+                    q = q.gte('created_at', startDate);
+                }
+                if (endDate) {
+                    q = q.lte('created_at', endDate);
+                }
+                if (origin && origin !== 'all') {
+                    q = q.or(`origem.eq.${origin},source.eq.${origin}`);
+                }
+                if (minScore) {
+                    q = q.gte('ai_score', minScore);
+                }
 
-            const { data, count, error } = await query
-                .order('created_at', { ascending: false })
-                .range((page - 1) * limit, page * limit - 1);
-
-            if (error) throw error;
-
-            const result = { 
-                leads: (data || []) as Lead[], 
-                totalCount: count || 0 
+                return q.order('created_at', { ascending: false })
+                    .range((page - 1) * limit, page * limit - 1);
             };
-            
+
+            // Tenta lean query primeiro; se falhar (coluna inexistente na VIEW), fallback p/ select('*')
+            let data: any[] | null = null;
+            let count: number | null = null;
+
+            if (pipelineOnly) {
+                const res = await buildQuery(LEAN_COLS);
+                if (res.error) {
+                    console.warn("[leadService] Lean query failed, falling back to select('*'):", res.error.message || res.error);
+                    const fallback = await buildQuery('*');
+                    if (fallback.error) throw fallback.error;
+                    data = fallback.data;
+                    count = fallback.count;
+                } else {
+                    data = res.data;
+                    count = res.count;
+                }
+            } else {
+                const res = await buildQuery('*');
+                if (res.error) throw res.error;
+                data = res.data;
+                count = res.count;
+            }
+
+            const result = {
+                leads: (data || []) as Lead[],
+                totalCount: count || 0
+            };
+
             cacheSet(cacheKey, result);
             return result;
-        } catch (err) {
-            console.error("Error in leadService.getLeadsPaginated:", err);
+        } catch (err: any) {
+            console.error("Error in leadService.getLeadsPaginated:", err?.message || err);
             return { leads: [], totalCount: 0 };
         }
     },
@@ -131,17 +172,17 @@ export const leadService = {
         let cleanId: string;
         if (idStr.startsWith('main_')) {
             targetTable = 'leads_manos_crm';
-            cleanId = idStr.replace('main_', '');
+            cleanId = idStr.substring(5); // Removes 'main_'
         } else if (idStr.startsWith('crm26_')) {
             targetTable = 'leads_distribuicao_crm_26';
-            cleanId = idStr.replace('crm26_', '');
+            cleanId = idStr.substring(6); // Removes 'crm26_'
         } else if (idStr.startsWith('master_')) {
             targetTable = 'leads_master';
-            cleanId = idStr.replace('master_', '');
+            cleanId = idStr.substring(7); // Removes 'master_'
         } else {
-            // Plain UUID or unknown prefix — assume leads_master
-            targetTable = 'leads_master';
-            cleanId = idStr.replace(/^(main_|crm26_|dist_|lead_|crm25_|master_)/, '');
+            // UUID puro ou sem prefixo conhecido — tenta leads_manos_crm por padrão
+            targetTable = 'leads_manos_crm';
+            cleanId = idStr;
         }
 
         const realId = targetTable === 'leads_distribuicao_crm_26' ? parseInt(cleanId) : cleanId;
@@ -181,12 +222,32 @@ export const leadService = {
             updatePayload.motivo_perda = lossReason;
         }
 
-        const { error } = await client
+        const { data: updateRes, error } = await client
             .from(targetTable)
             .update(updatePayload)
-            .eq('id', realId);
+            .eq('id', realId)
+            .select('id');
 
-        if (error) throw error;
+        if (error || !updateRes || updateRes.length === 0) {
+            console.warn(`[leadService] Primary update failed for ${targetTable}:${realId}. Error: ${error?.message || 'Zero rows'}`);
+            
+            // FALLBACK Resiliente para leads antigos (Master ou Manos)
+            if (targetTable === 'leads_manos_crm' || targetTable === 'leads_master') {
+                const otherTable = targetTable === 'leads_master' ? 'leads_manos_crm' : 'leads_master';
+                console.log(`[leadService] Attempting fallback to ${otherTable}...`);
+                const { data: fallbackRes, error: fallbackError } = await client
+                    .from(otherTable)
+                    .update(updatePayload)
+                    .eq('id', realId)
+                    .select('id');
+                
+                if (fallbackError || !fallbackRes || fallbackRes.length === 0) {
+                    throw new Error(`Lead ${leadId} não encontrado em nenhuma tabela compatível (Master/Manos).`);
+                }
+            } else {
+                throw error || new Error(`Lead ${leadId} não localizado.`);
+            }
+        }
         leadCacheInvalidate();
 
         // [Meta CAPI] Trigger event asynchronously
@@ -234,8 +295,21 @@ export const leadService = {
             // Mapeamentos específicos CRM26
             if (updateData.name) { updateData.nome = updateData.name; delete updateData.name; }
             if (updateData.vehicle_interest) { updateData.interesse = updateData.vehicle_interest; } 
-            if (updateData.carro_troca) { 
-                updateData.troca = updateData.carro_troca; 
+            if (updateData.carro_troca) { updateData.troca = updateData.carro_troca; }
+            if (updateData.cidade) { /* já é 'cidade' no crm26 */ }
+        }
+
+        if (targetTable === 'leads_manos_crm') {
+            if (updateData.cidade) {
+                updateData.region = updateData.cidade;
+                delete updateData.cidade;
+            }
+        }
+
+        if (targetTable === 'leads_master') {
+            if (updateData.cidade) {
+                updateData.city = updateData.cidade;
+                delete updateData.cidade;
             }
         }
 

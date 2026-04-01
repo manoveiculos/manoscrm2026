@@ -25,13 +25,16 @@ export async function updateLeadStatusAction(
 
     if (leadId.startsWith('crm26_')) {
         table = 'leads_distribuicao_crm_26';
-        realId = parseInt(leadId.replace('crm26_', ''));
+        realId = parseInt(leadId.substring(6));
     } else if (leadId.startsWith('main_')) {
         table = 'leads_manos_crm';
-        realId = leadId.replace('main_', '');
+        realId = leadId.substring(5);
+    } else if (leadId.startsWith('master_')) {
+        table = 'leads_master';
+        realId = leadId.substring(7);
     } else if (leadId.startsWith('dist_')) {
         table = 'leads_distribuicao';
-        realId = parseInt(leadId.replace('dist_', ''));
+        realId = parseInt(leadId.substring(5));
     }
 
     // REDISTRIBUTION TRIGGER LOGIC
@@ -113,7 +116,7 @@ export async function updateLeadStatusAction(
     const now = new Date().toISOString();
     const updatePayload: any = { status: targetStatus };
 
-    if (table === 'leads_manos_crm') {
+    if (table === 'leads_manos_crm' || table === 'leads_master') {
         updatePayload.updated_at = now;
     } else {
         updatePayload.atualizado_em = now;

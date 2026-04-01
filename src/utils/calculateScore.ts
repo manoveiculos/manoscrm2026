@@ -55,13 +55,15 @@ export function calculateLeadScore(input: ScoreInput): number {
     score -= 20;
   }
 
-  // Clamp entre 1-99 (100% é reservado EXCLUSIVAMENTE para VENDIDO, 0 para PERDIDO)
-  const final = Math.max(1, Math.round(score));
-  return Math.min(99, final);
+  // Clamp entre 0-100 (100% é reservado EXCLUSIVAMENTE para VENDIDO, 0 para PERDIDO)
+  const final = Math.max(0, Math.round(score));
+  return Math.min(100, final);
 }
 
 // Classificação textual
 export function getScoreLabel(score: number): { label: string; color: string } {
+  if (score <= 0) return { label: 'PERDIDO', color: '#6b7280' };
+  if (score >= 100) return { label: 'VENDIDO', color: '#f59e0b' };
   if (score >= 80) return { label: 'QUENTE', color: '#dc2626' };
   if (score >= 60) return { label: 'MORNO', color: '#f59e0b' };
   if (score >= 30) return { label: 'FRIO', color: '#3b82f6' };

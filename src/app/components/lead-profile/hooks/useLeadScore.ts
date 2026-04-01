@@ -9,7 +9,20 @@ export function useLeadScore(lead: any, interactionsCount: number, lastInteracti
     const [scoreInfo, setScoreInfo] = useState(getScoreLabel(Number(lead.ai_score) || 0));
 
     useEffect(() => {
+        const normalizedStatus = normalizeStatus(lead.status);
         const aiScore = Number(lead.ai_score);
+
+        // REGRA INEGOCIÁVEL: Status final (Perdido/Vendido) SOBRESCREVE qualquer score da IA
+        if (normalizedStatus === 'perdido') {
+            setFinalScore(0);
+            setScoreInfo({ label: 'PERDIDO', color: '#6b7280' });
+            return;
+        }
+        if (normalizedStatus === 'vendido') {
+            setFinalScore(100);
+            setScoreInfo({ label: 'VENDIDO', color: '#f59e0b' });
+            return;
+        }
 
         // Prioridade 1: score real da IA (banco) — fonte de verdade
         if (aiScore > 0) {
@@ -19,13 +32,12 @@ export function useLeadScore(lead: any, interactionsCount: number, lastInteracti
         }
 
         // Fallback heurístico — mesmo cálculo da lista (totalInteracoes: 0)
-        // para garantir consistência visual entre lista e perfil
         const now = new Date();
         const createdAt = new Date(lead.created_at);
         const tempoFunilH = Math.max(0, (now.getTime() - createdAt.getTime()) / (1000 * 60 * 60));
 
         const calculated = calculateLeadScore({
-            status: normalizeStatus(lead.status),
+            status: normalizedStatus,
             tempoFunilHoras: tempoFunilH,
             totalInteracoes: 0,
             ultimaInteracaoH: tempoFunilH,

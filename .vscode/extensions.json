@@ -1,13 +1,13 @@
 {
-	// See https://go.microsoft.com/fwlink/?LinkId=827846 to learn about workspace recommendations.
-	// Extension identifier format: ${publisher}.${name}. Example: vscode.csharp
-
-	// List of extensions which should be recommended for users of this workspace.
 	"recommendations": [
-		
+		"dbaeumer.vscode-eslint",
+		"bradlc.vscode-tailwindcss",
+		"esbenp.prettier-vscode",
+		"christian-kohler.path-intellisense",
+		"dsznajder.es7-react-js-snippets",
+		"usernamehw.errorlens",
+		"eamodio.gitlens",
+		"ms-vscode.vscode-typescript-next"
 	],
-	// List of extensions recommended by Antigravity that should not be recommended for users of this workspace.
-	"unwantedRecommendations": [
-		
-	]
+	"unwantedRecommendations": []
 }

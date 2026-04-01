@@ -31,14 +31,14 @@ export function useLeadData(initialLead: Lead, setLeads: React.Dispatch<React.Se
                 oldStatus
             );
 
-            const cleanId = initialLead.id.toString().replace(/main_|crm26_|dist_|lead_|crm25_/, '');
+            const cleanId = initialLead.id.toString().replace(/main_|crm26_|dist_|lead_|crm25_|master_/, '');
             const isNumeric = /^\d+$/.test(cleanId);
             
             if (cleanId) {
                 const interactionPayload: any = {
                     type: 'status_change',
                     notes: `[${userName || 'SISTEMA'}] Status alterado de ${oldStatus} para ${newStatusId} (via Sidebar)`,
-                    consultant_id: initialLead.assigned_consultant_id ? initialLead.assigned_consultant_id.toString().replace(/main_|crm26_|dist_|lead_|crm25_/, '') : null,
+                    consultant_id: initialLead.assigned_consultant_id ? initialLead.assigned_consultant_id.toString().replace(/main_|crm26_|dist_|lead_|crm25_|master_/, '') : null,
                     created_at: new Date().toISOString()
                 };
 

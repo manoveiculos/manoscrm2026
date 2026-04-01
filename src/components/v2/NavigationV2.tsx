@@ -91,18 +91,18 @@ export const NavigationV2 = () => {
 
     useEffect(() => {
         const getUserData = async () => {
-            const { data: { session } } = await supabase.auth.getSession();
-            if (session?.user) {
-                setUser(session.user);
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+                setUser(user as any);
                 const { data: consultant } = await supabase
                     .from('consultants_manos_crm')
                     .select('role')
-                    .eq('auth_id', session.user.id)
+                    .eq('auth_id', user.id)
                     .maybeSingle();
 
                 if (consultant) {
                     setRole(consultant.role);
-                } else if (session.user.email === 'alexandre_gorges@hotmail.com') {
+                } else if (user.email === 'alexandre_gorges@hotmail.com') {
                     setRole('admin');
                 } else {
                     setRole('consultant');
@@ -213,16 +213,6 @@ export const NavigationV2 = () => {
                                     strokeWidth={isActive ? 2.5 : 2}
                                     className={isActive ? 'text-red-500' : 'transition-colors group-hover:text-white/70'}
                                 />
-                                {item.href === '/pulse' && aiAlertCount > 0 && (
-                                    <motion.span
-                                        key={aiAlertCount}
-                                        initial={{ scale: 0 }}
-                                        animate={{ scale: 1 }}
-                                        className="absolute -top-2 -right-2 h-4 w-4 rounded-full bg-red-500 border border-[#0C0C0F] flex items-center justify-center text-[9px] font-black text-white leading-none shadow-lg shadow-red-500/20"
-                                    >
-                                        {aiAlertCount > 9 ? '9+' : aiAlertCount}
-                                    </motion.span>
-                                )}
                             </div>
                             {!isCollapsed && (
                                 <motion.div

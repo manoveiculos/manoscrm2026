@@ -53,33 +53,64 @@ export function SalesManagementDashboard() {
     const [consultants, setConsultants] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+    const [period, setPeriod] = useState<'today' | 'yesterday' | 'week' | 'month' | 'lastMonth' | 'custom' | 'all'>('month');
+    const [startDateCustom, setStartDateCustom] = useState('');
+    const [endDateCustom, setEndDateCustom] = useState('');
     const [editingSale, setEditingSale] = useState<any>(null);
 
-    const loadManagementData = async () => {
+    const loadManagementData = async (currentPeriod: string = period) => {
         setLoading(true);
         try {
-            // 1. Fetch leads from last 30 days
-            const thirtyDaysAgo = new Date();
-            thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-            
+            const now = new Date();
+            let startDate: Date | null = null;
+            let endDate: Date | null = null;
+
+            if (currentPeriod === 'today') {
+                startDate = new Date(now);
+                startDate.setHours(0, 0, 0, 0);
+            } else if (currentPeriod === 'yesterday') {
+                startDate = new Date(now);
+                startDate.setDate(now.getDate() - 1);
+                startDate.setHours(0, 0, 0, 0);
+                endDate = new Date(now);
+                endDate.setDate(now.getDate() - 1);
+                endDate.setHours(23, 59, 59, 999);
+            } else if (currentPeriod === 'week') {
+                startDate = new Date(now);
+                startDate.setDate(now.getDate() - 7);
+                startDate.setHours(0, 0, 0, 0);
+            } else if (currentPeriod === 'month') {
+                startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+                startDate.setHours(0, 0, 0, 0);
+            } else if (currentPeriod === 'lastMonth') {
+                startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+                startDate.setHours(0, 0, 0, 0);
+                endDate = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+            } else if (currentPeriod === 'custom') {
+                if (startDateCustom) {
+                    startDate = new Date(startDateCustom);
+                    startDate.setHours(0, 0, 0, 0);
+                }
+                if (endDateCustom) {
+                    endDate = new Date(endDateCustom);
+                    endDate.setHours(23, 59, 59, 999);
+                }
+            } else if (currentPeriod === 'all') {
+                startDate = new Date(2024, 0, 1);
+            }
+
+            const startDateISO = startDate?.toISOString();
+            const endDateISO = endDate?.toISOString() || now.toISOString();
+
             const [
                 { data: leadsData },
-                { data: manualSalesData },
-                { data: detailedSalesData },
                 { data: consultantsData }
             ] = await Promise.all([
                 supabase
                     .from('leads')
                     .select('*')
-                    .gte('created_at', thirtyDaysAgo.toISOString())
-                    .order('created_at', { ascending: false }),
-                supabase
-                    .from('cadastro_venda_veiculo')
-                    .select('*')
-                    .order('data_cadastro', { ascending: false }),
-                supabase
-                    .from('sales_manos_crm')
-                    .select('*')
+                    .gte('created_at', startDateISO)
+                    .lte('created_at', endDateISO)
                     .order('created_at', { ascending: false }),
                 supabase
                     .from('consultants_manos_crm')
@@ -90,9 +121,16 @@ export function SalesManagementDashboard() {
             setLeads(leadsData || []);
             setConsultants(consultantsData || []);
 
-            // 1. Fetch sales from all sources
-            const manualSalesResponse = await supabase.from('cadastro_venda_veiculo').select('*');
-            const detailedSalesResponse = await supabase.from('sales_manos_crm').select('id, lead_id, vehicle_name, consultant_id, sale_date, client_name, phone');
+            // 1. Fetch sales from all sources within range
+            const manualSalesResponse = await supabase.from('cadastro_venda_veiculo')
+                .select('*')
+                .gte('data_cadastro', startDateISO)
+                .lte('data_cadastro', endDateISO);
+
+            const detailedSalesResponse = await supabase.from('sales_manos_crm')
+                .select('id, lead_id, vehicle_name, consultant_id, sale_date, client_name, phone')
+                .gte('sale_date', startDateISO)
+                .lte('sale_date', endDateISO);
 
             const manualSalesDataList = manualSalesResponse.data || [];
             const detailedSalesDataList = detailedSalesResponse.data || [];
@@ -214,7 +252,7 @@ export function SalesManagementDashboard() {
 
     useEffect(() => {
         loadManagementData();
-    }, []);
+    }, [period, startDateCustom, endDateCustom]);
 
     const stats = useMemo(() => {
         const totalLeads = leads.length;
@@ -457,11 +495,58 @@ export function SalesManagementDashboard() {
                         <Briefcase size={24} />
                     </div>
                     <div>
-                        <h1 className="text-2xl font-black text-white tracking-tight uppercase">Gestão <span className="text-red-500">de Vendas</span></h1>
-                        <p className="text-[10px] font-black text-white/30 uppercase tracking-widest mt-1">Visão Geral de Resultados • Últimos 30 Dias</p>
+                        <p className="text-[10px] font-black text-white/30 uppercase tracking-widest mt-1">Visão Geral de Resultados • {
+                            period === 'today' ? 'Hoje' :
+                            period === 'yesterday' ? 'Ontem' :
+                            period === 'week' ? 'Últimos 7 Dias' :
+                            period === 'month' ? 'Este Mês' :
+                            period === 'lastMonth' ? 'Mês Passado' : 
+                            period === 'custom' ? 'Intervalo Customizado' : 'Total Geral'
+                        }</p>
                     </div>
                 </div>
                 <div className="flex items-center gap-3">
+                    {period === 'custom' && (
+                        <motion.div 
+                            initial={{ opacity: 0, x: -10 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            className="flex items-center gap-1 bg-white/5 border border-white/10 p-1 rounded-xl"
+                        >
+                            <input 
+                                type="date" 
+                                value={startDateCustom}
+                                onChange={(e) => setStartDateCustom(e.target.value)}
+                                className="bg-transparent border-none text-[9px] font-black text-white/40 outline-none uppercase p-1.5"
+                            />
+                            <span className="text-[9px] text-white/10 font-bold">A</span>
+                            <input 
+                                type="date" 
+                                value={endDateCustom}
+                                onChange={(e) => setEndDateCustom(e.target.value)}
+                                className="bg-transparent border-none text-[9px] font-black text-white/40 outline-none uppercase p-1.5"
+                            />
+                        </motion.div>
+                    )}
+                    <div className="flex items-center gap-0.5 bg-white/5 p-1 rounded-xl border border-white/10">
+                        {(['today', 'yesterday', 'week', 'month', 'lastMonth', 'custom', 'all'] as const).map(p => (
+                            <button
+                                key={p}
+                                onClick={() => setPeriod(p)}
+                                className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${
+                                    period === p
+                                        ? 'bg-red-600 text-white shadow-[0_4px_10px_rgba(239,68,68,0.3)]'
+                                        : 'text-white/30 hover:text-white hover:bg-white/5'
+                                }`}
+                            >
+                                {p === 'today' ? 'Hoje' : 
+                                 p === 'yesterday' ? 'Ontem' :
+                                 p === 'week' ? 'Semana' :
+                                 p === 'month' ? 'Mês' :
+                                 p === 'lastMonth' ? 'Mês Passado' : 
+                                 p === 'custom' ? 'Intervalo' : 'Tudo'}
+                            </button>
+                        ))}
+                    </div>
                     <div className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 flex items-center gap-3">
                         <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
                         <span className="text-[9px] font-black text-white/40 uppercase tracking-widest">Real-time Sync</span>

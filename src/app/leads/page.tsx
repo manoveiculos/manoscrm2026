@@ -33,6 +33,7 @@ import { ALL_STATUS, normalizeStatus } from '@/constants/status';
 import { calculateLeadScore } from '@/utils/calculateScore';
 import { isLeadQualified } from '@/utils/leadQualification';
 import { HUDSelect } from '../../components/shared_leads/HUDSelect';
+import { updateLeadStatusAction } from '../actions/leads';
 
 
 export default function CentralLeadsV2() {
@@ -79,19 +80,19 @@ function LeadsContent() {
         const loadInitialData = async () => {
             setLoading(true);
             try {
-                const { data: { session } } = await supabase.auth.getSession();
+                const { data: { user } } = await supabase.auth.getUser();
                 let currentConsultantId: string | null = null;
                 let userRole: 'admin' | 'consultant' = 'consultant';
 
-                if (session?.user) {
-                    const isAdmin = session.user.email === 'alexandre_gorges@hotmail.com';
+                if (user) {
+                    const isAdmin = user.email === 'alexandre_gorges@hotmail.com';
                     userRole = isAdmin ? 'admin' : 'consultant';
                     setRole(userRole);
 
                     const { data: profile } = await supabase
                         .from('consultants_manos_crm')
                         .select('id, name')
-                        .eq('auth_id', session.user.id)
+                        .eq('auth_id', user.id)
                         .maybeSingle();
                     
                     let consultantParamId: string | undefined = undefined;
@@ -107,7 +108,7 @@ function LeadsContent() {
 
                     const [leadsResult, consultantsData, inventoryData] = await Promise.all([
                         leadService.getLeadsPaginated(undefined, {
-                            consultantId: userRole === 'admin' ? undefined : (consultantParamId || session.user.id),
+                            consultantId: userRole === 'admin' ? undefined : (consultantParamId || user.id),
                             role: userRole,
                             limit: 2000 
                         }),
@@ -261,12 +262,10 @@ function LeadsContent() {
 
     const handleStatusChange = async (leadId: string, newStatus: LeadStatus) => {
         try {
-            const { error } = await supabase
-                .from('leads_manos_crm')
-                .update({ status: newStatus, updated_at: new Date().toISOString() })
-                .eq('id', leadId);
-
-            if (error) throw error;
+            const oldStatus = leads.find(l => l.id === leadId)?.status;
+            
+            // Usar Server Action para lidar com múltiplos bancos (manos/master) e prefixos (main_/master_)
+            await updateLeadStatusAction(leadId, newStatus, oldStatus);
 
             setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: newStatus } : l));
 
@@ -289,6 +288,7 @@ function LeadsContent() {
             }
         } catch (error) {
             console.error("Error updating status:", error);
+            alert("Erro ao atualizar status do lead.");
         }
     };
 
@@ -296,23 +296,18 @@ function LeadsContent() {
         if (role !== 'admin') return;
         try {
             const consultant = consultants.find(c => c.id === newConsultantId);
-            const previousConsultantId = leads.find(l => l.id === leadId)?.assigned_consultant_id;
+            const currentLead = leads.find(l => l.id === leadId);
+            const previousConsultantId = currentLead?.assigned_consultant_id;
 
-            const { error } = await supabase
-                .from('leads_manos_crm')
-                .update({
-                    assigned_consultant_id: newConsultantId,
-                    primeiro_vendedor: consultant?.name,
-                    updated_at: new Date().toISOString()
-                })
-                .eq('id', leadId);
-
-            if (error) throw error;
+            await leadService.updateLeadDetails(undefined, leadId, {
+                assigned_consultant_id: newConsultantId,
+                primeiro_vendedor: consultant?.name
+            });
 
             setLeads(prev => prev.map(l => l.id === leadId ? {
                 ...l,
                 assigned_consultant_id: newConsultantId,
-                consultant_name: consultant?.name,
+                vendedor: consultant?.name,
                 primeiro_vendedor: consultant?.name
             } : l));
 
@@ -470,7 +465,7 @@ function LeadsContent() {
 
 
             {/* QUICK FILTERS BAR - OPTIMIZED FOR 100% SCREEN */}
-            <div className="shrink-0 min-h-12 border-b border-white/5 bg-[#03060b] flex flex-wrap items-center gap-x-2 gap-y-2 px-3 sm:px-6 py-2.5 z-[60] relative">
+            <div className="shrink-0 min-h-12 border-b border-white/5 bg-[#03060b] flex flex-wrap items-center gap-x-2 gap-y-2 px-3 sm:px-6 py-2.5 z-[100] relative">
                 <div className="flex items-center gap-2 bg-white/5 p-1 rounded-xl border border-white/10">
                     <button 
                         onClick={() => setViewMode('list')}

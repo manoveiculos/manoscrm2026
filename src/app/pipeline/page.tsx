@@ -38,7 +38,8 @@ import {
     RefreshCw,
     Timer,
     Eye,
-    Lock
+    Lock,
+    Archive
 } from 'lucide-react';
 import { dataService } from '@/lib/dataService';
 
@@ -72,6 +73,8 @@ function PipelineContent() {
     const [filterConsultant, setFilterConsultant] = useState<string>('all');
     const [filterInterest, setFilterInterest] = useState<string>('all');
     const [filterOrigin, setFilterOrigin] = useState<string>('all');
+    const [startDateRange, setStartDateRange] = useState<string>('');
+    const [endDateRange, setEndDateRange] = useState<string>('');
 
     const [consultants, setConsultants] = useState<any[]>([]);
     const [inventory, setInventory] = useState<any[]>([]);
@@ -80,6 +83,7 @@ function PipelineContent() {
     const [consultantId, setConsultantId] = useState<string | undefined>(undefined);
 
     const [filterAI, setFilterAI] = useState(false);
+    const [showArchive, setShowArchive] = useState(false);
 
     // Busca semântica — ativa quando query tem 4+ palavras
     const [semanticIds, setSemanticIds] = useState<Set<string> | null>(null);
@@ -99,7 +103,7 @@ function PipelineContent() {
     useEffect(() => {
         async function initAuthAndData() {
             try {
-                const { data: { session } } = await supabase.auth.getSession();
+                const { data: { user } } = await supabase.auth.getUser();
                 
                 // Load Consultants & Inventory for filters
                 const [consData, invData] = await Promise.all([
@@ -108,21 +112,21 @@ function PipelineContent() {
                 ]);
                 setConsultants(consData || []);
                 setInventory(invData || []);
+                
+                if (!user) return;
 
-                if (!session?.user) return;
-
-                const isAdmin = session.user.email === 'alexandre_gorges@hotmail.com';
+                const isAdmin = user.email === 'alexandre_gorges@hotmail.com';
 
                 // CRITICAL: leads_manos_crm.assigned_consultant_id references consultants_manos_crm.id
                 // Must use the same table so IDs match — pipeline was using 'consultants' (V2) which has different UUIDs
                 const { data: consultant } = await supabase
                     .from('consultants_manos_crm')
                     .select('id, name, role')
-                    .eq('auth_id', session.user.id)
+                    .eq('auth_id', user.id)
                     .maybeSingle();
 
                 if (consultant) {
-                    const cName = consultant.name.split(' ')[0];
+                    const cName = (consultant.name || 'Consultor').split(' ')[0];
                     const cRole = isAdmin ? 'admin' : (consultant.role || 'consultant');
                     setUserName(cName);
                     setRole(cRole);
@@ -154,13 +158,59 @@ function PipelineContent() {
         else setLoading(true);
 
         try {
-            const limit = 2000; // MASSIVE LOAD to cover the entire unified database (1106+ leads)
+            const limit = 500; // Limite maior para suportar filtros de mês/ano
+            let startOfPeriod: string | undefined = undefined;
+            const now = new Date();
+
+            if (filterDate === 'today') {
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                startOfPeriod = today.toISOString();
+            } else if (filterDate === 'yesterday') {
+                const yesterday = new Date();
+                yesterday.setDate(yesterday.getDate() - 1);
+                yesterday.setHours(0, 0, 0, 0);
+                startOfPeriod = yesterday.toISOString();
+            } else if (filterDate === '7days') {
+                startOfPeriod = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+            } else if (filterDate === '30days') {
+                startOfPeriod = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+            } else if (filterDate === 'thisMonth') {
+                const firstDayMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+                startOfPeriod = firstDayMonth.toISOString();
+            } else if (filterDate === 'lastMonth') {
+                const firstDayLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+                startOfPeriod = firstDayLastMonth.toISOString();
+                const lastDayLastMonth = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+                var endOfPeriod: string | undefined = lastDayLastMonth.toISOString();
+            } else if (filterDate === 'custom') {
+                if (startDateRange) {
+                    const s = new Date(startDateRange);
+                    s.setHours(0,0,0,0);
+                    startOfPeriod = s.toISOString();
+                }
+                if (endDateRange) {
+                    const e = new Date(endDateRange);
+                    e.setHours(23, 59, 59, 999);
+                    var endOfPeriod: string | undefined = e.toISOString();
+                }
+            } else if (filterDate === 'thisYear') {
+                const firstDayYear = new Date(now.getFullYear(), 0, 1);
+                startOfPeriod = firstDayYear.toISOString();
+            } else if (!showArchive) {
+                // Default fallback: 30 dias se não tiver filtro ou arquivo
+                startOfPeriod = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+            }
+
             const result = await leadService.getLeadsPaginated(supabase, {
                 page: pageNum,
-                limit, 
+                limit,
                 consultantId,
                 searchTerm: debouncedSearchTerm || undefined,
-                role: role as 'admin' | 'consultant' // ISOLAMENTO DE DADOS
+                role: role as 'admin' | 'consultant',
+                pipelineOnly: !showArchive,  // Arquivo: busca vendido/perdido; Pipeline: só ativos
+                startDate: showArchive ? undefined : startOfPeriod,
+                endDate: showArchive ? undefined : (typeof endOfPeriod !== 'undefined' ? endOfPeriod : undefined)
             });
 
             if (isNewSearch) {
@@ -249,37 +299,59 @@ function PipelineContent() {
     useEffect(() => {
         setPage(1);
         loadLeads(1, true);
-    }, [debouncedSearchTerm, consultantId, filterFromUrl]);
+    }, [debouncedSearchTerm, consultantId, filterFromUrl, showArchive, filterDate, startDateRange, endDateRange]);
 
     const filteredLeads = useMemo(() => {
-        const fifteenDaysAgo = Date.now() - 15 * 24 * 60 * 60 * 1000;
-
         let filtered = leads.filter(l => {
             const norm = normalizeStatus(l.status);
             // Somente leads qualificados (com nome real) entram no Pipeline
             if (!isLeadQualified(l)) return false;
             
-            // Regra: Ocultar Vendidos e Perdidos do Pipeline
-            if (norm === 'vendido' || norm === 'perdido') return false;
-
-            // Regra: Ocultar leads sem atividade há mais de 15 dias
-            const lastActivity = new Date(l.updated_at || l.created_at || 0).getTime();
-            if (lastActivity < fifteenDaysAgo) return false;
+            // Regra: Ocultar Vendidos e Perdidos do Pipeline (exceto no modo arquivo)
+            if (!showArchive && (norm === 'vendido' || norm === 'perdido')) return false;
+            if (showArchive && norm !== 'vendido' && norm !== 'perdido') return false;
 
             return true;
         });
         
-        // Date Filter (Aligned with Central de Leads)
+        // Date Filter (Precise HUD Filtering)
         if (filterDate !== 'all') {
             const now = new Date();
             const todayStart = new Date();
             todayStart.setHours(0, 0, 0, 0);
+
+            const yesterdayStart = new Date();
+            yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+            yesterdayStart.setHours(0, 0, 0, 0);
             
             filtered = filtered.filter(l => {
                 const leadDate = new Date(l.created_at || 0).getTime();
+                
                 if (filterDate === 'today') return leadDate >= todayStart.getTime();
+                
+                if (filterDate === 'yesterday') {
+                    return leadDate >= yesterdayStart.getTime() && leadDate < todayStart.getTime();
+                }
+
                 if (filterDate === '7days') return leadDate >= (Date.now() - 7 * 24 * 60 * 60 * 1000);
                 if (filterDate === '30days') return leadDate >= (Date.now() - 30 * 24 * 60 * 60 * 1000);
+                
+                if (filterDate === 'thisMonth') {
+                    const firstOfThisMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+                    return leadDate >= firstOfThisMonth;
+                }
+
+                if (filterDate === 'lastMonth') {
+                    const firstOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1).getTime();
+                    const lastOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999).getTime();
+                    return leadDate >= firstOfLastMonth && leadDate <= lastOfLastMonth;
+                }
+
+                if (filterDate === 'thisYear') {
+                    const firstOfThisYear = new Date(now.getFullYear(), 0, 1).getTime();
+                    return leadDate >= firstOfThisYear;
+                }
+
                 return true;
             });
         }
@@ -374,7 +446,7 @@ function PipelineContent() {
             const dateB = new Date(b.created_at || 0).getTime();
             return dateB - dateA;
         });
-    }, [leads, searchTerm, filterStatus, filterScore, filterDate, filterConsultant, filterInterest, filterOrigin, sortBy, filterAI, semanticIds]);
+    }, [leads, searchTerm, filterStatus, filterScore, filterDate, filterConsultant, filterInterest, filterOrigin, sortBy, filterAI, semanticIds, showArchive]);
 
     // Briefing Matinal — busca 1x por sessão após leads carregados
     useEffect(() => {
@@ -508,7 +580,7 @@ function PipelineContent() {
     return (
         <div className="w-full h-screen flex flex-col pt-0 px-0 items-start justify-start leading-none bg-[#0C0C0F] overflow-hidden">
             {/* HEADER — linha 1: título + contadores + ações */}
-            <header className="px-3 sm:px-5 py-2 bg-[#0C0C0F] border-b border-white/[0.06] shrink-0 w-full z-[60]">
+            <header className="px-3 sm:px-5 py-2 bg-[#0C0C0F] border-b border-white/[0.06] shrink-0 w-full z-[100]">
                 <div className="flex items-center justify-between gap-4 w-full">
                     {/* Título */}
                     <div className="flex items-center gap-4 px-4 py-2 bg-white/[0.03] border border-white/10 rounded-2xl shadow-sm">
@@ -574,6 +646,20 @@ function PipelineContent() {
                             </div>
                         )}
 
+                        {/* Toggle arquivo (Vendido/Perdido) */}
+                        <button
+                            onClick={() => setShowArchive(prev => !prev)}
+                            className={`px-2.5 py-1.5 rounded-lg border flex items-center gap-1.5 text-[11px] font-semibold transition-all ${
+                                showArchive
+                                    ? 'bg-amber-500/10 border-amber-500/20 text-amber-400'
+                                    : 'bg-[#141418] border-white/[0.07] text-white/30 hover:text-white/60'
+                            }`}
+                            title={showArchive ? 'Voltar ao pipeline ativo' : 'Ver vendidos e perdidos'}
+                        >
+                            <Archive size={13} />
+                            {showArchive ? 'Ativo' : 'Arquivo'}
+                        </button>
+
                         {/* Toggle lista/kanban */}
                         <div className="flex bg-[#141418] p-0.5 rounded-lg border border-white/[0.07]">
                             <button
@@ -610,7 +696,7 @@ function PipelineContent() {
             </header>
 
             {/* FILTROS — linha 2: compacta e organizada (HUD Style) */}
-            <div className="w-full bg-[#0C0C0F] border-b border-white/[0.05] px-3 sm:px-6 py-2.5 flex items-center gap-6 overflow-visible custom-scrollbar shrink-0 z-[70]">
+            <div className="w-full bg-[#0C0C0F] border-b border-white/[0.05] px-3 sm:px-6 py-2.5 flex items-center gap-6 overflow-visible custom-scrollbar shrink-0 z-[110]">
                 
                 <HUDSelect 
                     label="Período"
@@ -619,10 +705,37 @@ function PipelineContent() {
                     options={[
                         { id: 'all', label: 'TODAS AS DATAS' },
                         { id: 'today', label: 'HOJE' },
+                        { id: 'yesterday', label: 'ONTEM' },
                         { id: '7days', label: 'ÚLTIMOS 7 DIAS' },
-                        { id: '30days', label: 'ÚLTIMOS 30 DIAS' }
+                        { id: '30days', label: 'ÚLTIMOS 30 DIAS' },
+                        { id: 'thisMonth', label: 'ESTE MÊS' },
+                        { id: 'lastMonth', label: 'MÊS PASSADO' },
+                        { id: 'custom', label: 'ENTRE DATAS...' },
+                        { id: 'thisYear', label: 'ESTE ANO' }
                     ]}
                 />
+
+                {filterDate === 'custom' && (
+                    <motion.div 
+                        initial={{ opacity: 0, x: -10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        className="flex items-center gap-2 bg-white/5 border border-white/10 p-1.5 rounded-xl"
+                    >
+                        <input 
+                            type="date" 
+                            value={startDateRange}
+                            onChange={(e) => setStartDateRange(e.target.value)}
+                            className="bg-transparent border-none text-[10px] font-black text-white/70 outline-none uppercase tracking-tighter"
+                        />
+                        <span className="text-[10px] text-white/20 font-black">A</span>
+                        <input 
+                            type="date" 
+                            value={endDateRange}
+                            onChange={(e) => setEndDateRange(e.target.value)}
+                            className="bg-transparent border-none text-[10px] font-black text-white/70 outline-none uppercase tracking-tighter"
+                        />
+                    </motion.div>
+                )}
 
                 <div className="h-4 w-[1px] bg-white/10 shrink-0" />
 
@@ -683,159 +796,6 @@ function PipelineContent() {
                     </button>
                 )}
             </div>
-
-            {/* ── ELITE ALERT BANNER ──────────────────────────────────────────── */}
-            {showEliteBanner && !loading && (eliteAlerts.red.length > 0 || eliteAlerts.orange > 0 || eliteAlerts.yellow.length > 0 || dailyBrief) && (
-                <div className="w-full px-3 sm:px-5 py-2.5 bg-[#0C0C0F] border-b border-white/[0.05] shrink-0">
-                    <div className="flex items-stretch gap-2 overflow-x-auto pb-0.5" style={{ scrollbarWidth: 'none' }}>
-
-                        {/* 🔴 NÍVEL VERMELHO — Perdas críticas (score ≥ 70 nos últimos 7 dias) */}
-                        {eliteAlerts.red.map(lead => (
-                            <div key={lead.id} className="flex-none bg-red-950/50 border border-red-500/40 rounded-xl px-3 py-2.5 min-w-[240px] max-w-[280px] flex flex-col">
-                                <div className="flex items-start gap-2 mb-1.5">
-                                    <AlertTriangle size={12} className="text-red-400 mt-0.5 shrink-0" />
-                                    <div className="min-w-0">
-                                        <p className="text-[9px] font-black text-red-400 uppercase tracking-widest leading-none mb-0.5">⚠ PERDA CRÍTICA</p>
-                                        <p className="text-[11px] font-bold text-white truncate">{(lead as any).nome || lead.name}</p>
-                                        <p className="text-[9px] text-white/35 truncate">{(lead as any).interesse || lead.vehicle_interest || 'Interesse n/d'}</p>
-                                    </div>
-                                </div>
-                                <p className="text-[9px] text-red-300/70 mb-2 leading-snug flex-1">
-                                    Score <span className="font-bold text-red-300">{lead.ai_score}%</span> quando perdido. Reversão ainda possível.
-                                </p>
-                                <div className="flex gap-1.5">
-                                    <button
-                                        onClick={() => { setIsManagement(false); setSelectedLead(lead); }}
-                                        className="flex-1 flex items-center justify-center gap-1 bg-white/5 hover:bg-white/10 text-white/50 hover:text-white text-[9px] font-semibold rounded-lg px-2 py-1.5 transition-colors"
-                                    >
-                                        <Eye size={9} /> VER CONTEXTO
-                                    </button>
-                                    <button
-                                        onClick={async () => {
-                                            await handleStatusChange(lead.id, 'ataque' as LeadStatus);
-                                            setIsManagement(false);
-                                            setSelectedLead({ ...lead, status: 'ataque' as LeadStatus });
-                                        }}
-                                        className="flex-1 flex items-center justify-center gap-1 bg-red-500/25 hover:bg-red-500/40 text-red-300 text-[9px] font-black rounded-lg px-2 py-1.5 transition-colors"
-                                    >
-                                        <RefreshCw size={9} /> RETOMAR AGORA
-                                    </button>
-                                </div>
-                            </div>
-                        ))}
-
-                        {/* 🟠 NÍVEL LARANJA — SLA estourado > 24h */}
-                        {eliteAlerts.orange > 0 && (
-                            <div className="flex-none bg-orange-950/40 border border-orange-500/30 rounded-xl px-3 py-2.5 min-w-[210px] max-w-[250px] flex flex-col">
-                                <div className="flex items-start gap-2 mb-1.5">
-                                    <Clock size={12} className="text-orange-400 mt-0.5 shrink-0" />
-                                    <div>
-                                        <p className="text-[9px] font-black text-orange-400 uppercase tracking-widest leading-none mb-0.5">🚨 SLA ESTOURADO</p>
-                                        <p className="text-[11px] font-bold text-white">{eliteAlerts.orange} lead{eliteAlerts.orange > 1 ? 's' : ''} parado{eliteAlerts.orange > 1 ? 's' : ''}</p>
-                                    </div>
-                                </div>
-                                <p className="text-[9px] text-orange-300/65 mb-2 leading-snug flex-1">
-                                    Sem contato há mais de 24h. A conversão cai 50% a cada hora de atraso.
-                                </p>
-                                <button
-                                    onClick={() => {
-                                        // Filtra para mostrar apenas leads sem contato > 24h
-                                        const worstId = eliteAlerts.orangeLeads[0]?.id;
-                                        if (worstId) {
-                                            const worst = eliteAlerts.orangeLeads[0];
-                                            setIsManagement(false);
-                                            setSelectedLead(worst);
-                                        }
-                                    }}
-                                    className="w-full flex items-center justify-center gap-1.5 bg-orange-500/15 hover:bg-orange-500/30 text-orange-300 text-[9px] font-bold rounded-lg px-2 py-1.5 transition-colors"
-                                >
-                                    <Eye size={9} /> VER O MAIS URGENTE
-                                </button>
-                            </div>
-                        )}
-
-                        {/* 🟡 NÍVEL AMARELO — Fechamento travado > 48h */}
-                        {eliteAlerts.yellow.map(lead => {
-                            const hoursStuck = Math.floor((Date.now() - new Date(lead.updated_at || lead.created_at).getTime()) / 3_600_000);
-                            return (
-                                <div key={lead.id} className="flex-none bg-amber-950/30 border border-amber-500/20 rounded-xl px-3 py-2.5 min-w-[230px] max-w-[270px] flex flex-col">
-                                    <div className="flex items-start gap-2 mb-1.5">
-                                        <Timer size={12} className="text-amber-400 mt-0.5 shrink-0" />
-                                        <div className="min-w-0">
-                                            <p className="text-[9px] font-black text-amber-500 uppercase tracking-widest leading-none mb-0.5">⏱ FECHAMENTO TRAVADO</p>
-                                            <p className="text-[11px] font-bold text-white truncate">{(lead as any).nome || lead.name}</p>
-                                            <p className="text-[9px] text-white/35 truncate">{(lead as any).interesse || lead.vehicle_interest}</p>
-                                        </div>
-                                    </div>
-                                    <p className="text-[9px] text-amber-300/60 mb-2 leading-snug flex-1">
-                                        {hoursStuck}h sem movimento em Fechamento. Proposta esfriando.
-                                    </p>
-                                    <div className="flex gap-1.5">
-                                        <button
-                                            onClick={() => { setIsManagement(false); setSelectedLead(lead); }}
-                                            className="flex-1 flex items-center justify-center gap-1 bg-white/5 hover:bg-white/10 text-white/50 hover:text-white text-[9px] font-semibold rounded-lg px-2 py-1.5 transition-colors"
-                                        >
-                                            <Eye size={9} /> VER
-                                        </button>
-                                        <button
-                                            onClick={() => { setIsManagement(false); setSelectedLead(lead); }}
-                                            className="flex-1 flex items-center justify-center gap-1 bg-amber-500/15 hover:bg-amber-500/30 text-amber-300 text-[9px] font-black rounded-lg px-2 py-1.5 transition-colors"
-                                        >
-                                            <Zap size={9} /> RETOMAR AGORA
-                                        </button>
-                                    </div>
-                                </div>
-                            );
-                        })}
-
-                        {/* 🟢 NÍVEL VERDE — Oportunidades do dia (só aparece sem alertas vermelhos) */}
-                        {dailyBrief && eliteAlerts.red.length === 0 && (
-                            <div className="flex-none bg-[#141418] border border-amber-500/10 rounded-xl px-3 py-2.5 min-w-[250px] max-w-[340px] flex flex-col">
-                                <div className="flex items-start gap-2 mb-1.5">
-                                    <Brain size={12} className="text-amber-400/70 mt-0.5 shrink-0" />
-                                    <div>
-                                        <p className="text-[9px] font-black text-amber-500/50 uppercase tracking-widest leading-none mb-0.5">IA HOJE</p>
-                                        <p className="text-[10px] font-semibold text-white/70 leading-snug">{dailyBrief.saudacao}</p>
-                                    </div>
-                                </div>
-                                {dailyBrief.prioridades.length > 0 && (
-                                    <div className="flex flex-col gap-0.5 flex-1">
-                                        {dailyBrief.prioridades.slice(0, 3).map((p, i) => (
-                                            <span key={i} className="text-[9px] text-white/40 leading-snug">
-                                                <span className="text-amber-500/40 mr-1">→</span>{p}
-                                            </span>
-                                        ))}
-                                    </div>
-                                )}
-                                {dailyBrief.aviso && (
-                                    <p className="text-[9px] text-red-400/60 mt-1.5 font-semibold leading-snug">⚠ {dailyBrief.aviso}</p>
-                                )}
-                            </div>
-                        )}
-
-                        {/* Botão de fechar — bloqueado se há alertas vermelhos */}
-                        <div className="flex-none flex items-start self-start ml-auto pl-1">
-                            <button
-                                onClick={() => {
-                                    if (eliteAlerts.red.length > 0) return;
-                                    setBriefDismissed(true);
-                                    const today = new Date().toISOString().split('T')[0];
-                                    sessionStorage.setItem(`brief_dismissed_${today}`, 'true');
-                                }}
-                                title={eliteAlerts.red.length > 0 ? 'Resolva as perdas críticas antes de fechar' : 'Minimizar'}
-                                className={`p-1.5 rounded-lg transition-colors ${
-                                    eliteAlerts.red.length > 0
-                                        ? 'text-red-500/30 cursor-not-allowed'
-                                        : 'text-white/20 hover:text-white/50 hover:bg-white/5'
-                                }`}
-                            >
-                                {eliteAlerts.red.length > 0 ? <Lock size={10} /> : <X size={10} />}
-                            </button>
-                        </div>
-
-                    </div>
-                </div>
-            )}
 
             {/* MAIN CONTENT AREA - NO DOUBLE SCROLLBARS */}
             <main className="flex-1 w-full overflow-hidden relative min-h-0">

@@ -34,7 +34,7 @@ export default function MarketingPageV2() {
     const [dailyReport, setDailyReport] = useState<MarketingReport | null>(null);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
-    const [dateFilter, setDateFilter] = useState('maximum');
+    const [dateFilter, setDateFilter] = useState('this_month');
     const [isSyncing, setIsSyncing] = useState(false);
     const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
     const [analyzingId, setAnalyzingId] = useState<string | null>(null);
@@ -275,7 +275,8 @@ export default function MarketingPageV2() {
                         <option value="yesterday">Ontem</option>
                         <option value="last_7d">7 Dias</option>
                         <option value="this_month">Este Mês</option>
-                        <option value="maximum">Total</option>
+                        <option value="last_month">Mês Passado</option>
+                        <option value="maximum">Tudo</option>
                     </select>
 
                     <div className="flex gap-1">

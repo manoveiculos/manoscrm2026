@@ -88,24 +88,70 @@ const item = {
 type Period = 'today' | 'week' | 'month' | 'all';
 type ViewTab = 'geral' | 'minha';
 
-function cutoffFor(period: Period): Date | null {
+function calculateDateRange(period: string, customStart?: string, customEnd?: string): { start: Date | null, end: Date | null } {
     const now = new Date();
-    if (period === 'today') {
-        const d = new Date(now); d.setHours(0, 0, 0, 0); return d;
+    const start = new Date(now);
+    let end: Date | null = null;
+
+    switch (period) {
+        case 'today':
+            start.setHours(0, 0, 0, 0);
+            break;
+        case 'week':
+            start.setDate(now.getDate() - 7);
+            start.setHours(0, 0, 0, 0);
+            break;
+        case 'month': // Este Mês (Calendário)
+            start.setDate(1);
+            start.setHours(0, 0, 0, 0);
+            break;
+        case 'lastMonth': // Mês Passado (Calendário)
+            start.setMonth(now.getMonth() - 1);
+            start.setDate(1);
+            start.setHours(0, 0, 0, 0);
+            end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+            break;
+        case 'custom':
+            if (customStart) {
+                const s = new Date(customStart);
+                s.setHours(0, 0, 0, 0);
+                var startOut: Date | null = s;
+            } else {
+                startOut = null;
+            }
+            if (customEnd) {
+                const e = new Date(customEnd);
+                e.setHours(23, 59, 59, 999);
+                var endOut: Date | null = e;
+            } else {
+                endOut = null;
+            }
+            return { start: startOut, end: endOut };
+        case 'year': // Este Ano
+            start.setMonth(0);
+            start.setDate(1);
+            start.setHours(0, 0, 0, 0);
+            break;
+        case 'all':
+            return { start: null, end: null };
+        default:
+            start.setDate(now.getDate() - 30);
+            start.setHours(0, 0, 0, 0);
     }
-    if (period === 'week') {
-        const d = new Date(now); d.setDate(d.getDate() - 7); return d;
-    }
-    if (period === 'month') {
-        const d = new Date(now); d.setDate(d.getDate() - 30); return d;
-    }
-    return null;
+
+    return { start, end };
 }
 
-function applyPeriod<T extends { created_at: string }>(items: T[], period: Period): T[] {
-    const cutoff = cutoffFor(period);
-    if (!cutoff) return items;
-    return items.filter(l => new Date(l.created_at) >= cutoff);
+function applyPeriod<T extends { created_at: string }>(items: T[], period: string, customStart?: string, customEnd?: string): T[] {
+    const { start, end } = calculateDateRange(period, customStart, customEnd);
+    if (!start && !end) return items;
+    
+    return items.filter(l => {
+        const d = new Date(l.created_at);
+        if (start && d < start) return false;
+        if (end && d > end) return false;
+        return true;
+    });
 }
 
 const supabase = createClient();
@@ -121,25 +167,27 @@ export default function AnalyticsV2() {
     const [role, setRole] = useState<'admin' | 'consultant'>('consultant');
     const [myConsultantId, setMyConsultantId] = useState<string | null>(null);
     const [myName, setMyName] = useState('');
-    const [period, setPeriod] = useState<Period>('month');
+    const [period, setPeriod] = useState<Period | 'custom'>('month');
     const [tab, setTab] = useState<ViewTab>('minha');
     const [isManagement, setIsManagement] = useState(false);
+    const [customStart, setCustomStart] = useState('');
+    const [customEnd, setCustomEnd] = useState('');
 
     useEffect(() => {
         async function load() {
             try {
-                const { data: { session } } = await supabase.auth.getSession();
-                if (!session?.user) return;
+                const { data: { user } } = await supabase.auth.getUser();
+                if (!user) return;
 
                 // CRITICAL: use consultants_manos_crm — same table that leads_manos_crm.assigned_consultant_id references
                 // Using 'consultants' (V2 table) would give a different UUID that doesn't match any lead assignment
                 const { data: consultant } = await supabase
                     .from('consultants_manos_crm')
                     .select('id, name, role, is_active')
-                    .eq('auth_id', session.user.id)
+                    .eq('auth_id', user.id)
                     .maybeSingle();
 
-                const isAdmin = session.user.email === 'alexandre_gorges@hotmail.com'
+                const isAdmin = user.email === 'alexandre_gorges@hotmail.com'
                     || consultant?.role === 'admin'
                     || consultant?.role === 'management';
 
@@ -148,19 +196,21 @@ export default function AnalyticsV2() {
                 if (isAdmin) setTab('geral');
 
                 if (consultant) {
-                    setMyName(consultant.name.split(' ')[0]);
+                    setMyName((consultant.name || 'Consultor').split(' ')[0]);
                     if (!isAdmin) setMyConsultantId(consultant.id);
                 }
 
-                // Load all data in parallel
-                // CRITICAL: use 'leads' VIEW (unified) not just leads_master — otherwise V1 leads (leads_manos_crm) are invisible
-                // 'consultants_manos_crm' is the table where assigned_consultant_id in leads_manos_crm points to
+                // Determinar a data de início para buscar do banco (baseada no período selecionado ou 365 dias para garantir ranking ano)
+                const fetchRange = calculateDateRange(period === 'all' ? 'year' : period);
+                const startDate = fetchRange.start || new Date(Date.now() - 365 * 24 * 60 * 60 * 1000);
+
                 const [leadsRes, consultantsRes] = await Promise.all([
                     supabase
                         .from('leads')
-                        .select('id, name, status, source, origem, ai_score, ai_classification, assigned_consultant_id, created_at, vehicle_interest, response_time_seconds')
+                        .select('id, status, source, origem, ai_score, ai_classification, assigned_consultant_id, created_at, vehicle_interest, response_time_seconds')
+                        .gte('created_at', startDate.toISOString())
                         .order('created_at', { ascending: false })
-                        .limit(3000),
+                        .limit(2000),
                     supabase
                         .from('consultants_manos_crm')
                         .select('id, name, role, is_active')
@@ -176,10 +226,10 @@ export default function AnalyticsV2() {
             }
         }
         load();
-    }, []);
+    }, [period]); // Re-fetch when period changes to ensure we have the data
 
     // ── Filtered datasets ────────────────────────────────────
-    const allPeriodLeads = useMemo(() => applyPeriod(leads, period), [leads, period]);
+    const allPeriodLeads = useMemo(() => applyPeriod(leads, period, customStart, customEnd), [leads, period, customStart, customEnd]);
 
     const myLeads = useMemo(() => {
         if (!myConsultantId) return allPeriodLeads;
@@ -314,10 +364,13 @@ export default function AnalyticsV2() {
     }
 
     const PERIODS = [
-        { value: 'today', label: 'Hoje' },
-        { value: 'week',  label: 'Semana' },
-        { value: 'month', label: 'Mês' },
-        { value: 'all',   label: 'Tudo' },
+        { value: 'today',     label: 'Hoje' },
+        { value: 'week',      label: '7 Dias' },
+        { value: 'month',     label: 'Este Mês' },
+        { value: 'lastMonth', label: 'Mês Passado' },
+        { value: 'custom',    label: 'Intervalo' },
+        { value: 'year',      label: 'Este Ano' },
+        { value: 'all',       label: 'Tudo' },
     ];
 
     return (
@@ -357,6 +410,28 @@ export default function AnalyticsV2() {
 
                 {/* Right: controls */}
                 <div className="flex items-center gap-2 flex-wrap">
+                    {period === 'custom' && (
+                        <motion.div 
+                            initial={{ opacity: 0, x: -10 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            className="flex items-center gap-1.5 bg-white/5 border border-white/10 p-1 rounded-xl"
+                        >
+                            <input 
+                                type="date" 
+                                value={customStart}
+                                onChange={(e) => setCustomStart(e.target.value)}
+                                className="bg-transparent border-none text-[9px] font-black text-white/50 outline-none uppercase p-1"
+                            />
+                            <span className="text-[9px] text-white/10 font-bold">A</span>
+                            <input 
+                                type="date" 
+                                value={customEnd}
+                                onChange={(e) => setCustomEnd(e.target.value)}
+                                className="bg-transparent border-none text-[9px] font-black text-white/50 outline-none uppercase p-1"
+                            />
+                        </motion.div>
+                    )}
+
                     {isManagement && (
                         <div className="flex items-center gap-0.5 bg-white/5 p-1 rounded-xl border border-white/10">
                             {(['geral', 'minha'] as ViewTab[]).map(t => (
@@ -379,7 +454,7 @@ export default function AnalyticsV2() {
                         {PERIODS.map(p => (
                             <button
                                 key={p.value}
-                                onClick={() => setPeriod(p.value as Period)}
+                                onClick={() => setPeriod(p.value as any)}
                                 className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${
                                     period === p.value
                                         ? 'bg-white/10 text-white'

@@ -27,6 +27,7 @@ export interface Lead {
   vendedor?: string;
   consultant_name?: string;
   primeiro_vendedor?: string;
+  cidade?: string;
   last_proposal_json?: {
     titulo: string;
     pitch: string;

@@ -3,6 +3,7 @@
 import React, { useRef, useState } from 'react';
 import { Lead, LeadStatus } from '@/lib/types';
 import { formatPhoneBR } from '@/lib/shared_utils/helpers';
+import { safeDisplayName, safeFirstName, safePhone, safeWhatsAppUrl, safeVendorFirstName } from '@/lib/shared_utils/safeLead';
 import { CarFront, Zap, Activity, Target, ChevronDown } from 'lucide-react';
 import { extractWhatsAppScript } from '@/lib/aiParser';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -49,12 +50,10 @@ export function LeadListV2({
 
     const handleQuickStrike = (e: React.MouseEvent, lead: Lead) => {
         e.stopPropagation();
-        const phone = lead.phone.replace(/\D/g, '');
-        if (phone.length >= 10) {
-            const script = lead.proxima_acao || lead.next_step || `Olá ${lead.name.split(' ')[0]}, tudo bem?`;
-            const extracted = extractWhatsAppScript(script) || script;
-            window.open(`https://wa.me/55${phone}?text=${encodeURIComponent(extracted)}`, '_blank');
-        }
+        const script = lead.proxima_acao || lead.next_step || `Olá ${safeFirstName(lead.name)}, tudo bem?`;
+        const extracted = extractWhatsAppScript(script) || script;
+        const url = safeWhatsAppUrl(lead.phone, extracted);
+        if (url) window.open(url, '_blank');
     };
 
     const getStatusStyle = (rawStatus: string) => {
@@ -85,8 +84,8 @@ export function LeadListV2({
                     const now = new Date();
                     const createdAt = new Date(lead.created_at);
                     const tempoFunilH = Math.max(0, (now.getTime() - createdAt.getTime()) / (1000 * 60 * 60));
-                    const aiScore = Number(lead.ai_score);
-                    const score = aiScore > 0 ? aiScore : calculateLeadScore({
+                    const aiScore = Number(lead.ai_score) || 0;
+                    const calculated = calculateLeadScore({
                         status: normalizeStatus(lead.status),
                         tempoFunilHoras: tempoFunilH,
                         totalInteracoes: 0,
@@ -94,6 +93,12 @@ export function LeadListV2({
                         temValorDefinido: !!lead.valor_investimento && lead.valor_investimento !== '0',
                         temVeiculoInteresse: !!lead.vehicle_interest && lead.vehicle_interest !== '---'
                     });
+                    
+                    // Se o status for perdido/vendido, usa o calculado (0/100). 
+                    // Caso contrário, se existir aiScore da IA, respeita ele.
+                    const score = (normalizeStatus(lead.status) === 'perdido' || normalizeStatus(lead.status) === 'vendido') 
+                        ? calculated 
+                        : (aiScore > 0 ? aiScore : calculated);
                     const info = getScoreLabel(score);
 
                     return (
@@ -118,7 +123,7 @@ export function LeadListV2({
                             <div className="flex-1 min-w-0">
                                 <div className="flex items-center justify-between gap-2 mb-0.5">
                                     <span className="text-[13px] font-semibold text-white/85 truncate">
-                                        {lead.name.split(' ')[0]}{lead.name.split(' ').length > 1 ? ' ' + lead.name.split(' ')[1][0] + '.' : ''}
+                                        {safeDisplayName(lead.name)}
                                     </span>
                                     <span
                                         className="shrink-0 inline-block px-2 py-0.5 rounded-md text-[9px] font-semibold uppercase tracking-wide"
@@ -128,19 +133,11 @@ export function LeadListV2({
                                     </span>
                                 </div>
                                 <div className="flex items-center gap-2 text-[11px] text-white/30 truncate">
-                                    <span className="tabular-nums shrink-0">{formatPhoneBR(lead.phone)}</span>
-                                    {(() => {
-                                        const vendorName = lead.vendedor || lead.consultant_name;
-                                        if (!vendorName) return null;
-                                        return (
-                                            <>
-                                                <span className="text-white/10 shrink-0">·</span>
-                                                <span className="text-blue-400/80 font-medium truncate">
-                                                    {vendorName.split(' ')[0]}
-                                                </span>
-                                            </>
-                                        );
-                                    })()}
+                                    <span className="tabular-nums shrink-0">{formatPhoneBR(safePhone(lead.phone))}</span>
+                                    <span className="text-white/10 shrink-0">·</span>
+                                    <span className="text-blue-400/80 font-medium truncate">
+                                        {lead.cidade || 'Não informado'}
+                                    </span>
                                     {lead.vehicle_interest && lead.vehicle_interest !== '---' && (
                                         <>
                                             <span className="text-white/10 shrink-0">·</span>
@@ -184,7 +181,7 @@ export function LeadListV2({
                                 <th className="px-4 py-3 text-[10px] font-semibold text-white/30 uppercase tracking-widest min-w-[180px]">Nome</th>
                                 <th className="px-4 py-3 text-[10px] font-semibold text-white/30 uppercase tracking-widest min-w-[140px]">Interesse</th>
                                 <th className="px-4 py-3 text-[10px] font-semibold text-white/30 uppercase tracking-widest w-32 text-center">Status</th>
-                                <th className="px-4 py-3 text-[10px] font-semibold text-white/30 uppercase tracking-widest w-32">Consultor</th>
+                                <th className="px-4 py-3 text-[10px] font-semibold text-white/30 uppercase tracking-widest w-32">Cidade</th>
                                 <th className="px-4 py-3 text-[10px] font-semibold text-white/30 uppercase tracking-widest w-28">Origem</th>
                                 <th className="px-4 py-3 text-[10px] font-semibold text-white/30 uppercase tracking-widest w-24">Score</th>
                                 <th className="px-4 py-3 text-[10px] font-semibold text-white/30 uppercase tracking-widest w-32 text-right">Data/Hora</th>
@@ -196,8 +193,8 @@ export function LeadListV2({
                                 const now = new Date();
                                 const createdAt = new Date(lead.created_at);
                                 const tempoFunilH = Math.max(0, (now.getTime() - createdAt.getTime()) / (1000 * 60 * 60));
-                                const aiScore = Number(lead.ai_score);
-                                const score = aiScore > 0 ? aiScore : calculateLeadScore({
+                                const aiScore = Number(lead.ai_score) || 0;
+                                const calculated = calculateLeadScore({
                                     status: normalizeStatus(lead.status),
                                     tempoFunilHoras: tempoFunilH,
                                     totalInteracoes: 0,
@@ -205,6 +202,10 @@ export function LeadListV2({
                                     temValorDefinido: !!lead.valor_investimento && lead.valor_investimento !== '0',
                                     temVeiculoInteresse: !!lead.vehicle_interest && lead.vehicle_interest !== '---'
                                 });
+
+                                const score = (normalizeStatus(lead.status) === 'perdido' || normalizeStatus(lead.status) === 'vendido') 
+                                    ? calculated 
+                                    : (aiScore > 0 ? aiScore : calculated);
                                 const info = getScoreLabel(score);
 
                                 return (
@@ -230,11 +231,11 @@ export function LeadListV2({
                                         <td className="px-4 py-3">
                                             <div className="flex flex-col gap-0.5">
                                                 <span className="text-[13px] font-semibold text-white/85 group-hover:text-white transition-colors truncate">
-                                                    {lead.name.split(' ')[0]}{lead.name.split(' ').length > 1 ? ' ' + lead.name.split(' ')[1][0] + '.' : ''}
+                                                    {safeDisplayName(lead.name)}
                                                 </span>
                                                 <div className="flex items-center gap-2">
                                                     <span className="text-[11px] text-white/30 tabular-nums">
-                                                        {formatPhoneBR(lead.phone)}
+                                                        {formatPhoneBR(safePhone(lead.phone))}
                                                     </span>
                                                     {(() => {
                                                         const reason = getLeadUnqualifiedReason(lead);
@@ -282,62 +283,9 @@ export function LeadListV2({
                                             </div>
                                         </td>
                                         <td className="px-4 py-3">
-                                            {role === 'admin' ? (
-                                                <div className="relative">
-                                                    <button 
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            setActiveConsultantMenu(activeConsultantMenu === lead.id ? null : lead.id);
-                                                        }}
-                                                        className="flex items-center gap-1.5 text-[11px] text-white/50 hover:text-white transition-colors group/cons"
-                                                    >
-                                                        <span className="truncate block max-w-[110px]">
-                                                            {lead.vendedor || lead.consultant_name || lead.primeiro_vendedor || '—'}
-                                                        </span>
-                                                        <ChevronDown size={10} className="text-white/20 group-hover/cons:text-white/50 transition-colors" />
-                                                    </button>
-                                                    
-                                                    <AnimatePresence>
-                                                        {activeConsultantMenu === lead.id && (
-                                                            <>
-                                                                <div 
-                                                                    className="fixed inset-0 z-[100]" 
-                                                                    onClick={(e) => { e.stopPropagation(); setActiveConsultantMenu(null); }} 
-                                                                />
-                                                                <motion.div
-                                                                    initial={{ opacity: 0, y: 5, scale: 0.95 }}
-                                                                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                                                                    exit={{ opacity: 0, y: 5, scale: 0.95 }}
-                                                                    className="absolute left-0 mt-2 w-48 bg-[#1A1A20] border border-white/10 rounded-xl shadow-2xl p-1.5 z-[110] overflow-hidden"
-                                                                    onClick={(e) => e.stopPropagation()}
-                                                                >
-                                                                    <div className="max-h-60 overflow-y-auto custom-scrollbar space-y-0.5">
-                                                                        {consultants.map(c => (
-                                                                            <button
-                                                                                key={c.id}
-                                                                                onClick={() => {
-                                                                                    onConsultantChange?.(lead.id, c.id);
-                                                                                    setActiveConsultantMenu(null);
-                                                                                }}
-                                                                                className="w-full text-left px-3 py-2 rounded-lg text-[11px] text-white/60 hover:bg-white/5 hover:text-white transition-all flex items-center justify-between group/opt"
-                                                                            >
-                                                                                {c.name}
-                                                                                {(lead.assigned_consultant_id === c.id || lead.primeiro_vendedor === c.name) && (
-                                                                                    <div className="w-1 h-1 rounded-full bg-red-500" />
-                                                                                )}
-                                                                            </button>
-                                                                        ))}
-                                                                    </div>
-                                                                </motion.div>
-                                                            </>
-                                                        )}
-                                                    </AnimatePresence>
-                                                </div>
-                                            ) : (
-                                                <span className="text-[11px] text-white/50 truncate block max-w-[110px]">
-                                                    {lead.vendedor || lead.consultant_name || lead.primeiro_vendedor || '—'}
-                                                </span>
-                                            )}
+                                            <span className="text-[11px] text-white/50 truncate block max-w-[110px]">
+                                                {lead.cidade || 'Não informado'}
+                                            </span>
                                         </td>
                                         <td className="px-4 py-3">
                                             <span className="text-[11px] text-white/40 uppercase tracking-tighter truncate block max-w-[100px]">

@@ -106,14 +106,12 @@ export const TacticalAction: React.FC<TacticalActionProps> = ({
                         Próxima ação IA
                     </span>
                 </div>
-                <button
-                    onClick={recalculateStrategy}
-                    disabled={isAnalyzing}
-                    className="flex items-center gap-1.5 text-[10px] text-white/30 hover:text-white/60 transition-colors disabled:opacity-40"
-                >
-                    <Sparkles size={11} className={isAnalyzing ? 'animate-spin' : ''} />
-                    {isAnalyzing ? loadingMessage : 'Recalcular'}
-                </button>
+                {isAnalyzing && (
+                    <span className="flex items-center gap-1.5 text-[10px] text-white/30">
+                        <Sparkles size={11} className="animate-spin" />
+                        {loadingMessage}
+                    </span>
+                )}
             </div>
 
             {/* Texto da ação — estado de loading ou texto real */}
@@ -177,24 +175,19 @@ export const TacticalAction: React.FC<TacticalActionProps> = ({
                 <ChevronRight size={15} className="text-white/20 group-hover:text-white/50 transition-colors" />
             </button>
 
-            <button
-                onClick={gerarProposta}
-                disabled={propostaLoading}
-                className="w-full flex items-center gap-3 px-4 py-3.5 hover:bg-white/[0.04] transition-colors group disabled:opacity-50"
-            >
-                <div className="h-8 w-8 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center shrink-0">
-                    <FileText size={14} className={`text-blue-400 ${propostaLoading ? 'animate-pulse' : ''}`} />
+            {/* Botão de proposta: só aparece como link discreto "Regerar" quando já existe cache, ou como loading */}
+            {(propostaLoading || propostaFromCache) && (
+                <div className="flex items-center justify-end px-4 py-2 border-t border-white/[0.03]">
+                    <button
+                        onClick={gerarProposta}
+                        disabled={propostaLoading}
+                        className="flex items-center gap-1.5 text-[10px] text-blue-400/50 hover:text-blue-300 transition-colors disabled:opacity-40"
+                    >
+                        <FileText size={10} className={propostaLoading ? 'animate-pulse' : ''} />
+                        {propostaLoading ? 'Gerando proposta…' : 'Regerar proposta'}
+                    </button>
                 </div>
-                <div className="flex-1 text-left">
-                    <p className="text-[13px] font-medium text-white/75">
-                        {propostaLoading ? 'Gerando proposta…' : propostaFromCache ? 'Regerar proposta' : 'Gerar proposta'}
-                    </p>
-                    <p className="text-[11px] text-white/30">
-                        {propostaFromCache ? 'Proposta em cache — clique para nova' : '3 cenários de financiamento com IA'}
-                    </p>
-                </div>
-                <ChevronRight size={15} className="text-white/20 group-hover:text-white/50 transition-colors" />
-            </button>
+            )}
         </div>
 
         {/* ── SCRIPTS PRONTOS — gerados pelo Elite Closer após Recalcular ── */}
