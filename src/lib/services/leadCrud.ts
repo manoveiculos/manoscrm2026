@@ -9,7 +9,7 @@ import { sendMetaConversion } from '@/lib/meta-service';
 /**
  * SERVIÇO DE CRUD DE LEADS
  */
-const LEAN_COLS = 'id,name,phone,email,source,origem,status,ai_score,ai_classification,ai_summary,vehicle_interest,assigned_consultant_id,created_at,updated_at,vendedor,proxima_acao,valor_investimento,observacoes,carro_troca,region,source_table,primeiro_vendedor,nivel_interesse,momento_compra';
+const LEAN_COLS = 'id,name,phone,email,source,origem,status,ai_score,ai_classification,ai_summary,vehicle_interest,assigned_consultant_id,created_at,updated_at,vendedor,proxima_acao,valor_investimento,observacoes,carro_troca,region,source_table,primeiro_vendedor';
 
 export async function getLeads(consultantId?: string, leadId?: string) {
     const cacheKey = `leads_${consultantId || 'all'}_${leadId || 'none'}`;
