@@ -32,10 +32,8 @@ const App = {
         // Inicializar UI
         UI.init();
 
-        // Restaurar badge de leads pendentes do storage (persistência entre reloads)
-        if (s.pendingLeads?.length) {
-            UI.renderPendingLeads(s.pendingLeads);
-        }
+        // Não restaurar cache antigo — esperar poll fresco do background
+        UI.renderPendingLeads([]);
 
         // Observar mudanças de chat
         Observers.watchChatChange(() => this.handleChatChange());

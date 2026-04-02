@@ -488,14 +488,20 @@ const UI = {
         
         overlay.classList.add('open');
         overlay.querySelector('#am-status').textContent = 'Carregando consultores...';
-        
+
         try {
-            // Chamar API de consultores (pode estar no App ou ser global)
-            // Aqui assumimos que App._apiFetch está disponível ou usamos fetch direto de forma segura via background
             document.dispatchEvent(new CustomEvent('manos-load-consultants', { detail: { overlay } }));
-            
+
             const s = await chrome.storage.local.get(['consultantId', 'consultantName']);
-            this._populateConsultants(overlay, s.consultantId);
+            // Validar se consultantId é UUID válido (versão antiga salvava nome como texto)
+            const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+            const validId = s.consultantId && UUID_RE.test(s.consultantId) ? s.consultantId : null;
+            if (!validId && s.consultantId) {
+                // Limpar storage antigo com nome em vez de UUID
+                console.warn('Manos CRM: consultantId inválido (nome antigo), limpando...');
+                await chrome.storage.local.remove(['consultantId', 'pendingLeads', 'pendingLeadsCount']);
+            }
+            this._populateConsultants(overlay, validId);
         } catch (e) {
             console.error('Erro ao abrir auth:', e);
         }

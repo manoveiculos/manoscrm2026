@@ -3,22 +3,28 @@
  * Handles: API proxying, chrome.alarms for new-leads polling, tab management
  */
 
+// Regex para validar UUID
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 chrome.runtime.onInstalled.addListener(() => {
     console.log("Manos CRM v2.1 Ready!");
     chrome.alarms.create('poll-new-leads', { periodInMinutes: 1 });
+    // Limpar cache antigo de leads ao instalar/atualizar
+    chrome.storage.local.remove(['pendingLeads', 'pendingLeadsCount']);
 });
 
 // Restart alarm after service worker wakeup
 chrome.alarms.create('poll-new-leads', { periodInMinutes: 1 });
 
-// ─── Alarm: Poll new leads every 60s ──────────────────
-chrome.alarms.onAlarm.addListener(async (alarm) => {
-    if (alarm.name !== 'poll-new-leads') return;
+// ─── Função de poll reutilizável ─────────────────────
+async function pollNewLeads() {
     const { crmToken, consultantId } = await chrome.storage.local.get(['crmToken', 'consultantId']);
 
-    // Sempre filtra por vendedor — cada um vê só os seus leads
     let url = 'https://manoscrm.com.br/api/extension/kanban';
-    if (consultantId) url += `?consultantId=${consultantId}`;
+    // Só envia consultantId se for UUID válido (não nome/texto antigo)
+    if (consultantId && UUID_RE.test(consultantId)) {
+        url += `?consultantId=${consultantId}`;
+    }
     const headers = crmToken ? { 'Authorization': `Bearer ${crmToken}` } : {};
 
     try {
@@ -41,6 +47,12 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     } catch (e) {
         console.warn("Manos CRM poll error:", e.message);
     }
+}
+
+// ─── Alarm: Poll new leads every 60s ──────────────────
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+    if (alarm.name !== 'poll-new-leads') return;
+    await pollNewLeads();
 });
 
 // ─── Message handler ──────────────────────────────────
@@ -67,7 +79,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 console.error("Fetch background error:", e);
                 sendResponse({ success: false, error: e.name === 'AbortError' ? 'Timeout' : e.message });
             });
-        return true; 
+        return true;
     }
 
     // --- Open new tab for creating a lead in the CRM ---
@@ -77,12 +89,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return false;
     }
 
-    // --- Force poll immediately ---
+    // --- Force poll immediately (não espera 60s) ---
     if (request.type === 'POLL_NOW') {
-        chrome.alarms.get('poll-new-leads', (alarm) => {
-            if (!alarm) chrome.alarms.create('poll-new-leads', { periodInMinutes: 1 });
-            sendResponse({ success: true });
-        });
+        pollNewLeads().then(() => sendResponse({ success: true })).catch(() => sendResponse({ success: false }));
         return true;
     }
 
