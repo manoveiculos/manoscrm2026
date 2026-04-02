@@ -145,7 +145,7 @@ export const InfoGrid: React.FC<InfoGridProps> = ({ lead, isAdmin, onSave, calcu
             <EditableRow
                 icon={MapPin}
                 label="Cidade"
-                value={lead.cidade || 'Não informado'}
+                value={lead.cidade || lead.region || 'Não informado'}
                 field="cidade"
                 isAdmin={isAdmin}
                 onSave={onSave}

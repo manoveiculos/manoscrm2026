@@ -26,6 +26,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
 import { UserProfileModal } from '@/components/UserProfileModal'; // using existing profile modal
 import { useAIAlerts } from '@/hooks/useAIAlerts';
+import { NotificationBell } from '@/components/v2/NotificationBell';
 
 interface NavItem {
     label: string;
@@ -232,6 +233,11 @@ export const NavigationV2 = () => {
                     );
                 })}
 
+            </div>
+
+            {/* Sininho de Notificação de Novos Leads */}
+            <div className={`w-full ${isCollapsed ? 'px-2' : 'px-3'} py-1`}>
+                <NotificationBell isCollapsed={isCollapsed} role={role} />
             </div>
 
             <div className={`mt-auto w-full ${isCollapsed ? 'px-2' : 'px-3'} pt-4 border-t border-white/[0.06] pb-4`}>

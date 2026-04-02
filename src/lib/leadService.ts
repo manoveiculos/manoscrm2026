@@ -150,8 +150,14 @@ export const leadService = {
                 count = res.count;
             }
 
+            // Mapeia 'region' (da VIEW) → 'cidade' (usado no frontend)
+            const leads = (data || []).map((l: any) => ({
+                ...l,
+                cidade: l.cidade || l.region || null,
+            })) as Lead[];
+
             const result = {
-                leads: (data || []) as Lead[],
+                leads,
                 totalCount: count || 0
             };
 

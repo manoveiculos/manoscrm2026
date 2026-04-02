@@ -32,6 +32,7 @@ interface DashboardTabProps {
     calcularDiffHoras: (date: string) => number;
     onSaveField: (field: string, value: string) => Promise<void>;
     scriptOptions?: { tipo: string; label: string; mensagem: string }[];
+    aiStale?: boolean;
 }
 
 export const DashboardTab: React.FC<DashboardTabProps> = ({
@@ -61,6 +62,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
     calcularDiffHoras,
     onSaveField,
     scriptOptions = [],
+    aiStale = false,
 }) => {
     // ── TELA DE CONCLUSÃO DE MISSÃO (estilo poker app) ──
     if (showFinishing) {
@@ -214,6 +216,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                 onTabChange={onTabChange}
                 fallbackAction={getAcaoTaticaFallback(lead)}
                 scriptOptions={scriptOptions}
+                aiStale={aiStale}
             />
 
             {/* ── RISCO DE CHURN ── (exibe quando churn > 0) */}

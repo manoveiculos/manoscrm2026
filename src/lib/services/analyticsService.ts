@@ -162,7 +162,7 @@ export async function getCampaigns() {
 
     const { data, error } = await supabase
         .from('campaigns_manos_crm')
-        .select('id, name, platform, status, total_spend, meta_results, updated_at')
+        .select('id, name, platform, status, total_spend, meta_results, impressions, link_clicks, reach, cpc, ctr, cpm, frequency, updated_at')
         .order('name');
 
     if (error) {

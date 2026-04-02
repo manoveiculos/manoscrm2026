@@ -14,9 +14,11 @@ chrome.alarms.create('poll-new-leads', { periodInMinutes: 1 });
 // ─── Alarm: Poll new leads every 60s ──────────────────
 chrome.alarms.onAlarm.addListener(async (alarm) => {
     if (alarm.name !== 'poll-new-leads') return;
-    const { crmToken } = await chrome.storage.local.get(['crmToken']);
+    const { crmToken, consultantId } = await chrome.storage.local.get(['crmToken', 'consultantId']);
 
-    const url = 'https://manoscrm.com.br/api/extension/kanban';
+    // Sempre filtra por vendedor — cada um vê só os seus leads
+    let url = 'https://manoscrm.com.br/api/extension/kanban';
+    if (consultantId) url += `?consultantId=${consultantId}`;
     const headers = crmToken ? { 'Authorization': `Bearer ${crmToken}` } : {};
 
     try {
@@ -25,10 +27,10 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
         const data = await res.json();
         if (!data.success) return;
 
-        // Count received/new leads (pending first contact)
+        // Count received/new/entrada leads (pending first contact)
         const kanban = data.kanban || {};
-        const count = (kanban['received'] || []).length + (kanban['new'] || []).length;
-        const leads = [...(kanban['received'] || []), ...(kanban['new'] || [])];
+        const count = (kanban['received'] || []).length + (kanban['new'] || []).length + (kanban['entrada'] || []).length;
+        const leads = [...(kanban['received'] || []), ...(kanban['new'] || []), ...(kanban['entrada'] || [])];
 
         // Store and notify all WhatsApp tabs
         await chrome.storage.local.set({ pendingLeadsCount: count, pendingLeads: leads });

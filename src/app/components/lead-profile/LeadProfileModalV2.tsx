@@ -142,7 +142,13 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
         if (activeTab === 'arsenal') fetchInventory();
     }, [activeTab, supabase]);
 
-    // Auto-trigger análise IA ao abrir aba Geral se análise stale (> 8h) e lead tem WhatsApp
+    // Cache-first: exibe análise salva imediatamente.
+    // IA roda automaticamente APENAS em 2 casos:
+    //   1. Lead nunca analisado (primeira vez)
+    //   2. Lead teve alteração desde a última análise (updated_at > last_scripts_at)
+    // Fora desses casos, zero chamadas de API — sempre cache.
+    const [aiStale, setAiStale] = useState(false);
+
     useEffect(() => {
         if (
             activeTab !== 'dashboard' ||
@@ -151,16 +157,27 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
             !lead.phone
         ) return;
 
-        const lastUpdate = new Date(lead.updated_at || lead.created_at).getTime();
-        const hoursStale = (Date.now() - lastUpdate) / 3_600_000;
+        const nuncaAnalisado = !lead.next_step && !lead.ai_reason;
 
-        // Só dispara se análise for antiga (> 8h) ou nunca foi feita
-        if (hoursStale > 8 || !lead.next_step) {
+        if (nuncaAnalisado) {
+            // Primeira vez no CRM: dispara IA automaticamente
             hasAutoTriggered.current = true;
-            // Pequeno delay para o modal terminar de abrir antes de disparar
             const timer = setTimeout(() => recalculateStrategy(), 1200);
             return () => clearTimeout(timer);
         }
+
+        // Lead já analisado: verifica se houve alteração desde a última análise
+        const lastAnalysis = lead.last_scripts_at ? new Date(lead.last_scripts_at).getTime() : 0;
+        const lastUpdate = new Date(lead.updated_at || lead.created_at).getTime();
+        if (lastAnalysis > 0 && lastUpdate > lastAnalysis) {
+            // Houve alteração no lead → recalcula scripts automaticamente
+            setAiStale(true);
+            hasAutoTriggered.current = true;
+            const timer = setTimeout(() => recalculateStrategy(), 1500);
+            return () => clearTimeout(timer);
+        }
+        // Sem alteração → exibe cache, zero chamadas
+        hasAutoTriggered.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [activeTab]);
 
@@ -670,6 +687,7 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
                                             calcularDiffHoras={calcularDiffHoras}
                                             onSaveField={handleSaveField}
                                             scriptOptions={scriptOptions}
+                                            aiStale={aiStale}
                                         />
                                     )}
                                     {activeTab === 'timeline' && (

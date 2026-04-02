@@ -26,6 +26,7 @@ interface TacticalActionProps {
     onTabChange: (tab: 'dashboard' | 'timeline' | 'followup' | 'arsenal') => void;
     fallbackAction: { emoji: string; titulo: string; descricao: string };
     scriptOptions?: ScriptOpt[];
+    aiStale?: boolean;
 }
 
 export const TacticalAction: React.FC<TacticalActionProps> = ({
@@ -36,6 +37,7 @@ export const TacticalAction: React.FC<TacticalActionProps> = ({
     onTabChange,
     fallbackAction,
     scriptOptions = [],
+    aiStale = false,
 }) => {
     const isAnalyzing = loadingStatus !== 'idle';
     const loadingMessage = 
@@ -106,12 +108,20 @@ export const TacticalAction: React.FC<TacticalActionProps> = ({
                         Próxima ação IA
                     </span>
                 </div>
-                {isAnalyzing && (
+                {isAnalyzing ? (
                     <span className="flex items-center gap-1.5 text-[10px] text-white/30">
                         <Sparkles size={11} className="animate-spin" />
                         {loadingMessage}
                     </span>
-                )}
+                ) : aiStale ? (
+                    <button
+                        onClick={recalculateStrategy}
+                        className="flex items-center gap-1.5 text-[10px] text-amber-400 hover:text-amber-300 transition-colors cursor-pointer"
+                    >
+                        <Sparkles size={11} />
+                        Atualização disponível
+                    </button>
+                ) : null}
             </div>
 
             {/* Texto da ação — estado de loading ou texto real */}

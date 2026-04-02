@@ -136,7 +136,7 @@ export function LeadListV2({
                                     <span className="tabular-nums shrink-0">{formatPhoneBR(safePhone(lead.phone))}</span>
                                     <span className="text-white/10 shrink-0">·</span>
                                     <span className="text-blue-400/80 font-medium truncate">
-                                        {lead.cidade || 'Não informado'}
+                                        {lead.cidade || lead.region || 'Não informado'}
                                     </span>
                                     {lead.vehicle_interest && lead.vehicle_interest !== '---' && (
                                         <>
@@ -181,7 +181,7 @@ export function LeadListV2({
                                 <th className="px-4 py-3 text-[10px] font-semibold text-white/30 uppercase tracking-widest min-w-[180px]">Nome</th>
                                 <th className="px-4 py-3 text-[10px] font-semibold text-white/30 uppercase tracking-widest min-w-[140px]">Interesse</th>
                                 <th className="px-4 py-3 text-[10px] font-semibold text-white/30 uppercase tracking-widest w-32 text-center">Status</th>
-                                <th className="px-4 py-3 text-[10px] font-semibold text-white/30 uppercase tracking-widest w-32">Cidade</th>
+                                <th className="px-4 py-3 text-[10px] font-semibold text-white/30 uppercase tracking-widest w-32">Consultor</th>
                                 <th className="px-4 py-3 text-[10px] font-semibold text-white/30 uppercase tracking-widest w-28">Origem</th>
                                 <th className="px-4 py-3 text-[10px] font-semibold text-white/30 uppercase tracking-widest w-24">Score</th>
                                 <th className="px-4 py-3 text-[10px] font-semibold text-white/30 uppercase tracking-widest w-32 text-right">Data/Hora</th>
@@ -283,9 +283,47 @@ export function LeadListV2({
                                             </div>
                                         </td>
                                         <td className="px-4 py-3">
-                                            <span className="text-[11px] text-white/50 truncate block max-w-[110px]">
-                                                {lead.cidade || 'Não informado'}
-                                            </span>
+                                            <div className="relative">
+                                                {role === 'admin' && consultants.length > 0 ? (
+                                                    <>
+                                                        <button
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                setActiveConsultantMenu(activeConsultantMenu === lead.id ? null : lead.id);
+                                                            }}
+                                                            className="text-[11px] text-white/50 truncate block max-w-[110px] hover:text-white/80 transition-colors flex items-center gap-1"
+                                                        >
+                                                            {lead.vendedor || lead.primeiro_vendedor || '—'}
+                                                            <ChevronDown size={10} className="text-white/30 shrink-0" />
+                                                        </button>
+                                                        {activeConsultantMenu === lead.id && (
+                                                            <div className="absolute z-50 top-full left-0 mt-1 bg-[#1a1a1e] border border-white/10 rounded-lg shadow-xl py-1 min-w-[160px] max-h-[200px] overflow-y-auto">
+                                                                {consultants.map((c) => (
+                                                                    <button
+                                                                        key={c.id}
+                                                                        onClick={(e) => {
+                                                                            e.stopPropagation();
+                                                                            onConsultantChange?.(lead.id, c.id);
+                                                                            setActiveConsultantMenu(null);
+                                                                        }}
+                                                                        className={`w-full text-left px-3 py-1.5 text-[11px] transition-colors ${
+                                                                            lead.assigned_consultant_id === c.id
+                                                                                ? 'text-emerald-400 bg-emerald-400/10'
+                                                                                : 'text-white/60 hover:bg-white/[0.06] hover:text-white/90'
+                                                                        }`}
+                                                                    >
+                                                                        {c.name}
+                                                                    </button>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                    </>
+                                                ) : (
+                                                    <span className="text-[11px] text-white/50 truncate block max-w-[110px]">
+                                                        {lead.vendedor || lead.primeiro_vendedor || '—'}
+                                                    </span>
+                                                )}
+                                            </div>
                                         </td>
                                         <td className="px-4 py-3">
                                             <span className="text-[11px] text-white/40 uppercase tracking-tighter truncate block max-w-[100px]">

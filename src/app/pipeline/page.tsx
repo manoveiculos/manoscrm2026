@@ -533,16 +533,10 @@ function PipelineContent() {
             const consultant = consultants.find(c => c.id === newConsultantId);
             const previousConsultantId = leads.find(l => l.id === leadId)?.assigned_consultant_id;
 
-            const { error } = await supabase
-                .from('leads_manos_crm')
-                .update({
-                    assigned_consultant_id: newConsultantId,
-                    primeiro_vendedor: consultant?.name,
-                    updated_at: new Date().toISOString()
-                })
-                .eq('id', leadId);
-
-            if (error) throw error;
+            await leadService.updateLeadDetails(supabase, leadId, {
+                assigned_consultant_id: newConsultantId,
+                primeiro_vendedor: consultant?.name
+            });
 
             setLeads(prev => prev.map(l => l.id === leadId ? {
                 ...l,

@@ -194,7 +194,7 @@ export const LeadCardV2: React.FC<LeadCardV2Props> = ({
                                         {tempoInteiro}
                                     </span>
                                     <span className="text-[9px] font-medium text-blue-400 bg-blue-400/10 border border-blue-400/20 px-1 py-px rounded leading-none">
-                                        {lead.cidade || 'Não informado'}
+                                        {lead.cidade || lead.region || 'Não informado'}
                                     </span>
                                 </div>
                             </div>
