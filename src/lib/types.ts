@@ -65,18 +65,18 @@ export interface Lead {
   name: string;
   phone: string;
   email?: string;
-  source: string;
+  source?: string;
   origem?: string;
   campaign_id?: string;
   creative_id?: string;
-  vehicle_interest: string;
+  vehicle_interest?: string;
   region?: string;
   estimated_ticket?: number;
   ai_score?: number;
   motivo_perda?: string;
   resumo_fechamento?: string;
-  ai_classification: AIClassification;
-  status: LeadStatus;
+  ai_classification?: AIClassification;
+  status?: LeadStatus;
   assigned_consultant_id?: string;
   assigned_at?: string;
   first_contact_at?: string;
@@ -87,8 +87,8 @@ export interface Lead {
   utm_content?: string;
   utm_term?: string;
   duplicate_id?: string;
-  created_at: string;
-  updated_at: string;
+  created_at?: string;
+  updated_at?: string;
 
   // Meta Leads PT-BR
   id_meta?: string;
@@ -136,6 +136,7 @@ export interface Lead {
   integration_priority?: number;
   pipeline_id?: string;
   cidade?: string;
+  resumo?: string;
 }
 
 export interface InventoryItem {

@@ -21,6 +21,7 @@ import {
     Database, // Icone para Nutrição/Banco de Dados
     SlidersHorizontal, // Calibração da IA
     DollarSign,
+    Radar, // Radar de Tráfego
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
@@ -49,6 +50,7 @@ const NAV_ITEMS: NavItem[] = [
     { label: 'Faturamento de Crédito', icon: DollarSign, href: '/admin/cobranca', adminOnly: true },
     { label: 'Gerenciar Equipe', icon: Shield, href: '/admin/equipe', adminOnly: true },
     { label: 'Cowork IA', icon: Bot, href: '/admin/cowork', adminOnly: true },
+    { label: 'Radar de Tráfego', icon: Radar, href: '/admin/trafego', adminOnly: true },
     { label: 'Calibração da IA', icon: SlidersHorizontal, href: '/admin/ai-calibration', adminOnly: true },
 ];
 

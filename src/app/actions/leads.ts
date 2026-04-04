@@ -15,7 +15,7 @@ export async function updateLeadStatusAction(
     motivo_perda?: string,
     resumo_fechamento?: string
 ) {
-    console.log('DEBUG: Status recebido no updateLeadStatus (SERVER ACTION):', status);
+    // DEBUG: Remoção conforme solicitado na auditoria final
 
     const adminClient = createClient();
     dataService.setClient(adminClient);
@@ -45,12 +45,16 @@ export async function updateLeadStatusAction(
         targetStatus = 'lost_redistributed' as any;
 
         try {
-            const { data: currentLead } = await adminClient.from(table).select('*, consultants(name)').eq('id', realId).single();
+            const { data: currentLead } = await adminClient
+                .from(table)
+                .select('id, dados_brutos, assigned_consultant_id, vendedor, consultants(name)')
+                .eq('id', realId)
+                .single();
 
             const meta = {
                 ...(currentLead?.dados_brutos || {}),
                 previous_consultant_id: currentLead?.assigned_consultant_id || currentLead?.vendedor,
-                previous_consultant_name: currentLead?.consultants?.name || currentLead?.vendedor || 'Desconhecido',
+                previous_consultant_name: (currentLead?.consultants as any)?.[0]?.name || currentLead?.vendedor || 'Desconhecido',
                 lost_at: new Date().toISOString(),
                 redistribution_eligible_at: new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString(),
                 motivo_perda: motivo_perda || 'Não especificado'
@@ -90,7 +94,7 @@ export async function updateLeadStatusAction(
                     );
                 }
             } catch (err) {
-                console.error("Erro ao registrar history de redistribuição:", err);
+                // Erro silencioso
             }
 
             // Trigger Meta Disqualification event
@@ -169,7 +173,6 @@ export async function updateLeadStatusAction(
         // --- FALLBACK 2: Transição V1 <-> V2 (UUIDs sem prefixo ou com prefixo trocado) ---
         else if (table === 'leads_master' || table === 'leads_manos_crm') {
             const otherTable = table === 'leads_master' ? 'leads_manos_crm' : 'leads_master';
-            console.log(`[updateLeadStatusAction] Tentando fallback na tabela secundária: ${otherTable}`);
             
             const { error: fError, data: fData } = await adminClient
                 .from(otherTable)
@@ -180,7 +183,6 @@ export async function updateLeadStatusAction(
             if (fError || !fData || fData.length === 0) {
                 throw new Error(`Falha ao persistir status do lead ${leadId}. O registro não foi encontrado em nenhuma tabela compatível (Master ou Manos).`);
             }
-            console.log(`[updateLeadStatusAction] Sucesso no fallback (tabela: ${otherTable})`);
         } else {
             throw new Error(`Falha ao persistir status do lead ${leadId}. O registro pode ter sido excluído.`);
         }
@@ -189,7 +191,11 @@ export async function updateLeadStatusAction(
     // DISPATCH META CONVERSION
     if (table === 'leads_manos_crm' || table === 'leads_distribuicao_crm_26') {
         try {
-            const { data: leadData } = await adminClient.from(table).select('*').eq('id', realId).single();
+            const { data: leadData } = await adminClient
+                .from(table)
+                .select('id, phone, telefone, status')
+                .eq('id', realId)
+                .single();
             if (leadData && (leadData.phone || leadData.telefone)) {
                 let eventName: string | null = null;
                 let extraData: any = undefined;

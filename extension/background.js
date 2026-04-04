@@ -66,13 +66,31 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         fetch(request.url, { ...(request.options || {}), signal: ctrl.signal })
             .then(async res => {
                 clearTimeout(t);
+                
+                const contentType = res.headers.get('content-type');
+                const isJson = contentType && contentType.includes('application/json');
+
                 if (!res.ok) {
                     let err = `HTTP ${res.status}`;
-                    try { const j = await res.json(); err = j.error || j.message || err; } catch (_) {}
+                    try {
+                        if (isJson) {
+                            const j = await res.json();
+                            err = j.error || j.message || err;
+                        } else {
+                            const text = await res.text();
+                            err = text.slice(0, 100) || err;
+                        }
+                    } catch (_) {}
                     return sendResponse({ success: false, error: err });
                 }
-                const data = await res.json();
-                sendResponse({ success: true, data });
+
+                if (isJson) {
+                    const data = await res.json();
+                    sendResponse({ success: true, data });
+                } else {
+                    const text = await res.text();
+                    sendResponse({ success: false, error: "Response is not JSON", raw: text.slice(0, 200) });
+                }
             })
             .catch(e => {
                 clearTimeout(t);

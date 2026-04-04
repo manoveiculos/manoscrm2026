@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Manos CRM – WhatsApp Extension",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Manos CRM v2 – 4 botões nativos no WhatsApp: Lead, Kanban, Config e Novos Leads.",
   "permissions": [
     "storage",

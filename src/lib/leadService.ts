@@ -144,10 +144,16 @@ export const leadService = {
                     count = res.count;
                 }
             } else {
-                const res = await buildQuery('*');
-                if (res.error) throw res.error;
-                data = res.data;
-                count = res.count;
+                const res = await buildQuery(LEAN_COLS);
+                if (res.error) {
+                    const fallback = await buildQuery('*');
+                    if (fallback.error) throw fallback.error;
+                    data = fallback.data;
+                    count = fallback.count;
+                } else {
+                    data = res.data;
+                    count = res.count;
+                }
             }
 
             // Mapeia 'region' (da VIEW) → 'cidade' (usado no frontend)
@@ -365,7 +371,7 @@ export const leadService = {
         const client = this.getClient(supabase);
         const { data, error } = await client
             .from('leads')
-            .select('*')
+            .select('id, name, phone, email, source, origem, status, ai_score, ai_classification, vehicle_interest, assigned_consultant_id, created_at, updated_at, vendedor, resumo')
             .eq('id', leadId)
             .maybeSingle();
 

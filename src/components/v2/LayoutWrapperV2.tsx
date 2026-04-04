@@ -4,6 +4,8 @@ import { usePathname } from 'next/navigation';
 import { NavigationV2 } from '@/components/v2/NavigationV2';
 import { BackgroundDecor } from '@/components/BackgroundDecor';
 import { ConsultantAlertModal } from '@/components/v2/ConsultantAlertModal';
+import { TrafficAlertBanner } from '@/components/v2/TrafficAlertBanner';
+
 
 export const LayoutWrapperV2 = ({ children }: { children: React.ReactNode }) => {
     const pathname = usePathname() || '';
@@ -28,7 +30,8 @@ export const LayoutWrapperV2 = ({ children }: { children: React.ReactNode }) => 
             <BackgroundDecor />
             <NavigationV2 />
             <ConsultantAlertModal />
-            <main className="flex-1 min-h-screen w-full relative flex justify-start items-start">
+            <main className="flex-1 min-h-screen w-full relative flex flex-col justify-start items-start">
+                <TrafficAlertBanner />
                 <div className="h-full w-full p-4 md:p-0 mt-14 md:mt-0 pt-16 md:pt-0 flex flex-col items-start justify-start overflow-x-hidden">
                     {children}
                 </div>

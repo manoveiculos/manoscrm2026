@@ -1,33 +1,12 @@
-import { Lead as BaseLead } from '@/lib/types';
+import { Lead as BaseLead, LeadStatus as BaseStatus, AIClassification as BaseAI } from '@/lib/types';
 
-export interface Lead {
+export interface Lead extends Partial<BaseLead> {
   id: string;
   name: string;
   phone: string;
-  email?: string;
-  source?: string;
-  origem?: string;
-  vehicle_interest?: string;
-  valor_investimento?: string;
-  ai_score?: number;
-  ai_classification?: string | any;
-  status: any;
-  assigned_consultant_id?: string;
+  status: any; // Mantido any para compatibilidade com fluxos legados
   created_at: string;
-  updated_at?: string;
-  ai_summary?: string;
-  next_step?: string;
-  proxima_acao?: string;
-  ai_reason?: string;
-  carro_troca?: string;
-  troca?: string;
-  interesse?: string;
-  observacoes?: string;
-  resumo?: string;
-  vendedor?: string;
-  consultant_name?: string;
-  primeiro_vendedor?: string;
-  cidade?: string;
+  // Campos estendidos específicos do V2
   last_proposal_json?: {
     titulo: string;
     pitch: string;

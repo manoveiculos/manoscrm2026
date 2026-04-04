@@ -421,10 +421,6 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
 
                 await leadService.updateLeadDetails(supabase, lead.id, { [col]: colValue });
                 
-                // Se chegou aqui, salvou com sucesso em algum lugar
-                saved = true;
-                console.log(`[Save] Sucesso ao salvar campo "${field}" na coluna "${col}"`);
-                
                 // Atualizar estado local
                 setLead((prev: any) => ({ ...prev, [col]: colValue, [fieldLower]: value }));
                 if (setLeads) {
