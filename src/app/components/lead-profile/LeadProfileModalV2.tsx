@@ -157,29 +157,31 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
             !lead.phone
         ) return;
 
-        const nuncaAnalisado = !lead.next_step && !lead.ai_reason;
+        // Se já existe análise, marca como trigger disparado para esta sessão do modal
+        const nuncaAnalisado = !lead.ai_summary && !lead.proxima_acao && !lead.ai_last_run_at;
 
         if (nuncaAnalisado) {
-            // Primeira vez no CRM: dispara IA automaticamente
+            // Caso 1: Primeira vez absoluta no CRM v2
             hasAutoTriggered.current = true;
             const timer = setTimeout(() => recalculateStrategy(), 1200);
             return () => clearTimeout(timer);
         }
 
-        // Lead já analisado: verifica se houve alteração desde a última análise
-        const lastAnalysis = lead.last_scripts_at ? new Date(lead.last_scripts_at).getTime() : 0;
-        const lastUpdate = new Date(lead.updated_at || lead.created_at).getTime();
-        if (lastAnalysis > 0 && lastUpdate > lastAnalysis) {
-            // Houve alteração no lead → recalcula scripts automaticamente
+        // Caso 2: Lead já analisado. Compara última interação com última análise.
+        const lastAnalysisTime = lead.ai_last_run_at ? new Date(lead.ai_last_run_at).getTime() : 0;
+        const lastInteractionTime = ultimaInteracao?.created_at ? new Date(ultimaInteracao.created_at).getTime() : 0;
+
+        // Se houver interação nova APÓS a última análise, ativa o modo Stale e recalcula
+        if (lastInteractionTime > lastAnalysisTime && lastInteractionTime > 0) {
             setAiStale(true);
             hasAutoTriggered.current = true;
             const timer = setTimeout(() => recalculateStrategy(), 1500);
             return () => clearTimeout(timer);
         }
-        // Sem alteração → exibe cache, zero chamadas
+
+        // Sem alteração relevante -> exibe cache e marca como disparado (para não rodar novamente nesta sessão)
         hasAutoTriggered.current = true;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [activeTab]);
+    }, [activeTab, lead.ai_last_run_at, ultimaInteracao?.created_at]);
 
     // Note Action
     const handleAddNote = useCallback(async (customNote?: string) => {

@@ -5,24 +5,8 @@
       "schedule": "0 11 * * 1-6"
     },
     {
-      "path": "/api/cron/anti-loss",
-      "schedule": "0 2 * * *"
-    },
-    {
-      "path": "/api/cron/pipeline-sla",
-      "schedule": "0 3 * * *"
-    },
-    {
-      "path": "/api/cron/ai-score-refresh",
+      "path": "/api/cron/daily-batch",
       "schedule": "0 7 * * *"
-    },
-    {
-      "path": "/api/cron/followup-ai",
-      "schedule": "0 8 * * *"
-    },
-    {
-      "path": "/api/cron/churn-predict",
-      "schedule": "0 6 * * *"
     }
   ]
 }

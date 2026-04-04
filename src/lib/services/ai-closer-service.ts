@@ -411,19 +411,11 @@ JSON: {
         proxima_acao: scriptWhatsApp,
         last_scripts_json: scriptOptions,
         last_scripts_at: new Date().toISOString(),
+        ai_last_run_at: new Date().toISOString(),
     };
 
     await supabaseAdmin.from(usedTable).update(updateData).eq('id', cleanId);
 
-    // REGISTRO NA TIMELINE como ai_analysis (aparece no filtro "Orientação IA")
-    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(cleanId);
-    await supabaseAdmin.from('interactions_manos_crm').insert({
-        [isUUID ? 'lead_id' : 'lead_id_v1']: cleanId,
-        type: 'ai_analysis',
-        notes: `🧠 ANÁLISE ELITE CLOSER (${modelUsed.toUpperCase()}):\n\n${diagnostico}\n\n→ ORIENTAÇÃO: ${orientacao}\n\n📱 SCRIPT: ${scriptWhatsApp}`,
-        created_at: new Date().toISOString(),
-        user_name: 'SISTEMA (IA)'
-    });
 
     return {
         success: true,

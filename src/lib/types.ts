@@ -117,6 +117,7 @@ export interface Lead {
   };
   next_step?: string;
   consultants_manos_crm?: { name: string };
+  ai_last_run_at?: string;
 
   // New AI analysis fields
   nivel_interesse?: string;
@@ -226,4 +227,5 @@ export interface DistributedLead {
   assigned_consultant_id?: string;
   primeiro_vendedor?: string;
   vendedor_anterior?: string;
+  ai_last_run_at?: string;
 }
