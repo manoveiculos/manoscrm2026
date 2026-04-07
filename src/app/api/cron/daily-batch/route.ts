@@ -1,15 +1,21 @@
 import { NextResponse } from 'next/server';
 
+// Vercel Hobby tier permite até 60s de duração para Serverless Functions.
+// Sem essa diretiva, o default de 10s mata o batch antes de terminar o 1º fetch.
+export const maxDuration = 60;
+
 /**
  * Cron batch diário — consolida múltiplos crons em um único endpoint
  * para respeitar o limite de 2 cron jobs do plano Hobby da Vercel.
  *
- * Executa sequencialmente: anti-loss, pipeline-sla, ai-score-refresh, followup-ai, churn-predict
+ * Dispara em paralelo: anti-loss, pipeline-sla, ai-score-refresh, followup-ai, churn-predict
  */
 export async function GET() {
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || process.env.VERCEL_URL
-        ? `https://${process.env.VERCEL_URL}`
-        : 'http://localhost:3000';
+    // Resolve a URL base canônica. NEXT_PUBLIC_BASE_URL tem prioridade (domínio público),
+    // VERCEL_URL é o fallback (domínio interno *.vercel.app).
+    const baseUrl =
+        process.env.NEXT_PUBLIC_BASE_URL
+        ?? (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
 
     const cronPaths = [
         '/api/cron/anti-loss',
@@ -19,16 +25,30 @@ export async function GET() {
         '/api/cron/churn-predict',
     ];
 
-    const results: Record<string, string> = {};
+    // Paraleliza os 5 crons. Em sequência (5 × 11s) não cabe nos 60s do tier Hobby —
+    // a única forma de respeitar o cap sem matar crons pesados (ai-score-refresh,
+    // churn-predict) é dispará-los em paralelo. Cada um tem até ~55s de janela.
+    const settled = await Promise.allSettled(
+        cronPaths.map(path =>
+            fetch(`${baseUrl}${path}`, { signal: AbortSignal.timeout(55000) })
+                .then(res => ({ path, status: res.ok ? 'ok' : `error:${res.status}` }))
+        )
+    );
 
-    for (const path of cronPaths) {
-        try {
-            const res = await fetch(`${baseUrl}${path}`, { signal: AbortSignal.timeout(30000) });
-            results[path] = res.ok ? 'ok' : `error:${res.status}`;
-        } catch (e: any) {
-            results[path] = `failed:${e.message}`;
+    const results: Record<string, string> = {};
+    let hasFailure = false;
+
+    for (let i = 0; i < settled.length; i++) {
+        const r = settled[i];
+        if (r.status === 'fulfilled') {
+            results[r.value.path] = r.value.status;
+            if (r.value.status !== 'ok') hasFailure = true;
+        } else {
+            results[cronPaths[i]] = `failed:${r.reason?.message || String(r.reason)}`;
+            hasFailure = true;
         }
     }
 
-    return NextResponse.json({ success: true, results });
+    // success reflete o resultado real do batch (não mais sempre true)
+    return NextResponse.json({ success: !hasFailure, baseUrl, results });
 }
