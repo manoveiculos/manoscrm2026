@@ -996,13 +996,17 @@ const UI = {
                     <div class="ig-icon">💰</div>
                     <div class="ig-body">
                         <div class="ig-label">Valor de Investimento</div>
-                        <div class="ig-val" id="val-valor">${this._esc(lead.valor || 'Pendente')}</div>
+                        <div class="ig-val" id="val-valor">${this._esc(this._formatPreco(lead.valor))}</div>
                     </div>
                     <div class="ig-edit-icon">✏️</div>
                 </div>
                 <div class="ig-row">
                     <div class="ig-icon">📍</div>
-                    <div class="ig-body"><div class="ig-label">Origem</div><div class="ig-val">${this._esc(lead.source || '—')}</div></div>
+                    <div class="ig-body"><div class="ig-label">Origem</div><div class="ig-val">${this._esc(lead.origem || lead.source || 'Social')}</div></div>
+                </div>
+                <div class="ig-row">
+                    <div class="ig-icon">📍</div>
+                    <div class="ig-body"><div class="ig-label">Cidade</div><div class="ig-val">${this._esc(lead.cidade || lead.region || 'Não informado')}</div></div>
                 </div>
                 <div class="ig-row">
                     <div class="ig-icon">🧑‍💼</div>
@@ -2014,6 +2018,23 @@ const UI = {
 
     // ── Helpers ───────────────────────────────────────
     _esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = String(s); return d.innerHTML; },
+    // Espelha exatamente formatPreco() de src/lib/shared_utils/helpers.ts:65 + a normalização
+    // de centavos legados de InfoGrid.tsx:110-117. Sem isso, valores antigos armazenados em
+    // centavos (ex: 3990000) apareceriam diferentes na extensão e no CRM web.
+    _formatPreco(value) {
+        if (value === null || value === undefined || value === '' || value === '0' || value === 0) return 'Pendente';
+        let num;
+        if (typeof value === 'number') {
+            num = value;
+        } else {
+            const clean = String(value).replace(/R\$\s?/, '').replace(/\./g, '').replace(',', '.');
+            num = parseFloat(clean);
+        }
+        if (isNaN(num) || num === 0) return 'Pendente';
+        // Heurística do CRM web: valores legados em centavos vêm como > 1M (ex: 3990000 = R$ 39.900).
+        if (num > 1_000_000) num = num / 100;
+        return 'R$ ' + Math.round(num).toLocaleString('pt-BR');
+    },
     _scoreInfo(score) {
         if (score >= 90) return { label: 'CRÍTICO', color: '#dc2626' };
         if (score >= 70) return { label: 'QUENTE',  color: '#ef4444' };

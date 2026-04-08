@@ -50,7 +50,12 @@ export async function GET(req: NextRequest) {
                 score: lead.ai_score,
                 vehicle: lead.vehicle_interest || lead.interesse,
                 valor: lead.valor_investimento,
+                // 'origem' separado de 'source' para a extensão poder espelhar exatamente o
+                // fallback do CRM web (lead.origem || lead.source || 'Social') em InfoGrid.tsx:140.
+                origem: lead.origem,
                 source: lead.source || lead.plataforma_meta || lead.utm_source,
+                // 'cidade' com mesma cadeia de fallback que leadService.ts:162 e InfoGrid.tsx:148.
+                cidade: lead.cidade || lead.region || null,
                 vendedor: lead.vendedor || lead.primeiro_vendedor || 'Não atribuído',
                 diagnosis: lead.ai_reason || lead.ai_summary || lead.resumo_consultor,
                 nextSteps: lead.proxima_acao || lead.next_step,

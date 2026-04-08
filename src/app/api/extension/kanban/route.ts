@@ -1,94 +1,62 @@
-
-import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyExtensionToken } from '@/lib/extensionAuth';
+import { createClient as createAdminClient } from '@/lib/supabase/admin';
+import { leadService } from '@/lib/leadService';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+/**
+ * Kanban da extensão Chrome — agora consome a VIEW unificada `leads` via
+ * leadService.getLeadsPaginated, mesma fonte que o CRM web (/leads/page.tsx:110).
+ *
+ * Antes: 3 queries paralelas em leads_manos_crm/leads_distribuicao_crm_26/leads_master
+ * com mapping manual de colunas (name/nome, phone/telefone, vehicle_interest/interesse).
+ * Isso causava divergência entre o que o consultor via na extensão e o que o gerente
+ * via no dashboard, porque cada lado tinha sua própria lógica de normalização.
+ *
+ * Depois: single source of truth — a VIEW `leads` já normaliza tudo no Supabase.
+ */
+const ENTRADA_STATUSES = new Set(['new', 'received', 'entrada', 'novo']);
 
 export async function GET(req: NextRequest) {
     const authError = verifyExtensionToken(req);
     if (authError) return authError;
 
     try {
-        // Filtro por vendedor (consultantId via query param)
         const consultantId = req.nextUrl.searchParams.get('consultantId');
-        // Status de entrada/sem atendimento
-        const entradaStatuses = ['new', 'received', 'entrada'];
 
-        // Buscar em todas as tabelas — apenas leads em estágio de entrada
-        let mainQuery = supabaseAdmin.from('leads_manos_crm')
-            .select('id, name, phone, status, ai_classification, vehicle_interest, assigned_consultant_id, created_at')
-            .in('status', entradaStatuses)
-            .order('created_at', { ascending: false });
-        let crm26Query = supabaseAdmin.from('leads_distribuicao_crm_26')
-            .select('id, nome, telefone, status, ai_classification, interesse, assigned_consultant_id, created_at')
-            .in('status', entradaStatuses)
-            .order('created_at', { ascending: false });
-        let masterQuery = supabaseAdmin.from('leads_master')
-            .select('id, name, phone, status, ai_classification, vehicle_interest, assigned_consultant_id, created_at')
-            .in('status', entradaStatuses)
-            .order('created_at', { ascending: false });
+        // Injeta admin client (bypassa RLS — proteção é o EXTENSION_API_SECRET).
+        const adminClient = createAdminClient();
+        leadService.setClient(adminClient);
 
-        // Filtrar apenas leads desse vendedor
-        if (consultantId) {
-            mainQuery = mainQuery.eq('assigned_consultant_id', consultantId);
-            crm26Query = crm26Query.eq('assigned_consultant_id', consultantId);
-            masterQuery = masterQuery.eq('assigned_consultant_id', consultantId);
+        const { leads } = await leadService.getLeadsPaginated(adminClient, {
+            consultantId: consultantId || undefined,
+            role: consultantId ? 'consultant' : 'admin',
+            pipelineOnly: true, // estágios ativos do pipeline; filtramos os de entrada abaixo
+            limit: 500,
+        });
+
+        // Mapeia o shape que o background.js já consome (extension/background.js:38-42).
+        // Mantém os mesmos campos para não quebrar o consumer existente.
+        const kanban: Record<string, any[]> = {};
+        for (const l of leads) {
+            const status = l.status || 'new';
+            // O pipelineOnly do leadService inclui estágios mais profundos (negotiation, etc).
+            // O kanban da extensão só quer os de ENTRADA — filtra aqui em memória.
+            if (!ENTRADA_STATUSES.has(status)) continue;
+            if (!kanban[status]) kanban[status] = [];
+            kanban[status].push({
+                id: l.id, // já vem prefixado da VIEW (main_/crm26_/master_)
+                name: l.name,
+                phone: l.phone,
+                status,
+                classification: l.ai_classification,
+                vehicle: l.vehicle_interest,
+                assigned_consultant_id: l.assigned_consultant_id,
+                created_at: l.created_at,
+                source: l.source_table === 'leads_distribuicao_crm_26' ? 'crm26'
+                    : l.source_table === 'leads_master' ? 'master'
+                    : 'main',
+            });
         }
-
-        const [mainResponse, crm26Response, masterResponse] = await Promise.all([
-            mainQuery, crm26Query, masterQuery
-        ]);
-
-        if (mainResponse.error) throw mainResponse.error;
-        if (crm26Response.error) throw crm26Response.error;
-        if (masterResponse.error) throw masterResponse.error;
-
-        const allLeads = [
-            ...(mainResponse.data || []).map(l => ({
-                id: `main_${l.id}`,
-                name: l.name,
-                phone: l.phone,
-                status: l.status,
-                classification: l.ai_classification,
-                vehicle: l.vehicle_interest,
-                assigned_consultant_id: l.assigned_consultant_id,
-                created_at: l.created_at,
-                source: 'main'
-            })),
-            ...(crm26Response.data || []).map(l => ({
-                id: `crm26_${l.id}`,
-                name: l.nome,
-                phone: l.telefone,
-                status: l.status,
-                classification: l.ai_classification,
-                vehicle: l.interesse,
-                assigned_consultant_id: l.assigned_consultant_id,
-                created_at: l.created_at,
-                source: 'crm26'
-            })),
-            ...(masterResponse.data || []).map(l => ({
-                id: `master_${l.id}`,
-                name: l.name,
-                phone: l.phone,
-                status: l.status,
-                classification: l.ai_classification,
-                vehicle: l.vehicle_interest,
-                assigned_consultant_id: l.assigned_consultant_id,
-                created_at: l.created_at,
-                source: 'master'
-            }))
-        ];
-
-        // Agrupar por status
-        const kanban = allLeads.reduce((acc: any, lead) => {
-            const status = lead.status || 'new';
-            if (!acc[status]) acc[status] = [];
-            acc[status].push(lead);
-            return acc;
-        }, {});
 
         return NextResponse.json({ success: true, kanban });
 

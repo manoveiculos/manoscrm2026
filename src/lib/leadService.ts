@@ -369,14 +369,18 @@ export const leadService = {
 
     async getLeadById(supabase: SupabaseClient | undefined, leadId: string): Promise<Lead | null> {
         const client = this.getClient(supabase);
+        // Colunas alinhadas com LEAN_COLS de getLeadsPaginated/leadCrud para que o
+        // refetch do LeadProfileModalV2 não perca campos (valor_investimento, region,
+        // carro_troca, ai_summary, etc). Sem cache — sempre lê fresco da VIEW.
         const { data, error } = await client
             .from('leads')
-            .select('id, name, phone, email, source, origem, status, ai_score, ai_classification, vehicle_interest, assigned_consultant_id, created_at, updated_at, vendedor, resumo')
+            .select('id, name, phone, email, source, origem, status, ai_score, ai_classification, ai_summary, vehicle_interest, assigned_consultant_id, created_at, updated_at, vendedor, proxima_acao, valor_investimento, observacoes, carro_troca, region, source_table, ai_reason')
             .eq('id', leadId)
             .maybeSingle();
 
         if (error || !data) return null;
-        return data as Lead;
+        // Espelha o mapping region→cidade que getLeadsPaginated faz na linha 162.
+        return { ...data, cidade: (data as any).cidade || (data as any).region || null } as Lead;
     },
 
     // ============ Follow-up Services ============

@@ -18,6 +18,33 @@ export function useLeadData(initialLead: Lead, setLeads: React.Dispatch<React.Se
         origem: initialLead.origem || ''
     });
 
+    // Refetch on-mount: o initialLead vem de uma lista cacheada (TTL 30s) que pode
+    // estar obsoleta, especialmente se a extensão Chrome editou o lead em paralelo.
+    // Aqui buscamos fresco da VIEW 'leads' (sem cache) e fazemos merge preservando
+    // campos enriquecidos do initialLead que getLeadById pode não trazer.
+    useEffect(() => {
+        if (!initialLead?.id) return;
+        let cancelled = false;
+        (async () => {
+            try {
+                const fresh = await leadService.getLeadById(supabase, initialLead.id);
+                if (cancelled || !fresh) return;
+                setLead(prev => ({ ...prev, ...fresh }));
+                setEditedLead(prev => ({
+                    name: fresh.name ?? prev.name,
+                    phone: fresh.phone ?? prev.phone,
+                    vehicle_interest: fresh.vehicle_interest || '',
+                    valor_investimento: fresh.valor_investimento || '',
+                    origem: fresh.origem || '',
+                }));
+            } catch (err) {
+                console.warn('[useLeadData] refetch on-mount falhou — mantendo initialLead:', err);
+            }
+        })();
+        return () => { cancelled = true; };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [initialLead?.id]);
+
     const updateStatus = useCallback(async (newStatusId: string) => {
         const oldStatus = lead.status;
         

@@ -23,7 +23,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { dataService } from '@/lib/dataService';
 import { Lead, Consultant, InventoryItem, LeadStatus } from '@/lib/types';
-import { leadService } from '@/lib/leadService';
+import { leadService, leadCacheInvalidate } from '@/lib/leadService';
 import { LeadListV2 } from '../pipeline/components/LeadListV2';
 import { LeadProfileModalV2 } from '../components/lead-profile/LeadProfileModalV2';
 import { NewLeadModalV2 } from '../pipeline/components/NewLeadModalV2';
@@ -77,11 +77,10 @@ function LeadsContent() {
     const semanticDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     useEffect(() => {
-        const loadInitialData = async () => {
-            setLoading(true);
+        const loadInitialData = async (skipLoadingFlag = false) => {
+            if (!skipLoadingFlag) setLoading(true);
             try {
                 const { data: { user } } = await supabase.auth.getUser();
-                let currentConsultantId: string | null = null;
                 let userRole: 'admin' | 'consultant' = 'consultant';
 
                 if (user) {
@@ -94,7 +93,7 @@ function LeadsContent() {
                         .select('id, name')
                         .eq('auth_id', user.id)
                         .maybeSingle();
-                    
+
                     let consultantParamId: string | undefined = undefined;
                     if (profile) {
                         setUserName(profile.name.split(' ')[0]);
@@ -110,7 +109,7 @@ function LeadsContent() {
                         leadService.getLeadsPaginated(undefined, {
                             consultantId: userRole === 'admin' ? undefined : (consultantParamId || user.id),
                             role: userRole,
-                            limit: 2000 
+                            limit: 2000
                         }),
                         dataService.getConsultants(),
                         dataService.getInventory()
@@ -124,11 +123,32 @@ function LeadsContent() {
             } catch (error) {
                 console.error("Error loading Central de Leads data:", error);
             } finally {
-                setLoading(false);
+                if (!skipLoadingFlag) setLoading(false);
             }
         };
 
         loadInitialData();
+
+        // Refetch silencioso quando o usuário volta para a aba após pelo menos 30s.
+        // Garante que dados editados pela extensão Chrome (em outra janela/dispositivo)
+        // apareçam ao retomar o foco, sem esperar o usuário dar F5.
+        let lastHidden = 0;
+        const onVisibility = () => {
+            if (document.visibilityState === 'hidden') {
+                lastHidden = Date.now();
+                return;
+            }
+            if (document.visibilityState === 'visible' && lastHidden > 0) {
+                const awayMs = Date.now() - lastHidden;
+                lastHidden = 0;
+                if (awayMs >= 30_000) {
+                    leadCacheInvalidate();
+                    loadInitialData(true); // skip loading flag — refetch silencioso
+                }
+            }
+        };
+        document.addEventListener('visibilitychange', onVisibility);
+        return () => document.removeEventListener('visibilitychange', onVisibility);
     }, []);
 
     const filteredLeads = (leads || [])
