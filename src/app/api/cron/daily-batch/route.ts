@@ -25,12 +25,27 @@ export async function GET() {
         '/api/cron/churn-predict',
     ];
 
+    // Os 5 sub-crons validam Authorization: Bearer ${CRON_SECRET}. Sem esse header,
+    // cada chamada retorna 401 e o batch inteiro fica "verde" na Vercel mas sem gravar
+    // nada no banco — foi exatamente o modo de falha silenciosa observado em 08/04.
+    const cronSecret = process.env.CRON_SECRET;
+    if (!cronSecret) {
+        return NextResponse.json(
+            { success: false, error: 'CRON_SECRET não configurado — batch abortado' },
+            { status: 500 }
+        );
+    }
+    const authHeaders = { Authorization: `Bearer ${cronSecret}` };
+
     // Paraleliza os 5 crons. Em sequência (5 × 11s) não cabe nos 60s do tier Hobby —
     // a única forma de respeitar o cap sem matar crons pesados (ai-score-refresh,
     // churn-predict) é dispará-los em paralelo. Cada um tem até ~55s de janela.
     const settled = await Promise.allSettled(
         cronPaths.map(path =>
-            fetch(`${baseUrl}${path}`, { signal: AbortSignal.timeout(55000) })
+            fetch(`${baseUrl}${path}`, {
+                headers: authHeaders,
+                signal: AbortSignal.timeout(55000),
+            })
                 .then(res => ({ path, status: res.ok ? 'ok' : `error:${res.status}` }))
         )
     );
