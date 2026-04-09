@@ -237,6 +237,7 @@ Responda SOMENTE o primeiro nome (ex: "Carlos") ou null:`
                 estoque_disponivel: inventory || [],
                 consultant_name: consultor,
                 lead_status: lead.status || '',
+                behavioral_profile: lead.behavioral_profile || null,
             };
 
             const claudeResult = await generateLeadStrategy(payload);
@@ -304,7 +305,7 @@ PERFIL COMPORTAMENTAL:
               ).join('\n')
             : 'Nenhuma mensagem WhatsApp sincronizada.';
 
-        const prompt = `Você é o Especialista Elite de Vendas da Manos Veículos (Rio do Sul/SC). Faça uma análise CIRÚRGICA deste lead e responda em JSON.
+        const prompt = `Você é o Closer Elite da Manos Veículos (Rio do Sul/SC). Seu objetivo é FORÇAR O FECHAMENTO usando gatilhos mentais (Urgência e Escassez). Faça uma análise implacável deste lead e responda em JSON.
 
 DADOS DO LEAD:
 - Nome: ${lead.nome || lead.name}
@@ -327,18 +328,18 @@ ${inventorySummary || 'Nenhum veículo no estoque no momento.'}
 ${memoriaAcoes}
 
 MISSÃO:
-1. Diagnostique a situação REAL do lead (o que está travando, qual a objeção provável, nível de interesse verdadeiro)
-2. Dê uma orientação tática ESPECÍFICA e DIFERENTE das anteriores para o consultor fechar ou avançar o lead HOJE (canal, horário, argumento inédito)
-3. Escreva um script WhatsApp de 2-3 frases que o consultor pode copiar e enviar AGORA
-4. Se há histórico de ações anteriores que não funcionaram, mude o canal (ex: ligação em vez de WhatsApp) ou o argumento
-4. Calcule score de 0-100 baseado no comportamento, não no status
+1. Diagnostique a situação REAL (o que está travando a venda?)
+2. Dê uma ORDEM TÁTICA ESPECÍFICA para o consultor fechar HOJE (Ação incisiva e argumento de Cialdini)
+3. Escreva um script WhatsApp de 2 frases CURTAS, DIRETAS, abusando de Escassez/Urgência (ex: "Tenho outro interessado pra ver o carro hoje, mas dou preferência a você se fechar agora"). Sem gentilezas.
+4. Se ação anterior falhou, ESCALE. (ex: Ligar imediatamente cobrando posição)
+5. Calcule score de 0-100 baseado na temperatura comportamental.
 
-Retorne JSON: { "diagnostico": "texto preciso em 2-3 frases", "orientacao": "ação específica com horário/canal", "script": "mensagem WhatsApp pronta", "score": 0-100 }`;
+Retorne JSON: { "diagnostico": "texto preciso em 2-3 frases", "orientacao": "ação específica com horário/canal e gatilho", "script": "mensagem WhatsApp matadora", "score": 0-100 }`;
 
         const response = await openai.chat.completions.create({
             model: isHot ? 'gpt-4o' : 'gpt-4o-mini',
             messages: [
-                { role: 'system', content: 'Você é um mestre fechador de vendas de veículos. Analise friamente os dados e dê orientação cirúrgica. Sem rodeios. Responda APENAS com JSON válido.' },
+                { role: 'system', content: 'Você é um closer implacável de veículos. Analise friamente os dados e dê ordens cirúrgicas. Sem rodeios, sem passividade. Responda APENAS com JSON válido.' },
                 { role: 'user', content: prompt }
             ],
             response_format: { type: 'json_object' },
@@ -367,7 +368,7 @@ Retorne JSON: { "diagnostico": "texto preciso em 2-3 frases", "orientacao": "aç
             response_format: { type: 'json_object' },
             messages: [{
                 role: 'system',
-                content: 'Você é um especialista em vendas automotivas da Manos Veículos. Gere scripts de WhatsApp curtos, diretos, sem gerundismo e sem "tudo bem?". Retorne APENAS JSON válido.'
+                content: 'Você é um Closer agressivo da Manos Veículos. Gere scripts de WhatsApp curtos (2 frases), focados em gerar Micro-comprometimentos e usando Escassez e Urgência. Zero gentilezas tipo "tudo bem?". Retorne APENAS JSON válido.'
             }, {
                 role: 'user',
                 content: `Cliente: ${leadFirstName} | Interesse: ${vehicleInterest} | Diagnóstico: ${diagnostico || 'Lead sem histórico'} | Score: ${urgencyScore}%
