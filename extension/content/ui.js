@@ -1365,12 +1365,12 @@ const UI = {
         };
         const fmt = (ts) => {
             if (!ts) return '';
-            try { return new Intl.DateTimeFormat('pt-BR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }).format(new Date(ts)); } catch (_) { return ts; }
+            try { return new Intl.DateTimeFormat('pt-BR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit', timeZone: 'America/Sao_Paulo' }).format(new Date(ts)); } catch (_) { return ts; }
         };
 
         const fmtTime = (ts) => {
             if (!ts) return '';
-            try { return new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' }).format(new Date(ts)); } catch (_) { return ''; }
+            try { return new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' }).format(new Date(ts)); } catch (_) { return ''; }
         };
         const isWAFilter = filter === 'whatsapp';
         const wrapClass  = isWAFilter ? 'wa-chat-area' : 'tl-event-list';
@@ -1441,7 +1441,7 @@ const UI = {
 
         const fmt = (ts) => {
             if (!ts) return '';
-            try { return new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(ts)); } catch (_) { return ts; }
+            try { return new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' }).format(new Date(ts)); } catch (_) { return ts; }
         };
 
         if (!items?.length) { target.innerHTML = '<div class="placeholder">Nenhum follow-up agendado.</div>'; return; }

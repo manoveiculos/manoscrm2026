@@ -405,7 +405,7 @@ JSON: {
 
     const updateData: any = {
         [usedTable === 'leads_distribuicao_crm_26' ? 'resumo_consultor' : 'ai_reason']: `${diagnostico} | ORIENTAÇÃO: ${orientacao}`,
-        [usedTable === 'leads_distribuicao_crm_26' ? 'resumo' : 'ai_summary']: timelineNote + (lead?.ai_summary || lead?.resumo || ''),
+        [usedTable === 'leads_distribuicao_crm_26' ? 'resumo' : 'ai_summary']: timelineNote, // Fim do append infinito
         ai_score: urgencyScore,
         ai_classification: temperature as any,
         next_step: scriptWhatsApp,
@@ -416,6 +416,20 @@ JSON: {
     };
 
     await supabaseAdmin.from(usedTable).update(updateData).eq('id', cleanId);
+
+    // ── Registro Físico na Timeline (para a nova aba de Histórico) ──
+    try {
+        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(cleanId);
+        await supabaseAdmin.from('interactions_manos_crm').insert({
+            [isUUID ? 'lead_id' : 'lead_id_v1']: cleanId,
+            type: 'ai_analysis',
+            notes: timelineNote,
+            user_name: 'IA Mentor',
+            created_at: new Date().toISOString(),
+        });
+    } catch (err) {
+        console.error('[AI-Closer] Falha ao registrar interação na timeline:', err);
+    }
 
 
     return {

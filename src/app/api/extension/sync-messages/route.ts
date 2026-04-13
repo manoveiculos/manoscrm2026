@@ -247,6 +247,30 @@ export async function POST(req: NextRequest) {
             const targetLeadId = uuidId || (numericId !== null ? `crm26_${numericId}` : '');
             if (!targetLeadId) throw new Error('Lead ID resolvido vazio antes de runEliteCloser');
 
+            // ── Quick Buying Signal Detection (Immediate Score Impact) ──
+            const inboundMsgs = messages.filter((m: any) => m.direction === 'inbound');
+            const lastClientMsg = inboundMsgs[inboundMsgs.length - 1]?.text?.toLowerCase() || '';
+            
+            const immediateBuyingKeywords = [
+                'quero comprar', 'vou fechar', 'onde assina', 'manda o pix', 
+                'qual a conta', 'pode reservar', 'vou buscar', 'fechado',
+                'quero esse', 'vende pra mim', 'tenho o dinheiro'
+            ];
+            
+            const isImmediateHot = immediateBuyingKeywords.some(kw => lastClientMsg.includes(kw));
+            
+            if (isImmediateHot) {
+                console.log(`[QuickAI] Sinal de compra imediato detectado p/ lead ${targetLeadId}. Forçando score 95.`);
+                const tableToUpdate = leadFound?.source_table || (leadType === 'main' ? 'leads_master' : 'leads_distribuicao_crm_26');
+                await supabaseAdmin.from(tableToUpdate)
+                    .update({ 
+                        ai_score: 95, 
+                        ai_classification: 'hot',
+                        ai_last_run_at: new Date().toISOString()
+                    })
+                    .eq('id', uuidId || numericId);
+            }
+
             const eliteResult = await runEliteCloser(targetLeadId, mappedMessages, consultor);
 
             aiAnalysisResult = {

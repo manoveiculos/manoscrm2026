@@ -134,17 +134,35 @@ function filterTopVehicles(
 }
 
 function truncateConversation(msgs: WhatsAppMessage[]): string {
+    // Filtro agressivo para remover "sujeira" de sistema e logs que não são conversas reais
+    const cleanMsgs = msgs.filter(m => {
+        const text = (m.content || '').toLowerCase();
+        const isAISummary = text.includes('🤖 análise') || text.includes('orientação:') || text.includes('diagnóstico:');
+        const isSystemNote = text.startsWith('[sistema]') || text.includes('🔧 campo') || text.includes('🎯 veículo vinculado');
+        const isShortLog = text.length < 2 && !text.includes('?'); // Remove pontuações soltas ou msgs vazias
+        
+        return !isAISummary && !isSystemNote && !isShortLog;
+    });
+
+    // Garante que as mensagens estejam em ordem CRONOLÓGICA (Antigo -> Novo) para o raciocínio da IA
+    const sortedCleanMsgs = [...cleanMsgs].sort((a, b) => {
+        const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return dateA - dateB;
+    });
+
     const fmt = (m: WhatsAppMessage) =>
         `[${m.created_at ? new Date(m.created_at).toLocaleString('pt-BR') : 'Agora'}] ${m.direction === 'inbound' ? 'CLIENTE' : 'VENDEDOR'}: ${m.content}`;
 
-    const all = msgs.map(fmt);
+    const all = sortedCleanMsgs.map(fmt);
     const full = all.join('\n');
 
     if (full.length < 8000) return full;
 
-    const head = all.slice(0, 3);
-    const tail = all.slice(-15);
-    return [...head, '--- [histórico resumido] ---', ...tail].join('\n');
+    // Se ainda for muito grande, prioriza as últimas 20 mensagens (janela de contexto humana)
+    const head = all.slice(0, 5);
+    const tail = all.slice(-20);
+    return [...head, '\n... [histórico antigo suprimido para foco no fechamento atual] ...\n', ...tail].join('\n');
 }
 
 function postProcess(raw: string, leadName: string): string {

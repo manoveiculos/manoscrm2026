@@ -8,15 +8,15 @@ import {
     Flame, 
     Thermometer, 
     Snowflake,
-    MessageCircle,
-    Facebook,
-    Search,
+    ThumbsUp,
+    ThumbsDown,
+    AlertCircle,
     Check
 } from 'lucide-react';
 
 interface QuizPayload {
-    temperatura_vendas: 'quente' | 'esquentando' | 'medio' | 'frio';
-    origem_macro: 'WhatsApp' | 'Facebook' | 'Google' | 'OK';
+    temperatura_vendas: 'quente' | 'medio' | 'frio';
+    problema_credito: boolean;
     comentario_extra?: string;
 }
 
@@ -25,8 +25,7 @@ interface DailyTrafficQuizProps {
     onSubmit: (payload: QuizPayload) => Promise<boolean>;
 }
 
-type TemperaturaVendas = 'quente' | 'esquentando' | 'medio' | 'frio';
-type OrigemMacro = 'WhatsApp' | 'Facebook' | 'Google' | 'OK';
+type TemperaturaVendas = 'quente' | 'medio' | 'frio';
 
 const SLIDE_VARIANTS = {
     enter: { x: 40, opacity: 0 },
@@ -34,7 +33,7 @@ const SLIDE_VARIANTS = {
     exit: { x: -40, opacity: 0 },
 };
 
-const TEMPERATURA_OPTIONS: { value: TemperaturaVendas; label: string; emoji: string; color: string; bg: string; border: string }[] = [
+const TEMPERATURA_OPTIONS: { value: TemperaturaVendas; label: string; emoji: string; color: string; bg: string; border: string; desc: string }[] = [
     {
         value: 'quente',
         label: 'Quentes',
@@ -42,14 +41,7 @@ const TEMPERATURA_OPTIONS: { value: TemperaturaVendas; label: string; emoji: str
         color: '#ef4444',
         bg: 'bg-red-500/10 hover:bg-red-500/20',
         border: 'border-red-500/20 hover:border-red-500/50',
-    },
-    {
-        value: 'esquentando',
-        label: 'Esquentando',
-        emoji: '☀️',
-        color: '#f97316',
-        bg: 'bg-orange-500/10 hover:bg-orange-500/20',
-        border: 'border-orange-500/20 hover:border-orange-500/50',
+        desc: 'Prontos para comprar / Interesse real'
     },
     {
         value: 'medio',
@@ -58,6 +50,7 @@ const TEMPERATURA_OPTIONS: { value: TemperaturaVendas; label: string; emoji: str
         color: '#f59e0b',
         bg: 'bg-amber-500/10 hover:bg-amber-500/20',
         border: 'border-amber-500/20 hover:border-amber-500/50',
+        desc: 'Apenas curiosos / Em pesquisa'
     },
     {
         value: 'frio',
@@ -66,44 +59,14 @@ const TEMPERATURA_OPTIONS: { value: TemperaturaVendas; label: string; emoji: str
         color: '#3b82f6',
         bg: 'bg-blue-500/10 hover:bg-blue-500/20',
         border: 'border-blue-500/20 hover:border-blue-500/50',
-    },
-];
-
-const ORIGEM_OPTIONS: { value: OrigemMacro; label: string; icon: any; color: string; bg: string }[] = [
-    {
-        value: 'WhatsApp',
-        label: 'WhatsApp',
-        icon: MessageCircle,
-        color: '#22c55e',
-        bg: 'bg-emerald-500/10 border-emerald-500/20 hover:border-emerald-500/40',
-    },
-    {
-        value: 'Facebook',
-        label: 'Facebook',
-        icon: Facebook,
-        color: '#3b82f6',
-        bg: 'bg-blue-500/10 border-blue-500/20 hover:border-blue-500/40',
-    },
-    {
-        value: 'Google',
-        label: 'Google Ads',
-        icon: Search,
-        color: '#f97316',
-        bg: 'bg-orange-500/10 border-orange-500/20 hover:border-orange-500/40',
-    },
-    {
-        value: 'OK',
-        label: 'Tudo Ok / Não sei',
-        icon: Check,
-        color: '#a855f7',
-        bg: 'bg-purple-500/10 border-purple-500/20 hover:border-purple-500/40',
+        desc: 'Fora do perfil / DDD errado'
     },
 ];
 
 export function DailyTrafficQuiz({ isSubmitting, onSubmit }: DailyTrafficQuizProps) {
     const [step, setStep] = useState(1);
     const [temperatura, setTemperatura] = useState<TemperaturaVendas | null>(null);
-    const [origemMacro, setOrigemMacro] = useState<OrigemMacro | null>(null);
+    const [problemaCredito, setProblemaCredito] = useState<boolean | null>(null);
     const [comentario, setComentario] = useState('');
     const [submitSuccess, setSubmitSuccess] = useState(false);
 
@@ -112,27 +75,26 @@ export function DailyTrafficQuiz({ isSubmitting, onSubmit }: DailyTrafficQuizPro
         setTimeout(() => setStep(2), 300);
     };
 
-    const handleOrigem = (value: OrigemMacro) => {
-        setOrigemMacro(value);
+    const handleCredito = (value: boolean) => {
+        setProblemaCredito(value);
         setTimeout(() => setStep(3), 300);
     };
 
     const handleSubmit = async () => {
-        if (!temperatura || !origemMacro) return;
+        if (!temperatura || problemaCredito === null) return;
 
         const success = await onSubmit({
             temperatura_vendas: temperatura,
-            origem_macro: origemMacro,
+            problema_credito: problemaCredito,
             comentario_extra: comentario,
         });
 
         if (success) {
             setSubmitSuccess(true);
-            // O unblock visual é instantâneo via Success screen
         }
     };
 
-    const canSubmit = temperatura !== null && origemMacro !== null && !isSubmitting;
+    const canSubmit = temperatura !== null && problemaCredito !== null && !isSubmitting;
 
     if (submitSuccess) {
         return (
@@ -161,7 +123,7 @@ export function DailyTrafficQuiz({ isSubmitting, onSubmit }: DailyTrafficQuizPro
 
     return (
         <div className="space-y-7">
-            {/* Barra de Progresso Minimalista */}
+            {/* Barra de Progresso */}
             <div className="space-y-3">
                 <div className="flex items-center justify-between px-1">
                     <span className="text-[10px] font-black uppercase tracking-[0.4em] text-white/25">
@@ -215,7 +177,7 @@ export function DailyTrafficQuiz({ isSubmitting, onSubmit }: DailyTrafficQuizPro
                                             {opt.label}
                                         </span>
                                         <span className="text-[10px] text-white/30 font-medium">
-                                            {opt.value === 'quente' ? 'Prontos para comprar' : opt.value === 'esquentando' ? 'Interesse real em fechar' : opt.value === 'medio' ? 'Apenas curiosos/pesquisando' : 'Fora do perfil / DDD errado'}
+                                            {opt.desc}
                                         </span>
                                     </div>
                                 </motion.button>
@@ -224,7 +186,7 @@ export function DailyTrafficQuiz({ isSubmitting, onSubmit }: DailyTrafficQuizPro
                     </motion.div>
                 )}
 
-                {/* ETAPA 2: Origem Macro */}
+                {/* ETAPA 2: Problema de Crédito */}
                 {step === 2 && (
                     <motion.div
                         key="step2"
@@ -237,32 +199,40 @@ export function DailyTrafficQuiz({ isSubmitting, onSubmit }: DailyTrafficQuizPro
                     >
                         <div className="space-y-1.5">
                             <h3 className="text-xl font-black text-white leading-tight">
-                                Qual origem trouxe o público mais desqualificado ontem?
+                                Houve muitos problemas de crédito ontem?
                             </h3>
                             <p className="text-xs text-white/40 font-medium">
-                                Identifique a fonte com leads mais "frios" no dia anterior.
+                                Leads com restrições ou sem score para aprovação.
                             </p>
                         </div>
                         <div className="grid grid-cols-2 gap-3">
-                            {ORIGEM_OPTIONS.map((opt) => {
-                                const Icon = opt.icon;
-                                return (
-                                    <motion.button
-                                        key={opt.value}
-                                        whileHover={{ y: -4, backgroundColor: 'rgba(255,255,255,0.05)' }}
-                                        whileTap={{ scale: 0.96 }}
-                                        onClick={() => handleOrigem(opt.value)}
-                                        className={`flex flex-col items-center justify-center gap-3 p-5 rounded-2xl border transition-all duration-200 text-center ${opt.bg}`}
-                                    >
-                                        <div className="p-2 rounded-xl bg-black/20 border border-white/5">
-                                            <Icon size={20} style={{ color: opt.color }} />
-                                        </div>
-                                        <span className="text-[11px] font-black text-white/80 uppercase tracking-widest leading-tight">
-                                            {opt.label}
-                                        </span>
-                                    </motion.button>
-                                );
-                            })}
+                            <motion.button
+                                whileHover={{ y: -4, backgroundColor: 'rgba(59,130,246,0.1)' }}
+                                whileTap={{ scale: 0.96 }}
+                                onClick={() => handleCredito(false)}
+                                className="flex flex-col items-center justify-center gap-4 p-6 rounded-2xl bg-blue-500/10 border border-blue-500/20 hover:border-blue-500/40 transition-all duration-200"
+                            >
+                                <div className="p-3 rounded-xl bg-blue-500/20">
+                                    <ThumbsUp size={24} className="text-blue-400" />
+                                </div>
+                                <span className="text-[11px] font-black text-white/80 uppercase tracking-widest leading-tight">
+                                    Crédito OK / Perfil Bom
+                                </span>
+                            </motion.button>
+
+                            <motion.button
+                                whileHover={{ y: -4, backgroundColor: 'rgba(245,158,11,0.1)' }}
+                                whileTap={{ scale: 0.96 }}
+                                onClick={() => handleCredito(true)}
+                                className="flex flex-col items-center justify-center gap-4 p-6 rounded-2xl bg-amber-500/10 border border-amber-500/20 hover:border-amber-500/40 transition-all duration-200"
+                            >
+                                <div className="p-3 rounded-xl bg-amber-500/20">
+                                    <ThumbsDown size={24} className="text-amber-400" />
+                                </div>
+                                <span className="text-[11px] font-black text-white/80 uppercase tracking-widest leading-tight">
+                                    Muitos S/ Crédito
+                                </span>
+                            </motion.button>
                         </div>
                     </motion.div>
                 )}

@@ -52,6 +52,7 @@ const NAV_ITEMS: NavItem[] = [
     { label: 'Cowork IA', icon: Bot, href: '/admin/cowork', adminOnly: true },
     { label: 'Radar de Tráfego', icon: Radar, href: '/admin/trafego', adminOnly: true },
     { label: 'Calibração da IA', icon: SlidersHorizontal, href: '/admin/ai-calibration', adminOnly: true },
+    { label: 'Compras', icon: CarFront, href: '/compras', restricted: true },
 ];
 
 interface NavUser {
@@ -185,7 +186,15 @@ export const NavigationV2 = () => {
                         <p className="text-[10px] font-black text-white/20 uppercase tracking-[0.3em]">Navegação Principal</p>
                     </div>
                 )}
-                {NAV_ITEMS.filter(item => !item.adminOnly || role === 'admin').map((item) => {
+                {NAV_ITEMS.filter(item => {
+                    const isAdmin = role === 'admin';
+                    const isFelipe = user?.user_metadata?.full_name?.includes('Felipe Ledra');
+                    
+                    if (item.adminOnly && !isAdmin) return false;
+                    if (item.restricted && !(isAdmin || isFelipe)) return false;
+                    
+                    return true;
+                }).map((item) => {
                     const isActive = pathname.startsWith(item.href);
                     return (
                         <Link

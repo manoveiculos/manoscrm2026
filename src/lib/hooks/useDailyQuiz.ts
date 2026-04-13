@@ -16,9 +16,10 @@ interface ConsultantInfo {
 }
 
 interface QuizPayload {
-    temperatura_vendas: 'quente' | 'esquentando' | 'medio' | 'frio';
-    origem_macro: 'WhatsApp' | 'Facebook' | 'Google' | 'OK';
+    temperatura_vendas: 'quente' | 'medio' | 'frio';
+    problema_credito: boolean;
     comentario_extra?: string;
+    campanha_id?: string;
 }
 
 interface UseDailyQuizReturn {
@@ -146,8 +147,9 @@ export function useDailyQuiz(): UseDailyQuizReturn {
                     consultor_id: consultant.id,
                     data: new Date().toISOString(),
                     temperatura_vendas: payload.temperatura_vendas,
-                    origem_macro: payload.origem_macro,
+                    problema_credito: payload.problema_credito,
                     comentario_extra: payload.comentario_extra?.trim() || null,
+                    campanha_id: payload.campanha_id || null
                 });
 
             if (error) {

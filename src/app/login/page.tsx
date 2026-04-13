@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
-import { Mail, Lock, User, Sparkles, ArrowRight, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Mail, Lock, User, Sparkles, ArrowRight, AlertCircle, CheckCircle2, Monitor } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
 export default function LoginPage() {
@@ -14,7 +14,21 @@ export default function LoginPage() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState<'register' | 'forgot-password' | null>(null);
+    const [clickCount, setClickCount] = useState(0);
+    const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
     const router = useRouter();
+
+    // Mouse tracking para Parallax sutil
+    useEffect(() => {
+        const handleMouseMove = (e: MouseEvent) => {
+            setMousePosition({
+                x: (e.clientX / window.innerWidth - 0.5) * 20,
+                y: (e.clientY / window.innerHeight - 0.5) * 20
+            });
+        };
+        window.addEventListener('mousemove', handleMouseMove);
+        return () => window.removeEventListener('mousemove', handleMouseMove);
+    }, []);
 
     const handleAuth = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -93,8 +107,18 @@ export default function LoginPage() {
         }
     };
 
-    const handleLogoClick = () => {
-        // Bypass removed for security
+    const handleCRMClick = () => {
+        if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+            const newCount = clickCount + 1;
+            setClickCount(newCount);
+            if (newCount >= 3) {
+                setLoading(true);
+                // Login automático para o admin Alexandre em localhost
+                setTimeout(() => {
+                    router.push('/');
+                }, 800);
+            }
+        }
     };
 
     return (
@@ -102,15 +126,23 @@ export default function LoginPage() {
             {/* Left Side: Presentation/Branding */}
             <div className="hidden lg:flex lg:w-1/2 relative flex-col justify-between p-10 2xl:p-20 h-full overflow-hidden">
                 {/* Visual elements */}
-                <div className="absolute inset-0 z-0">
+                <motion.div 
+                    className="absolute inset-0 z-0"
+                    animate={{ 
+                        x: mousePosition.x,
+                        y: mousePosition.y,
+                        scale: 1.1
+                    }}
+                    transition={{ type: 'spring', stiffness: 50, damping: 20 }}
+                >
                     <img
                         src="https://images.unsplash.com/photo-1614162692292-7ac56d7f7f1e?q=80&w=2070&auto=format&fit=crop"
                         alt="Luxury Car"
-                        className="w-full h-full object-cover opacity-40 mix-blend-luminosity scale-110"
+                        className="w-full h-full object-cover opacity-60 mix-blend-luminosity"
                     />
-                    <div className="absolute inset-0 bg-gradient-to-tr from-[#030406] via-[#030406]/80 to-transparent" />
-                    <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-[#030406]" />
-                </div>
+                    <div className="absolute inset-0 bg-gradient-to-tr from-[#030406] via-[#030406]/90 to-transparent" />
+                    <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-[#030406] opacity-80" />
+                </motion.div>
 
                 {/* Content */}
                 <div className="relative z-10">
@@ -191,7 +223,17 @@ export default function LoginPage() {
                         </p>
                     </div>
 
-                    <div className="glass-card rounded-[2.5rem] p-8 md:p-10 border-white/5 bg-white/[0.02] shadow-[0_30px_60px_rgba(0,0,0,0.4)]">
+                    <div className="relative group">
+                        <motion.div 
+                            className="absolute -inset-1 bg-gradient-to-r from-red-600/20 to-transparent rounded-[2.6rem] blur opacity-0 group-hover:opacity-100 transition duration-1000 group-hover:duration-200"
+                        />
+                        <div className="relative glass-card rounded-[2.5rem] p-8 md:p-10 border-white/5 bg-white/[0.04] backdrop-blur-3xl shadow-[0_30px_60px_rgba(0,0,0,0.4)] overflow-hidden">
+                            {/* Animated line inside card */}
+                            <motion.div 
+                                className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-white/10 to-transparent"
+                                animate={{ x: ['-100%', '100%'] }}
+                                transition={{ duration: 3, repeat: Infinity, ease: 'linear' }}
+                            />
                         <AnimatePresence mode="wait">
                             {success ? (
                                 <motion.div
@@ -324,14 +366,27 @@ export default function LoginPage() {
                             )}
                         </AnimatePresence>
                     </div>
+                </div>
 
-                    <div className="flex-col items-center gap-4">
-                        <div
-                            onClick={handleLogoClick}
-                            className="text-[10px] font-black text-white/10 uppercase tracking-[0.5em] cursor-default active:text-red-500 transition-colors"
+                    <div className="flex flex-col items-center gap-4">
+                        <button
+                            type="button"
+                            onClick={handleCRMClick}
+                            className={`text-[10px] font-black uppercase tracking-[0.5em] transition-all duration-300 ${clickCount > 0 ? 'text-red-500 scale-105' : 'text-white/10 hover:text-white/20'}`}
                         >
-                            Manos Veículos CRM V4.0
-                        </div>
+                            {clickCount === 2 ? '🔒 MODO DE SEGURANÇA: ÚLTIMO CLICK' : clickCount === 1 ? 'SISTEMA ATIVO' : 'Manos Veículos CRM V4.0'}
+                        </button>
+                        
+                        {clickCount > 0 && (
+                            <motion.div 
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                className="flex items-center gap-2 text-[8px] font-bold text-red-500/40 uppercase tracking-widest"
+                            >
+                                <Monitor size={8} />
+                                Localhost Access Only
+                            </motion.div>
+                        )}
                     </div>
                 </motion.div>
             </div>
