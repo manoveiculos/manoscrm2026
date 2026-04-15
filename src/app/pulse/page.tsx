@@ -237,7 +237,7 @@ export default function Pulse() {
                 // Injeção do 1º dia do mês atual para filtrar leads recebidos EXCLUSIVAMENTE neste mês
                 const firstDayOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
 
-                const [leadsResult, metricsResult] = await Promise.all([
+                const [leadsResult, metricsResult, comprasResult] = await Promise.all([
                     leadService.getLeadsPaginated(undefined, {
                         consultantId: isAdmin ? undefined : consultant.id,
                         role: isAdmin ? 'admin' : 'consultant',
@@ -252,9 +252,36 @@ export default function Pulse() {
                             end: `${customDates.end}T23:59:59`
                         } : undefined
                     }),
+                    (async () => {
+                        const { data } = await supabase
+                            .from('leads_compra')
+                            .select('*')
+                            .gte('criado_em', firstDayOfMonth)
+                            .order('criado_em', { ascending: false });
+                        
+                        return (data || []).map(l => ({
+                            id: `compra_${l.id}`,
+                            name: l.nome,
+                            phone: l.telefone,
+                            email: '',
+                            source: l.origem || 'IA Ativa',
+                            origem: l.origem,
+                            status: l.status,
+                            ai_score: l.ai_score || 0,
+                            ai_classification: l.ai_classification || '',
+                            ai_summary: l.ai_summary || '',
+                            vehicle_interest: `Avaliação: ${l.marca || ''} ${l.modelo || ''} ${l.ano || ''}`,
+                            assigned_consultant_id: null,
+                            created_at: l.criado_em,
+                            updated_at: l.updated_at,
+                            is_compra: true
+                        }));
+                    })(),
                 ]);
 
-                setLeads(leadsResult.leads || []);
+                // Merge
+                const allLeads = [...(leadsResult.leads || []), ...comprasResult];
+                setLeads(allLeads as Lead[]);
                 setMetrics(metricsResult as FinancialMetrics);
 
                 // Alertas de sobrecarga — só para admin
@@ -687,10 +714,16 @@ export default function Pulse() {
                                                 <div className="flex-1 min-w-0">
                                                     <div className="flex items-center gap-2">
                                                         <p className="text-sm font-bold text-white/90 truncate">{lead.name || 'Novo Lead'}</p>
-                                                        <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-white/5 border border-white/10 shrink-0">
-                                                            <IconComp size={10} style={{ color: src.color }} />
-                                                            <span className="text-[9px] font-bold text-white/40 uppercase tracking-tighter">{lead.source || lead.origem || 'Geral'}</span>
-                                                        </div>
+                                                        {(lead as any).is_compra ? (
+                                                            <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/20 shrink-0">
+                                                                <span className="text-[9px] font-bold text-emerald-400 uppercase tracking-tighter">Compra</span>
+                                                            </div>
+                                                        ) : (
+                                                            <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-white/5 border border-white/10 shrink-0">
+                                                                <IconComp size={10} style={{ color: src.color }} />
+                                                                <span className="text-[9px] font-bold text-white/40 uppercase tracking-tighter">{lead.source || lead.origem || 'Geral'}</span>
+                                                            </div>
+                                                        )}
                                                     </div>
                                                     <p className="text-[11px] text-white/30 truncate">{lead.vehicle_interest || 'Interesse não definido'}</p>
                                                 </div>
@@ -791,6 +824,11 @@ export default function Pulse() {
                                                             >
                                                                 NOVO
                                                             </motion.span>
+                                                        )}
+                                                        {(lead as any).is_compra && (
+                                                            <span className="text-[8px] font-black px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 uppercase tracking-widest shrink-0">
+                                                                COMPRA
+                                                            </span>
                                                         )}
                                                     </div>
                                                     <p className="text-[11px] text-white/30 truncate">
