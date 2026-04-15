@@ -14,7 +14,11 @@ import {
     Clock,
     CheckCircle2,
     AlertCircle,
-    MessageCircle
+    MessageCircle,
+    Brain,
+    Flame,
+    Snowflake,
+    Zap
 } from 'lucide-react';
 import { LeadCompra } from '@/lib/types/compra';
 import { formatPhoneBR } from '@/lib/shared_utils/helpers';
@@ -33,6 +37,21 @@ export const LeadCardCompra = ({ lead, onClick }: LeadCardCompraProps) => {
         return val.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
     };
 
+    const getScoreColor = (score: number) => {
+        if (score >= 80) return 'text-red-500 border-red-500/50 shadow-[0_0_15px_rgba(239,68,68,0.2)] bg-red-500/10';
+        if (score >= 40) return 'text-orange-500 border-orange-500/50 shadow-[0_0_15px_rgba(249,115,22,0.2)] bg-orange-500/10';
+        return 'text-blue-500 border-blue-500/50 shadow-[0_0_15px_rgba(59,130,246,0.2)] bg-blue-500/10';
+    };
+
+    const getScoreIcon = (score: number) => {
+        if (score >= 80) return <Flame size={12} className="text-red-500" />;
+        if (score >= 40) return <Zap size={12} className="text-orange-500" />;
+        return <Snowflake size={12} className="text-blue-500" />;
+    };
+
+    const aiScore = lead.ai_score || 0;
+    const hasAI = typeof lead.ai_score === 'number' || lead.ai_summary;
+
     return (
         <motion.div
             layout
@@ -48,8 +67,13 @@ export const LeadCardCompra = ({ lead, onClick }: LeadCardCompraProps) => {
             {/* Header: Lead Name & Badge */}
             <div className="flex justify-between items-start mb-4 relative z-10">
                 <div className="flex flex-col min-w-0">
-                    <h3 className="text-[15px] font-black text-white truncate group-hover:text-red-400 transition-colors uppercase tracking-tight leading-none">
+                    <h3 className="text-[15px] font-black text-white truncate group-hover:text-red-400 transition-colors uppercase tracking-tight leading-none flex items-center gap-2">
                         {lead.nome}
+                        {hasAI && (
+                            <div className={`shrink-0 flex items-center justify-center w-6 h-6 rounded-full border ${getScoreColor(aiScore)}`} title="Cérebro IA Ativo">
+                                {getScoreIcon(aiScore)}
+                            </div>
+                        )}
                     </h3>
                     {lead.telefone && (
                         <span className="text-[11px] font-bold text-white/40 mt-1">
@@ -60,16 +84,41 @@ export const LeadCardCompra = ({ lead, onClick }: LeadCardCompraProps) => {
                         <span className="text-[10px] font-bold text-white/30 uppercase tracking-widest flex items-center gap-1">
                             <Tag size={10} /> {lead.origem || 'Facebook Leads'}
                         </span>
+                        {hasAI && (
+                            <span className="text-[10px] font-bold text-red-500/80 uppercase tracking-widest flex items-center gap-1">
+                                • Score {aiScore}%
+                            </span>
+                        )}
                     </div>
                 </div>
-                {lead.aceita_abaixo_fipe && (
-                    <div className="shrink-0 animate-pulse">
-                        <div className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[9px] font-black px-2 py-1 rounded-lg uppercase tracking-wider">
-                            Abaixo FIPE
+                <div className="flex flex-col items-end gap-2">
+                    {lead.aceita_abaixo_fipe && (
+                        <div className="shrink-0 animate-pulse">
+                            <div className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[9px] font-black px-2 py-1 rounded-lg uppercase tracking-wider">
+                                Abaixo FIPE
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {/* AI Diagnosis Bubble */}
+            {hasAI && lead.ai_summary && (
+                <div className="mb-4 bg-red-900/10 border border-red-500/20 rounded-xl p-3 relative overflow-hidden">
+                    <div className="absolute top-0 left-0 w-1 h-full bg-red-500" />
+                    <div className="flex items-start gap-2">
+                        <Brain size={14} className="text-red-400 shrink-0 mt-0.5" />
+                        <div className="flex flex-col">
+                            <span className="text-[9px] font-black text-red-400/80 uppercase tracking-widest mb-1">
+                                Análise IA {lead.proxima_acao ? `- Ação: ${lead.proxima_acao}` : ''}
+                            </span>
+                            <p className="text-[11px] text-white/80 leading-snug line-clamp-2" title={lead.ai_summary}>
+                                {lead.ai_summary}
+                            </p>
                         </div>
                     </div>
-                )}
-            </div>
+                </div>
+            )}
 
             {/* Car Details */}
             <div className="grid grid-cols-2 gap-3 mb-5 relative z-10">
@@ -130,8 +179,22 @@ export const LeadCardCompra = ({ lead, onClick }: LeadCardCompraProps) => {
                         Criado há {Math.floor((Date.now() - new Date(lead.criado_em).getTime()) / (1000 * 60 * 60 * 24))} dias
                     </span>
                 </div>
-                <div className="flex items-center gap-3">
-                    {lead.telefone && (
+                <div className="flex items-center gap-2">
+                    {lead.last_scripts_json && lead.last_scripts_json.agendamento && (
+                        <button 
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                const text = encodeURIComponent(lead.last_scripts_json.agendamento);
+                                window.open(`https://wa.me/55${lead.telefone.replace(/\D/g, '')}?text=${text}`, '_blank');
+                            }}
+                            className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 px-3 py-1.5 rounded-lg border border-emerald-500/20 text-[10px] font-bold flex items-center gap-1.5 transition-all shadow-[0_0_10px_rgba(16,185,129,0.1)]"
+                            title="Disparar Script Mágico (Agendamento)"
+                        >
+                            <Zap size={10} />
+                            Action
+                        </button>
+                    )}
+                    {lead.telefone && !lead.last_scripts_json?.agendamento && (
                         <a 
                             href={`https://wa.me/55${lead.telefone.replace(/\D/g, '')}`}
                             target="_blank"

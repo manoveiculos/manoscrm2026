@@ -183,6 +183,10 @@ Responda SOMENTE o primeiro nome (ex: "Carlos") ou null:`
     const leadScore = lead.ai_score || 0;
     const isHot = leadScore >= 50 || leadScore === 0;
 
+    const hoursInactive = Math.round(
+        (Date.now() - new Date(lead.updated_at || lead.created_at).getTime()) / 3_600_000
+    );
+
     // MEMÓRIA DE AÇÕES — busca análises anteriores para NÃO repetir
     let memoriaAcoes = '';
     try {
@@ -254,10 +258,6 @@ Responda SOMENTE o primeiro nome (ex: "Carlos") ou null:`
 
     // CAMINHO B: GPT-4o (Backup ou Frio)
     if (!diagnostico) {
-        const hoursInactive = Math.round(
-            (Date.now() - new Date(lead.updated_at || lead.created_at).getTime()) / 3_600_000
-        );
-
         const inventorySummary = (inventory || [])
             .slice(0, 20)
             .map((i: any) => `- ${i.marca} ${i.modelo} ${i.ano} | R$ ${Number(i.preco).toLocaleString('pt-BR')} | ${i.km ? i.km + 'km' : 'km n/d'} | ${i.cambio || ''} ${i.combustivel || ''}`)
@@ -305,13 +305,28 @@ PERFIL COMPORTAMENTAL:
               ).join('\n')
             : 'Nenhuma mensagem WhatsApp sincronizada.';
 
-        const prompt = `Você é o Closer Elite da Manos Veículos (Rio do Sul/SC). Seu objetivo é FORÇAR O FECHAMENTO usando gatilhos mentais (Urgência e Escassez). Faça uma análise implacável deste lead e responda em JSON.
+        const isCompra = usedTable === 'leads_compra';
+        const sistemaPromptText = isCompra
+            ? 'Você é um Negociador de Compras de veículos especialista. Avalie agressivamente o lead. Faça-o trazer o carro pra loja. Responda APENAS com JSON válido.'
+            : 'Você é um closer implacável de veículos. Analise friamente os dados e dê ordens cirúrgicas. Sem rodeios, sem passividade. Responda APENAS com JSON válido.';
+        
+        let promptBaseDesc = isCompra 
+            ? 'Você é o Analista de Compras da Manos Veículos (Rio do Sul/SC). Seu objetivo é AVALIAR O VEÍCULO DO CLIENTE e gerar URGÊNCIA PARA ELE TRAZER O CARRO NA LOJA. Faça uma análise implacável deste lead e responda em JSON.'
+            : 'Você é o Closer Elite da Manos Veículos (Rio do Sul/SC). Seu objetivo é FORÇAR O FECHAMENTO usando gatilhos mentais (Urgência e Escassez). Faça uma análise implacável deste lead e responda em JSON.';
+            
+        let originVehicleDesc = isCompra
+            ? `- Veículo Ofertado: ${lead.veiculo_original || lead.modelo || 'não informado'}\n- Ano: ${lead.ano || 'não informado'}\n- Km: ${lead.km || 'não informado'}\n- Tabela FIPE esperada: ${lead.valor_fipe || 'não informado'}\n- Aceita abaixo da FIPE: ${lead.aceita_abaixo_fipe ? 'SIM' : 'NÃO'}`
+            : `- Interesse: ${lead.interesse || lead.vehicle_interest || 'não informado'}\n- Investimento: ${lead.valor_investimento || 'não informado'}\n- Troca: ${lead.carro_troca || 'não informado'}`;
+
+        let missionP2 = isCompra 
+            ? '2. Dê uma ORDEM TÁTICA ESPECÍFICA para o avaliador (ações como pedir fotos, docs ou chamar na loja).'
+            : '2. Dê uma ORDEM TÁTICA ESPECÍFICA para o consultor fechar HOJE (Ação incisiva e argumento de Cialdini)';
+
+        const prompt = `${promptBaseDesc}
 
 DADOS DO LEAD:
 - Nome: ${lead.nome || lead.name}
-- Interesse: ${lead.interesse || lead.vehicle_interest || 'não informado'}
-- Investimento: ${lead.valor_investimento || 'não informado'}
-- Troca: ${lead.carro_troca || 'não informado'}
+${originVehicleDesc}
 - Status atual: ${lead.status || 'não informado'}
 - Origem: ${lead.origem || lead.source || 'não informado'}
 - Score IA atual: ${lead.ai_score || 0}%
@@ -323,15 +338,15 @@ HISTÓRICO DE CONVERSA:
 ${chatText}
 ${recentInteractions}
 
-ESTOQUE DISPONÍVEL:
+ESTOQUE DISPONÍVEL (Caso haja troca com troco ou algo assim):
 ${inventorySummary || 'Nenhum veículo no estoque no momento.'}
 ${memoriaAcoes}
 
 MISSÃO:
-1. Diagnostique a situação REAL (o que está travando a venda?)
-2. Dê uma ORDEM TÁTICA ESPECÍFICA para o consultor fechar HOJE (Ação incisiva e argumento de Cialdini)
-3. Escreva um script WhatsApp de 2 frases CURTAS, DIRETAS, abusando de Escassez/Urgência (ex: "Tenho outro interessado pra ver o carro hoje, mas dou preferência a você se fechar agora"). Sem gentilezas.
-4. Se ação anterior falhou, ESCALE. (ex: Ligar imediatamente cobrando posição)
+1. Diagnostique a situação REAL (quais dados faltam para a avaliação do carro? O cliente está quente para vender?)
+${missionP2}
+3. Escreva um script WhatsApp de 2 frases CURTAS, DIRETAS, abusando de gatilhos mentais para puxar o cliente para a loja.
+4. Se ação anterior falhou, ESCALE.
 5. Calcule score de 0-100 baseado na temperatura comportamental.
 
 Retorne JSON: { "diagnostico": "texto preciso em 2-3 frases", "orientacao": "ação específica com horário/canal e gatilho", "script": "mensagem WhatsApp matadora", "score": 0-100 }`;
@@ -339,7 +354,7 @@ Retorne JSON: { "diagnostico": "texto preciso em 2-3 frases", "orientacao": "aç
         const response = await openai.chat.completions.create({
             model: isHot ? 'gpt-4o' : 'gpt-4o-mini',
             messages: [
-                { role: 'system', content: 'Você é um closer implacável de veículos. Analise friamente os dados e dê ordens cirúrgicas. Sem rodeios, sem passividade. Responda APENAS com JSON válido.' },
+                { role: 'system', content: sistemaPromptText },
                 { role: 'user', content: prompt }
             ],
             response_format: { type: 'json_object' },
@@ -362,16 +377,19 @@ Retorne JSON: { "diagnostico": "texto preciso em 2-3 frases", "orientacao": "aç
     let scriptOptions: ScriptOption[] = [];
 
     try {
+        const isCompraSub = usedTable === 'leads_compra';
         const scriptRes = await openai.chat.completions.create({
             model: 'gpt-4o-mini',
             temperature: 0.4,
             response_format: { type: 'json_object' },
             messages: [{
                 role: 'system',
-                content: 'Você é um Closer agressivo da Manos Veículos. Gere scripts de WhatsApp curtos (2 frases), focados em gerar Micro-comprometimentos e usando Escassez e Urgência. Zero gentilezas tipo "tudo bem?". Retorne APENAS JSON válido.'
+                content: isCompraSub 
+                   ? 'Você é um Analista de Compras da Manos Veículos. Gere scripts de WhatsApp (2 frases curtas) para avaliação de carros e puxar cliente para agendamento presencial. JSON Válido apenas.'
+                   : 'Você é um Closer agressivo da Manos Veículos. Gere scripts de WhatsApp curtos (2 frases), focados em gerar Micro-comprometimentos e usando Escassez e Urgência. Zero gentilezas tipo "tudo bem?". Retorne APENAS JSON válido.'
             }, {
                 role: 'user',
-                content: `Cliente: ${leadFirstName} | Interesse: ${vehicleInterest} | Diagnóstico: ${diagnostico || 'Lead sem histórico'} | Score: ${urgencyScore}%
+                content: `Cliente: ${leadFirstName} | Veículo / Interesse: ${vehicleInterest} | Diagnóstico: ${diagnostico || 'Lead sem histórico'} | Score: ${urgencyScore}%
 
 Gere 3 mensagens prontas para o consultor copiar e enviar agora. Cada uma com no máximo 2 frases. Comece sempre pelo primeiro nome.
 
@@ -399,15 +417,49 @@ JSON: {
         ];
     }
 
-    // PERSISTÊNCIA
+    // PERSISTÊNCIA & ANTI-OVERLOAD
+    let finalUrgency = urgencyScore;
+    let finalTemperature = temperature;
+    let churnProb = lead.churn_probability || 0;
+    let oldStatus = lead.status || 'novo';
+    let newStatus = oldStatus;
+    let autopilotTriggered = false;
+    let ghostTriggered = false;
+
+    // Penalidade por Inatividade (Anti-Overload)
+    if (hoursInactive > 48) {
+        const penalty = Math.floor(hoursInactive / 24) * 5;
+        finalUrgency = Math.max(1, finalUrgency - penalty);
+        finalTemperature = finalUrgency >= 70 ? 'hot' : finalUrgency >= 40 ? 'warm' : 'cold';
+        churnProb = Math.min(99, churnProb + penalty * 2);
+    }
+
+    // Marca como Abandonado se passar do limite de Churn
+    if (churnProb > 85 && !['fechado', 'perdido', 'abandonado', 'ganho', 'vendido'].some(s => oldStatus.toLowerCase().includes(s))) {
+        newStatus = 'perdido';
+        ghostTriggered = true;
+    }
+
+    // Piloto Automático (Auto Pilot) de Movimentação Positiva
+    if (finalUrgency >= 90 && !ghostTriggered) {
+        if (usedTable === 'leads_compra' && oldStatus === 'novo') {
+            newStatus = 'em_analise';
+            autopilotTriggered = true;
+        } else if (usedTable !== 'leads_compra' && ['novo', 'contato_iniciado'].includes(oldStatus)) {
+            newStatus = 'proposta';
+            autopilotTriggered = true;
+        }
+    }
+
     const timestamp = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
     const timelineNote = `[${timestamp}] 🤖 ANÁLISE ${modelUsed.toUpperCase()}:\n${diagnostico}\n\nORIENTAÇÃO: ${orientacao}`;
 
     const updateData: any = {
         [usedTable === 'leads_distribuicao_crm_26' ? 'resumo_consultor' : 'ai_reason']: `${diagnostico} | ORIENTAÇÃO: ${orientacao}`,
         [usedTable === 'leads_distribuicao_crm_26' ? 'resumo' : 'ai_summary']: timelineNote, // Fim do append infinito
-        ai_score: urgencyScore,
-        ai_classification: temperature as any,
+        ai_score: finalUrgency,
+        ai_classification: finalTemperature as any,
+        churn_probability: churnProb,
         next_step: scriptWhatsApp,
         proxima_acao: scriptWhatsApp,
         last_scripts_json: scriptOptions,
@@ -415,11 +467,27 @@ JSON: {
         ai_last_run_at: new Date().toISOString(),
     };
 
+    if (autopilotTriggered || ghostTriggered) {
+        updateData.status = newStatus;
+    }
+
     await supabaseAdmin.from(usedTable).update(updateData).eq('id', cleanId);
 
     // ── Registro Físico na Timeline (para a nova aba de Histórico) ──
     try {
         const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(cleanId);
+        
+        // Se mudou de status devido ao Autopilot ou Ghost, gera um tracker customizado
+        if (autopilotTriggered || ghostTriggered) {
+            await supabaseAdmin.from('interactions_manos_crm').insert({
+                [isUUID ? 'lead_id' : 'lead_id_v1']: cleanId,
+                type: 'ai_analysis',
+                notes: `🤖 Sistema Autônomo:\nStatus movido de "${oldStatus}" para "${newStatus}" devido a ${autopilotTriggered ? 'alta intenção detectada (>90 score)' : 'esfriamento / risco de abandono (>85 churn)'}.`,
+                user_name: 'IA Autopilot',
+                created_at: new Date().toISOString(),
+            });
+        }
+
         await supabaseAdmin.from('interactions_manos_crm').insert({
             [isUUID ? 'lead_id' : 'lead_id_v1']: cleanId,
             type: 'ai_analysis',

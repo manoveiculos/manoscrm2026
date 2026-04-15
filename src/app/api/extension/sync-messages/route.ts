@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
         let numericId: number | null = null;
         let uuidId: string | null = null;
         let leadFound = null;
-        let leadType: 'main' | 'crm26' = 'crm26';
+        let leadType: 'main' | 'crm26' | 'compra' = 'crm26';
 
         const cleanPhone = phone ? phone.replace(/\D/g, '') : '';
         
@@ -170,7 +170,37 @@ export async function POST(req: NextRequest) {
             }
         }
 
+        // 3.5. TENTAR em leads_compra
+        let compraId: string | null = null;
         if (!uuidId && !numericId) {
+            if (leadId?.startsWith('compra_')) {
+                const cleanId = (leadId || '').replace('compra_', '');
+                const { data: leadCompra } = await supabaseAdmin.from('leads_compra').select('*').eq('id', cleanId).maybeSingle();
+                if (leadCompra) {
+                    compraId = leadCompra.id;
+                    leadFound = leadCompra;
+                    leadType = 'compra';
+                }
+            }
+            if (!compraId && cleanPhone) {
+                const orConditions = phoneVariants.map(v => `telefone.ilike.%${v}%`).join(',');
+                const { data: leadsCompra, error: errCompra } = await supabaseAdmin.from('leads_compra').select('*').or(orConditions).order('criado_em', { ascending: false }).limit(3);
+                
+                if (leadsCompra && leadsCompra.length > 0) {
+                    const bestMatch = leadsCompra.find(l => {
+                        const lClean = (l.telefone || '').replace(/\D/g, '');
+                        return lClean.includes(cleanPhone.slice(-8)) || cleanPhone.includes(lClean.slice(-8));
+                    }) || leadsCompra[0];
+
+                    compraId = bestMatch.id;
+                    leadFound = bestMatch;
+                    leadType = 'compra';
+                    console.log(`[Sync API] Lead localizado em leads_compra: ${bestMatch.nome}`);
+                } else if (errCompra) console.error('[Sync API] Erro busca leads_compra:', errCompra);
+            }
+        }
+
+        if (!uuidId && !numericId && !compraId) {
             const errorMsg = `Lead não identificado para phone=${phone} (clean=${cleanPhone}, id=${leadId})`;
             // Vercel FS é read-only — log apenas em stdout (visível em Vercel Logs).
             console.error(`[Sync API] Falha crítica: ${errorMsg} | payload: ${JSON.stringify(body).slice(0, 500)}`);
@@ -187,12 +217,12 @@ export async function POST(req: NextRequest) {
             });
         }
 
-        console.log(`[Sync API] Sincronizando ${messages.length} mensagens para lead (${leadType}): ${uuidId || numericId}`);
+        console.log(`[Sync API] Sincronizando ${messages.length} mensagens para lead (${leadType}): ${uuidId || numericId || compraId}`);
 
         // 2. Preparar registros para inserção (Deduplicação Inteligente)
-        if (leadType === 'crm26') {
+        if (leadType === 'crm26' || leadType === 'compra') {
             const messagesToInsert = messages.map((m: any) => ({
-                lead_id: numericId,
+                [leadType === 'crm26' ? 'lead_id' : 'lead_compra_id']: leadType === 'crm26' ? numericId : compraId,
                 message_text: m.text,
                 direction: m.direction,
                 message_id: m.id || m.messageId, // Tenta capturar o ID único do WhatsApp
@@ -200,10 +230,11 @@ export async function POST(req: NextRequest) {
             }));
 
             // Deduplicação por ID de mensagem ou Conteúdo+Direção+Recentidade
+            const colName = leadType === 'crm26' ? 'lead_id' : 'lead_compra_id';
             const { data: existingMsgs } = await supabaseAdmin
                 .from('whatsapp_messages')
                 .select('message_text, direction, message_id')
-                .eq('lead_id', numericId)
+                .eq(colName, leadType === 'crm26' ? numericId : compraId)
                 .order('created_at', { ascending: false })
                 .limit(messagesToInsert.length + 100);
 
@@ -221,7 +252,7 @@ export async function POST(req: NextRequest) {
 
             if (filteredMessages.length > 0) {
                 await supabaseAdmin.from('whatsapp_messages').insert(filteredMessages);
-                console.log(`[Sync API] Inseridas ${filteredMessages.length} novas msgs p/ lead ${numericId}`);
+                console.log(`[Sync API] Inseridas ${filteredMessages.length} novas msgs p/ lead ${leadType === 'crm26' ? numericId : compraId}`);
             }
         }
 
@@ -244,7 +275,7 @@ export async function POST(req: NextRequest) {
                 created_at: m.timestamp || m.created_at || new Date().toISOString(),
             }));
 
-            const targetLeadId = uuidId || (numericId !== null ? `crm26_${numericId}` : '');
+            const targetLeadId = uuidId || (numericId !== null ? `crm26_${numericId}` : (compraId !== null ? `compra_${compraId}` : ''));
             if (!targetLeadId) throw new Error('Lead ID resolvido vazio antes de runEliteCloser');
 
             // ── Quick Buying Signal Detection (Immediate Score Impact) ──
@@ -260,15 +291,19 @@ export async function POST(req: NextRequest) {
             const isImmediateHot = immediateBuyingKeywords.some(kw => lastClientMsg.includes(kw));
             
             if (isImmediateHot) {
-                console.log(`[QuickAI] Sinal de compra imediato detectado p/ lead ${targetLeadId}. Forçando score 95.`);
-                const tableToUpdate = leadFound?.source_table || (leadType === 'main' ? 'leads_master' : 'leads_distribuicao_crm_26');
+                console.log(`[QuickAI] Sinal de compra (venda imediata) detectado p/ lead ${targetLeadId}. Forçando score 95.`);
+                let tableToUpdate = 'leads_master';
+                if (leadType === 'compra') tableToUpdate = 'leads_compra';
+                else if (leadType === 'crm26') tableToUpdate = 'leads_distribuicao_crm_26';
+                else if (leadFound?.source_table) tableToUpdate = leadFound.source_table;
+                
                 await supabaseAdmin.from(tableToUpdate)
                     .update({ 
                         ai_score: 95, 
                         ai_classification: 'hot',
                         ai_last_run_at: new Date().toISOString()
                     })
-                    .eq('id', uuidId || numericId);
+                    .eq('id', uuidId || numericId || compraId);
             }
 
             const eliteResult = await runEliteCloser(targetLeadId, mappedMessages, consultor);
@@ -406,7 +441,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ 
             success: true, 
             count: messages.length,
-            leadId: uuidId || `crm26_${numericId}`,
+            leadId: uuidId || `crm26_${numericId}` || `compra_${compraId}`,
             aiAnalysis: aiAnalysisResult,
             aiError: aiError
         }, {

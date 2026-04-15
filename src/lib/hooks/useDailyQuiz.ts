@@ -46,31 +46,10 @@ export function useDailyQuiz(): UseDailyQuizReturn {
     const isOpen = needsQuiz;
 
     const checkIfNeedsQuiz = useCallback(async (consultantId: string) => {
-        // Horário de bloqueio configurado (05:00 AM)
-        const now = new Date();
-        const currentHour = now.getHours();
-        
-        // Se ainda não é 05:00h, não bloqueia
-        if (currentHour < 5) return false;
-
-        // Início do dia atual (00:00:00) em ISO
-        const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-
-        const { data, error } = await supabase
-            .from('traffic_quality_feedback')
-            .select('id')
-            .eq('consultor_id', consultantId)
-            .gte('data', startOfToday)
-            .limit(1)
-            .maybeSingle();
-
-        if (error) {
-            console.error('[useDailyQuiz] Erro ao verificar feedback:', error);
-            return false;
-        }
-
-        // Se não encontrou nenhum registro → precisa preencher
-        return !data;
+        // [CIRURGIA V3] O CRM trabalhando para o consultor.
+        // A IA agora analisa os feedbacks via Elite Closer na API de WhatsApp
+        // Retornamos falso em definitivo para liberar a tela
+        return false;
     }, []);
 
     const fetchCampaigns = useCallback(async () => {
