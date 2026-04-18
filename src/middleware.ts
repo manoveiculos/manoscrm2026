@@ -76,6 +76,6 @@ export const config = {
          * Corresponde a todos os caminhos, exceto arquivos estáticos conhecidos.
          * Usamos uma lógica mais abrangente para garantir segurança total.
          */
-        '/((?!api/auth|api/webhook|api/health|api/cron|api/extension|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+        '/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
     ],
 };
