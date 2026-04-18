@@ -1,10 +1,6 @@
 {
   "crons": [
     {
-      "path": "/api/cron/morning-push",
-      "schedule": "0 11 * * 1-6"
-    },
-    {
       "path": "/api/cron/daily-batch",
       "schedule": "0 7 * * *"
     },
@@ -15,16 +11,16 @@
   ],
   "functions": {
     "src/app/api/cron/ai-score-refresh/route.ts": {
-      "maxDuration": 300
+      "maxDuration": 60
     },
     "src/app/api/cron/anti-loss/route.ts": {
-      "maxDuration": 120
+      "maxDuration": 60
     },
     "src/app/api/cron/churn-predict/route.ts": {
-      "maxDuration": 120
+      "maxDuration": 60
     },
     "src/app/api/cron/followup-ai/route.ts": {
-      "maxDuration": 120
+      "maxDuration": 60
     },
     "src/app/api/cron/pipeline-sla/route.ts": {
       "maxDuration": 60
@@ -33,7 +29,7 @@
       "maxDuration": 60
     },
     "src/app/api/cron/daily-batch/route.ts": {
-      "maxDuration": 300
+      "maxDuration": 60
     },
     "src/app/api/cron/morning-push/route.ts": {
       "maxDuration": 60

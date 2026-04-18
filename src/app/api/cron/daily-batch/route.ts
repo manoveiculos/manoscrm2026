@@ -18,6 +18,7 @@ export async function GET() {
         ?? (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
 
     const cronPaths = [
+        '/api/cron/morning-push',
         '/api/cron/anti-loss',
         '/api/cron/pipeline-sla',
         '/api/cron/ai-score-refresh',
