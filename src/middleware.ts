@@ -12,6 +12,17 @@ export async function middleware(request: NextRequest) {
 
     // Middleware logic continues below
 
+    const path = request.nextUrl.pathname;
+    const isLoginPage = path === '/login';
+    const isPublicApi = path.startsWith('/api/auth') || path.startsWith('/api/webhook') || path.startsWith('/api/health') || path.startsWith('/api/extension') || path.startsWith('/api/cron');
+    const isEmbed = path === '/pipeline/embed';
+    const isStaticAsset = path.includes('.') || path.startsWith('/_next');
+
+    // Se for um asset estático, API pública ou Embed, ignoramos
+    if (isStaticAsset || isPublicApi || isEmbed) {
+        return supabaseResponse;
+    }
+
     const supabase = createServerClient(
         process.env.NEXT_PUBLIC_SUPABASE_URL!,
         process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -36,17 +47,6 @@ export async function middleware(request: NextRequest) {
     // IMPORTANTE: getUser() é mais seguro que getSession() no middleware
     // pois verifica o token contra o banco de dados do Supabase.
     const { data: { user } } = await supabase.auth.getUser();
-
-    const path = request.nextUrl.pathname;
-    const isLoginPage = path === '/login';
-    const isPublicApi = path.startsWith('/api/auth') || path.startsWith('/api/webhook') || path.startsWith('/api/health') || path.startsWith('/api/extension') || path.startsWith('/api/cron');
-    const isEmbed = path === '/pipeline/embed';
-    const isStaticAsset = path.includes('.') || path.startsWith('/_next');
-
-    // Se for um asset estático, API pública ou Embed, ignoramos
-    if (isStaticAsset || isPublicApi || isEmbed) {
-        return supabaseResponse;
-    }
 
     // Lógica de Redirecionamento
     if (!user && !isLoginPage) {
