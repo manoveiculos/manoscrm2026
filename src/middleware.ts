@@ -39,7 +39,7 @@ export async function middleware(request: NextRequest) {
 
     const path = request.nextUrl.pathname;
     const isLoginPage = path === '/login';
-    const isPublicApi = path.startsWith('/api/auth') || path.startsWith('/api/webhook') || path.startsWith('/api/health') || path.startsWith('/api/extension');
+    const isPublicApi = path.startsWith('/api/auth') || path.startsWith('/api/webhook') || path.startsWith('/api/health') || path.startsWith('/api/extension') || path.startsWith('/api/cron');
     const isEmbed = path === '/pipeline/embed';
     const isStaticAsset = path.includes('.') || path.startsWith('/_next');
 
