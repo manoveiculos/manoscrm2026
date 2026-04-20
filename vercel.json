@@ -5,11 +5,20 @@
       "schedule": "0 7 * * *"
     },
     {
-      "path": "/api/cron/pipeline-sla",
-      "schedule": "*/30 * * * *"
+      "path": "/api/cron/fifteen-min-scheduler",
+      "schedule": "*/15 * * * *"
     }
   ],
   "functions": {
+    "src/app/api/cron/fifteen-min-scheduler/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/cron/refresh-metrics/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/cron/hot-leak-alert/route.ts": {
+      "maxDuration": 60
+    },
     "src/app/api/cron/ai-score-refresh/route.ts": {
       "maxDuration": 60
     },

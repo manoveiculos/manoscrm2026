@@ -45,7 +45,7 @@ export function useLeadData(initialLead: Lead, setLeads: React.Dispatch<React.Se
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [initialLead?.id]);
 
-    const updateStatus = useCallback(async (newStatusId: string) => {
+    const updateStatus = useCallback(async (newStatusId: string, reason?: string) => {
         const oldStatus = lead.status;
         
         // Chamando a Server Action para garantir paridade total com a V1
@@ -55,7 +55,9 @@ export function useLeadData(initialLead: Lead, setLeads: React.Dispatch<React.Se
             await updateLeadStatusAction(
                 lead.id, 
                 newStatusId as any, 
-                oldStatus
+                oldStatus,
+                undefined, // notes
+                reason    // motivo_perda
             );
 
             const cleanId = initialLead.id.toString().replace(/main_|crm26_|dist_|lead_|crm25_|master_/, '');

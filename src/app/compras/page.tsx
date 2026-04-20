@@ -17,6 +17,7 @@ import {
 import { createClient } from '@/lib/supabase/client';
 import { LeadCompra } from '@/lib/types/compra';
 import { compraService } from '@/lib/services/compraService';
+import { LeadEditModalCompra } from './components/LeadEditModalCompra';
 import { LeadCardCompra } from './components/LeadCardCompra';
 
 export default function ComprasPage() {
@@ -24,8 +25,18 @@ export default function ComprasPage() {
     const [leads, setLeads] = useState<LeadCompra[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
+    const [statusFilter, setStatusFilter] = useState<string>('todos');
     const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
     const [authorized, setAuthorized] = useState<boolean | null>(null);
+    
+    // Novas variáveis para edição
+    const [selectedLead, setSelectedLead] = useState<LeadCompra | null>(null);
+    const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+
+    const loadLeads = async () => {
+        const data = await compraService.getLeads(supabase);
+        setLeads(data);
+    };
 
     useEffect(() => {
         async function checkAccessAndLoad() {
@@ -47,8 +58,7 @@ export default function ComprasPage() {
 
             if (isAdmin || isFelipe) {
                 setAuthorized(true);
-                const data = await compraService.getLeads(supabase);
-                setLeads(data);
+                await loadLeads();
             } else {
                 setAuthorized(false);
             }
@@ -58,11 +68,34 @@ export default function ComprasPage() {
         checkAccessAndLoad();
     }, []);
 
-    const filteredLeads = leads.filter(l => 
-        (l.nome?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
-        (l.modelo?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
-        (l.marca?.toLowerCase() || '').includes(searchTerm.toLowerCase())
-    );
+    const filteredLeads = leads
+        .filter(l => {
+            const matchesSearch = 
+                (l.nome?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+                (l.modelo?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+                (l.marca?.toLowerCase() || '').includes(searchTerm.toLowerCase());
+            
+            const matchesStatus = statusFilter === 'todos' || l.status === statusFilter;
+            
+            return matchesSearch && matchesStatus;
+        })
+        .sort((a, b) => {
+            // Regra 1: Data de criação (Mais recente sempre no topo)
+            const dateA = new Date(a.criado_em).getTime();
+            const dateB = new Date(b.criado_em).getTime();
+            if (dateA !== dateB) return dateB - dateA;
+
+            // Regra 2: Prioridade manual (se as datas forem iguais)
+            if ((a.prioridade || 0) !== (b.prioridade || 0)) {
+                return (b.prioridade || 0) - (a.prioridade || 0);
+            }
+
+            // Regra 3: Status 'perdido' sempre para o final
+            if (a.status === 'perdido' && b.status !== 'perdido') return 1;
+            if (a.status !== 'perdido' && b.status === 'perdido') return -1;
+
+            return 0;
+        });
 
     if (loading) {
         return (
@@ -91,7 +124,7 @@ export default function ComprasPage() {
     }
 
     return (
-        <div className="min-h-screen bg-[#0C0C0F] flex flex-col pt-0">
+        <div className="min-h-screen bg-[#0C0C0F] flex flex-col pt-0 pb-20">
             {/* Header Area */}
             <header className="px-6 py-6 border-b border-white/[0.06] bg-[#0C0C0F] sticky top-0 z-40">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
@@ -109,7 +142,23 @@ export default function ComprasPage() {
                         </div>
                     </div>
 
-                    <div className="flex items-center gap-3">
+                    <div className="flex flex-wrap items-center gap-3">
+                        {/* Status Filter */}
+                        <select 
+                            value={statusFilter}
+                            onChange={(e) => setStatusFilter(e.target.value)}
+                            className="bg-white/[0.03] border border-white/[0.08] rounded-xl px-4 py-2.5 text-xs font-black text-white/60 uppercase tracking-widest focus:outline-none focus:border-red-500 transition-all cursor-pointer"
+                        >
+                            <option value="todos">Todos Status</option>
+                            <option value="novo">Novos</option>
+                            <option value="em_analise">Em Análise</option>
+                            <option value="proposta_enviada">Proposta Enviada</option>
+                            <option value="agendado">Agendado</option>
+                            <option value="vistoria">Vistoria</option>
+                            <option value="fechado">Fechado</option>
+                            <option value="perdido">Perdido / Lixo</option>
+                        </select>
+
                         <div className="relative group">
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/20 group-focus-within:text-red-500 transition-colors" size={16} />
                             <input 
@@ -136,7 +185,10 @@ export default function ComprasPage() {
                             </button>
                         </div>
 
-                        <button className="bg-white/5 hover:bg-white/10 border border-white/10 p-2.5 rounded-xl text-white/40 hover:text-white transition-all">
+                        <button 
+                            onClick={() => loadLeads()}
+                            className="bg-white/5 hover:bg-white/10 border border-white/10 p-2.5 rounded-xl text-white/40 hover:text-white transition-all"
+                        >
                             <RefreshCw size={18} />
                         </button>
                         
@@ -154,16 +206,16 @@ export default function ComprasPage() {
                     </div>
                     <div className="w-px h-8 bg-white/5" />
                     <div className="flex items-center gap-2">
-                        <span className="text-[10px] font-black text-white/20 uppercase tracking-[0.2em]">Oportunidades</span>
-                        <span className="text-xl font-black text-emerald-500 tabular-nums">
-                            {leads.filter(l => l.aceita_abaixo_fipe).length}
+                        <span className="text-[10px] font-black text-white/20 uppercase tracking-[0.2em]">Quentes 🔥</span>
+                        <span className="text-xl font-black text-red-500 tabular-nums">
+                            {leads.filter(l => l.prioridade === 1).length}
                         </span>
                     </div>
                     <div className="w-px h-8 bg-white/5" />
                     <div className="flex items-center gap-2">
-                        <span className="text-[10px] font-black text-white/20 uppercase tracking-[0.2em]">Volume Negocial</span>
+                        <span className="text-[10px] font-black text-white/20 uppercase tracking-[0.2em]">Volume Captação</span>
                         <span className="text-xl font-black text-white/80 tabular-nums">
-                            {(leads.reduce((acc, curr) => acc + (curr.valor_cliente || 0), 0) / 1000000).toFixed(1)}M
+                            {(leads.filter(l => l.status !== 'perdido').reduce((acc, curr) => acc + (curr.valor_negociado || curr.valor_cliente || 0), 0) / 1000000).toFixed(1)}M
                         </span>
                     </div>
                 </div>
@@ -171,15 +223,25 @@ export default function ComprasPage() {
 
             {/* Content Area */}
             <main className="p-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                <div className={viewMode === 'grid' 
+                    ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6"
+                    : "flex flex-col gap-4"
+                }>
                     <AnimatePresence>
-                        {filteredLeads.map((lead) => (
-                            <LeadCardCompra 
-                                key={lead.id} 
-                                lead={lead} 
-                                onClick={() => {}} 
-                            />
-                        ))}
+                        {filteredLeads.map((lead) => {
+                            const isDuplicate = leads.filter(l => l.telefone === lead.telefone && l.id !== lead.id).length > 0;
+                            return (
+                                <LeadCardCompra 
+                                    key={lead.id} 
+                                    lead={lead} 
+                                    isDuplicate={isDuplicate}
+                                    onClick={() => {
+                                        setSelectedLead(lead);
+                                        setIsEditModalOpen(true);
+                                    }} 
+                                />
+                            );
+                        })}
                     </AnimatePresence>
                 </div>
 
@@ -189,10 +251,20 @@ export default function ComprasPage() {
                             <Search className="text-white/10" size={40} />
                         </div>
                         <h2 className="text-xl font-bold text-white/90">Nenhum lead encontrado</h2>
-                        <p className="text-white/30 max-w-xs mt-2">Tente ajustar sua busca ou adicione um novo lead para começar.</p>
+                        <p className="text-white/30 max-w-xs mt-2">Tente ajustar sua busca ou filtros para encontrar o que procura.</p>
                     </div>
                 )}
             </main>
+
+            {/* Edição de Lead */}
+            {selectedLead && (
+                <LeadEditModalCompra 
+                    isOpen={isEditModalOpen}
+                    onClose={() => setIsEditModalOpen(false)}
+                    lead={selectedLead}
+                    onUpdate={loadLeads}
+                />
+            )}
         </div>
     );
 }

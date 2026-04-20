@@ -35,7 +35,7 @@ function buildScorePrompt(lead: {
 }, now: number): string {
     const name        = lead.name || lead.nome || 'Desconhecido';
     const vehicle     = lead.vehicle_interest || lead.interesse || 'Não informado';
-    const origem      = lead.source || lead.origem || 'Não informada';
+    const origem      = lead.source || 'Não informada';
     const investimento = lead.valor_investimento || 'Não informado';
     const troca       = lead.carro_troca || 'Sem troca';
     const stage       = lead.status || 'entrada';
@@ -112,9 +112,9 @@ export async function GET(request: Request) {
         // Pool A: nunca analisados
         const { data: poolA, error: errA } = await supabase
             .from('leads_manos_crm')
-            .select('id, name, status, vehicle_interest, source, origem, valor_investimento, carro_troca, ai_summary, next_step, proxima_acao, behavioral_profile, updated_at, created_at')
+            .select('id, name, status, vehicle_interest, source, valor_investimento, carro_troca, ai_summary, next_step, proxima_acao, behavioral_profile, updated_at, created_at')
             .not('status', 'in', FINAL_STATUSES)
-            .or('ai_score.is.null,ai_score.eq.0')
+            .or('ai_score.is.null,ai_score.eq.0,ai_pending.eq.true')
             .order('created_at', { ascending: false })
             .limit(60);
 
@@ -123,7 +123,7 @@ export async function GET(request: Request) {
         // Pool B: score existente mas defasado (> 3 dias) com análise comportamental disponível
         const { data: poolB } = await supabase
             .from('leads_manos_crm')
-            .select('id, name, status, vehicle_interest, source, origem, valor_investimento, carro_troca, ai_summary, next_step, proxima_acao, behavioral_profile, updated_at, created_at')
+            .select('id, name, status, vehicle_interest, source, valor_investimento, carro_troca, ai_summary, next_step, proxima_acao, behavioral_profile, updated_at, created_at')
             .not('status', 'in', FINAL_STATUSES)
             .gt('ai_score', 0)
             .not('behavioral_profile', 'is', null)
@@ -193,12 +193,12 @@ PRINCÍPIO FUNDAMENTAL: score reflete probabilidade real de conversão, não pos
             }
         }
 
-        // ── Pool crm26 — mesma lógica, campos adaptados ────────────────────────
+        // ── Pool B (crm26) — mesma lógica, campos adaptados ────────────────────────
         const { data: leadsCrm26 } = await supabase
             .from('leads_distribuicao_crm_26')
             .select('id, nome, status, interesse, origem, valor_investimento, carro_troca, ai_summary, next_step, behavioral_profile, updated_at, criado_em')
             .not('status', 'in', FINAL_STATUSES)
-            .or('ai_score.is.null,ai_score.eq.0')
+            .or('ai_score.is.null,ai_score.eq.0,ai_pending.eq.true')
             .order('criado_em', { ascending: false })
             .limit(50);
 
@@ -241,6 +241,8 @@ PRINCÍPIO FUNDAMENTAL: score reflete probabilidade real de conversão, não pos
                             ai_score: Math.min(99, Math.max(1, Number(result.ai_score) || 40)),
                             ai_classification: ['hot', 'warm', 'cold'].includes(result.ai_classification) ? result.ai_classification : 'warm',
                             next_step: result.proxima_acao || '',
+                            proxima_acao: result.proxima_acao || '',
+                            ai_pending: false,
                         };
 
                         const normalized = (result.vehicle_interest_normalized || '').trim();
@@ -250,7 +252,7 @@ PRINCÍPIO FUNDAMENTAL: score reflete probabilidade real de conversão, não pos
 
                         await supabase.from('leads_distribuicao_crm_26').update(updatePayload).eq('id', lead.id);
                         processed++;
-                        log.push(`✅ [crm26] ${lead.nome} [${lead.status}] → ${result.ai_score}% (${result.ai_classification})`);
+                        log.push(`✅ [crm26] ${lead.nome} → ${result.ai_score}%`);
                     } catch (e: any) {
                         skipped++;
                         log.push(`❌ [crm26] ${lead.nome} → ${e.message}`);
@@ -263,11 +265,82 @@ PRINCÍPIO FUNDAMENTAL: score reflete probabilidade real de conversão, não pos
             }
         }
 
+        // Pool C: leads_compra — mesma lógica adaptada
+        const { data: leadsCompra } = await supabase
+            .from('leads_compra')
+            .select('id, nome, status, veiculo_original, origem, valor_cliente, ai_summary, next_step, proxima_acao, behavioral_profile, updated_at, criado_em')
+            .not('status', 'in', FINAL_STATUSES)
+            .or('ai_score.is.null,ai_score.eq.0,ai_pending.eq.true')
+            .order('criado_em', { ascending: false })
+            .limit(40);
+
+        if (leadsCompra?.length) {
+            log.push(`📋 ${leadsCompra.length} leads de compra elegíveis para score`);
+
+            for (let i = 0; i < leadsCompra.length; i += BATCH_SIZE) {
+                const batch = leadsCompra.slice(i, i + BATCH_SIZE);
+
+                await Promise.allSettled(batch.map(async (lead) => {
+                    try {
+                        const adaptedLead = {
+                            name: lead.nome,
+                            status: lead.status,
+                            vehicle_interest: lead.veiculo_original,
+                            origem: lead.origem,
+                            valor_investimento: lead.valor_cliente?.toString(),
+                            ai_summary: lead.ai_summary,
+                            next_step: lead.next_step || lead.proxima_acao,
+                            behavioral_profile: lead.behavioral_profile,
+                            updated_at: lead.updated_at,
+                            created_at: lead.criado_em,
+                        };
+
+                        const res = await openai.chat.completions.create({
+                            model: 'gpt-4o-mini',
+                            messages: [
+                                { role: 'system', content: systemPrompt },
+                                { role: 'user', content: buildScorePrompt(adaptedLead, now) },
+                            ],
+                            response_format: { type: 'json_object' },
+                            temperature: 0.2,
+                            max_tokens: 220,
+                        });
+
+                        const result = JSON.parse(res.choices[0]?.message?.content || '{}');
+
+                        const updatePayload: Record<string, any> = {
+                            ai_score: Math.min(99, Math.max(1, Number(result.ai_score) || 40)),
+                            ai_classification: ['hot', 'warm', 'cold'].includes(result.ai_classification) ? result.ai_classification : 'warm',
+                            next_step: result.proxima_acao || '',
+                            proxima_acao: result.proxima_acao || '',
+                            ai_pending: false, // Sucesso no reprocessamento
+                        };
+
+                        const normalized = (result.vehicle_interest_normalized || '').trim();
+                        if (normalized.length > 3 && normalized.toLowerCase() !== 'vazio') {
+                            updatePayload.veiculo_original = normalized;
+                        }
+
+                        await supabase.from('leads_compra').update(updatePayload).eq('id', lead.id);
+                        processed++;
+                        log.push(`✅ [compra] ${lead.nome} → ${result.ai_score}%`);
+                    } catch (e: any) {
+                        skipped++;
+                        log.push(`❌ [compra] ${lead.nome} → ${e.message}`);
+                    }
+                }));
+
+                if (i + BATCH_SIZE < leadsCompra.length) {
+                    await new Promise(r => setTimeout(r, 600));
+                }
+            }
+        }
+
         return NextResponse.json({
             success: true,
             processed,
             skipped,
-            leadsScanned: leads.length + (leadsCrm26?.length || 0),
+            leadsScanned: leads.length + (leadsCrm26?.length || 0) + (leadsCompra?.length || 0),
             log,
         });
     } catch (err: any) {

@@ -130,6 +130,29 @@ export async function updateLeadStatusAction(
     if (resumo_fechamento) updatePayload.resumo_fechamento = resumo_fechamento;
     if (notes) updatePayload.notas = notes;
 
+    // --- CONVERSION INTELLIGENCE MILESTONES ---
+    const s = String(targetStatus).toUpperCase().trim();
+    
+    // 1. First Contact (quando sai de status inicial/neutro)
+    if (['EM ATENDIMENTO', 'ATTEMPT', 'CONTACTED', 'CONFIRMED', 'AGENDAMENTO', 'SCHEDULED', 'VISITOU', 'VISITED'].includes(s)) {
+        // Usamos COALESCE no SQL ou checamos se ja existe. Aqui faremos via SQL para ser atomico se possivel, 
+        // mas no payload simples vamos setar se o status antigo for 'NEW'/'RECEIVED'
+        const isFromInitial = ['NEW', 'RECEIVED', 'AGUARDANDO'].includes(String(oldStatus || '').toUpperCase());
+        if (isFromInitial) {
+            updatePayload.first_contact_at = now;
+        }
+    }
+
+    // 2. Won At
+    if (['VENDIDO', 'COMPRA REALIZADA', 'CLOSED', 'COMPRADO', 'FECHADO', 'VENDA'].includes(s)) {
+        updatePayload.won_at = now;
+    }
+
+    // 3. Lost At
+    if (['PERDA / SEM CONTATO', 'PERDIDO / DESCARTE', 'LOST', 'LOST_REDISTRIBUTED', 'POST_SALE', 'TRASH'].includes(s)) {
+        updatePayload.lost_at = now;
+    }
+
     // Sincronizar marcador de status no resumo para leads CRM26 (Evita que o parser legado sobrescreva no refresh)
     if (table === 'leads_distribuicao_crm_26') {
         const { data: currentLead } = await adminClient.from(table).select('resumo').eq('id', realId).single();

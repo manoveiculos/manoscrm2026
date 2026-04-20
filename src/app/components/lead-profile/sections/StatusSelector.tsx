@@ -8,7 +8,7 @@ import { ScoreBadgeWithFeedback } from '../components/ScoreBadgeWithFeedback';
 interface StatusSelectorProps {
     lead: any;
     currentStatus: string;
-    onChange: (newStatus: string) => void;
+    onChange: (newStatus: string, reason?: string) => void;
     scoreInfo: { color: string; label: string };
     displayScore: number;
     userName: string;
@@ -27,6 +27,8 @@ export const StatusSelector: React.FC<StatusSelectorProps> = ({
     const [showStatusMenu, setShowStatusMenu] = useState(false);
     const [mounted, setMounted] = useState(false);
     const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({});
+    const [pendingStatus, setPendingStatus] = useState<string | null>(null);
+    const [lossReason, setLossReason] = useState('');
     const buttonRef = useRef<HTMLButtonElement>(null);
     const normalizedId = normalizeStatus(currentStatus);
     const statusConfig = getStatusConfig(currentStatus);
@@ -101,21 +103,63 @@ export const StatusSelector: React.FC<StatusSelectorProps> = ({
                                     style={dropdownStyle}
                                     className="bg-[#141418] border border-white/[0.08] rounded-xl shadow-2xl overflow-hidden"
                                 >
-                                    {ALL_STATUS.map(s => (
-                                        <button
-                                            key={s.id}
-                                            onClick={() => {
-                                                onChange(s.id);
-                                                setShowStatusMenu(false);
-                                            }}
-                                            className="w-full text-start px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wider hover:bg-white/[0.04] transition-colors flex items-center gap-3 border-b border-white/[0.04] last:border-0"
-                                            style={{ color: s.id === normalizedId ? s.color : 'rgba(255,255,255,0.35)' }}
-                                        >
-                                            <span className="text-sm opacity-70">{s.icon}</span>
-                                            {s.label}
-                                            {s.id === normalizedId && <Check size={10} className="ml-auto" />}
-                                        </button>
-                                    ))}
+                                    {!pendingStatus ? (
+                                        ALL_STATUS.map(s => (
+                                            <button
+                                                key={s.id}
+                                                onClick={() => {
+                                                    if (s.id === 'perdido' && s.id !== normalizedId) {
+                                                        setPendingStatus('perdido');
+                                                    } else {
+                                                        onChange(s.id);
+                                                        setShowStatusMenu(false);
+                                                    }
+                                                }}
+                                                className="w-full text-start px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wider hover:bg-white/[0.04] transition-colors flex items-center gap-3 border-b border-white/[0.04] last:border-0"
+                                                style={{ color: s.id === normalizedId ? s.color : 'rgba(255,255,255,0.35)' }}
+                                            >
+                                                <span className="text-sm opacity-70">{s.icon}</span>
+                                                {s.label}
+                                                {s.id === normalizedId && <Check size={10} className="ml-auto" />}
+                                            </button>
+                                        ))
+                                    ) : (
+                                        <div className="p-4 flex flex-col gap-3">
+                                            <div className="flex items-center gap-2 text-red-400 text-[10px] font-bold uppercase tracking-widest mb-1">
+                                                <span>💀</span> Motivo da Perda
+                                            </div>
+                                            <textarea
+                                                autoFocus
+                                                value={lossReason}
+                                                onChange={(e) => setLossReason(e.target.value)}
+                                                placeholder="Por que este lead foi perdido? (Ex: comprou em outra loja, sem crédito...)"
+                                                className="w-full bg-white/[0.03] border border-white/10 rounded-lg p-3 text-[11px] text-white outline-none focus:border-red-500/50 min-h-[80px] resize-none"
+                                            />
+                                            <div className="flex gap-2">
+                                                <button
+                                                    onClick={() => {
+                                                        setPendingStatus(null);
+                                                        setLossReason('');
+                                                    }}
+                                                    className="flex-1 py-2 rounded-lg text-[10px] font-bold uppercase bg-white/5 hover:bg-white/10 transition-colors"
+                                                >
+                                                    Voltar
+                                                </button>
+                                                <button
+                                                    disabled={!lossReason.trim()}
+                                                    onClick={() => {
+                                                        onChange('perdido', lossReason);
+                                                        setPendingStatus(null);
+                                                        setLossReason('');
+                                                        setShowStatusMenu(false);
+                                                    }}
+                                                    className="flex-3 py-2 rounded-lg text-[10px] font-bold uppercase bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 transition-colors disabled:opacity-30"
+                                                >
+                                                    Confirmar Perda
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
                                 </motion.div>
                             </>
                         )}

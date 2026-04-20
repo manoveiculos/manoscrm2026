@@ -2,8 +2,9 @@
 -- Descrição: Adiciona resiliência para falhas de IA e rastreabilidade de notificações
 -- Autor: Antigravity (Auditoria Forense)
 
--- 1. Campos para controle de processamento de IA
+-- 1. Campos para controle de processamento de IA e compatibilidade de legados
 ALTER TABLE public.leads_manos_crm ADD COLUMN IF NOT EXISTS ai_pending BOOLEAN DEFAULT FALSE;
+ALTER TABLE public.leads_manos_crm ADD COLUMN IF NOT EXISTS origem TEXT;
 ALTER TABLE public.leads_compra ADD COLUMN IF NOT EXISTS ai_pending BOOLEAN DEFAULT FALSE;
 
 -- 2. Tabela para log de falhas em webhooks externos (n8n, etc)

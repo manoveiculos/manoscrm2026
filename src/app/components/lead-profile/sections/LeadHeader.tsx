@@ -122,7 +122,18 @@ export const LeadHeader: React.FC<LeadHeaderProps> = ({ lead, isAdmin, onSave, s
                                     href={`https://wa.me/55${lead.phone?.replace(/\D/g, '')}`}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    onClick={e => e.stopPropagation()}
+                                    onClick={async (e) => {
+                                        e.stopPropagation();
+                                        // Registro silencioso do touch
+                                        try {
+                                            await fetch('/api/leads/touch', {
+                                                method: 'POST',
+                                                body: JSON.stringify({ leadId: lead.id })
+                                            });
+                                        } catch (err) {
+                                            console.warn('Failed to record touch:', err);
+                                        }
+                                    }}
                                     className="flex items-center gap-1.5 text-[13px] text-white/55 hover:text-emerald-400 transition-colors"
                                 >
                                     <MessageCircle size={13} className="text-emerald-500 shrink-0" />

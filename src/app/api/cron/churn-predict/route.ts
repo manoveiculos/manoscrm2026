@@ -30,7 +30,7 @@ export async function GET(request: Request) {
 
     const { data: leads, error } = await admin
         .from('leads_manos_crm')
-        .select('id, nome, status, updated_at, created_at, ai_score, ai_classification, assigned_consultant_id, ai_summary, next_step, interesse, origem')
+        .select('id, name, status, updated_at, created_at, ai_score, ai_classification, assigned_consultant_id, ai_summary, next_step, vehicle_interest, source')
         .in('status', ACTIVE_STATUSES)
         .limit(500);
 

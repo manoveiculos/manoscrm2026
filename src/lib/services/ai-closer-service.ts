@@ -36,7 +36,7 @@ export async function runEliteCloser(leadId: string, messages: any[] = [], consu
     const cleanId = stripPrefix(leadId) || leadId;
 
     // Tenta a tabela primária; se não encontrar, percorre as demais
-    const ALL_TABLES = ['leads_master', 'leads_manos_crm', 'leads_distribuicao_crm_26'];
+    const ALL_TABLES = ['leads_compra', 'leads_manos_crm', 'leads_master', 'leads_distribuicao_crm_26'];
     const tablePriority = [primaryTable, ...ALL_TABLES.filter(t => t !== primaryTable)];
 
     let lead: any = null;

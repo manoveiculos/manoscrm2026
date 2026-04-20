@@ -4,7 +4,7 @@ const N8N_WEBHOOK_URL =
     process.env.N8N_VENDOR_WEBHOOK_URL ||
     'https://n8n.drivvoo.com/webhook/chamadavendedorcrm';
 
-export type NotifyType = 'lead_arrival' | 'morning_brief' | 'sla_warning';
+export type NotifyType = 'lead_arrival' | 'morning_brief' | 'sla_warning' | 'hot_leak_alert';
 
 interface NotifyPayload {
     consultant_name: string;
@@ -86,20 +86,63 @@ async function sendToWebhook(payload: NotifyPayload): Promise<void> {
 }
 
 /**
+ * Helper para buscar lead em qualquer vertical e normalizar campos para notificação.
+ * Tenta leads_manos_crm (Venda) primeiro, depois leads_compra (Compra).
+ */
+async function fetchLeadForNotify(cleanId: string) {
+    const admin = createClient();
+    
+    // 1. Tentar Venda
+    const { data: vLead } = await admin
+        .from('leads_manos_crm')
+        .select('id, name, phone, vehicle_interest, source, ai_score, ai_classification, proxima_acao, assigned_consultant_id, valor_investimento')
+        .eq('id', cleanId)
+        .maybeSingle();
+
+    if (vLead) {
+        return {
+            ...vLead,
+            isCompra: false,
+            valor: vLead.valor_investimento
+        };
+    }
+
+    // 2. Tentar Compra
+    const { data: cLead } = await admin
+        .from('leads_compra')
+        .select('id, nome, telefone, veiculo_original, origem, ai_score, ai_classification, proxima_acao, assigned_consultant_id, valor_cliente')
+        .eq('id', cleanId)
+        .maybeSingle();
+
+    if (cLead) {
+        return {
+            id: cLead.id,
+            name: cLead.nome,
+            phone: cLead.telefone,
+            vehicle_interest: cLead.veiculo_original,
+            source: cLead.origem,
+            ai_score: cLead.ai_score,
+            ai_classification: cLead.ai_classification,
+            proxima_acao: cLead.proxima_acao,
+            assigned_consultant_id: cLead.assigned_consultant_id,
+            valor: cLead.valor_cliente?.toString(),
+            isCompra: true
+        };
+    }
+
+    return null;
+}
+
+/**
  * Dispara WhatsApp para o vendedor responsável quando um lead novo
  * recebe score IA. Speed-to-lead: vendedor recebe no celular pessoal
  * antes de abrir o CRM.
  */
 export async function notifyLeadArrival(leadId: string): Promise<void> {
     const admin = createClient();
-    const cleanId = leadId.toString().replace(/^(main_|crm26_|dist_|lead_|crm25_|master_)/, '');
+    const cleanId = leadId.toString().replace(/^(main_|crm26_|dist_|lead_|crm25_|master_|compra_)/, '');
 
-    const { data: lead } = await admin
-        .from('leads_manos_crm')
-        .select('id, name, phone, vehicle_interest, source, ai_score, ai_classification, proxima_acao, assigned_consultant_id, valor_investimento')
-        .eq('id', cleanId)
-        .maybeSingle();
-
+    const lead = await fetchLeadForNotify(cleanId);
     if (!lead || !lead.assigned_consultant_id) return;
 
     const { data: consultant } = await admin
@@ -115,45 +158,42 @@ export async function notifyLeadArrival(leadId: string): Promise<void> {
     const firstName = (consultant.name || '').split(' ')[0];
     const leadFirstName = (lead.name || 'cliente').split(' ')[0];
 
-    // Script personalizado: usa proxima_acao da IA ou monta fallback
-    const script = (lead.proxima_acao && lead.proxima_acao.length > 10)
+    // Script personalizado
+    const script = (lead.proxima_acao && lead.proxima_acao.length > 20)
         ? lead.proxima_acao
-        : `Olá ${leadFirstName}! Aqui é o ${firstName} da Manos Veículos. Vi seu interesse${lead.vehicle_interest ? ` no ${lead.vehicle_interest}` : ''}. Posso te ajudar agora?`;
+        : `Olá ${leadFirstName}! Aqui é o ${firstName} da Manos Veículos. Vi seu interesse em ${lead.isCompra ? 'vender seu' : 'comprar um'} ${lead.vehicle_interest || 'veículo'}. Posso te ajudar?`;
 
     const wa = buildWhatsAppLink(lead.phone, script);
-    const valor = lead.valor_investimento ? `\n💰 R$ ${lead.valor_investimento}` : '';
-    const interest = lead.vehicle_interest ? `\n🚗 ${lead.vehicle_interest}` : '';
+    const label = lead.isCompra ? '💰 OFERTA DE COMPRA' : '🚗 INTERESSE DE VENDA';
+    const valorLabel = lead.isCompra ? 'Preço cliente' : 'Investimento';
+    const valorStr = lead.valor ? `\n${valorLabel}: R$ ${lead.valor}` : '';
+    const interest = lead.vehicle_interest ? `\n📦 ${lead.vehicle_interest}` : '';
 
     const message =
-        `${classificationEmoji(cls)} *LEAD NOVO • ${lead.name || 'Sem nome'}* (score ${score})` +
+        `${classificationEmoji(cls)} *LEAD NOVO • ${lead.name || 'Sem nome'}* (score ${score})\n` +
+        `━━━━━━━━━━━━━━━━━━\n` +
+        `${label}` +
         interest +
-        valor +
+        valorStr +
         `\n📡 ${lead.source || 'Direto'}` +
-        `\n\n━━━━━━━━━━━━━━━━━━` +
-        `\n📋 *SCRIPT PRONTO — copie e envie:*` +
-        `\n━━━━━━━━━━━━━━━━━━\n` +
+        `\n\n📋 *SCRIPT SUGERIDO:*` +
         `\n${script}\n` +
         `\n━━━━━━━━━━━━━━━━━━` +
-        (wa ? `\n🚀 *Abrir conversa (mensagem já carregada):*\n${wa}` : '') +
-        `\n\n_⏱️ Resposta em <5min = 9x mais conversão_`;
+        (wa ? `\n🚀 *Abrir WhatsApp:*\n${wa}` : '') +
+        `\n\n_⏱️ Speed-to-lead é tudo!_`;
 
     await sendToWebhook({
         consultant_name: consultant.name,
         consultant_phone: normalizeBRPhone(consultant.phone),
         type: 'lead_arrival',
-        message,
+        message: message,
         meta: {
             lead_id: cleanId,
             lead_name: lead.name,
-            lead_first_name: leadFirstName,
             lead_phone: normalizeBRPhone(lead.phone),
             lead_score: score,
-            lead_classification: cls,
-            lead_vehicle: lead.vehicle_interest || '',
-            lead_source: lead.source || '',
-            lead_valor: lead.valor_investimento || '',
-            script: script,
-            wa_link: wa,
+            lead_type: lead.isCompra ? 'compra' : 'venda',
+            wa_link: wa
         },
     });
 }
@@ -237,4 +277,81 @@ export async function notifyMorningBrief(): Promise<{ sent: number; skipped: num
     }
 
     return { sent, skipped };
+}
+
+/**
+ * Alerta de "vazamento" de leads estratégicos.
+ * Busca leads HOT (≥80) sem contato há mais de 15 minutos.
+ * Envia um alerta consolidado para o Alexandre (Admin/CEO).
+ */
+export async function notifyHotLeaksToAdmin(): Promise<{ leaked: number }> {
+    const admin = createClient();
+    const fifteenMinsAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+
+    // 1. Buscar no CRM (Venda)
+    const { data: vLeads } = await admin
+        .from('leads_manos_crm')
+        .select('id, name, ai_score, vehicle_interest, assigned_consultant_id')
+        .eq('status', 'novo')
+        .is('first_contact_at', null)
+        .gte('ai_score', 80)
+        .lt('created_at', fifteenMinsAgo)
+        .limit(10);
+
+    // 2. Buscar no Compra
+    const { data: cLeads } = await admin
+        .from('leads_compra')
+        .select('id, nome, ai_score, veiculo_original, assigned_consultant_id')
+        .eq('status', 'novo')
+        .is('first_contact_at', null)
+        .gte('ai_score', 80)
+        .lt('created_at', fifteenMinsAgo)
+        .limit(10);
+
+    const vList = (vLeads || []).map(l => ({ ...l, type: 'Venda' }));
+    const cList = (cLeads || []).map(l => ({ id: l.id, name: l.nome, ai_score: l.ai_score, vehicle_interest: l.veiculo_original, type: 'Compra', assigned_consultant_id: l.assigned_consultant_id }));
+    const allLeaked = [...vList, ...cList];
+
+    if (allLeaked.length === 0) return { leaked: 0 };
+
+    // Buscar nomes dos vendedores para o relatório
+    const consultantIds = [...new Set(allLeaked.map(l => l.assigned_consultant_id).filter(Boolean))];
+    const { data: consultants } = await admin
+        .from('consultants_manos_crm')
+        .select('id, name')
+        .in('id', consultantIds);
+
+    const consultantMap = (consultants || []).reduce((acc, c) => ({ ...acc, [c.id]: c.name }), {} as Record<string, string>);
+
+    const lines = allLeaked.map((l, i) => {
+        const vName = consultantMap[l.assigned_consultant_id || ''] || 'Sem vendedor';
+        return `⚠️ *${l.name}* (Score ${l.ai_score})\n   Vertical: ${l.type} | Carro: ${l.vehicle_interest || '—'}\n   Atribuído a: ${vName}`;
+    }).join('\n\n');
+
+    // Alexandre (CEO) - Se não tiver telefone no banco, o N8N deve ter o dele fixo para o tipo 'hot_leak_alert'
+    // Mas vamos tentar buscar o admin.
+    const { data: boss } = await admin
+        .from('consultants_manos_crm')
+        .select('name, phone')
+        .eq('role', 'admin')
+        .not('phone', 'is', null)
+        .limit(1);
+
+    const message = 
+        `🚨 *ALERTA CEO: LEADS HOT EM RISCO* 🚨\n` +
+        `━━━━━━━━━━━━━━━━━━\n` +
+        `Detectamos ${allLeaked.length} leads estratégicos (score ≥80) sem nenhum contato há mais de 15 minutos!\n\n` +
+        lines +
+        `\n\n━━━━━━━━━━━━━━━━━━\n` +
+        `📢 *Ação recomendada:* Cobrar os vendedores ou redistribuir os leads agora. Dinheiro está vazando!`;
+
+    await sendToWebhook({
+        consultant_name: boss?.[0]?.name || 'Alexandre Gorges',
+        consultant_phone: normalizeBRPhone(process.env.CEO_PHONE || process.env.ADMIN_PHONE || boss?.[0]?.phone || ''), 
+        type: 'hot_leak_alert',
+        message,
+        meta: { leaked_count: allLeaked.length }
+    });
+
+    return { leaked: allLeaked.length };
 }

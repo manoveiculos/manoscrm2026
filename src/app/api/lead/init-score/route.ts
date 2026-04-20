@@ -111,7 +111,24 @@ export async function POST(req: NextRequest) {
             body: JSON.stringify({ lead_id: cleanId }),
         }).catch(() => {});
 
-        // Notificar vendedor
+        // 8. Auto-atribuição (Round-Robin) se não tiver consultor
+        // Buscamos o lead atualizado para checar se já tem consultor
+        const { data: currentLead } = await admin
+            .from(tableName)
+            .select('assigned_consultant_id')
+            .eq('id', cleanId)
+            .maybeSingle();
+
+        if (!currentLead?.assigned_consultant_id) {
+            try {
+                const { assignNextConsultant } = await import('@/lib/services/autoAssignService');
+                await assignNextConsultant(cleanId, tableName as any);
+            } catch (assignErr) {
+                console.warn('[init-score] auto-assignment failed:', assignErr);
+            }
+        }
+
+        // 9. Notificar vendedor
         notifyLeadArrival(cleanId).catch(e =>
             console.warn('[init-score] vendor notify failed:', e?.message)
         );

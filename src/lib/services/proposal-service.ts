@@ -238,11 +238,21 @@ JSON estrito (sem markdown):
     };
 
     // ── 6. Persiste no lead e na timeline ─────────────────────────────────────
+    // [CONVERSION INTELLIGENCE] Preencher first_proposal_at se for a primeira vez
     for (const t of tablePriority) {
-        const { error } = await supabaseAdmin.from(t).update({
+        // Primeiro verificamos se já tem first_proposal_at para evitar sobrescrever
+        const { data: currentLead } = await supabaseAdmin.from(t).select('first_proposal_at').eq('id', cleanId).maybeSingle();
+        
+        const updatePayload: any = {
             last_proposal_json: proposal,
             last_proposal_at: new Date().toISOString(),
-        }).eq('id', cleanId);
+        };
+
+        if (currentLead && !currentLead.first_proposal_at) {
+            updatePayload.first_proposal_at = new Date().toISOString();
+        }
+
+        const { error } = await supabaseAdmin.from(t).update(updatePayload).eq('id', cleanId);
         if (!error) break;
     }
 

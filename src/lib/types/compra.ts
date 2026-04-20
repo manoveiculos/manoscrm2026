@@ -29,6 +29,12 @@ export interface LeadCompra {
     ai_last_run_at?: string;
     behavioral_profile?: any;
     churn_probability?: number;
+
+    // Novos campos de atendimento
+    fotos?: any[];
+    interesses?: string;
+    valor_negociado?: number;
+    prioridade?: number;
 }
 
 export type LeadCompraStatus = 'novo' | 'em_analise' | 'proposta_enviada' | 'agendado' | 'vistoria' | 'fechado' | 'perdido';

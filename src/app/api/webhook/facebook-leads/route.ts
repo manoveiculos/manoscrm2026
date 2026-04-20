@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/services/supabaseClients';
 import { runEliteCloser } from '@/lib/services/ai-closer-service';
 import { runGenerateProposal } from '@/lib/services/proposal-service';
+import { assignNextConsultant } from '@/lib/services/autoAssignService';
+import { notifyLeadArrival } from '@/lib/services/vendorNotifyService';
 
 /**
  * Facebook Lead Ads Webhook (CORRIGIDO: Auditoria Forense 2026-04-18)
@@ -117,16 +119,53 @@ export async function POST(req: NextRequest) {
                     }
 
                     if (newLead && newLead.id) {
-                        const fullId = `main_` + newLead.id;
+                        const fullId = `compra_` + newLead.id;
+
+                        // 2. Atribuição Automática (Round-Robin) - Síncrona
+                        const consultantId = await assignNextConsultant(newLead.id, 'leads_compra');
+                        if (!consultantId) {
+                            console.error('[Webhook] Sem consultor disponível para lead', newLead.id);
+                        }
                         
-                        // 2. Disparar Elite Closer Automático (IA Proativa)
+                        // 3. Disparar Elite Closer Automático (IA Proativa) com Fallback
                         console.log(`[Webhook] Iniciando análise Elite Closer para lead: ${fullId}`);
-                        const analysis = await runEliteCloser(fullId, [], 'SISTEMA').catch(e => {
-                            console.error('[Webhook] Erro na análise automática:', e);
+                        const analysis = await runEliteCloser(fullId, [], 'SISTEMA').catch(async (e) => {
+                            console.error('[Webhook] Elite Closer falhou:', e);
+                            
+                            // Marcar ai_pending para reprocessamento pelo cron
+                            await supabaseAdmin.from('leads_compra')
+                                .update({ ai_pending: true })
+                                .eq('id', newLead.id);
+                            
+                            await supabaseAdmin.from('notification_failures').insert({
+                                lead_id: newLead.id,
+                                channel: 'elite_closer_webhook',
+                                error_message: `runEliteCloser falhou: ${e?.message || 'Erro desconhecido'}`,
+                                resolved: false
+                            });
+                            
                             return null;
                         });
 
-                        // 3. Gerar Proposta Automática se o Score for > 60
+                        // Fallback adicional se retornar nulo sem estourar exceção
+                        if (!analysis) {
+                            await supabaseAdmin.from('leads_compra')
+                                .update({ ai_pending: true }).eq('id', newLead.id);
+                            
+                            await supabaseAdmin.from('notification_failures').insert({
+                                lead_id: newLead.id,
+                                channel: 'elite_closer_webhook',
+                                error_message: 'runEliteCloser retornou null no webhook',
+                                resolved: false
+                            });
+                        }
+
+                        // 4. Notificar Vendedor (Fire-and-forget) - SEMPRE dispara
+                        notifyLeadArrival(newLead.id).catch(e =>
+                            console.warn('[Webhook] notifyLeadArrival falhou:', e?.message)
+                        );
+
+                        // 5. Gerar Proposta Automática se o Score for > 60
                         if (analysis && analysis.urgencyScore > 60) {
                             console.log(`[Webhook] Score alto detectado (${analysis.urgencyScore}). Gerando proposta automática...`);
                             await runGenerateProposal(fullId).catch(e => {

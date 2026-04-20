@@ -72,7 +72,7 @@ export async function GET(request: Request) {
 
     const { data: leads, error } = await admin
         .from('leads_manos_crm')
-        .select('id, name, vehicle_interest, proxima_acao, next_step, status, updated_at, assigned_consultant_id, valor_investimento, carro_troca, origem, source')
+        .select('id, name, vehicle_interest, proxima_acao, next_step, status, updated_at, assigned_consultant_id, valor_investimento, carro_troca, source')
         .in('status', activeStatuses)
         .order('updated_at', { ascending: true })
         .limit(30);
