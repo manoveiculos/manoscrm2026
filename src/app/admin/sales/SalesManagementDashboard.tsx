@@ -2,12 +2,12 @@
 
 import React, { useEffect, useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { 
-    BarChart3, 
-    PieChart, 
-    TrendingUp, 
-    Users, 
-    Target, 
+import {
+    BarChart3,
+    PieChart,
+    TrendingUp,
+    Users,
+    Target,
     DollarSign,
     ArrowUpRight,
     ArrowDownRight,
@@ -26,6 +26,7 @@ import {
     Filter,
     Search
 } from 'lucide-react';
+import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import { normalizeStatus } from '@/constants/status';
 
@@ -506,6 +507,13 @@ export function SalesManagementDashboard() {
                     </div>
                 </div>
                 <div className="flex items-center gap-3">
+                    <Link
+                        href="/admin/sales/performance"
+                        className="hidden md:inline-flex items-center gap-2 bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 hover:text-red-300 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition"
+                        title="Auditoria de quem abandona leads quentes"
+                    >
+                        <ShieldCheck size={12} /> Performance Vendedor
+                    </Link>
                     {period === 'custom' && (
                         <motion.div 
                             initial={{ opacity: 0, x: -10 }}

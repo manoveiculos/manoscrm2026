@@ -1,12 +1,53 @@
 {
   "crons": [
     {
-      "path": "/api/cron/cowork-daily",
-      "schedule": "0 11 * * 1-6"
-    },
-    {
       "path": "/api/cron/daily-batch",
       "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/api/cron/fifteen-min-scheduler",
+      "schedule": "*/15 * * * *"
     }
-  ]
+  ],
+  "functions": {
+    "src/app/api/cron/fifteen-min-scheduler/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/cron/refresh-metrics/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/cron/hot-leak-alert/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/cron/ai-score-refresh/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/cron/anti-loss/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/cron/churn-predict/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/cron/followup-ai/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/cron/pipeline-sla/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/cron/cowork-daily/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/cron/daily-batch/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/cron/morning-push/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/lead/init-score/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/lead/finish/route.ts": {
+      "maxDuration": 60
+    }
+  }
 }

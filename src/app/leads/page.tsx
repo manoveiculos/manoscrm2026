@@ -281,6 +281,18 @@ function LeadsContent() {
     // ──────────────────────────────────────────────────────────
 
     const handleStatusChange = async (leadId: string, newStatus: LeadStatus) => {
+        const normalized = normalizeStatus(newStatus);
+        
+        // Interceptar estados finais para garantir captura de motivo/detalhes via Modal
+        if (normalized === 'perdido' || normalized === 'vendido') {
+            const lead = leads.find(l => l.id === leadId);
+            if (lead) {
+                setSelectedLead(lead);
+                setIsManagement(true);
+                return;
+            }
+        }
+
         try {
             const oldStatus = leads.find(l => l.id === leadId)?.status;
             

@@ -548,11 +548,12 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
     if (!isOpen || !lead) return null;
 
     const TABS = [
-        { id: 'dashboard',    label: 'Geral' },
-        { id: 'timeline',     label: 'Timeline'    },
-        { id: 'followup',     label: 'Ações'        },
-        { id: 'arsenal',      label: 'Arsenal'      },
-        { id: 'troca',        label: 'Troca'        },
+        { id: 'dashboard',     label: 'Geral' },
+        { id: 'whatsapp',      label: 'Conversa'     },
+        { id: 'timeline',      label: 'Histórico'    },
+        { id: 'followup',      label: 'Ações'        },
+        { id: 'arsenal',       label: 'Arsenal'      },
+        { id: 'troca',         label: 'Troca'        },
         { id: 'financiamento', label: 'Crédito'     },
     ] as const;
 
@@ -688,11 +689,11 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
                                             aiStale={aiStale}
                                         />
                                     )}
-                                    {activeTab === 'timeline' && (
+                                    {(activeTab === 'timeline' || activeTab === 'whatsapp') && (
                                         <TimelineTab
                                             events={timeline.events}
                                             loading={timeline.loading}
-                                            filter={timeline.filter}
+                                            filter={activeTab === 'whatsapp' ? 'whatsapp' : timeline.filter}
                                             setFilter={timeline.setFilter}
                                             newNote={newNote}
                                             setNewNote={setNewNote}
@@ -700,6 +701,9 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
                                             handleAddNote={() => handleAddNote()}
                                             loadingStatus={loadingStatus}
                                             recalculateStrategy={recalculateStrategy}
+                                            isConversationMode={activeTab === 'whatsapp'}
+                                            diagnostico={diagnostico}
+                                            orientacao={orientacao}
                                         />
                                     )}
                                     {activeTab === 'followup' && (

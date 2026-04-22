@@ -86,3 +86,19 @@ export function formatKM(value: any): string {
   if (isNaN(num)) return 'N/I';
   return num.toLocaleString('pt-BR') + ' km';
 }
+
+export const formatDateBR = (date: string | Date | number) => {
+    if (!date) return '';
+    try {
+        const d = new Date(date);
+        return d.toLocaleString('pt-BR', {
+            timeZone: 'America/Sao_Paulo',
+            day: '2-digit',
+            month: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+    } catch (e) {
+        return String(date);
+    }
+};

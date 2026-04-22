@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@supabase/ssr';
-import { dataService } from '@/lib/dataService';
+import { supabaseAdmin } from '@/lib/services/supabaseClients';
 import { runEliteCloser } from '@/lib/services/ai-closer-service';
 import { runGenerateProposal } from '@/lib/services/proposal-service';
+import { assignNextConsultant } from '@/lib/services/autoAssignService';
+import { notifyLeadArrival } from '@/lib/services/vendorNotifyService';
 
 /**
- * Facebook Lead Ads Webhook
- * Automado com Elite Closer & Proposta Automática (V3)
+ * Facebook Lead Ads Webhook (CORRIGIDO: Auditoria Forense 2026-04-18)
+ * - Usa supabaseAdmin para contornar RLS
+ * - Grava na tabela leads_compra
+ * - Retorna 500 em falha para forçar reenvio do Meta
  */
 
 export async function GET(req: NextRequest) {
@@ -51,14 +54,16 @@ export async function POST(req: NextRequest) {
                 const leadUrl = `https://graph.facebook.com/v19.0/${leadgenId}?fields=id,created_time,field_data,campaign_id,ad_id,form_id,platform&access_token=${META_TOKEN}`;
                 const leadRes = await fetch(leadUrl).catch(() => null);
                 
-                if (!leadRes || !leadRes.ok) continue;
+                if (!leadRes || !leadRes.ok) {
+                    console.error(`[Webhook] Falha ao buscar lead ${leadgenId} no Meta Graph API`);
+                    return NextResponse.json({ error: 'Falha no Graph API' }, { status: 500 });
+                }
 
                 const leadData = await leadRes.json();
 
                 // Parse field_data
                 let phone = '';
                 let name = '';
-                let email = '';
                 let city = '';
                 let interest = '';
 
@@ -68,14 +73,16 @@ export async function POST(req: NextRequest) {
                         const v = field.values?.[0] || '';
                         if (n.includes('phone') || n.includes('tel') || n === 'phone_number') phone = v;
                         else if (n.includes('full_name') || n.includes('nome') || n === 'name') name = v;
-                        else if (n.includes('email')) email = v;
                         else if (n.includes('city') || n.includes('cidade')) city = v;
                         else if (n.includes('vehicle') || n.includes('veiculo') || n.includes('interesse') || n.includes('model')) interest = v;
                     });
                 }
 
                 const cleanPhone = phone.replace(/\D/g, '');
-                if (!cleanPhone || cleanPhone.length < 8) continue;
+                if (!cleanPhone || cleanPhone.length < 8) {
+                    console.warn(`[Webhook] Lead ${leadgenId} ignorado: telefone inválido (${phone})`);
+                    continue; // Pular leads sem telefone, mas não falhar o webhook inteiro
+                }
 
                 let campaignName = 'Facebook Leads';
                 if (leadData.campaign_id) {
@@ -91,38 +98,87 @@ export async function POST(req: NextRequest) {
                 const platform = leadData.platform || 'facebook';
                 const finalSource = platform.toLowerCase() === 'instagram' ? 'Instagram' : campaignName;
 
-                // 1. Criar Lead no CRM
+                // 1. Criar Lead no CRM (Tabela leads_compra via Admin para furar RLS)
                 try {
-                    const newLead = await dataService.createLead({
-                        name: name || 'Lead Meta Form',
-                        phone: cleanPhone,
-                        source: finalSource,
-                        vehicle_interest: interest || campaignName,
-                        region: city || '',
-                        status: 'received',
-                        created_at: leadData.created_time || new Date().toISOString(),
-                    });
+                    const { data: newLead, error: insertError } = await supabaseAdmin
+                        .from('leads_compra')
+                        .insert({
+                            nome: name || 'Lead Meta Form',
+                            telefone: cleanPhone,
+                            origem: finalSource,
+                            veiculo_original: interest || campaignName,
+                            status: 'novo',
+                            criado_em: leadData.created_time || new Date().toISOString(),
+                        })
+                        .select()
+                        .single();
+
+                    if (insertError) {
+                        console.error('[Webhook] Erro ao inserir lead no Supabase (leads_compra):', insertError.message, insertError.details, insertError.code);
+                        return NextResponse.json({ error: 'Erro no banco' }, { status: 500 });
+                    }
 
                     if (newLead && newLead.id) {
-                        const fullId = `main_` + newLead.id;
+                        const fullId = `compra_` + newLead.id;
+
+                        // 2. Atribuição Automática (Round-Robin) - Síncrona
+                        const consultantId = await assignNextConsultant(newLead.id, 'leads_compra');
+                        if (!consultantId) {
+                            console.error('[Webhook] Sem consultor disponível para lead', newLead.id);
+                        }
                         
-                        // 2. Disparar Elite Closer Automático (IA Proativa)
+                        // 3. Disparar Elite Closer Automático (IA Proativa) com Fallback
                         console.log(`[Webhook] Iniciando análise Elite Closer para lead: ${fullId}`);
-                        const analysis = await runEliteCloser(fullId, [], 'SISTEMA').catch(e => {
-                            console.error('[Webhook] Erro na análise automática:', e);
+                        const analysis = await runEliteCloser(fullId, [], 'SISTEMA').catch(async (e) => {
+                            console.error('[Webhook] Elite Closer falhou:', e);
+                            
+                            // Marcar ai_pending para reprocessamento pelo cron
+                            await supabaseAdmin.from('leads_compra')
+                                .update({ ai_pending: true })
+                                .eq('id', newLead.id);
+                            
+                            await supabaseAdmin.from('notification_failures').insert({
+                                lead_id: newLead.id,
+                                channel: 'elite_closer_webhook',
+                                error_message: `runEliteCloser falhou: ${e?.message || 'Erro desconhecido'}`,
+                                resolved: false
+                            });
+                            
                             return null;
                         });
 
-                        // 3. Gerar Proposta Automática se o Score for > 60
+                        // Fallback adicional se retornar nulo sem estourar exceção
+                        if (!analysis) {
+                            await supabaseAdmin.from('leads_compra')
+                                .update({ ai_pending: true }).eq('id', newLead.id);
+                            
+                            await supabaseAdmin.from('notification_failures').insert({
+                                lead_id: newLead.id,
+                                channel: 'elite_closer_webhook',
+                                error_message: 'runEliteCloser retornou null no webhook',
+                                resolved: false
+                            });
+                        }
+
+                        // 4. Notificar Vendedor (Fire-and-forget) - SEMPRE dispara
+                        notifyLeadArrival(newLead.id).catch(e =>
+                            console.warn('[Webhook] notifyLeadArrival falhou:', e?.message)
+                        );
+
+                        // 5. Gerar Proposta Automática se o Score for > 60
                         if (analysis && analysis.urgencyScore > 60) {
                             console.log(`[Webhook] Score alto detectado (${analysis.urgencyScore}). Gerando proposta automática...`);
                             await runGenerateProposal(fullId).catch(e => {
                                 console.error('[Webhook] Erro na proposta automática:', e);
                             });
                         }
+                    } else {
+                        console.error('[Webhook] Lead inserido mas não retornou ID');
+                        return NextResponse.json({ error: 'ID não gerado' }, { status: 500 });
                     }
-                } catch (err) {
-                    console.error('Error processing Facebook lead in webhook:', err);
+                } catch (err: any) {
+                    console.error('[Webhook] Exceção crítica ao processar lead:', err.message);
+                    return NextResponse.json({ error: 'Erro interno' }, { status: 500 });
                 }
             }
         }
@@ -130,7 +186,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ received: true });
 
     } catch (error: any) {
-        console.error('Facebook Leads Webhook Error:', error.message);
+        console.error('Facebook Leads Webhook Error Global:', error.message);
         return NextResponse.json({ error: 'Internal error' }, { status: 500 });
     }
 }

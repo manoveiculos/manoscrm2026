@@ -159,11 +159,11 @@ export async function runGenerateProposal(leadId: string): Promise<ProposalResul
 
     const aiReason = (lead.ai_reason || '').split('| ORIENTAÇÃO:')[0].trim();
 
-    const promptGPT = `Você é consultor de vendas sênior da Manos Veículos (multimarcas, Rio do Sul/SC).
+    const promptGPT = `Você é um Closer Implacável da Manos Veículos (Multimarcas, Rio do Sul/SC). Seu objetivo NÃO é informar, é FECHAR.
 
 DADOS FIXOS DO FINANCIAMENTO:
 - Veículo: ${veiculoNomeReal} — ${fmtBRL(precoVeiculo)}
-- Taxa: 2,00% a.m. — Prazo: ${PRAZO}x
+- Taxa: 2,00% a.m. (Condição temporária) — Prazo: ${PRAZO}x
 ${troca ? `- Troca do cliente: ${troca} (valor estimado ${fmtBRL(valorTroca)} incluído na entrada)` : ''}
 - Contexto IA: ${aiReason || 'sem análise anterior'}
 
@@ -174,17 +174,17 @@ Cenário ${c.index + 1} (Entrada ${c.pct_entrada}):
 
 TAREFA:
 Gere para cada cenário:
-1. "obs": frase curta (máx 8 palavras) destacando a vantagem deste plano
-2. "mensagem_whatsapp": mensagem COMPLETA, humanizada e pronta para enviar a ${nome}
-   - Use emojis com moderação
-   - Inclua nome do cliente (${nome}), veículo, entrada, parcela e prazo
-   - Tom: amigável, profissional, sem pressão
-   - Termine com pergunta de fechamento suave
-   - Máx 200 palavras por mensagem
+1. "obs": frase muito curta (máx 8 palavras) destacando Escassez ou Vantagem Irrecusável.
+2. "mensagem_whatsapp": DIRECT RESPONSE. Mensagem matadora para copiar/enviar a ${nome}.
+   - Nenhuma gentileza inútil. Direto ao número.
+   - Use Gatilhos: Condição válida só até o final do dia, simulação pré-aprovada temporária, etc.
+   - Inclua nome (${nome}), veículo, entrada, parcela e prazo.
+   - Fechamento EXIGINDO a ação: "Manda a CNH agora", "Posso rodar a ficha pra travar a taxa?", "Vem assinar hoje às 14h?".
+   - Máx 180 palavras por mensagem.
 
 Também gere:
-- "pitch": frase de abertura para o consultor dizer ao apresentar (máx 2 linhas)
-- "cta": frase de fechamento para o consultor usar no final da conversa
+- "pitch": Frase de abertura de IMPACTO para o consultor usar (ex: "Consegui algo que o banco não libera pra qualquer um").
+- "cta": Comando final inquestionável para o consultor forçar o fechamento.
 
 JSON estrito (sem markdown):
 {
@@ -238,11 +238,21 @@ JSON estrito (sem markdown):
     };
 
     // ── 6. Persiste no lead e na timeline ─────────────────────────────────────
+    // [CONVERSION INTELLIGENCE] Preencher first_proposal_at se for a primeira vez
     for (const t of tablePriority) {
-        const { error } = await supabaseAdmin.from(t).update({
+        // Primeiro verificamos se já tem first_proposal_at para evitar sobrescrever
+        const { data: currentLead } = await supabaseAdmin.from(t).select('first_proposal_at').eq('id', cleanId).maybeSingle();
+        
+        const updatePayload: any = {
             last_proposal_json: proposal,
             last_proposal_at: new Date().toISOString(),
-        }).eq('id', cleanId);
+        };
+
+        if (currentLead && !currentLead.first_proposal_at) {
+            updatePayload.first_proposal_at = new Date().toISOString();
+        }
+
+        const { error } = await supabaseAdmin.from(t).update(updatePayload).eq('id', cleanId);
         if (!error) break;
     }
 

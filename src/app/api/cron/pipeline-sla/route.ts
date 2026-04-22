@@ -54,7 +54,7 @@ export async function GET(request: Request) {
         // Busca leads ativos no pipeline (não vendidos/perdidos)
         const { data: leads, error } = await supabase
             .from('leads_manos_crm')
-            .select('id, name, status, assigned_consultant_id, updated_at, vehicle_interest, origem, source')
+            .select('id, name, status, assigned_consultant_id, updated_at, vehicle_interest, source')
             .not('status', 'in', '("vendido","perdido","lost","comprado","lixo","duplicado","desqualificado")')
             .not('assigned_consultant_id', 'is', null);
 

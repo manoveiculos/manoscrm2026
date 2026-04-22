@@ -15,9 +15,13 @@ export async function GET() {
     // VERCEL_URL é o fallback (domínio interno *.vercel.app).
     const baseUrl =
         process.env.NEXT_PUBLIC_BASE_URL
-        ?? (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
+        || (process.env.NEXT_PUBLIC_VERCEL_PROJECT_ID ? `https://manoscrm2026-kl2w.vercel.app` : null)
+        || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
+
+    console.log(`[daily-batch] env_secret_set=${!!process.env.CRON_SECRET}, vercel_url=${process.env.VERCEL_URL}, target_base=${baseUrl}`);
 
     const cronPaths = [
+        '/api/cron/morning-push',
         '/api/cron/anti-loss',
         '/api/cron/pipeline-sla',
         '/api/cron/ai-score-refresh',

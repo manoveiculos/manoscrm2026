@@ -24,29 +24,9 @@ export function useLeadScore(lead: any, interactionsCount: number, lastInteracti
             return;
         }
 
-        // Prioridade 1: score real da IA (banco) — fonte de verdade
-        if (aiScore > 0) {
-            setFinalScore(aiScore);
-            setScoreInfo(getScoreLabel(aiScore));
-            return;
-        }
-
-        // Fallback heurístico — mesmo cálculo da lista (totalInteracoes: 0)
-        const now = new Date();
-        const createdAt = new Date(lead.created_at);
-        const tempoFunilH = Math.max(0, (now.getTime() - createdAt.getTime()) / (1000 * 60 * 60));
-
-        const calculated = calculateLeadScore({
-            status: normalizedStatus,
-            tempoFunilHoras: tempoFunilH,
-            totalInteracoes: 0,
-            ultimaInteracaoH: tempoFunilH,
-            temValorDefinido: !!lead.valor_investimento && lead.valor_investimento !== '0',
-            temVeiculoInteresse: !!lead.vehicle_interest && lead.vehicle_interest !== '---'
-        });
-
-        setFinalScore(calculated);
-        setScoreInfo(getScoreLabel(calculated));
+        // Fonte de Verdade Inquestionável: Score da IA vindo do Banco
+        setFinalScore(aiScore);
+        setScoreInfo(getScoreLabel(aiScore));
     }, [lead]);
 
     return { finalScore, scoreInfo };

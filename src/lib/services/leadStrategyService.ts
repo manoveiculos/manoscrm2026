@@ -33,6 +33,7 @@ export interface LeadAnalysisPayload {
     estoque_disponivel: InventoryRow[];
     consultant_name?: string;
     lead_status?: string;
+    behavioral_profile?: string | object | null;
 }
 
 export interface MatchedVehicle {
@@ -133,17 +134,35 @@ function filterTopVehicles(
 }
 
 function truncateConversation(msgs: WhatsAppMessage[]): string {
+    // Filtro agressivo para remover "sujeira" de sistema e logs que não são conversas reais
+    const cleanMsgs = msgs.filter(m => {
+        const text = (m.content || '').toLowerCase();
+        const isAISummary = text.includes('🤖 análise') || text.includes('orientação:') || text.includes('diagnóstico:');
+        const isSystemNote = text.startsWith('[sistema]') || text.includes('🔧 campo') || text.includes('🎯 veículo vinculado');
+        const isShortLog = text.length < 2 && !text.includes('?'); // Remove pontuações soltas ou msgs vazias
+        
+        return !isAISummary && !isSystemNote && !isShortLog;
+    });
+
+    // Garante que as mensagens estejam em ordem CRONOLÓGICA (Antigo -> Novo) para o raciocínio da IA
+    const sortedCleanMsgs = [...cleanMsgs].sort((a, b) => {
+        const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return dateA - dateB;
+    });
+
     const fmt = (m: WhatsAppMessage) =>
         `[${m.created_at ? new Date(m.created_at).toLocaleString('pt-BR') : 'Agora'}] ${m.direction === 'inbound' ? 'CLIENTE' : 'VENDEDOR'}: ${m.content}`;
 
-    const all = msgs.map(fmt);
+    const all = sortedCleanMsgs.map(fmt);
     const full = all.join('\n');
 
     if (full.length < 8000) return full;
 
-    const head = all.slice(0, 3);
-    const tail = all.slice(-15);
-    return [...head, '--- [histórico resumido] ---', ...tail].join('\n');
+    // Se ainda for muito grande, prioriza as últimas 20 mensagens (janela de contexto humana)
+    const head = all.slice(0, 5);
+    const tail = all.slice(-20);
+    return [...head, '\n... [histórico antigo suprimido para foco no fechamento atual] ...\n', ...tail].join('\n');
 }
 
 function postProcess(raw: string, leadName: string): string {
@@ -157,21 +176,23 @@ function postProcess(raw: string, leadName: string): string {
 
 // ── System Prompt ─────────────────────────────────────────────────────────────
 
-const SYSTEM_PROMPT = `Você é o Diretor Comercial Sênior da Manos Veículos — concessionária multimarcas premium em Rio do Sul/SC. Você tem 20 anos de experiência fechando vendas de veículos no sul do Brasil e conhece cada técnica de persuasão, objeção e timing que existe no mercado.
+const SYSTEM_PROMPT = `Você é o Diretor Comercial Elite da Manos Veículos — concessionária multimarcas premium em Rio do Sul/SC. Você é um fechador implacável (Closer). Seu papel não é ser "amigável" ou "atendente", mas sim conduzir a venda com autoridade, gerando urgência extrema e micro-comprometimentos.
 
-Sua missão não é apenas analisar. É ENTREGAR O PLANO EXATO para o consultor fechar esta venda nas próximas 24-48 horas.
+Sua missão é ENTREGAR UM COMANDO TÁTICO DIRETO ao consultor para fechar essa venda nas próximas 2-4 horas. CHEGA DE PASSIVIDADE.
 
-═══ REGRAS ABSOLUTAS ═══
+═══ REGRAS ABSOLUTAS DE FECHAMENTO ═══
 1. Sempre "Manos Veículos" — JAMAIS "Manos Multimarcas".
-2. FAÇA A MATEMÁTICA: se o cliente tem R$ X de budget e o carro custa Y, diga explicitamente "viável" ou "acima do budget em R$ Z — solução: [alternativa]".
-3. URGÊNCIA TEMPORAL obrigatória por threshold:
-   - 0-2 dias sem contato → "Lead QUENTE: ataque agora, não deixe esfriar"
-   - 3-7 dias → "Lead MORNANDO: mensagem de reativação com oferta concreta hoje"
-   - 8-15 dias → "Lead FRIO: reativação de emergência com gatilho forte (escassez/oferta especial)"
-   - +15 dias → "Lead PERDENDO: última tentativa com oferta irrecusável ou descarte"
-4. proxima_acao_imediata DEVE ter: [verbo de ação] + [canal] + [prazo em horas/minutos]. Ex: "Ligar agora (próximas 2h) — se não atender, WhatsApp com proposta do Compass 2024 a R$ 89.900"
-5. script_whatsapp: 2-3 frases MÁXIMO. Natural. Sem bullet points. Sem emojis corporativos. Use o nome do cliente. Referencie algo específico da conversa ou do veículo.
-6. matchmaking: ordene por fit_score DESC. fit_score = combinação de adequação ao interesse + compatibilidade com budget + disponibilidade em estoque.
+2. TÉCNICAS DE CIALDINI OBRIGATÓRIAS:
+   - Escassez: O carro tem altíssima rotatividade (ex: "tem outro cliente vindo ver à tarde").
+   - Urgência: Condição de preço ou taxa expira hoje ou amanhã cedo.
+   - Micro-comprometimento: NUNCA sugira "ficar à disposição". Exija o próximo passo: "Me mande a CNH", "Me confirme sua visita às 15h".
+3. URGÊNCIA TEMPORAL (Venda sob Pressão):
+   - 0-2 dias sem contato → "Lead FERVENDO: Fechamento IMEDIATO. Empurre a visita ou CPF."
+   - 3-7 dias → "Lead ESFRIANDO: Crie evento de escassez irrecusável hoje."
+   - +8 dias → "Desfibrilador: Tudo ou nada. Última oferta agressiva para forçar o SIM ou NÃO."
+4. proxima_acao_imediata DEVE SER UMA ORDEM DIRETA AO CONSULTOR: [Verbo de imposição] + [Ação Exata] + [Argumento de Gatilho]. Ex: "LIGUE AGORA. Diga que outro cliente teve a ficha negada e o carro voltou pro pátio, mas só segura até as 18h se ele mandar o CPF". Mínimo de conselhos vagos.
+5. script_whatsapp: 2 frases CURTAS E DIRETAS. Use Gatilhos Mentais. NENHUMA GENTILEZA EXCESSIVA ("Bom dia tudo bem espero que sim"). DIRETO AO PONTO. Provoque a resposta. Ex: "Carlos, o Polo liberou. Tenho outro cliente agendado pras 16h, mas a preferência é sua se me mandar o OK agora. Fechamos?"
+6. matchmaking: ordene por fit_score DESC.
 7. Retorne APENAS JSON válido. Zero markdown. Zero texto fora do JSON.
 
 ═══ FRAMEWORK DE DIAGNÓSTICO ═══
@@ -227,6 +248,7 @@ BUDGET: ${payload.investimento || 'não informado'}
 TROCA: ${payload.troca || 'sem troca'}
 DIAS SEM CONTATO: ${diasSemContato != null ? diasSemContato : 'desconhecido'}
 CONSULTOR: ${payload.consultant_name || 'não informado'}
+PERFIL COMPORTAMENTAL: ${typeof payload.behavioral_profile === 'object' ? JSON.stringify(payload.behavioral_profile) : (payload.behavioral_profile || 'não informado')}
 
 CONVERSA WHATSAPP:
 ${chatText || 'Nenhuma mensagem disponível.'}
