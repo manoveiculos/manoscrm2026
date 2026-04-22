@@ -33,10 +33,6 @@ export async function middleware(request: NextRequest) {
         }
     );
 
-    // IMPORTANTE: getUser() é mais seguro que getSession() no middleware
-    // pois verifica o token contra o banco de dados do Supabase.
-    const { data: { user } } = await supabase.auth.getUser();
-
     const path = request.nextUrl.pathname;
     const isLoginPage = path === '/login';
     const isPublicApi = path.startsWith('/api/auth') || path.startsWith('/api/webhook') || path.startsWith('/api/health') || path.startsWith('/api/extension');
@@ -48,17 +44,29 @@ export async function middleware(request: NextRequest) {
         return supabaseResponse;
     }
 
+    // IMPORTANTE: getUser() é mais seguro que getSession() no proxy
+    // pois verifica o token contra o banco de dados do Supabase.
+    const { data: { user } } = await supabase.auth.getUser();
+
     // Lógica de Redirecionamento
     if (!user && !isLoginPage) {
         // Redireciona para login se não estiver autenticado
         const loginUrl = new URL('/login', request.url);
-        return NextResponse.redirect(loginUrl);
+        const redirectResponse = NextResponse.redirect(loginUrl);
+        supabaseResponse.cookies.getAll().forEach((cookie) => {
+            redirectResponse.cookies.set(cookie.name, cookie.value, cookie);
+        });
+        return redirectResponse;
     }
 
     if (user && isLoginPage) {
         // Se já estiver logado, não deixa entrar na tela de login
         const dashboardUrl = new URL('/', request.url);
-        return NextResponse.redirect(dashboardUrl);
+        const redirectResponse = NextResponse.redirect(dashboardUrl);
+        supabaseResponse.cookies.getAll().forEach((cookie) => {
+            redirectResponse.cookies.set(cookie.name, cookie.value, cookie);
+        });
+        return redirectResponse;
     }
 
     return supabaseResponse;
