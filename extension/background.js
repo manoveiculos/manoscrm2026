@@ -35,8 +35,8 @@ async function pollNewLeads() {
 
         // Count received/new/entrada leads (pending first contact)
         const kanban = data.kanban || {};
-        const count = (kanban['received'] || []).length + (kanban['new'] || []).length + (kanban['entrada'] || []).length;
-        const leads = [...(kanban['received'] || []), ...(kanban['new'] || []), ...(kanban['entrada'] || [])];
+        const count = (kanban['received'] || []).length + (kanban['novo'] || []).length + (kanban['entrada'] || []).length;
+        const leads = [...(kanban['received'] || []), ...(kanban['novo'] || []), ...(kanban['entrada'] || [])];
 
         // Store and notify all WhatsApp tabs
         await chrome.storage.local.set({ pendingLeadsCount: count, pendingLeads: leads });
@@ -94,8 +94,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             })
             .catch(e => {
                 clearTimeout(t);
-                console.error("Fetch background error:", e);
-                sendResponse({ success: false, error: e.name === 'AbortError' ? 'Timeout' : e.message });
+                console.error("[ManosCRM-BG] Fetch error:", {
+                    url: request.url,
+                    error: e.message,
+                    stack: e.stack
+                });
+                sendResponse({ success: false, error: e.name === 'AbortError' ? 'Timeout (15s)' : e.message });
             });
         return true;
     }
