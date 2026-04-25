@@ -43,6 +43,7 @@ interface Lead {
     last_scripts_json: any;
     valor_investimento: string | null;
     assigned_consultant_id: string | null;
+    ai_summary: string | null;
 }
 
 interface Message {
@@ -65,6 +66,7 @@ export default function LeadDetailPage() {
     const [messages, setMessages] = useState<Message[]>([]);
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
+    const [analyzing, setAnalyzing] = useState(false);
 
     const [showSold, setShowSold] = useState(false);
     const [showLost, setShowLost] = useState(false);
@@ -89,7 +91,7 @@ export default function LeadDetailPage() {
             // Lê da view unificada — funciona para qualquer tabela origem
             const { data: l } = await supabase
                 .from('leads_unified')
-                .select('uid, table_name, native_id, name, phone, vehicle_interest, source, ai_score, ai_classification, status, proxima_acao, assigned_consultant_id')
+                .select('uid, table_name, native_id, name, phone, vehicle_interest, source, ai_score, ai_classification, status, proxima_acao, assigned_consultant_id, ai_summary')
                 .eq('table_name', leadTable)
                 .eq('native_id', leadId)
                 .maybeSingle();
@@ -108,6 +110,7 @@ export default function LeadDetailPage() {
                 last_scripts_json: null,
                 valor_investimento: null,
                 assigned_consultant_id: l.assigned_consultant_id,
+                ai_summary: l.ai_summary,
             } : null;
             setLead(lead);
             setSoldVehicle(lead?.vehicle_interest || '');
@@ -167,6 +170,34 @@ export default function LeadDetailPage() {
         }
     }
 
+    async function handleAnalyze() {
+        setAnalyzing(true);
+        try {
+            const res = await fetch('/api/lead/analyze', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    leadId: leadId,
+                    table: leadTable,
+                    messages: messages // envia mensagens carregadas para acelerar análise
+                }),
+            });
+            const data = await res.json();
+            if (data.success && lead) {
+                // Atualiza o resumo localmente
+                setLead({
+                    ...lead,
+                    ai_summary: `[${new Date().toLocaleString('pt-BR')}] 🤖 ANÁLISE:\n${data.diagnostico}\n\nORIENTAÇÃO: ${data.orientacao}`,
+                    proxima_acao: data.scriptWhatsApp
+                });
+            }
+        } catch (err) {
+            console.error('Falha ao analisar:', err);
+        } finally {
+            setAnalyzing(false);
+        }
+    }
+
     async function handleSchedule() {
         if (!scheduleAt) return;
         setSubmitting(true);
@@ -222,6 +253,37 @@ export default function LeadDetailPage() {
                         <MessageSquare className="w-4 h-4" /> Conversa WhatsApp
                     </h3>
                     <div className="flex-1 overflow-y-auto space-y-2">
+                        {lead.ai_summary ? (
+                            <div className="mb-6 p-4 bg-zinc-800/80 border-l-4 border-emerald-500 rounded-r-lg shadow-lg relative group">
+                                <div className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider mb-1 flex items-center gap-1">
+                                    <MessageSquare className="w-3 h-3" /> Resumo Estratégico da IA
+                                </div>
+                                <p className="text-gray-100 text-sm leading-relaxed whitespace-pre-line">
+                                    {lead.ai_summary}
+                                </p>
+                                <button 
+                                    onClick={handleAnalyze}
+                                    disabled={analyzing}
+                                    className="absolute top-2 right-2 text-[10px] bg-zinc-700 hover:bg-zinc-600 text-gray-300 px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-50"
+                                >
+                                    {analyzing ? 'Analisando...' : 'Atualizar Resumo'}
+                                </button>
+                            </div>
+                        ) : (
+                            messages.length > 0 && (
+                                <div className="mb-6 p-4 bg-blue-900/20 border border-dashed border-blue-700 rounded-lg text-center">
+                                    <p className="text-sm text-blue-300 mb-2">Gostaria de um resumo estratégico desta conversa?</p>
+                                    <button 
+                                        onClick={handleAnalyze}
+                                        disabled={analyzing}
+                                        className="bg-blue-600 hover:bg-blue-500 text-white text-xs px-4 py-2 rounded-full font-medium transition-all"
+                                    >
+                                        {analyzing ? 'Analisando...' : '✨ Gerar Resumo com IA'}
+                                    </button>
+                                </div>
+                            )
+                        )}
+
                         {messages.length === 0 ? (
                             <p className="text-sm text-gray-500">Nenhuma mensagem ainda.</p>
                         ) : (
