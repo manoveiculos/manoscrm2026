@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
 
         // Busca leads ativos (máx 30 para contexto)
         let query = admin
-            .from('leads_manos_crm')
+            .from('leads_master')
             .select('id, name, ai_score, ai_classification, status, vehicle_interest, updated_at, created_at, proxima_acao, next_step')
             .not('status', 'in', '("vendido","perdido","lost","comprado","lixo","duplicado","desqualificado")')
             .order('ai_score', { ascending: false })

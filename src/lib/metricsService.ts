@@ -1,5 +1,5 @@
 import { SupabaseClient } from '@supabase/supabase-js';
-import { getFinancialMetrics } from './services/analyticsService';
+import { getFinancialMetrics } from './services/salesMetrics';
 import { FinancialMetrics } from './types';
 
 /**

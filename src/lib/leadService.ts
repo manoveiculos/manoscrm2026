@@ -1,7 +1,6 @@
 import { SupabaseClient } from '@supabase/supabase-js';
 import { supabase as defaultSupabase } from './supabase';
 import { Lead, LeadStatus, AIClassification } from './types';
-import { metaCapiService } from './metaCapiService';
 
 // ============ Cache ============
 const _cache = new Map<string, { data: any, expiry: number }>();
@@ -261,15 +260,6 @@ export const leadService = {
             }
         }
         leadCacheInvalidate();
-
-        // [Meta CAPI] Trigger event asynchronously
-        const eventName = metaCapiService.mapStatusToEvent(status);
-        if (eventName) {
-            this.getLeadById(supabase, leadId).then(lead => {
-                if (lead) metaCapiService.sendEvent(lead, eventName);
-            }).catch(err => console.error("Meta CAPI async trigger error:", err));
-        }
-
         return true;
     },
 

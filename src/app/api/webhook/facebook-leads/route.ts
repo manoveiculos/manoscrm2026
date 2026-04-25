@@ -4,6 +4,7 @@ import { runEliteCloser } from '@/lib/services/ai-closer-service';
 import { runGenerateProposal } from '@/lib/services/proposal-service';
 import { assignNextConsultant } from '@/lib/services/autoAssignService';
 import { notifyLeadArrival } from '@/lib/services/vendorNotifyService';
+import { scheduleFirstContact } from '@/lib/services/aiSdrService';
 
 /**
  * Facebook Lead Ads Webhook (CORRIGIDO: Auditoria Forense 2026-04-18)
@@ -164,6 +165,18 @@ export async function POST(req: NextRequest) {
                         notifyLeadArrival(newLead.id).catch(e =>
                             console.warn('[Webhook] notifyLeadArrival falhou:', e?.message)
                         );
+
+                        // 4b. AI SDR — primeira mensagem ao CLIENTE em ~30s (fire-and-forget)
+                        // Garante que o lead nunca espere pelo vendedor pra ter resposta.
+                        scheduleFirstContact({
+                            leadId: newLead.id,
+                            leadName: name,
+                            leadPhone: cleanPhone,
+                            vehicleInterest: interest || campaignName,
+                            source: finalSource,
+                            consultantName: null,
+                            flow: 'compra',
+                        }, 'leads_compra');
 
                         // 5. Gerar Proposta Automática se o Score for > 60
                         if (analysis && analysis.urgencyScore > 60) {

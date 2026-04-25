@@ -1,24 +1,62 @@
 import { createClient } from '@/lib/supabase/admin';
 import { NextRequest, NextResponse } from 'next/server';
-import { analyzeLossAttribution } from '@/lib/services/lossAttributionService';
 
 export const maxDuration = 30;
 
+type LeadTable = 'leads_manos_crm' | 'leads_compra' | 'leads_distribuicao_crm_26' | 'leads_master';
+
+interface TableSchema {
+    statusSold: string;
+    statusLost: string;
+    updatedAtCol: string;
+    wonAtCol: string | null;
+    lostAtCol: string | null;
+    lossReasonCol: string | null;
+}
+
+const SCHEMA: Record<LeadTable, TableSchema> = {
+    leads_manos_crm: {
+        statusSold: 'vendido', statusLost: 'perdido',
+        updatedAtCol: 'updated_at', wonAtCol: 'won_at',
+        lostAtCol: 'lost_at', lossReasonCol: 'motivo_perda',
+    },
+    leads_compra: {
+        statusSold: 'comprado', statusLost: 'perdido',
+        updatedAtCol: 'atualizado_em', wonAtCol: null,
+        lostAtCol: null, lossReasonCol: 'motivo_perda',
+    },
+    leads_distribuicao_crm_26: {
+        statusSold: 'vendido', statusLost: 'perdido',
+        updatedAtCol: 'atualizado_em', wonAtCol: null,
+        lostAtCol: null, lossReasonCol: null,
+    },
+    leads_master: {
+        statusSold: 'vendido', statusLost: 'perdido',
+        updatedAtCol: 'updated_at', wonAtCol: 'won_at',
+        lostAtCol: 'lost_at', lossReasonCol: 'motivo_perda',
+    },
+};
+
+const VALID_TABLES = new Set<LeadTable>(['leads_manos_crm', 'leads_compra', 'leads_distribuicao_crm_26', 'leads_master']);
+
 export async function POST(req: NextRequest) {
     try {
-        const { lead_id, finish_type, vehicle_details, loss_reason, consultant_name, consultant_id } = await req.json();
+        const { lead_id, lead_table, finish_type, vehicle_details, loss_reason, consultant_name, consultant_id } = await req.json();
 
         if (!lead_id || !finish_type) {
             return NextResponse.json({ error: 'lead_id e finish_type são obrigatórios' }, { status: 400 });
         }
 
+        const table: LeadTable = VALID_TABLES.has(lead_table) ? lead_table : 'leads_manos_crm';
+        const schema = SCHEMA[table];
+
         const admin = createClient();
-        const cleanId = lead_id.toString().replace(/^(main_|crm26_|dist_|lead_|crm25_|master_)/, '');
+        const cleanId = lead_id.toString().replace(/^(main_|crm26_|dist_|lead_|crm25_|master_|compra_)/, '');
         const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(cleanId);
         const cleanConsId = (consultant_id || '').toString().replace(/^(main_|crm26_|dist_|lead_|crm25_|master_)/, '') || null;
         const now = new Date().toISOString();
 
-        const newStatus = finish_type === 'perda' ? 'perdido' : 'vendido';
+        const newStatus = finish_type === 'perda' ? schema.statusLost : schema.statusSold;
 
         const notePrefix = finish_type === 'perda'
             ? '🚫 ENCERRADO COMO PERDA'
@@ -29,43 +67,42 @@ export async function POST(req: NextRequest) {
             ? (loss_reason || 'Motivo não informado')
             : (vehicle_details || 'Veículo não informado');
 
-        // ── 0. Snapshot ANTES de mudar status (perda apenas) ──
-        // Captura o score IA e telefone no momento da perda. Sem isso,
-        // não conseguimos auditar depois "lead bom perdido por vendedor ruim".
+        // Snapshot pré-update (perda apenas — leads_manos_crm)
         let scoreAtLoss: number | null = null;
-        let leadPhone: string | null = null;
-        if (finish_type === 'perda' && isUUID) {
+        if (finish_type === 'perda' && table === 'leads_manos_crm' && isUUID) {
             const { data: snapshot } = await admin
                 .from('leads_manos_crm')
-                .select('ai_score, phone')
+                .select('ai_score')
                 .eq('id', cleanId)
                 .maybeSingle();
             scoreAtLoss = Number(snapshot?.ai_score) || 0;
-            leadPhone = snapshot?.phone || null;
         }
 
-        // ── 1. Atualizar status (e ai_score_at_loss, se perda) ──
-        const updatePayload: Record<string, any> = { status: newStatus, updated_at: now };
-        if (scoreAtLoss !== null) updatePayload.ai_score_at_loss = scoreAtLoss;
-        
+        const updatePayload: Record<string, any> = {
+            status: newStatus,
+            [schema.updatedAtCol]: now,
+        };
+        if (scoreAtLoss !== null && table === 'leads_manos_crm') {
+            updatePayload.ai_score_at_loss = scoreAtLoss;
+        }
         if (finish_type === 'perda') {
-            updatePayload.lost_at = now;
-            updatePayload.motivo_perda = loss_reason || 'Não informado';
-        } else {
-            updatePayload.won_at = now;
+            if (schema.lostAtCol) updatePayload[schema.lostAtCol] = now;
+            if (schema.lossReasonCol) updatePayload[schema.lossReasonCol] = loss_reason || 'Não informado';
+        } else if (schema.wonAtCol) {
+            updatePayload[schema.wonAtCol] = now;
         }
 
         const { error: statusError } = await admin
-            .from('leads_manos_crm')
+            .from(table)
             .update(updatePayload)
             .eq('id', cleanId);
 
         if (statusError) {
-            console.error('[finish] Erro ao atualizar status:', statusError);
+            console.error(`[finish] Erro ao atualizar status em ${table}:`, statusError);
             return NextResponse.json({ error: statusError.message }, { status: 500 });
         }
 
-        // ── 2. Timeline ──
+        // Timeline (sempre interactions_manos_crm — única tabela de timeline)
         await admin.from('interactions_manos_crm').insert({
             [isUUID ? 'lead_id' : 'lead_id_v1']: cleanId,
             type: finish_type === 'perda' ? 'loss' : 'sale',
@@ -75,7 +112,7 @@ export async function POST(req: NextRequest) {
             created_at: now,
         });
 
-        // ── 3. Sale (apenas venda real) ──
+        // Registro de venda (apenas venda real)
         if (finish_type === 'venda' && vehicle_details) {
             const salePayload = {
                 lead_id: cleanId,
@@ -92,37 +129,17 @@ export async function POST(req: NextRequest) {
             ]);
         }
 
-        // ── 4. Pipeline de análise da PERDA (fire-and-forget) ──
-        // Roda em paralelo:
-        //   a) Classifica motivo (preço/concorrente/sem_resposta/etc) — já existia
-        //   b) Atribui culpa (client_disengaged | consultant_abandoned | external_factor)
-        //      lendo o histórico WhatsApp via lossAttributionService
-        if (finish_type === 'perda' && loss_reason) {
+        // Classifica motivo de perda em background (apenas leads_manos_crm tem loss_category)
+        if (finish_type === 'perda' && loss_reason && table === 'leads_manos_crm') {
             classifyLossReasonAsync(cleanId, loss_reason, admin).catch(
                 (e) => console.error('[finish] classifyLoss falhou:', e)
             );
         }
 
-        if (finish_type === 'perda' && isUUID && leadPhone) {
-            analyzeLossAttribution(cleanId, leadPhone, loss_reason || '')
-                .then(async (result) => {
-                    // Audit trail: registra análise na timeline com flag visual
-                    const flag = result.loss_attribution === 'consultant_abandoned' ? '⚠️' : '✅';
-                    await admin.from('interactions_manos_crm').insert({
-                        [isUUID ? 'lead_id' : 'lead_id_v1']: cleanId,
-                        type: 'loss_audit',
-                        notes: `${flag} AUDITORIA IA: ${result.loss_attribution} (proatividade vendedor: ${result.consultant_response_score}/100) — ${result.loss_attribution_reason}`,
-                        consultant_id: cleanConsId,
-                        user_name: 'IA Auditor',
-                        created_at: new Date().toISOString(),
-                    });
-                })
-                .catch((e) => console.error('[finish] lossAttribution falhou:', e?.message));
-        }
-
         return NextResponse.json({
             success: true,
             status: newStatus,
+            table,
             ai_score_at_loss: scoreAtLoss,
         });
     } catch (err: any) {
@@ -131,7 +148,6 @@ export async function POST(req: NextRequest) {
     }
 }
 
-// Classifica o motivo de perda com GPT-4o mini e salva em loss_category
 async function classifyLossReasonAsync(leadId: string, reason: string, admin: ReturnType<typeof createClient>) {
     const { OpenAI } = await import('openai');
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -153,9 +169,5 @@ async function classifyLossReasonAsync(leadId: string, reason: string, admin: Re
     await admin
         .from('leads_manos_crm')
         .update({ loss_category: category })
-        .eq('id', leadId)
-        .then(
-            () => console.log(`[finish] loss_category=${category} para lead ${leadId}`),
-            (e: any) => console.warn('[finish] loss_category não salvo:', e?.message)
-        );
+        .eq('id', leadId);
 }

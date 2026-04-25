@@ -38,21 +38,15 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
-    { label: 'Visão Geral', icon: LayoutDashboard, href: '/' },
-    { label: 'Painel de Elite', icon: Activity, href: '/pulse' },
-    { label: 'Pipeline de Vendas', icon: KanbanSquare, href: '/pipeline' },
-    { label: 'Central da IA', icon: Bot, href: '/leads' },
-    { label: 'Arsenal de Veículos', icon: CarFront, href: '/inventory' },
-    { label: 'Ranking de Vendas', icon: Trophy, href: '/ranking' },
-    { label: 'Análise Inteligente', icon: BarChart3, href: '/analytics' },
-    { label: 'Campanhas Meta/Google', icon: Target, href: '/marketing', adminOnly: true },
-    { label: 'Gestão de Vendas', icon: ClipboardCheck, href: '/admin/sales', adminOnly: true },
-    { label: 'Faturamento de Crédito', icon: DollarSign, href: '/admin/cobranca', adminOnly: true },
-    { label: 'Gerenciar Equipe', icon: Shield, href: '/admin/equipe', adminOnly: true },
-    { label: 'Cowork IA', icon: Bot, href: '/admin/cowork', adminOnly: true },
-    { label: 'Radar de Tráfego', icon: Radar, href: '/admin/trafego', adminOnly: true },
-    { label: 'Calibração da IA', icon: SlidersHorizontal, href: '/admin/ai-calibration', adminOnly: true },
-    { label: 'Compras', icon: CarFront, href: '/compras', restricted: true },
+    { label: 'Inbox', icon: Bot, href: '/inbox' },
+    { label: 'Pipeline', icon: KanbanSquare, href: '/pipeline' },
+    { label: 'Leads', icon: LayoutDashboard, href: '/leads' },
+    { label: 'Dashboard', icon: BarChart3, href: '/' },
+    { label: 'Conversão', icon: BarChart3, href: '/admin/conversion', adminOnly: true },
+    { label: 'Resgate', icon: Bot, href: '/admin/rescue', adminOnly: true },
+    { label: 'Consultores', icon: Shield, href: '/admin/users', adminOnly: true },
+    { label: 'Saúde', icon: Activity, href: '/admin/health', adminOnly: true },
+    { label: 'SDR Bench', icon: Bot, href: '/admin/sdr-bench', adminOnly: true },
 ];
 
 interface NavUser {
@@ -188,11 +182,7 @@ export const NavigationV2 = () => {
                 )}
                 {NAV_ITEMS.filter(item => {
                     const isAdmin = role === 'admin';
-                    const isFelipe = user?.user_metadata?.full_name?.includes('Felipe Ledra');
-                    
                     if (item.adminOnly && !isAdmin) return false;
-                    if (item.restricted && !(isAdmin || isFelipe)) return false;
-                    
                     return true;
                 }).map((item) => {
                     const isActive = pathname.startsWith(item.href);

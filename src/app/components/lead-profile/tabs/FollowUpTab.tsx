@@ -315,7 +315,7 @@ export const FollowUpTab: React.FC<FollowUpTabProps> = ({
 
                     {/* Proposta */}
                     <button
-                        onClick={() => onTabChange?.('dashboard')}
+                        onClick={() => onTabChange?.('proposta')}
                         className="flex flex-col items-center gap-1.5 py-4 hover:bg-white/[0.04] transition-colors"
                     >
                         <div className="h-9 w-9 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center">

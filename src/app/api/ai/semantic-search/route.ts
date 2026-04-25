@@ -21,8 +21,8 @@ export async function POST(req: NextRequest) {
         });
         const queryEmbedding = embRes.data[0].embedding;
 
-        // Busca por similaridade via função SQL match_leads
-        const { data, error } = await supabaseAdmin.rpc('match_leads', {
+        // Busca por similaridade via função SQL match_leads_semantic
+        const { data, error } = await supabaseAdmin.rpc('match_leads_semantic', {
             query_embedding: queryEmbedding,
             match_threshold: threshold,
             match_count: limit,
@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
 
         if (error) {
             // Se a função não existir ainda, retorna lista vazia com flag
-            if (error.message.includes('match_leads')) {
+            if (error.message.includes('match_leads_semantic')) {
                 return NextResponse.json({ success: true, results: [], needs_indexing: true });
             }
             throw error;
@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
 
         // Verifica se há leads sem embedding (precisa indexar)
         const { count } = await supabaseAdmin
-            .from('leads_manos_crm')
+            .from('leads_master')
             .select('id', { count: 'exact', head: true })
             .is('embedding', null);
 

@@ -9,10 +9,9 @@ import * as interactionService from './interactionService';
 import * as inventoryService from './inventoryService';
 import * as consultantService from './consultantService';
 import * as salesService from './salesService';
-import * as analyticsService from './analyticsService';
+import * as salesMetrics from './salesMetrics';
 import * as followUpService from './followUpService';
 import * as purchaseService from './purchaseService';
-import * as deprecated from './deprecated';
 import { setGlobalClient } from './supabaseClients';
 
 // Re-exports individuais para novos componentes
@@ -22,7 +21,7 @@ export * from './interactionService';
 export * from './inventoryService';
 export * from './consultantService';
 export * from './salesService';
-export * from './analyticsService';
+export * from './salesMetrics';
 export * from './followUpService';
 export * from './purchaseService';
 
@@ -30,17 +29,16 @@ export * from './purchaseService';
 export const dataService: any = {};
 
 // Merge manual via Object.assign para garantir exportação limpa no Turbopack
-Object.assign(dataService, 
+Object.assign(dataService,
     leadRouter,
     leadCrud,
     interactionService,
     inventoryService,
     consultantService,
     salesService,
-    analyticsService,
+    salesMetrics,
     followUpService,
-    purchaseService,
-    deprecated
+    purchaseService
 );
 
 // Métodos especiais que podem precisar de bind ou lógica extra

@@ -9,46 +9,64 @@ const Scraper = {
     getPhone() {
         try {
             const fromDataId = (sel) => {
-                const el = document.querySelector(sel);
-                const d = el?.closest('[data-id]') || el?.querySelector('[data-id]') || el;
-                const id = d?.getAttribute?.('data-id');
-                if (id && (id.includes('@c.us') || id.includes('@s.whatsapp.net'))) {
-                    const ph = id.split('@')[0].split('_').pop().replace(/\D/g, '');
-                    if (this._isValid(ph)) return this._norm(ph);
+                const els = document.querySelectorAll(sel);
+                for (const el of els) {
+                    const d = el?.closest('[data-id]') || el?.querySelector('[data-id]') || el;
+                    const id = d?.getAttribute?.('data-id');
+                    if (id && (id.includes('@c.us') || id.includes('@s.whatsapp.net'))) {
+                        const ph = id.split('@')[0].split('_').pop().replace(/\D/g, '');
+                        if (this._isValid(ph)) return this._norm(ph);
+                    }
                 }
                 return null;
             };
 
-            // 1. Header data-id
+            // 1. Header (Mais rápido e comum)
             let r = fromDataId('#main header') || fromDataId('[data-testid="conversation-panel-wrapper"] [data-id]') || fromDataId('[data-testid="chat-header"]');
             if (r) return r;
 
-            // 2. Header text regex
-            const hdr = document.querySelector('#main header');
-            if (hdr) {
-                const m = (hdr.innerText||'').match(/\+?\d[\d\s\-\(\)]{8,15}\d/g);
-                if (m) for (const x of m) { const c=x.replace(/\D/g,''); if(this._isValid(c)) return this._norm(c); }
+            // 2. Contact info drawer (Agressivo se aberto)
+            const drawer = document.querySelector('[data-testid="contact-info-drawer"]') || document.querySelector('section[role="region"]');
+            if (drawer) {
+                // Tenta extrair do data-id do drawer
+                r = fromDataId('[data-testid="contact-info-drawer"] [data-id]');
+                if (r) return r;
+
+                // Scan por texto que pareça telefone dentro do drawer
+                const textElements = drawer.querySelectorAll('span, div');
+                for (const el of textElements) {
+                    const txt = el.innerText || '';
+                    if (txt.includes('+') || (txt.replace(/\D/g, '').length >= 10)) {
+                        const clean = txt.replace(/\D/g, '');
+                        if (this._isValid(clean)) return this._norm(clean);
+                    }
+                }
             }
 
             // 3. Pane side selected
             r = fromDataId('#pane-side [aria-selected="true"]') || fromDataId('#pane-side [data-testid="list-item"][aria-selected="true"]');
             if (r) return r;
 
-            // 4. Contact info drawer
-            r = fromDataId('[data-testid="contact-info-drawer"]') || fromDataId('section[role="region"]');
-            if (r) return r;
+            // 4. Header text regex (Fallback)
+            const hdr = document.querySelector('#main header');
+            if (hdr) {
+                const m = (hdr.innerText||'').match(/\+?\d[\d\s\-\(\)]{10,15}\d/g);
+                if (m) for (const x of m) { const c=x.replace(/\D/g,''); if(this._isValid(c)) return this._norm(c); }
+            }
 
             // 5. Brute force header spans
-            if (hdr) { for (const s of hdr.querySelectorAll('span,div')) { const t=(s.innerText||'').replace(/\D/g,''); if(t.length>=10&&t.length<=13&&this._isValid(t)) return this._norm(t); } }
+            if (hdr) { 
+                for (const s of hdr.querySelectorAll('span,div')) { 
+                    const t=(s.innerText||'').replace(/\D/g,''); 
+                    if(t.length>=10 && t.length<=14 && this._isValid(t)) return this._norm(t); 
+                } 
+            }
 
-            // 6. Global scan #main data-id
+            // 6. Global scan #main data-id (Último recurso)
             const main = document.querySelector('#main');
-            if (main) for (const el of main.querySelectorAll('[data-id]')) {
-                const id=el.getAttribute('data-id');
-                if(id&&(id.includes('@c.us')||id.includes('@s.whatsapp.net'))) {
-                    const ph=id.split('@')[0].split('_').pop().replace(/\D/g,'');
-                    if(this._isValid(ph)) return this._norm(ph);
-                }
+            if (main) {
+                r = fromDataId('#main [data-id]');
+                if (r) return r;
             }
         } catch(e) { console.error("Scraper error",e); }
         return null;

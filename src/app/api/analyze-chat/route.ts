@@ -4,14 +4,6 @@ import { createServerClient } from '@supabase/ssr';
 
 export const maxDuration = 60; // Permite que a Edge Function rode por até 60 segundos (Vercel)
 
-export const config = {
-    api: {
-        bodyParser: {
-            sizeLimit: '50mb',
-        },
-    },
-};
-
 // OpenAI initialization will happen inside the handler to ensure env vars are loaded
 let openaiInstance: OpenAI | null = null;
 

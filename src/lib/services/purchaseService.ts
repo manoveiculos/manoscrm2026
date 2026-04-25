@@ -1,4 +1,4 @@
-import { supabase } from './supabaseClients';
+import { createClient } from '@/lib/supabase/admin';
 import { stripPrefix } from './leadRouter';
 
 /**
@@ -10,6 +10,7 @@ import { stripPrefix } from './leadRouter';
  */
 
 export async function recordPurchase(purchaseData: any) {
+    const admin = createClient();
     const cleanId = stripPrefix(purchaseData.lead_id || '');
     const cleanConsId = stripPrefix(purchaseData.consultant_id || '');
     const now = new Date().toISOString();
@@ -23,30 +24,21 @@ export async function recordPurchase(purchaseData: any) {
         created_at: now
     };
 
-    // 1. Gravar na tabela 'purchases' (Legacy)
-    const { data: legacyPur, error: legacyError } = await supabase
-        .from('purchases')
-        .insert([purchasePayload])
-        .select()
-        .single();
+    // 1. Gravar na tabela 'purchases' (Legacy) e 'purchases_manos_crm' (V2) em paralelo
+    const [legacyRes, v2Res] = await Promise.all([
+        admin.from('purchases').insert([purchasePayload]).select().single(),
+        admin.from('purchases_manos_crm').insert([purchasePayload]).select().single()
+    ]);
     
-    if (legacyError) console.error("Erro ao gravar em purchases (legacy):", legacyError);
+    if (legacyRes.error) console.error("Erro ao gravar em purchases (legacy):", legacyRes.error);
+    if (v2Res.error) console.error("Erro ao gravar em purchases_manos_crm (v2):", v2Res.error);
 
-    // 2. Gravar na tabela 'purchases_manos_crm' (V2 lookup)
-    const { data: v2Pur, error: v2Error } = await supabase
-        .from('purchases_manos_crm')
-        .insert([purchasePayload])
-        .select()
-        .single();
-
-    if (v2Error) console.error("Erro ao gravar em purchases_manos_crm (v2):", v2Error);
-
-    return v2Pur || legacyPur;
+    return v2Res.data || legacyRes.data;
 }
 
 export async function getPurchases(leadId?: string) {
-    // BUSCA em 'purchases_manos_crm' como orientado no mapeamento de conflitos
-    let query = supabase.from('purchases_manos_crm').select('*');
+    const admin = createClient();
+    let query = admin.from('purchases_manos_crm').select('*');
     if (leadId) {
         query = query.eq('lead_id', stripPrefix(leadId));
     }

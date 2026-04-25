@@ -1,9 +1,10 @@
 import './globals.css';
 import { LayoutWrapperV2 } from '@/components/v2/LayoutWrapperV2';
+import BlockingAlertModal from '@/components/BlockingAlertModal';
 
 export const metadata = {
-  title: 'Manos CRM V2',
-  description: 'Sistema CRM Premium Intelligence',
+  title: 'Manos CRM',
+  description: 'Máquina de vender',
 };
 
 export default function RootLayout({
@@ -15,6 +16,7 @@ export default function RootLayout({
     <html lang="pt-BR">
       <body>
         <LayoutWrapperV2>{children}</LayoutWrapperV2>
+        <BlockingAlertModal />
       </body>
     </html>
   );

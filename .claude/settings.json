@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git checkout *)",
+      "Bash(curl -sS -w \"\\\\n\\\\nHTTP_STATUS: %{http_code}\\\\n\" -H \"Authorization: Bearer bb90d7dfd6b54c69bfa32979a906b777\" \"https://manoscrm.com.br/api/extension/lead-info?phone=554796423678\")",
+      "Bash(curl -sS -w \"\\\\n\\\\nHTTP_STATUS: %{http_code}\\\\n\" -H \"Authorization: Bearer bb90d7dfd6b54c69bfa32979a906b777\" \"https://manoscrm.com.br/api/extension/kanban\")",
+      "Bash(curl -sS -H \"Authorization: Bearer bb90d7dfd6b54c69bfa32979a906b777\" \"https://manoscrm.com.br/api/extension/lead-info?phone=554796423678\")",
+      "Bash(curl -sS -H \"Authorization: Bearer bb90d7dfd6b54c69bfa32979a906b777\" \"https://manoscrm.com.br/api/extension/lead-info?phone=5547996423678\")",
+      "Bash(curl -sS -H 'Authorization: Bearer bb90d7dfd6b54c69bfa32979a906b777' 'https://manoscrm.com.br/api/extension/lead-info?phone=__TRACKED_VAR__')",
+      "Bash(grep -o \"getLeadByPhone[^}]\\\\{1,300\\\\}\" d:/Antigravity/crm-manos/.next/server/app/api/extension/lead-info/route.js)",
+      "Bash(git commit -m ' *)"
+    ]
+  }
+}

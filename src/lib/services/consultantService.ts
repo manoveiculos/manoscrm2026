@@ -203,7 +203,7 @@ export async function resolveConsultantIdByName(name: string): Promise<string | 
     return exactMatch ? exactMatch.id : consultants[0].id;
 }
 
-import { getFinancialMetrics as getUnifiedMetrics } from './analyticsService';
+import { getFinancialMetrics as getUnifiedMetrics } from './salesMetrics';
 
 // ... (outras funções dadas)
 

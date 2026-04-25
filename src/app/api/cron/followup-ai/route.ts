@@ -1,24 +1,25 @@
 import { createClient } from '@/lib/supabase/admin';
 import { NextResponse } from 'next/server';
 import { OpenAI } from 'openai';
+import { sendWhatsApp, isSenderConfigured } from '@/lib/services/whatsappSender';
+import { withHeartbeat } from '@/lib/services/cronHeartbeat';
 
 export const maxDuration = 120;
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// SLA padrão de follow-up por estágio (fallback quando sla_config não tem registro)
 const DEFAULT_FOLLOWUP_SLA: Record<string, number> = {
-    ataque:      6,
-    triagem:     6,
-    fechamento:  3,
-    confirmed:   6,
-    scheduled:   6,
+    ataque: 6,
+    triagem: 6,
+    fechamento: 3,
+    confirmed: 6,
+    scheduled: 6,
     negotiation: 3,
-    proposed:    3,
+    proposed: 3,
 };
 
 type SlaRow = { origem: string; stage: string; followup_hours: number | null };
-type FollowupMap = Map<string, number>; // key: "origem|stage"
+type FollowupMap = Map<string, number>;
 
 async function loadFollowupMap(admin: ReturnType<typeof createClient>): Promise<FollowupMap> {
     const { data } = await admin
@@ -35,7 +36,6 @@ async function loadFollowupMap(admin: ReturnType<typeof createClient>): Promise<
 }
 
 function getFollowupHours(origem: string | null | undefined, status: string, map: FollowupMap): number {
-    // Normaliza o status para o stage canônico
     const stageMap: Record<string, string> = {
         confirmed: 'ataque', scheduled: 'ataque',
         negotiation: 'fechamento', proposed: 'fechamento',
@@ -50,10 +50,14 @@ function getFollowupHours(origem: string | null | undefined, status: string, map
 
 /**
  * GET /api/cron/followup-ai
- * Executa a cada 3 horas.
- * Para leads em estágios decisivos sem contato recente, gera mensagem de
- * reengajamento personalizada com GPT-4o mini e cria follow_up com type='ai_auto'.
- * Janela de inatividade é dinâmica por origem (tabela sla_config).
+ *
+ * Roda a cada 1h via daily-batch. Para leads parados além do SLA da origem,
+ * gera mensagem com GPT-4o-mini e ENVIA direto ao cliente via whatsappSender.
+ * Registra em follow_ups (status='sent' se enviou, 'pending' se falhou),
+ * e em interactions_manos_crm (audit trail).
+ *
+ * Idempotência: pula leads com follow-up ai_auto pendente OU enviado nas
+ * últimas 24h, e respeita flag ai_followup_enabled (default true).
  */
 export async function GET(request: Request) {
     const authHeader = request.headers.get('authorization');
@@ -61,18 +65,28 @@ export async function GET(request: Request) {
         return new NextResponse('Unauthorized', { status: 401 });
     }
 
+    return await withHeartbeat('followup-ai', async () => {
+        const out = await runFollowupAi();
+        return { result: NextResponse.json(out), metrics: out };
+    });
+}
+
+async function runFollowupAi() {
     const admin = createClient();
     const now = Date.now();
     const log: string[] = [];
-    let generated = 0;
-    let skipped = 0;
+    let generated = 0, sent = 0, skipped = 0, failed = 0;
+
+    if (!isSenderConfigured()) {
+        log.push('⚠️ Sender não configurado — gerando msgs mas sem enviar.');
+    }
 
     const followupMap = await loadFollowupMap(admin);
     const activeStatuses = Object.keys(DEFAULT_FOLLOWUP_SLA);
 
     const { data: leads, error } = await admin
         .from('leads_manos_crm')
-        .select('id, name, vehicle_interest, proxima_acao, next_step, status, updated_at, assigned_consultant_id, valor_investimento, carro_troca, source')
+        .select('id, name, phone, vehicle_interest, proxima_acao, next_step, status, updated_at, assigned_consultant_id, valor_investimento, carro_troca, source, ai_followup_enabled')
         .in('status', activeStatuses)
         .order('updated_at', { ascending: true })
         .limit(30);
@@ -81,38 +95,47 @@ export async function GET(request: Request) {
         return NextResponse.json({ success: false, error: error.message }, { status: 500 });
     }
 
-    // Filtra apenas leads que ultrapassaram o SLA de inatividade (dinâmico por origem)
-    const eligible = (leads || []).filter(l => {
-        const leadOrigem = l.origem || l.source || null;
-        const slaH = getFollowupHours(leadOrigem, l.status, followupMap);
+    const eligible = (leads || []).filter((l: any) => {
+        if (l.ai_followup_enabled === false) return false;
+        const slaH = getFollowupHours(l.source, l.status, followupMap);
         const hoursInactive = (now - new Date(l.updated_at || 0).getTime()) / 3_600_000;
         return hoursInactive >= slaH;
     });
 
     log.push(`🎯 ${eligible.length} leads elegíveis (de ${leads?.length ?? 0} ativos)`);
 
+    const dayAgo = new Date(now - 24 * 3600 * 1000).toISOString();
+
     for (const lead of eligible) {
         try {
-            // Evita duplicata: não cria se já existe ai_auto pendente
             const { data: existing } = await admin
                 .from('follow_ups')
-                .select('id')
+                .select('id, status, scheduled_at')
                 .eq('lead_id', lead.id)
                 .eq('type', 'ai_auto')
-                .eq('status', 'pending')
-                .maybeSingle();
+                .gte('scheduled_at', dayAgo)
+                .order('scheduled_at', { ascending: false })
+                .limit(1);
 
-            if (existing) {
+            if (existing && existing.length > 0) {
                 skipped++;
                 continue;
             }
 
-            // Gera mensagem de reengajamento com GPT-4o mini
             const res = await openai.chat.completions.create({
                 model: 'gpt-4o-mini',
                 messages: [{
                     role: 'user',
-                    content: `Lead da Manos Veículos (concessionária, Rio Do Sul/SC):\n- Nome: ${lead.name}\n- Interesse: ${lead.vehicle_interest || 'não informado'}\n- Investimento: ${lead.valor_investimento || 'não informado'}\n- Troca: ${lead.carro_troca || 'sem troca'}\n- Estágio: ${lead.status}\n- Última ação sugerida: "${lead.proxima_acao || lead.next_step || 'sem ação prévia'}"\n\nGere UMA mensagem de reengajamento curta (1-2 frases) para WhatsApp. Sem gerundismo. Sem "tudo bem?". Comece pelo primeiro nome. Seja direto e crie urgência real.\n\nJSON: { "mensagem": "..." }`,
+                    content: `Lead da Manos Veículos (Rio do Sul/SC):
+- Nome: ${lead.name}
+- Interesse: ${lead.vehicle_interest || 'não informado'}
+- Investimento: ${lead.valor_investimento || 'não informado'}
+- Estágio: ${lead.status}
+- Última ação sugerida: "${lead.proxima_acao || lead.next_step || 'sem ação prévia'}"
+
+Gere UMA mensagem de reengajamento curta (1-2 frases, máx 220 chars) para WhatsApp. Sem "tudo bem?", sem gerundismo. Comece pelo primeiro nome. Termine com pergunta direta. Crie urgência real (ex: condição limitada, agenda apertada).
+
+JSON: { "mensagem": "..." }`,
                 }],
                 response_format: { type: 'json_object' },
                 temperature: 0.45,
@@ -120,11 +143,26 @@ export async function GET(request: Request) {
             });
 
             const result = JSON.parse(res.choices[0]?.message?.content || '{}');
-            const msg = result.mensagem?.trim() || `${lead.name.split(' ')[0]}, ainda tenho uma condição especial reservada no ${lead.vehicle_interest || 'veículo de seu interesse'}. Podemos fechar hoje?`;
+            const firstName = (lead.name || 'Cliente').split(' ')[0];
+            const msg = (result.mensagem || '').trim() ||
+                `${firstName}, ainda tenho condição reservada no ${lead.vehicle_interest || 'veículo de interesse'}. Posso te chamar agora?`;
 
             const priority = ['fechamento', 'negotiation', 'proposed'].includes(lead.status) ? 'high' : 'medium';
+            generated++;
 
-            // Cria follow-up IA (safety gate — vendedor aprova antes de enviar)
+            // Tenta enviar de fato ao cliente
+            let sendResult: { ok: boolean; provider: string; error?: string } = { ok: false, provider: 'none' };
+            if (lead.phone && isSenderConfigured()) {
+                sendResult = await sendWhatsApp({
+                    toPhone: lead.phone,
+                    message: msg,
+                    kind: 'ai_followup',
+                    leadId: lead.id,
+                });
+                if (sendResult.ok) sent++;
+                else failed++;
+            }
+
             await admin.from('follow_ups').insert({
                 lead_id: lead.id,
                 user_id: lead.assigned_consultant_id || 'system',
@@ -132,25 +170,33 @@ export async function GET(request: Request) {
                 type: 'ai_auto',
                 note: msg,
                 priority,
-                status: 'pending',
+                status: sendResult.ok ? 'sent' : 'pending',
             });
 
-            // Registra na timeline (fire-and-forget)
+            // Audit trail (best-effort)
             void admin.from('interactions_manos_crm').insert({
                 lead_id: lead.id,
-                notes: `[IA AUTO] Follow-up gerado: "${msg}"`,
+                notes: sendResult.ok
+                    ? `[IA AUTO ENVIADO via ${sendResult.provider}] "${msg}"`
+                    : `[IA AUTO GERADO sem envio: ${sendResult.error || 'sem provider'}] "${msg}"`,
                 new_status: lead.status,
                 type: 'ai_followup',
                 created_at: new Date().toISOString(),
             }).then(null, () => {});
 
-            generated++;
-            log.push(`✅ ${lead.name} (${lead.status}) → "${msg.slice(0, 60)}..."`);
+            // Atualiza lead pra evitar reenvio em loop
+            if (sendResult.ok) {
+                await admin.from('leads_manos_crm')
+                    .update({ updated_at: new Date().toISOString() })
+                    .eq('id', lead.id);
+            }
+
+            log.push(`${sendResult.ok ? '📤' : '📝'} ${lead.name} (${lead.status}) → "${msg.slice(0, 60)}..."`);
         } catch (e: any) {
-            skipped++;
-            log.push(`❌ ${lead.name} → ${e.message}`);
+            failed++;
+            log.push(`❌ ${lead.name} → ${e?.message}`);
         }
     }
 
-    return NextResponse.json({ success: true, generated, skipped, log });
+    return { success: true, generated, sent, skipped, failed, log };
 }

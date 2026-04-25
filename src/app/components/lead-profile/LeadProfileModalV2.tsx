@@ -19,6 +19,7 @@ import { FollowUpTab } from './tabs/FollowUpTab';
 import { ArsenalTab } from './tabs/ArsenalTab';
 import { TradeInTab } from './tabs/TradeInTab';
 import { FinancingTab } from './tabs/FinancingTab';
+import ProposalTab from './tabs/ProposalTab';
 
 import { StatusSelector } from './sections/StatusSelector';
 import { LeadHeader } from './sections/LeadHeader';
@@ -555,6 +556,7 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
         { id: 'arsenal',       label: 'Arsenal'      },
         { id: 'troca',         label: 'Troca'        },
         { id: 'financiamento', label: 'Crédito'     },
+        { id: 'proposta',      label: 'Proposta'      },
     ] as const;
 
     const modalContent = (
@@ -765,6 +767,13 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
                                         <FinancingTab 
                                             lead={lead} 
                                             onSaveField={handleSaveField} 
+                                        />
+                                    )}
+                                    {activeTab === 'proposta' && (
+                                        <ProposalTab 
+                                            leadId={lead.id} 
+                                            leadName={lead.name}
+                                            onClose={() => setActiveTab('dashboard')}
                                         />
                                     )}
                                 </motion.div>

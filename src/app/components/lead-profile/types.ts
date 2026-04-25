@@ -31,7 +31,7 @@ export interface TimelineEvent {
   feedType?: 'interaction' | 'message' | 'ai_lab';
 }
 
-export type TabId = 'dashboard' | 'timeline' | 'followup' | 'arsenal' | 'troca' | 'financiamento';
+export type TabId = 'dashboard' | 'timeline' | 'followup' | 'arsenal' | 'troca' | 'financiamento' | 'proposta' | 'whatsapp';
 
 export interface InventoryItem {
   marca: string;

@@ -87,12 +87,27 @@ async function sendToWebhook(payload: NotifyPayload): Promise<void> {
 
 /**
  * Helper para buscar lead em qualquer vertical e normalizar campos para notificação.
- * Tenta leads_manos_crm (Venda) primeiro, depois leads_compra (Compra).
+ * Prioriza leads_master (Nova fonte da verdade), depois leads_manos_crm e leads_compra.
  */
 async function fetchLeadForNotify(cleanId: string) {
     const admin = createClient();
     
-    // 1. Tentar Venda
+    // 0. Tentar Master (Consolidação)
+    const { data: mLead } = await admin
+        .from('leads_master')
+        .select('id, name, phone, vehicle_interest, source, ai_score, ai_classification, proxima_acao, assigned_consultant_id, valor_investimento')
+        .eq('id', cleanId)
+        .maybeSingle();
+
+    if (mLead) {
+        return {
+            ...mLead,
+            isCompra: false,
+            valor: mLead.valor_investimento
+        };
+    }
+    
+    // 1. Tentar Venda (Legacy/V2)
     const { data: vLead } = await admin
         .from('leads_manos_crm')
         .select('id, name, phone, vehicle_interest, source, ai_score, ai_classification, proxima_acao, assigned_consultant_id, valor_investimento')
@@ -107,7 +122,7 @@ async function fetchLeadForNotify(cleanId: string) {
         };
     }
 
-    // 2. Tentar Compra
+    // 2. Tentar Compra (Legacy)
     const { data: cLead } = await admin
         .from('leads_compra')
         .select('id, nome, telefone, veiculo_original, origem, ai_score, ai_classification, proxima_acao, assigned_consultant_id, valor_cliente')
@@ -211,12 +226,13 @@ interface MorningLead {
 /**
  * Briefing matinal: TOP leads quentes + SLA vencendo, enviado às 08h
  * para o WhatsApp pessoal de cada vendedor ativo.
+ * 
+ * Refatorado para Fire-and-Forget: não bloqueia o chamador.
  */
 export async function notifyMorningBrief(): Promise<{ sent: number; skipped: number }> {
     const admin = createClient();
-    let sent = 0;
-    let skipped = 0;
-
+    
+    // Buscar consultores ativos (rápido)
     const { data: consultants } = await admin
         .from('consultants_manos_crm')
         .select('id, name, phone')
@@ -225,58 +241,55 @@ export async function notifyMorningBrief(): Promise<{ sent: number; skipped: num
 
     if (!consultants || consultants.length === 0) return { sent: 0, skipped: 0 };
 
-    for (const c of consultants) {
-        if (!c.phone) {
-            skipped++;
-            continue;
+    // Disparar processamento em background
+    (async () => {
+        for (const c of consultants) {
+            if (!c.phone) continue;
+
+            // Busca leads em várias tabelas (mais pesado)
+            const { data: leads } = await admin
+                .from('leads_master')
+                .select('id, name, phone, ai_score, ai_classification, proxima_acao, vehicle_interest')
+                .eq('assigned_consultant_id', c.id)
+                .not('status', 'in', '("vendido","perdido","comprado")')
+                .gte('ai_score', 60)
+                .order('ai_score', { ascending: false })
+                .limit(3);
+
+            const top = (leads || []) as MorningLead[];
+            if (top.length === 0) continue;
+
+            const consFirst = (c.name || '').split(' ')[0];
+            const lines = top.map((l, i) => {
+                const leadFirst = (l.name || 'cliente').split(' ')[0];
+                const script = (l.proxima_acao && l.proxima_acao.length > 10)
+                    ? l.proxima_acao
+                    : `Olá ${leadFirst}! Aqui é o ${consFirst} da Manos. Posso retomar nosso contato?`;
+                const wa = buildWhatsAppLink(l.phone, script);
+                return (
+                    `\n${i + 1}. ${classificationEmoji(l.ai_classification)} *${l.name || 'Sem nome'}* (score ${l.ai_score})` +
+                    `\n   🚗 ${l.vehicle_interest || '—'}` +
+                    (wa ? `\n   🚀 ${wa}` : '')
+                );
+            }).join('\n');
+
+            const message =
+                `☀️ *Bom dia ${consFirst}!*\n` +
+                `\n${top.length} ${top.length === 1 ? 'lead quente' : 'leads quentes'} para atacar hoje:\n` +
+                lines +
+                `\n\n_Cada link já abre a conversa com mensagem pronta. Bora vender._`;
+
+            await sendToWebhook({
+                consultant_name: c.name,
+                consultant_phone: normalizeBRPhone(c.phone),
+                type: 'morning_brief',
+                message,
+                meta: { lead_count: top.length },
+            });
         }
+    })().catch(err => console.error('[vendorNotify] background morning brief error:', err));
 
-        const { data: leads } = await admin
-            .from('leads_manos_crm')
-            .select('id, name, phone, ai_score, ai_classification, proxima_acao, vehicle_interest')
-            .eq('assigned_consultant_id', c.id)
-            .not('status', 'in', '("vendido","perdido","comprado")')
-            .gte('ai_score', 60)
-            .order('ai_score', { ascending: false })
-            .limit(3);
-
-        const top = (leads || []) as MorningLead[];
-        if (top.length === 0) {
-            skipped++;
-            continue;
-        }
-
-        const consFirst = (c.name || '').split(' ')[0];
-        const lines = top.map((l, i) => {
-            const leadFirst = (l.name || 'cliente').split(' ')[0];
-            const script = (l.proxima_acao && l.proxima_acao.length > 10)
-                ? l.proxima_acao
-                : `Olá ${leadFirst}! Aqui é o ${consFirst} da Manos. Posso retomar nosso contato?`;
-            const wa = buildWhatsAppLink(l.phone, script);
-            return (
-                `\n${i + 1}. ${classificationEmoji(l.ai_classification)} *${l.name || 'Sem nome'}* (score ${l.ai_score})` +
-                `\n   🚗 ${l.vehicle_interest || '—'}` +
-                (wa ? `\n   🚀 ${wa}` : '')
-            );
-        }).join('\n');
-
-        const message =
-            `☀️ *Bom dia ${consFirst}!*\n` +
-            `\n${top.length} ${top.length === 1 ? 'lead quente' : 'leads quentes'} para atacar hoje:\n` +
-            lines +
-            `\n\n_Cada link já abre a conversa com mensagem pronta. Bora vender._`;
-
-        await sendToWebhook({
-            consultant_name: c.name,
-            consultant_phone: normalizeBRPhone(c.phone),
-            type: 'morning_brief',
-            message,
-            meta: { lead_count: top.length },
-        });
-        sent++;
-    }
-
-    return { sent, skipped };
+    return { sent: consultants.length, skipped: 0 };
 }
 
 /**

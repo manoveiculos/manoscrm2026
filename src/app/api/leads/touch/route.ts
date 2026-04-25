@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase/server';
+import { createClient as createServerClient } from '@/lib/supabase/server';
 import { createClient } from '@/lib/supabase/admin';
-import { getLeadTableByPrefix } from '@/lib/services/leadRouter';
+import { getTableForLead } from '@/lib/services/leadRouter';
 
 /**
  * Registra o primeiro contato (touch) de um consultor com o lead.
@@ -10,7 +10,7 @@ import { getLeadTableByPrefix } from '@/lib/services/leadRouter';
 export async function POST(req: Request) {
   try {
     // 1. Validar Sessão
-    const supabaseServer = createServerClient();
+    const supabaseServer = await createServerClient();
     const { data: { user }, error: authError } = await supabaseServer.auth.getUser();
 
     if (authError || !user) {
@@ -23,7 +23,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Lead ID é obrigatório' }, { status: 400 });
     }
 
-    const table = getLeadTableByPrefix(leadId);
+    const table = getTableForLead(leadId);
     const admin = createClient();
     
     // 3. Atualizar o campo first_contact_at apenas se ele for nulo
