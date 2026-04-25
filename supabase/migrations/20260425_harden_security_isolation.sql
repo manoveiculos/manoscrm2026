@@ -163,3 +163,78 @@ USING (
 -- 4. Garantir acesso ao Service Role (para CRONs e Triggers)
 -- O service_role geralmente ignora RLS, mas é bom deixar explícito se necessário.
 -- No Supabase, o service_role tem bypassrls por padrão.
+
+-- 11. Corrigindo as Views para respeitarem o RLS das tabelas base (Postgres 15+)
+-- Como as views agora são SECURITY INVOKER, elas herdam o RLS de quem as consulta.
+DROP VIEW IF EXISTS public.leads_unified_active;
+DROP VIEW IF EXISTS public.leads_unified;
+
+CREATE OR REPLACE VIEW public.leads_unified 
+WITH (security_invoker = true) AS
+SELECT
+    'leads_manos_crm:' || l.id::text                       AS uid,
+    'leads_manos_crm'                                       AS table_name,
+    l.id::text                                              AS native_id,
+    l.name                                                  AS name,
+    l.phone                                                 AS phone,
+    l.vehicle_interest                                      AS vehicle_interest,
+    l.source                                                AS source,
+    l.ai_score                                              AS ai_score,
+    l.ai_classification                                     AS ai_classification,
+    l.status                                                AS status,
+    l.proxima_acao                                          AS proxima_acao,
+    l.assigned_consultant_id                                AS assigned_consultant_id,
+    l.created_at                                            AS created_at,
+    l.updated_at                                            AS updated_at,
+    l.first_contact_at                                      AS first_contact_at,
+    'venda'                                                 AS flow_type
+FROM public.leads_manos_crm l
+
+UNION ALL
+
+SELECT
+    'leads_compra:' || c.id::text                           AS uid,
+    'leads_compra'                                          AS table_name,
+    c.id::text                                              AS native_id,
+    c.nome                                                  AS name,
+    c.telefone                                              AS phone,
+    c.veiculo_original                                      AS vehicle_interest,
+    c.origem                                                AS source,
+    c.ai_score                                              AS ai_score,
+    c.ai_classification                                     AS ai_classification,
+    c.status                                                AS status,
+    c.proxima_acao                                          AS proxima_acao,
+    c.assigned_consultant_id                                AS assigned_consultant_id,
+    c.criado_em                                             AS created_at,
+    c.updated_at                                            AS updated_at,
+    c.first_contact_at                                      AS first_contact_at,
+    'compra'                                                AS flow_type
+FROM public.leads_compra c
+
+UNION ALL
+
+SELECT
+    'leads_distribuicao_crm_26:' || d.id::text              AS uid,
+    'leads_distribuicao_crm_26'                             AS table_name,
+    d.id::text                                              AS native_id,
+    d.nome                                                  AS name,
+    d.telefone                                              AS phone,
+    NULL                                                    AS vehicle_interest,
+    d.origem                                                AS source,
+    d.ai_score                                              AS ai_score,
+    d.ai_classification                                     AS ai_classification,
+    d.status                                                AS status,
+    NULL                                                    AS proxima_acao,
+    d.assigned_consultant_id                                AS assigned_consultant_id,
+    d.criado_em                                             AS created_at,
+    d.atualizado_em                                         AS updated_at,
+    d.first_contact_at                                      AS first_contact_at,
+    'venda'                                                 AS flow_type
+FROM public.leads_distribuicao_crm_26 d;
+
+CREATE OR REPLACE VIEW public.leads_unified_active 
+WITH (security_invoker = true) AS
+SELECT * FROM public.leads_unified
+WHERE LOWER(COALESCE(status, '')) NOT IN
+    ('vendido', 'perdido', 'comprado', 'finalizado', 'lost', 'lost_by_inactivity');
+
