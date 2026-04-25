@@ -40,6 +40,8 @@ export const KanbanBoardV2: React.FC<KanbanBoardV2Props> = ({
     const [columnWithMenuOpen, setColumnWithMenuOpen] = useState<string | null>(null);
     const [columnVisibleCount, setColumnVisibleCount] = useState<Record<string, number>>({});
 
+    const [activeTab, setActiveTab] = useState(PIPELINE_STAGES[0].id);
+
     const columns = PIPELINE_STAGES.map(s => ({
         id: s.id,
         title: s.label,
@@ -72,7 +74,38 @@ export const KanbanBoardV2: React.FC<KanbanBoardV2Props> = ({
 
     return (
         <div className="h-full w-full flex flex-col bg-[#0C0C0F] overflow-y-hidden overflow-x-hidden min-h-0">
-            <div className="flex h-full w-full gap-2 px-2 pt-2 pb-2 antialiased items-stretch overflow-x-auto custom-scrollbar-h min-h-0">
+            {/* MOBILE: Tab Switcher (visível apenas < md) */}
+            <div className="md:hidden flex items-center gap-1.5 px-3 py-2.5 overflow-x-auto whitespace-nowrap scrollbar-hide shrink-0 border-b border-white/[0.05] bg-[#0F0F12]">
+                {columns.map(col => {
+                    const count = getColumnLeads(col.id).length;
+                    const isActive = activeTab === col.id;
+                    return (
+                        <button
+                            key={col.id}
+                            onClick={() => setActiveTab(col.id)}
+                            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-[10px] font-black uppercase tracking-[0.05em] transition-all duration-300 relative ${
+                                isActive 
+                                ? 'text-white' 
+                                : 'text-white/20 hover:text-white/40 bg-white/[0.02]'
+                            }`}
+                        >
+                            {isActive && (
+                                <motion.div 
+                                    layoutId="active-tab-bg"
+                                    className="absolute inset-0 bg-gradient-to-r from-red-600 to-red-500 rounded-xl shadow-[0_4px_12px_rgba(220,38,38,0.25)]"
+                                    transition={{ type: 'spring', bounce: 0.2, duration: 0.6 }}
+                                />
+                            )}
+                            <span className="relative z-10">{col.title}</span>
+                            <span className={`relative z-10 tabular-nums px-1.5 py-0.5 rounded-md text-[9px] ${isActive ? 'bg-white/20 text-white' : 'bg-white/[0.05] text-white/20'}`}>
+                                {count}
+                            </span>
+                        </button>
+                    );
+                })}
+            </div>
+
+            <div className="flex h-full w-full gap-2 px-2 pt-2 pb-2 antialiased items-stretch overflow-x-auto md:overflow-x-hidden custom-scrollbar-h min-h-0">
                 {columns.map((col, index) => {
                     const colLeads = getColumnLeads(col.id);
                     const visibleLimit = columnVisibleCount[col.id] || INITIAL_VISIBLE;
@@ -81,11 +114,19 @@ export const KanbanBoardV2: React.FC<KanbanBoardV2Props> = ({
                     const isClosingStage = col.id === 'fechamento';
                     const isOver = isOverColumnId === col.id;
                     const hasMenuOpen = columnWithMenuOpen === col.id;
+                    const isActiveOnMobile = activeTab === col.id;
 
                     return (
-                        <div 
+                        <motion.div 
                             key={col.id} 
-                            className="flex flex-col min-w-[200px] h-full relative"
+                            initial={false}
+                            animate={{ 
+                                opacity: 1,
+                                display: 'flex'
+                            }}
+                            className={`flex-col min-w-[280px] md:min-w-[200px] h-full relative ${
+                                !isActiveOnMobile ? 'hidden md:flex' : 'flex w-full'
+                            }`}
                             style={{ 
                                 flex: '1 1 0%',
                                 zIndex: hasMenuOpen ? 100 : 50 - index 
@@ -175,7 +216,7 @@ export const KanbanBoardV2: React.FC<KanbanBoardV2Props> = ({
                                     />
                                 )}
                             </div>
-                        </div>
+                        </motion.div>
                     );
                 })}
             </div>

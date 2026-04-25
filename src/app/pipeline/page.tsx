@@ -581,36 +581,36 @@ function PipelineContent() {
     return (
         <div className="w-full h-screen flex flex-col pt-0 px-0 items-start justify-start leading-none bg-[#0C0C0F] overflow-hidden">
             {/* HEADER — linha 1: título + contadores + ações */}
-            <header className="px-3 sm:px-5 py-2 bg-[#0C0C0F] border-b border-white/[0.06] shrink-0 w-full z-[100]">
-                <div className="flex items-center justify-between gap-4 w-full">
-                    {/* Título */}
-                    <div className="flex items-center gap-4 px-4 py-2 bg-white/[0.03] border border-white/10 rounded-2xl shadow-sm">
+            <header className="px-3 sm:px-5 py-2.5 bg-[#0C0C0F] border-b border-white/[0.06] shrink-0 w-full z-[100]">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 w-full">
+                    {/* Título e Contadores */}
+                    <div className="flex items-center justify-between sm:justify-start gap-4 px-3 py-2 bg-white/[0.03] border border-white/10 rounded-2xl shadow-sm">
                         <div className="flex flex-col">
-                            <h1 className="text-sm font-black text-white uppercase tracking-tight leading-none whitespace-nowrap">
+                            <h1 className="text-[13px] sm:text-sm font-black text-white uppercase tracking-tight leading-none whitespace-nowrap">
                                 Pipeline <span className="text-red-500">de Vendas</span>
                             </h1>
                         </div>
 
                         {/* Contadores inline */}
-                        <div className="hidden sm:flex items-center gap-4 pl-4 border-l border-white/10 ml-2">
+                        <div className="flex items-center gap-3 sm:gap-4 pl-3 sm:pl-4 border-l border-white/10 ml-1">
                             <div className="flex items-baseline gap-1.5">
-                                <span className="text-xs font-black text-white/80 tabular-nums">{counters.total}</span>
-                                <span className="text-[8px] font-bold text-white/20 uppercase tracking-widest leading-none">TOTAL</span>
+                                <span className="text-[11px] sm:text-xs font-black text-white/80 tabular-nums">{counters.total}</span>
+                                <span className="text-[7px] sm:text-[8px] font-bold text-white/20 uppercase tracking-widest leading-none">TOTAL</span>
                             </div>
                             
-                            <div className="w-px h-3 bg-white/10" />
+                            <div className="hidden xs:block w-px h-3 bg-white/10" />
                             
-                            <div className="flex items-baseline gap-1.5">
-                                <span className="text-xs font-black text-amber-400 tabular-nums">{counters.elite}</span>
-                                <span className="text-[8px] font-bold text-white/20 uppercase tracking-widest leading-none">ELITE</span>
+                            <div className="hidden xs:flex items-baseline gap-1.5">
+                                <span className="text-[11px] sm:text-xs font-black text-amber-400 tabular-nums">{counters.elite}</span>
+                                <span className="text-[7px] sm:text-[8px] font-bold text-white/20 uppercase tracking-widest leading-none">ELITE</span>
                             </div>
 
                             {counters.emergency > 0 && (
                                 <>
                                     <div className="w-px h-3 bg-white/10" />
                                     <div className="flex items-baseline gap-1.5">
-                                        <span className="text-xs font-black text-red-500 tabular-nums animate-pulse">{counters.emergency}</span>
-                                        <span className="text-[8px] font-bold text-red-500/40 uppercase tracking-widest leading-none">URGENTE</span>
+                                        <span className="text-[11px] sm:text-xs font-black text-red-500 tabular-nums animate-pulse">{counters.emergency}</span>
+                                        <span className="text-[7px] sm:text-[8px] font-bold text-red-500/40 uppercase tracking-widest leading-none">URGENTE</span>
                                     </div>
                                 </>
                             )}
@@ -618,7 +618,7 @@ function PipelineContent() {
                     </div>
 
                     {/* Ações */}
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 overflow-x-auto sm:overflow-visible pb-1 sm:pb-0 scrollbar-hide">
                         {/* Busca */}
                         <div className={`flex items-center bg-[#141418] border rounded-lg px-3 py-2 w-28 sm:w-36 lg:w-44 xl:w-56 focus-within:border-white/20 transition-all ${semanticIds !== null ? 'border-violet-500/40' : 'border-white/[0.07]'}`}>
                             {loading || isSemanticLoading ? (
@@ -697,7 +697,7 @@ function PipelineContent() {
             </header>
 
             {/* FILTROS — linha 2: compacta e organizada (HUD Style) */}
-            <div className="w-full bg-[#0C0C0F] border-b border-white/[0.05] px-3 sm:px-6 py-2.5 flex items-center gap-6 overflow-visible custom-scrollbar shrink-0 z-[110]">
+            <div className="w-full bg-[#0C0C0F] border-b border-white/[0.05] px-3 sm:px-6 py-2 flex items-center gap-5 overflow-x-auto whitespace-nowrap scrollbar-hide shrink-0 z-[110] relative">
                 
                 <HUDSelect 
                     label="Período"

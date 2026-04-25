@@ -222,14 +222,14 @@ export default function LeadDetailPage() {
     if (!lead) return <div className="p-6 text-gray-400">Lead não encontrado.</div>;
 
     return (
-        <div className="p-4 max-w-7xl mx-auto">
+        <div className="p-2 md:p-4 max-w-7xl mx-auto w-full overflow-x-hidden">
             <button onClick={() => router.push('/inbox')} className="text-sm text-gray-400 hover:text-white flex items-center gap-1 mb-3">
                 <ArrowLeft className="w-4 h-4" /> Voltar
             </button>
 
             <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
                 {/* Esquerda — dados */}
-                <aside className="md:col-span-3 bg-zinc-900 rounded-lg p-4">
+                <aside className="md:col-span-3 bg-zinc-900 rounded-lg p-3 md:p-4 min-w-0">
                     <h2 className="text-xl font-bold text-white">{lead.name || 'Sem nome'}</h2>
                     <p className="text-sm text-gray-400 mt-1">{lead.phone || '—'}</p>
                     <div className="mt-3 space-y-1 text-sm">
@@ -248,7 +248,7 @@ export default function LeadDetailPage() {
                 </aside>
 
                 {/* Centro — conversa */}
-                <section className="md:col-span-6 bg-zinc-900 rounded-lg p-4 flex flex-col" style={{ maxHeight: '70vh' }}>
+                <section className="md:col-span-6 bg-zinc-900 rounded-lg p-3 md:p-4 flex flex-col min-w-0" style={{ maxHeight: '75vh' }}>
                     <h3 className="text-sm font-semibold text-gray-300 mb-2 flex items-center gap-2">
                         <MessageSquare className="w-4 h-4" /> Conversa WhatsApp
                     </h3>
@@ -258,14 +258,15 @@ export default function LeadDetailPage() {
                                 <div className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider mb-1 flex items-center gap-1">
                                     <MessageSquare className="w-3 h-3" /> Resumo Estratégico da IA
                                 </div>
-                                <p className="text-gray-100 text-sm leading-relaxed whitespace-pre-line">
+                                <p className="text-gray-100 text-sm leading-relaxed whitespace-pre-line break-words mb-2">
                                     {lead.ai_summary}
                                 </p>
                                 <button 
                                     onClick={handleAnalyze}
                                     disabled={analyzing}
-                                    className="absolute top-2 right-2 text-[10px] bg-zinc-700 hover:bg-zinc-600 text-gray-300 px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-50"
+                                    className="md:absolute md:top-2 md:right-2 text-[10px] bg-zinc-700 hover:bg-zinc-600 text-gray-300 px-3 py-1.5 rounded md:opacity-0 md:group-hover:opacity-100 transition-opacity disabled:opacity-50 mt-2 md:mt-0 flex items-center gap-1.5 w-full md:w-auto justify-center"
                                 >
+                                    <Activity size={10} />
                                     {analyzing ? 'Analisando...' : 'Atualizar Resumo'}
                                 </button>
                             </div>
@@ -290,7 +291,7 @@ export default function LeadDetailPage() {
                             messages.map(m => (
                                 <div
                                     key={m.id}
-                                    className={`text-sm p-2 rounded max-w-[85%] ${m.direction === 'inbound' ? 'bg-zinc-800 text-gray-100' : 'bg-blue-900/40 text-blue-100 ml-auto'}`}
+                                    className={`text-sm p-2 rounded max-w-[90%] md:max-w-[85%] break-words ${m.direction === 'inbound' ? 'bg-zinc-800 text-gray-100' : 'bg-blue-900/40 text-blue-100 ml-auto'}`}
                                 >
                                     {m.message_text}
                                     <div className="text-[10px] text-gray-500 mt-1">{new Date(m.created_at).toLocaleString('pt-BR')}</div>
@@ -301,7 +302,7 @@ export default function LeadDetailPage() {
                 </section>
 
                 {/* Direita — ações */}
-                <aside className="md:col-span-3 space-y-3">
+                <aside className="md:col-span-3 space-y-3 min-w-0">
                     <button onClick={() => setShowSold(true)} className="w-full bg-green-600 hover:bg-green-500 text-white py-4 rounded-lg font-bold text-lg flex items-center justify-center gap-2">
                         <Trophy className="w-5 h-5" /> VENDIDO
                     </button>
@@ -370,8 +371,8 @@ export default function LeadDetailPage() {
 
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
     return (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={onClose}>
-            <div className="bg-zinc-900 rounded-lg p-6 max-w-md w-full" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-3 md:p-4" onClick={onClose}>
+            <div className="bg-zinc-900 rounded-lg p-5 md:p-6 max-w-md w-full overflow-hidden" onClick={e => e.stopPropagation()}>
                 <div className="flex items-center justify-between mb-4">
                     <h3 className="text-lg font-bold text-white">{title}</h3>
                     <button onClick={onClose} className="text-gray-400 hover:text-white"><X className="w-5 h-5" /></button>
