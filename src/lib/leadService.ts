@@ -86,8 +86,10 @@ export const leadService = {
                     .from('leads')
                     .select(selectCols, { count: 'exact' });
 
-                if (role === 'consultant' && consultantId) {
-                    q = q.eq('assigned_consultant_id', consultantId);
+                if (role === 'consultant') {
+                    // Fail-closed: se for consultor e não tiver ID, filtra por ID inexistente
+                    const cid = consultantId || '00000000-0000-0000-0000-000000000000';
+                    q = q.eq('assigned_consultant_id', cid);
                 } else if (role === 'admin' && consultantId) {
                     if (consultantId === 'unassigned' || consultantId === 'none') {
                         q = q.is('assigned_consultant_id', null);

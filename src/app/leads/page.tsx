@@ -82,33 +82,33 @@ function LeadsContent() {
             try {
                 const { data: { user } } = await supabase.auth.getUser();
                 let userRole: 'admin' | 'consultant' = 'consultant';
-
+                
                 if (user) {
-                    const isAdmin = user.email === 'alexandre_gorges@hotmail.com';
-                    userRole = isAdmin ? 'admin' : 'consultant';
-                    setRole(userRole);
-
-                    const { data: profile } = await supabase
+                    const { data: consultant } = await supabase
                         .from('consultants_manos_crm')
-                        .select('id, name')
+                        .select('id, name, role')
                         .eq('auth_id', user.id)
                         .maybeSingle();
 
-                    let consultantParamId: string | undefined = undefined;
-                    if (profile) {
-                        setUserName(profile.name.split(' ')[0]);
-                        consultantParamId = profile.id;
-                        if (!isAdmin) {
-                            setConsultantId(profile.id);
-                        }
-                    } else if (isAdmin) {
+                    let currentRole: 'admin' | 'consultant' = 'consultant';
+                    let currentConsultantId: string | null = null;
+
+                    if (consultant) {
+                        setUserName(consultant.name.split(' ')[0]);
+                        currentConsultantId = consultant.id;
+                        currentRole = consultant.role === 'admin' ? 'admin' : 'consultant';
+                    } else if (user.email === 'alexandre_gorges@hotmail.com') {
                         setUserName('Admin');
+                        currentRole = 'admin';
                     }
+
+                    setRole(currentRole);
+                    setConsultantId(currentConsultantId);
 
                     const [leadsResult, consultantsData, inventoryData] = await Promise.all([
                         leadService.getLeadsPaginated(undefined, {
-                            consultantId: userRole === 'admin' ? undefined : (consultantParamId || user.id),
-                            role: userRole,
+                            consultantId: currentRole === 'admin' ? undefined : (currentConsultantId || '00000000-0000-0000-0000-000000000000'),
+                            role: currentRole,
                             limit: 2000
                         }),
                         dataService.getConsultants(),
@@ -207,15 +207,15 @@ function LeadsContent() {
                 true
             );
 
-            // ── REGRA DE ACESSO (CIRÚRGICA) ──────────────────────────
-            // Se não for admin, o consultor só pode ver:
-            // 1. Leads atribuídos a ele mesmo
-            // 2. Leads que ainda não têm consultor atribuído (para triagem/resgate)
-            if (role !== 'admin' && consultantId) {
+            // ── REGRA DE ACESSO (ESTRITA) ──────────────────────────
+            // Se não for admin, o consultor só pode ver leads atribuídos a ele.
+            // O RLS no banco já cuida disso, mas mantemos o filtro aqui para segurança absoluta.
+            if (role !== 'admin') {
+                if (!consultantId) return false; // Fail closed se não identificado
                 const isMine = lead.assigned_consultant_id === consultantId;
-                const isOrphan = !lead.assigned_consultant_id || lead.assigned_consultant_id === '';
-                if (!isMine && !isOrphan) return false;
+                if (!isMine) return false;
             }
+            // ──────────────────────────────────────────────────────────
             // ──────────────────────────────────────────────────────────
 
             return matchesSearch && matchesConsultant && matchesStatus && matchesInterest && matchesOrigin && matchesScore && matchesDate;
@@ -381,7 +381,7 @@ function LeadsContent() {
                             <h1 className="text-xs font-black uppercase tracking-[0.3em] text-white/95 whitespace-nowrap">
                                 Central <span className="text-red-500 font-black">DA IA</span>
                             </h1>
-                            <div className="text-[6px] font-bold text-white/10 uppercase tracking-[0.2em] -mt-1">Visibility: FULL DATABASE</div>
+                            <div className="text-[6px] font-bold text-white/10 uppercase tracking-[0.2em] -mt-1">Visibility: {role === 'admin' ? 'FULL DATABASE' : 'ISOLATED'}</div>
                         </div>
                     </div>
 

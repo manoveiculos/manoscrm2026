@@ -113,29 +113,24 @@ function PipelineContent() {
                 setConsultants(consData || []);
                 setInventory(invData || []);
                 
-                if (!user) return;
+                if (user) {
+                    const { data: consultant } = await supabase
+                        .from('consultants_manos_crm')
+                        .select('id, name, role')
+                        .eq('auth_id', user.id)
+                        .maybeSingle();
 
-                const isAdmin = user.email === 'alexandre_gorges@hotmail.com';
-
-                // CRITICAL: leads_manos_crm.assigned_consultant_id references consultants_manos_crm.id
-                // Must use the same table so IDs match — pipeline was using 'consultants' (V2) which has different UUIDs
-                const { data: consultant } = await supabase
-                    .from('consultants_manos_crm')
-                    .select('id, name, role')
-                    .eq('auth_id', user.id)
-                    .maybeSingle();
-
-                if (consultant) {
-                    const cName = (consultant.name || 'Consultor').split(' ')[0];
-                    const cRole = isAdmin ? 'admin' : (consultant.role || 'consultant');
-                    setUserName(cName);
-                    setRole(cRole);
-                    if (cRole !== 'admin') {
+                    if (consultant) {
+                        setUserName(consultant.name.split(' ')[0]);
+                        setRole(consultant.role || 'consultant');
                         setConsultantId(consultant.id);
                         setFilterConsultant(consultant.id);
+                        setIsManagement(consultant.role === 'admin');
+                    } else if (user.email === 'alexandre_gorges@hotmail.com') {
+                        setRole('admin');
+                        setUserName('Admin');
+                        setIsManagement(true);
                     }
-                } else if (isAdmin) {
-                    setRole('admin');
                 }
             } catch (err) {
                 console.error("Auth/Data init error:", err);
@@ -198,8 +193,8 @@ function PipelineContent() {
                 const firstDayYear = new Date(now.getFullYear(), 0, 1);
                 startOfPeriod = firstDayYear.toISOString();
             } else if (!showArchive) {
-                // Default fallback: 30 dias se não tiver filtro ou arquivo
-                startOfPeriod = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+                // Default fallback: 90 dias se não tiver filtro ou arquivo (estendido de 30 para Wilson ver leads antigos)
+                startOfPeriod = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
             }
 
             const result = await leadService.getLeadsPaginated(supabase, {
@@ -304,12 +299,24 @@ function PipelineContent() {
     const filteredLeads = useMemo(() => {
         let filtered = leads.filter(l => {
             const norm = normalizeStatus(l.status);
-            // Somente leads qualificados (com nome real) entram no Pipeline
-            if (!isLeadQualified(l)) return false;
+            
+            // Regra de Qualificação: 
+            // Somente leads qualificados (com nome real) entram no Pipeline GERAL.
+            // MAS, se o lead estiver ATRIBUÍDO ao consultor logado, ele DEVE ver no Pipeline dele.
+            const isAssignedToMe = consultantId && l.assigned_consultant_id === consultantId;
+            if (!isLeadQualified(l) && !isAssignedToMe) return false;
             
             // Regra: Ocultar Vendidos e Perdidos do Pipeline (exceto no modo arquivo)
             if (!showArchive && (norm === 'vendido' || norm === 'perdido')) return false;
             if (showArchive && norm !== 'vendido' && norm !== 'perdido') return false;
+
+            // ── REGRA DE ACESSO (ESTRITA) ──────────────────────────
+            // Se não for admin, o consultor só pode ver leads atribuídos a ele.
+            if (role !== 'admin') {
+                if (!consultantId) return false; // Fail closed
+                if (l.assigned_consultant_id !== consultantId) return false;
+            }
+            // ──────────────────────────────────────────────────────────
 
             return true;
         });
