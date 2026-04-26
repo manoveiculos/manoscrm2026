@@ -120,10 +120,12 @@ export async function updateLeadStatusAction(
     const now = new Date().toISOString();
     const updatePayload: any = { status: targetStatus };
 
-    if (table === 'leads_manos_crm' || table === 'leads_master') {
-        updatePayload.updated_at = now;
-    } else {
+    // leads_compra agora usa updated_at (alinhado com leads_unified).
+    // Apenas leads_distribuicao_crm_26 segue em atualizado_em (legado).
+    if (table === 'leads_distribuicao_crm_26') {
         updatePayload.atualizado_em = now;
+    } else {
+        updatePayload.updated_at = now;
     }
 
     if (motivo_perda) updatePayload.motivo_perda = motivo_perda;

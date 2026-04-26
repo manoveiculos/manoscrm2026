@@ -243,10 +243,13 @@ export async function updateLeadStatus(leadId: string, status: LeadStatus, oldSt
     const realId = table === 'leads_distribuicao_crm_26' ? parseInt(realIdRaw) : realIdRaw;
     const now = new Date().toISOString();
     
+    // leads_compra agora usa updated_at (alinhado com leads_unified).
+    // Apenas leads_distribuicao_crm_26 segue em atualizado_em (legado).
+    const useUpdatedAt = table !== 'leads_distribuicao_crm_26';
     const updatePayload: any = {
         status,
-        updated_at: (table === 'leads_manos_crm' || table === 'leads_master') ? now : undefined,
-        atualizado_em: (table !== 'leads_manos_crm' && table !== 'leads_master') ? now : undefined,
+        updated_at: useUpdatedAt ? now : undefined,
+        atualizado_em: useUpdatedAt ? undefined : now,
         motivo_perda,
         resumo_fechamento
     };
@@ -274,10 +277,12 @@ export async function updateLeadDetails(leadId: string, details: Partial<Lead>) 
     const realId = table === 'leads_distribuicao_crm_26' ? parseInt(realIdRaw) : realIdRaw;
     const payload = table === 'leads_manos_crm' ? details : mapToCRM26(details);
     
+    const useUpdatedAt = table !== 'leads_distribuicao_crm_26';
+    const nowIso = new Date().toISOString();
     const { data, error } = await supabase.from(table).update({
         ...payload,
-        updated_at: (table === 'leads_manos_crm' || table === 'leads_master') ? new Date().toISOString() : undefined,
-        atualizado_em: (table !== 'leads_manos_crm' && table !== 'leads_master') ? new Date().toISOString() : undefined
+        updated_at: useUpdatedAt ? nowIso : undefined,
+        atualizado_em: useUpdatedAt ? undefined : nowIso,
     }).eq('id', realId).select('id');
 
     if (error) throw error;

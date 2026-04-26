@@ -1,4 +1,14 @@
 {
+  "crons": [
+    {
+      "path": "/api/cron/daily-batch",
+      "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/api/cron/fifteen-min-scheduler",
+      "schedule": "*/5 * * * *"
+    }
+  ],
   "functions": {
     "src/app/api/cron/fifteen-min-scheduler/route.ts": {
       "maxDuration": 60

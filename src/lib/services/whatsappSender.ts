@@ -9,10 +9,13 @@ import { createClient } from '@/lib/supabase/admin';
  *
  * Providers suportados, em ordem de prioridade:
  *   1. WhatsApp Cloud API (Meta) — se WHATSAPP_CLOUD_TOKEN + WHATSAPP_PHONE_NUMBER_ID presentes
- *   2. Webhook genérico (ex.: N8N) — se WHATSAPP_SEND_WEBHOOK_URL presente
- *   3. Fallback: grava em notification_failures e retorna false (não quebra o fluxo)
+ *   2. Evolution API (auto-hospedada) — se EVOLUTION_BASE_URL + EVOLUTION_INSTANCE_NAME + EVOLUTION_INSTANCE_TOKEN presentes
+ *   3. Webhook genérico (ex.: N8N) — se WHATSAPP_SEND_WEBHOOK_URL presente
+ *   4. Fallback: grava em notification_failures e retorna false (não quebra o fluxo)
  *
- * Rate limit: 1 msg a cada 3s por número de origem (proteger extensão/número contra ban).
+ * IMPORTANTE: o sistema escolhe UM provider por envio (sem cascata em caso de
+ * falha) pra evitar entregar a mesma mensagem 2x ao cliente.
+ *
  * Dedup: não envia mesma msg (hash) pro mesmo destino em <10min.
  */
 

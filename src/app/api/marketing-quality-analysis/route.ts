@@ -242,6 +242,8 @@ FORMATO DO JSON DE SAÍDA:
                     : 'leads_manos_crm';
                 const realId = item.id.toString().replace('crm26_', '');
 
+                const nowIso = new Date().toISOString();
+                const tsCol = targetTable === 'leads_distribuicao_crm_26' ? 'atualizado_em' : 'updated_at';
                 await supabaseAdmin
                     .from(targetTable)
                     .update({
@@ -250,7 +252,7 @@ FORMATO DO JSON DE SAÍDA:
                         ai_reason: item.reason,
                         probability_of_sale: item.probability,
                         recommended_approach: item.recommendation,
-                        atualizado_em: new Date().toISOString()
+                        [tsCol]: nowIso,
                     })
                     .eq('id', realId);
 

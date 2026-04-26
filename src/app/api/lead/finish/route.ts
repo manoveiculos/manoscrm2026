@@ -22,7 +22,7 @@ const SCHEMA: Record<LeadTable, TableSchema> = {
     },
     leads_compra: {
         statusSold: 'comprado', statusLost: 'perdido',
-        updatedAtCol: 'atualizado_em', wonAtCol: null,
+        updatedAtCol: 'updated_at', wonAtCol: null,
         lostAtCol: null, lossReasonCol: 'motivo_perda',
     },
     leads_distribuicao_crm_26: {

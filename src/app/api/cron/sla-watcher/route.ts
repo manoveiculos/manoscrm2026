@@ -56,7 +56,7 @@ async function fetchLeadsCompra(): Promise<LeadSla[]> {
     const admin = createClient();
     const { data } = await admin
         .from('leads_compra')
-        .select('id, nome, assigned_consultant_id, criado_em, atualizado_em, status')
+        .select('id, nome, assigned_consultant_id, criado_em, updated_at, status')
         .not('status', 'in', `(${FINAL_STATUSES.map(s => `"${s}"`).join(',')})`)
         .order('criado_em', { ascending: false })
         .limit(500);
@@ -66,7 +66,7 @@ async function fetchLeadsCompra(): Promise<LeadSla[]> {
         name: l.nome || 'Lead',
         consultantId: l.assigned_consultant_id,
         createdAt: l.criado_em,
-        lastActivityAt: l.atualizado_em || l.criado_em,
+        lastActivityAt: l.updated_at || l.criado_em,
         status: l.status || 'novo',
     }));
 }

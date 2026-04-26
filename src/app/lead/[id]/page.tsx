@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
-import { Trophy, X, CalendarPlus, ArrowLeft, MessageSquare } from 'lucide-react';
+import { Trophy, X, CalendarPlus, ArrowLeft, MessageSquare, Activity } from 'lucide-react';
 import { parseUid } from '@/lib/services/unifiedLead';
 
 /**

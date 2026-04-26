@@ -53,7 +53,7 @@ export const FIELD_ALIASES: Record<LeadTable, Record<string, string>> = {
     },
     leads_compra: {
         name: 'nome', phone: 'telefone', vehicleInterest: 'veiculo_original',
-        source: 'origem', createdAt: 'criado_em', updatedAt: 'atualizado_em',
+        source: 'origem', createdAt: 'criado_em', updatedAt: 'updated_at',
     },
     leads_distribuicao_crm_26: {
         name: 'nome', phone: 'telefone', vehicleInterest: 'vehicle_interest',
