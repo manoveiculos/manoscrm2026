@@ -147,10 +147,19 @@ export async function sendFirstContact(input: FirstContactInput, table: 'leads_c
 
     if (result.ok) {
         try {
-            await admin.from(table).update({
-                first_contact_at: new Date().toISOString(),
+            // Atualiza first_contact_at + faz BOIA (updated_at/atualizado_em) pra
+            // o lead subir pra "Urgente" no /inbox via Realtime
+            const now = new Date().toISOString();
+            const updates: Record<string, any> = {
+                first_contact_at: now,
                 first_contact_channel: 'ai_sdr',
-            }).eq('id', input.leadId);
+            };
+            if (table === 'leads_distribuicao_crm_26') {
+                updates.atualizado_em = now;
+            } else {
+                updates.updated_at = now;
+            }
+            await admin.from(table).update(updates).eq('id', input.leadId);
 
             // Audit trail na timeline (best-effort)
             const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(input.leadId);
@@ -159,7 +168,7 @@ export async function sendFirstContact(input: FirstContactInput, table: 'leads_c
                 type: 'ai_first_contact',
                 notes: `🤖 IA SDR enviou primeira mensagem:\n${message}`,
                 user_name: 'IA SDR',
-                created_at: new Date().toISOString(),
+                created_at: now,
             });
         } catch {}
     }
