@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Trophy, X, CalendarPlus, ArrowLeft, MessageSquare, Activity } from 'lucide-react';
 import { parseUid } from '@/lib/services/unifiedLead';
+import CannedResponses, { CannedContext } from '@/components/CannedResponses';
 
 /**
  * /lead/[id] — Tela de FECHAMENTO.
@@ -67,6 +68,8 @@ export default function LeadDetailPage() {
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
     const [analyzing, setAnalyzing] = useState(false);
+    const [consultantName, setConsultantName] = useState<string>('');
+    const [showConfetti, setShowConfetti] = useState(false);
 
     const [showSold, setShowSold] = useState(false);
     const [showLost, setShowLost] = useState(false);
@@ -122,6 +125,20 @@ export default function LeadDetailPage() {
                 .order('created_at', { ascending: false })
                 .limit(30);
             if (alive) setMessages((msgs || []).reverse());
+
+            // Resolve nome do consultor logado pra usar nas mensagens prontas
+            try {
+                const { data: auth } = await supabase.auth.getUser();
+                if (auth?.user) {
+                    const { data: cons } = await supabase
+                        .from('consultants_manos_crm')
+                        .select('name')
+                        .eq('user_id', auth.user.id)
+                        .maybeSingle();
+                    if (alive && cons?.name) setConsultantName(cons.name);
+                }
+            } catch {}
+
             setLoading(false);
         }
         if (leadId) load();
@@ -143,7 +160,10 @@ export default function LeadDetailPage() {
                     consultant_id: lead?.assigned_consultant_id,
                 }),
             });
-            router.push('/inbox');
+            // Comemoração antes de redirecionar
+            setShowSold(false);
+            setShowConfetti(true);
+            setTimeout(() => router.push('/inbox'), 2400);
         } finally {
             setSubmitting(false);
         }
@@ -249,9 +269,19 @@ export default function LeadDetailPage() {
 
                 {/* Centro — conversa */}
                 <section className="md:col-span-6 bg-zinc-900 rounded-lg p-3 md:p-4 flex flex-col min-w-0" style={{ maxHeight: '75vh' }}>
-                    <h3 className="text-sm font-semibold text-gray-300 mb-2 flex items-center gap-2">
-                        <MessageSquare className="w-4 h-4" /> Conversa WhatsApp
-                    </h3>
+                    <div className="flex items-center justify-between mb-2 gap-2">
+                        <h3 className="text-sm font-semibold text-gray-300 flex items-center gap-2">
+                            <MessageSquare className="w-4 h-4" /> Conversa WhatsApp
+                        </h3>
+                        <CannedResponses
+                            ctx={{
+                                leadFirstName: (lead.name || '').trim().split(/\s+/)[0] || '',
+                                vehicleInterest: lead.vehicle_interest || '',
+                                consultantFirstName: (consultantName || '').trim().split(/\s+/)[0] || '',
+                                leadPhone: lead.phone || undefined,
+                            } as CannedContext}
+                        />
+                    </div>
                     <div className="flex-1 overflow-y-auto space-y-2">
                         {lead.ai_summary ? (
                             <div className="mb-6 p-4 bg-zinc-800/80 border-l-4 border-emerald-500 rounded-r-lg shadow-lg relative group">
@@ -365,6 +395,69 @@ export default function LeadDetailPage() {
                     </button>
                 </Modal>
             )}
+
+            {showConfetti && <ConfettiOverlay />}
+        </div>
+    );
+}
+
+function ConfettiOverlay() {
+    const pieces = Array.from({ length: 80 }, (_, i) => i);
+    const colors = ['#22c55e', '#3b82f6', '#eab308', '#ef4444', '#a855f7', '#f97316', '#06b6d4'];
+    return (
+        <div className="fixed inset-0 z-[9999] pointer-events-none overflow-hidden">
+            {/* Banner central */}
+            <div className="absolute inset-0 flex items-center justify-center">
+                <div className="bg-green-600/95 text-white px-8 py-6 rounded-2xl shadow-2xl text-center animate-confetti-banner">
+                    <div className="text-5xl mb-2">🎉</div>
+                    <div className="text-2xl font-black uppercase tracking-wider">VENDA FECHADA!</div>
+                    <div className="text-xs opacity-90 mt-1">Bora pra próxima.</div>
+                </div>
+            </div>
+            {/* Confete */}
+            {pieces.map(i => {
+                const left = Math.random() * 100;
+                const delay = Math.random() * 0.6;
+                const dur = 1.6 + Math.random() * 1.2;
+                const color = colors[i % colors.length];
+                const size = 6 + Math.floor(Math.random() * 8);
+                return (
+                    <span
+                        key={i}
+                        className="absolute top-[-20px] block animate-confetti-fall"
+                        style={{
+                            left: `${left}%`,
+                            width: `${size}px`,
+                            height: `${size * 0.4}px`,
+                            background: color,
+                            animationDelay: `${delay}s`,
+                            animationDuration: `${dur}s`,
+                            transform: `rotate(${Math.random() * 360}deg)`,
+                        }}
+                    />
+                );
+            })}
+            <style jsx>{`
+                @keyframes confetti-fall {
+                    0% { transform: translateY(0) rotate(0deg); opacity: 1; }
+                    100% { transform: translateY(110vh) rotate(720deg); opacity: 0.7; }
+                }
+                @keyframes confetti-banner {
+                    0% { transform: scale(0.6); opacity: 0; }
+                    20% { transform: scale(1.08); opacity: 1; }
+                    40% { transform: scale(1); }
+                    85% { transform: scale(1); opacity: 1; }
+                    100% { transform: scale(0.95); opacity: 0; }
+                }
+                :global(.animate-confetti-fall) {
+                    animation-name: confetti-fall;
+                    animation-timing-function: cubic-bezier(0.2, 0.6, 0.6, 1);
+                    animation-fill-mode: forwards;
+                }
+                :global(.animate-confetti-banner) {
+                    animation: confetti-banner 2.4s ease-out forwards;
+                }
+            `}</style>
         </div>
     );
 }

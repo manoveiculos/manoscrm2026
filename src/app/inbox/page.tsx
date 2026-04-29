@@ -43,10 +43,10 @@ interface LastMessage {
 type Filter = 'priority' | 'today' | 'all';
 type Bucket = 'urgent' | 'active' | 'cooling' | 'zombie';
 
-const ZOMBIE_DAYS = 14;
-const URGENT_HOURS = 4;
-const ACTIVE_HOURS = 48;
-const URGENT_SCORE = 80;
+const ZOMBIE_DAYS = 15;
+const URGENT_MINUTES = 30;     // novos OU com nova interação <30min
+const ACTIVE_HOURS = 48;       // em negociação até 48h
+const URGENT_SCORE = 80;       // score alto sempre é urgente
 const ACTIVE_SCORE = 40;
 
 function ageMinutes(updatedAt: string | null, createdAt: string): number {
@@ -57,7 +57,9 @@ function bucketFor(lead: InboxLead): Bucket {
     const min = ageMinutes(lead.updated_at, lead.created_at);
     if (min > ZOMBIE_DAYS * 24 * 60) return 'zombie';
     const score = lead.ai_score ?? 0;
-    if (min < URGENT_HOURS * 60 || score >= URGENT_SCORE) return 'urgent';
+    // Urgente: <30min (novo OU lead que acabou de receber msg = boia) OU score alto
+    if (min < URGENT_MINUTES || score >= URGENT_SCORE) return 'urgent';
+    // Em negociação: até 48h
     if (min < ACTIVE_HOURS * 60 || score >= ACTIVE_SCORE) return 'active';
     return 'cooling';
 }
@@ -294,12 +296,12 @@ export default function InboxPage() {
                 </div>
             ) : (
                 <div className="space-y-6">
-                    <Section title="Atender agora" subtitle="<4h ou score alto · responder em minutos" icon={<Flame className="w-4 h-4 text-red-500" />} accent="border-red-700"
+                    <Section title="Urgente" subtitle="Novos ou com nova mensagem · responda agora" icon={<Flame className="w-4 h-4 text-red-500" />} accent="border-red-700"
                         leads={grouped.urgent} lastMsgByLead={lastMsgByLead} emptyText="Nenhum lead urgente. Bom trabalho." />
-                    <Section title="Em conversa" subtitle="Negociando · mantenha o ritmo" icon={<Thermometer className="w-4 h-4 text-orange-400" />} accent="border-orange-700"
+                    <Section title="Em negociação" subtitle="Conversa ativa · mantenha o ritmo" icon={<Thermometer className="w-4 h-4 text-orange-400" />} accent="border-orange-700"
                         leads={grouped.active} lastMsgByLead={lastMsgByLead} emptyText="Nenhum em negociação no momento." />
-                    <Section title="Esfriando" subtitle="Sem resposta · puxa de volta antes de perder" icon={<Snowflake className="w-4 h-4 text-blue-400" />} accent="border-blue-900"
-                        leads={grouped.cooling} lastMsgByLead={lastMsgByLead} emptyText="Nenhum lead esfriando." />
+                    <Section title="Aguardando" subtitle="Sem resposta há 48h+ · reaqueça antes de perder" icon={<Snowflake className="w-4 h-4 text-blue-400" />} accent="border-blue-900"
+                        leads={grouped.cooling} lastMsgByLead={lastMsgByLead} emptyText="Nenhum lead aguardando." />
                     {filter === 'all' && grouped.zombie.length > 0 && (
                         <Section title="Zumbis" subtitle={`Mais de ${ZOMBIE_DAYS}d sem atividade · serão fechados pelo SLA`} icon={<AlertTriangle className="w-4 h-4 text-zinc-500" />} accent="border-zinc-800 opacity-60"
                             leads={grouped.zombie} lastMsgByLead={lastMsgByLead} emptyText="" />

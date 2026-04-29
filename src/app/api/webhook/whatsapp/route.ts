@@ -114,11 +114,19 @@ export async function POST(req: NextRequest) {
             }
 
             leadId = newLead.id;
-        } else if (existingLead && (existingLead.status === 'post_sale' || existingLead.status === 'lost')) {
-            // Se o lead estava perdido ou no pós-venda, "ressuscita" ele para recebido
+        } else if (existingLead) {
+            // BOIA: toda msg inbound atualiza atualizado_em → lead sobe pro topo do /inbox
+            // Se status era final (post_sale/lost), ressuscita pra received
+            const isFinal = existingLead.status === 'post_sale' || existingLead.status === 'lost' ||
+                            existingLead.status === 'vendido' || existingLead.status === 'perdido';
+            const updates: Record<string, any> = {
+                atualizado_em: new Date().toISOString(),
+            };
+            if (isFinal) updates.status = 'received';
+
             await supabase
                 .from('leads_distribuicao_crm_26')
-                .update({ status: 'received', atualizado_em: new Date().toISOString() })
+                .update(updates)
                 .eq('id', leadId);
         }
 
