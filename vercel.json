@@ -6,7 +6,7 @@
     },
     {
       "path": "/api/cron/fifteen-min-scheduler",
-      "schedule": "*/5 * * * *"
+      "schedule": "0 8 * * *"
     }
   ],
   "functions": {
