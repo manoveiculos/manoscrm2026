@@ -8,8 +8,13 @@ import { sendMetaConversion } from '@/lib/meta-service';
 
 /**
  * SERVIÇO DE CRUD DE LEADS
+ *
+ * LEAN_COLS  → tabelas concretas (leads_manos_crm, leads_master) que têm primeiro_vendedor
+ * VIEW_COLS  → view "leads" (unificada legada) que NÃO tem primeiro_vendedor.
+ *              Antes de adicionar coluna nova aqui, conferir o schema da view.
  */
 const LEAN_COLS = 'id,name,phone,email,source,origem,status,ai_score,ai_classification,ai_summary,vehicle_interest,assigned_consultant_id,created_at,updated_at,vendedor,proxima_acao,valor_investimento,observacoes,carro_troca,region,source_table,primeiro_vendedor';
+const VIEW_COLS = 'id,name,phone,email,source,origem,status,ai_score,ai_classification,ai_summary,vehicle_interest,assigned_consultant_id,created_at,updated_at,vendedor,proxima_acao,valor_investimento,observacoes,carro_troca,region,source_table';
 
 export async function getLeads(consultantId?: string, leadId?: string) {
     const cacheKey = `leads_${consultantId || 'all'}_${leadId || 'none'}`;
@@ -17,7 +22,7 @@ export async function getLeads(consultantId?: string, leadId?: string) {
     if (cached) return cached;
 
     try {
-        let query = supabase.from('leads').select(LEAN_COLS);
+        let query = supabase.from('leads').select(VIEW_COLS);
         if (consultantId) {
             query = query.eq('assigned_consultant_id', consultantId)
                          .neq('status', 'lost')
@@ -67,7 +72,7 @@ export async function getLeadByPhone(phone: string): Promise<Lead | null> {
     // Busca prioritária na VIEW inteligente que unifica tudo
     const { data, error } = await supabase
         .from('leads')
-        .select(LEAN_COLS)
+        .select(VIEW_COLS)
         .ilike('phone', `%${cleanPhone.slice(-8)}%`) // Busca resiliente pelos últimos 8 dígitos
         .order('priority', { ascending: true }) // V2 > CRM26 > Master
         .limit(1)
