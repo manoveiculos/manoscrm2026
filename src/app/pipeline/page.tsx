@@ -55,6 +55,7 @@ function PipelineContent() {
     const [page, setPage] = useState(1);
     const [hasMore, setHasMore] = useState(true);
     const [loading, setLoading] = useState(true);
+    const [authReady, setAuthReady] = useState(false); // Evita loadLeads antes do auth completar
     const [loadingMore, setLoadingMore] = useState(false);
     const [userName, setUserName] = useState('');
     const [role, setRole] = useState('consultant');
@@ -124,13 +125,18 @@ function PipelineContent() {
                         setUserName(consultant.name.split(' ')[0]);
                         setRole(consultant.role || 'consultant');
                         setConsultantId(consultant.id);
-                        setFilterConsultant(consultant.id);
+                        // Admins vêem todos os leads por padrão (filterConsultant = 'all')
+                        // Consultores vêem apenas os próprios leads
+                        if (consultant.role !== 'admin') {
+                            setFilterConsultant(consultant.id);
+                        }
                         setIsManagement(consultant.role === 'admin');
                     } else if (user.email === 'alexandre_gorges@hotmail.com') {
                         setRole('admin');
                         setUserName('Admin');
                         setIsManagement(true);
                     }
+                    setAuthReady(true); // Auth completo — libera loadLeads
                 }
             } catch (err) {
                 console.error("Auth/Data init error:", err);
@@ -290,11 +296,12 @@ function PipelineContent() {
             .finally(() => setIsSemanticLoading(false));
     }, [debouncedSearchTerm]);
 
-    // Re-fetch on filter/search change
+    // Re-fetch on filter/search change — aguarda auth completar para não buscar com role='consultant' + consultantId vazio
     useEffect(() => {
+        if (!authReady) return;
         setPage(1);
         loadLeads(1, true);
-    }, [debouncedSearchTerm, consultantId, filterFromUrl, showArchive, filterDate, startDateRange, endDateRange]);
+    }, [authReady, debouncedSearchTerm, consultantId, filterFromUrl, showArchive, filterDate, startDateRange, endDateRange]);
 
     const filteredLeads = useMemo(() => {
         let filtered = leads.filter(l => {
