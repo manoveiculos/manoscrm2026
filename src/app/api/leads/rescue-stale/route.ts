@@ -22,10 +22,13 @@ export const dynamic = 'force-dynamic';
  * Auth: Bearer ${CRON_SECRET} no header Authorization.
  */
 
+type SourceTable = 'leads_manos_crm' | 'leads_compra' | 'leads_distribuicao_crm_26';
+
 interface RescueArgs {
     days: number;
     limit: number;
     dryRun: boolean;
+    tables: SourceTable[]; // se vazio, considera todas
 }
 
 interface RescueResult {
@@ -47,11 +50,31 @@ function parseArgs(req: NextRequest, body: any): RescueArgs {
         return Math.min(n, max);
     };
     const dryRunRaw = body?.dry_run ?? url.searchParams.get('dry_run');
+
+    // Filtro de tabelas (opcional). Body: tables=['leads_compra']. Query: ?tables=leads_compra,leads_manos_crm
+    const VALID: SourceTable[] = ['leads_manos_crm', 'leads_compra', 'leads_distribuicao_crm_26'];
+    let tablesRaw = body?.tables;
+    if (!tablesRaw) {
+        const qp = url.searchParams.get('tables');
+        if (qp) tablesRaw = qp.split(',');
+    }
+    let tables: SourceTable[] = [];
+    if (Array.isArray(tablesRaw)) {
+        tables = tablesRaw
+            .map((t: any) => String(t).trim())
+            .filter((t: string): t is SourceTable => VALID.includes(t as SourceTable));
+    }
+
     return {
         days: num('days', 7, 30),
         limit: num('limit', 50, 200),
         dryRun: dryRunRaw === true || dryRunRaw === 'true',
+        tables,
     };
+}
+
+function shouldQuery(table: SourceTable, args: RescueArgs): boolean {
+    return args.tables.length === 0 || args.tables.includes(table);
 }
 
 async function processBatch(
@@ -170,37 +193,45 @@ export async function POST(req: NextRequest) {
         if (c.id) consultantNameById.set(c.id, c.name || '');
     }
 
-    const halfLimit = Math.ceil(args.limit / 3);
+    // Se tabelas filtradas, dá limite total pra elas. Sem filtro, divide em 3.
+    const activeTablesCount = args.tables.length === 0 ? 3 : args.tables.length;
+    const perTableLimit = Math.ceil(args.limit / activeTablesCount);
 
     // 1. leads_manos_crm
-    const { data: lmcRows } = await admin
-        .from('leads_manos_crm')
-        .select('id, name, phone, vehicle_interest, source, assigned_consultant_id, status, created_at, first_contact_at')
-        .is('first_contact_at', null)
-        .gte('created_at', cutoff)
-        .not('status', 'in', `(${FINAL.map(s => `"${s}"`).join(',')})`)
-        .order('created_at', { ascending: false })
-        .limit(halfLimit);
+    const lmcRows = shouldQuery('leads_manos_crm', args)
+        ? (await admin
+            .from('leads_manos_crm')
+            .select('id, name, phone, vehicle_interest, source, assigned_consultant_id, status, created_at, first_contact_at')
+            .is('first_contact_at', null)
+            .gte('created_at', cutoff)
+            .not('status', 'in', `(${FINAL.map(s => `"${s}"`).join(',')})`)
+            .order('created_at', { ascending: false })
+            .limit(perTableLimit)).data
+        : null;
 
     // 2. leads_compra
-    const { data: compraRows } = await admin
-        .from('leads_compra')
-        .select('id, nome, telefone, veiculo_original, origem, assigned_consultant_id, status, criado_em, first_contact_at')
-        .is('first_contact_at', null)
-        .gte('criado_em', cutoff)
-        .not('status', 'in', `(${FINAL.map(s => `"${s}"`).join(',')})`)
-        .order('criado_em', { ascending: false })
-        .limit(halfLimit);
+    const compraRows = shouldQuery('leads_compra', args)
+        ? (await admin
+            .from('leads_compra')
+            .select('id, nome, telefone, veiculo_original, origem, assigned_consultant_id, status, criado_em, first_contact_at')
+            .is('first_contact_at', null)
+            .gte('criado_em', cutoff)
+            .not('status', 'in', `(${FINAL.map(s => `"${s}"`).join(',')})`)
+            .order('criado_em', { ascending: false })
+            .limit(perTableLimit)).data
+        : null;
 
     // 3. leads_distribuicao_crm_26
-    const { data: distRows } = await admin
-        .from('leads_distribuicao_crm_26')
-        .select('id, nome, telefone, origem, assigned_consultant_id, status, criado_em, first_contact_at')
-        .is('first_contact_at', null)
-        .gte('criado_em', cutoff)
-        .not('status', 'in', `(${FINAL.map(s => `"${s}"`).join(',')})`)
-        .order('criado_em', { ascending: false })
-        .limit(halfLimit);
+    const distRows = shouldQuery('leads_distribuicao_crm_26', args)
+        ? (await admin
+            .from('leads_distribuicao_crm_26')
+            .select('id, nome, telefone, origem, assigned_consultant_id, status, criado_em, first_contact_at')
+            .is('first_contact_at', null)
+            .gte('criado_em', cutoff)
+            .not('status', 'in', `(${FINAL.map(s => `"${s}"`).join(',')})`)
+            .order('criado_em', { ascending: false })
+            .limit(perTableLimit)).data
+        : null;
 
     const result: RescueResult = {
         scanned: 0, eligible: 0, sent: 0, skipped: 0, failed: 0,
