@@ -40,7 +40,7 @@ interface LastMessage {
     direction: string | null;
 }
 
-type Filter = 'priority' | 'today' | 'all';
+type Filter = 'priority' | 'today' | 'all' | 'archived';
 type Bucket = 'urgent' | 'active' | 'cooling' | 'zombie';
 
 const ZOMBIE_DAYS = 15;
@@ -114,13 +114,16 @@ export default function InboxPage() {
     const baseTitleRef = useRef<string>('Inbox');
     const unreadRef = useRef(0);
 
-    const fetchLeads = useCallback(async (cid: string | null) => {
+    const fetchLeads = useCallback(async (cid: string | null, viewMode: 'active' | 'archived' = 'active') => {
+        // Modo arquivados: pega da view geral filtrando por archived_at IS NOT NULL
+        const sourceView = viewMode === 'archived' ? 'leads_unified' : 'leads_unified_active';
         const query = supabase
-            .from('leads_unified_active')
-            .select('uid, table_name, native_id, name, phone, vehicle_interest, source, ai_score, ai_classification, status, updated_at, created_at, proxima_acao')
-            .order('ai_score', { ascending: false, nullsFirst: false })
+            .from(sourceView)
+            .select('uid, table_name, native_id, name, phone, vehicle_interest, source, ai_score, ai_classification, status, updated_at, created_at, proxima_acao' + (viewMode === 'archived' ? ', archived_at' : ''))
+            .order(viewMode === 'archived' ? 'updated_at' : 'ai_score', { ascending: false, nullsFirst: false })
             .limit(200);
         if (cid) query.eq('assigned_consultant_id', cid);
+        if (viewMode === 'archived') query.not('archived_at', 'is', null);
         const { data } = await query;
         const next = (data as InboxLead[]) || [];
 
@@ -175,11 +178,11 @@ export default function InboxPage() {
             const cid = cons?.id || null;
             if (!alive) return;
             setConsultantId(cid);
-            await fetchLeads(cid);
+            await fetchLeads(cid, filter === 'archived' ? 'archived' : 'active');
             if (alive) setLoading(false);
         })();
         return () => { alive = false; };
-    }, [supabase, router, fetchLeads]);
+    }, [supabase, router, fetchLeads, filter]);
 
     // Tab title flasher
     useEffect(() => {
@@ -214,11 +217,11 @@ export default function InboxPage() {
         const channel = supabase.channel('inbox-live');
         for (const t of tables) {
             channel.on('postgres_changes', { event: '*', schema: 'public', table: t },
-                () => { fetchLeads(consultantId); });
+                () => { fetchLeads(consultantId, filter === 'archived' ? 'archived' : 'active'); });
         }
         channel.subscribe(status => { setLive(status === 'SUBSCRIBED'); });
         return () => { supabase.removeChannel(channel); };
-    }, [supabase, consultantId, fetchLeads]);
+    }, [supabase, consultantId, fetchLeads, filter]);
 
     // Buckets + filtros
     const grouped = useMemo(() => {
@@ -263,11 +266,12 @@ export default function InboxPage() {
                         <Wifi className="w-3 h-3" /> {live ? 'ao vivo' : 'offline'}
                     </span>
                 </div>
-                <div className="flex gap-2 text-sm">
+                <div className="flex gap-2 text-sm flex-wrap">
                     {([
                         ['priority', 'Prioridade'],
                         ['today', 'Hoje'],
                         ['all', 'Tudo'],
+                        ['archived', '🗄️ Arquivados'],
                     ] as Array<[Filter, string]>).map(([f, label]) => (
                         <button key={f} onClick={() => setFilter(f)}
                             className={`px-3 py-1 rounded-full border ${filter === f ? 'bg-blue-600 text-white border-blue-600' : 'border-zinc-700 text-gray-300 hover:bg-zinc-800'}`}>
@@ -278,17 +282,51 @@ export default function InboxPage() {
             </div>
 
             {/* CONTADORES */}
-            <div className="flex items-center gap-3 mb-5 text-xs text-gray-400">
-                <span>🔥 <strong className="text-red-400">{counts.urgent}</strong> urgentes</span>
-                <span>🌡️ <strong className="text-orange-300">{counts.active}</strong> em conversa</span>
-                <span>❄️ <strong className="text-blue-300">{counts.cooling}</strong> esfriando</span>
-                {filter === 'all' && counts.zombie > 0 && (
-                    <span>🪦 <strong className="text-zinc-500">{counts.zombie}</strong> zumbis (mais de {ZOMBIE_DAYS}d)</span>
-                )}
-            </div>
+            {filter !== 'archived' && (
+                <div className="flex items-center gap-3 mb-5 text-xs text-gray-400">
+                    <span>🔥 <strong className="text-red-400">{counts.urgent}</strong> urgentes</span>
+                    <span>🌡️ <strong className="text-orange-300">{counts.active}</strong> em conversa</span>
+                    <span>❄️ <strong className="text-blue-300">{counts.cooling}</strong> esfriando</span>
+                    {filter === 'all' && counts.zombie > 0 && (
+                        <span>🪦 <strong className="text-zinc-500">{counts.zombie}</strong> zumbis (mais de {ZOMBIE_DAYS}d)</span>
+                    )}
+                </div>
+            )}
+            {filter === 'archived' && (
+                <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-3 mb-4 text-sm text-gray-300">
+                    🗄️ <strong>{leads.length}</strong> leads arquivados.
+                    Eles <strong>não recebem mais mensagens automáticas da IA</strong> e não aparecem na fila normal.
+                    Clique em qualquer um pra ver/desarquivar.
+                </div>
+            )}
 
             {loading ? (
                 <p className="text-gray-400">Carregando…</p>
+            ) : filter === 'archived' ? (
+                leads.length === 0 ? (
+                    <div className="text-gray-400 text-center py-12">
+                        <p className="text-lg">Nenhum lead arquivado.</p>
+                    </div>
+                ) : (
+                    <ul className="space-y-2">
+                        {leads.map(lead => (
+                            <li key={lead.uid}>
+                                <Link href={`/lead/${encodeURIComponent(lead.uid)}`}
+                                    className="block bg-zinc-900 hover:bg-zinc-800 rounded-lg p-3 transition opacity-70 hover:opacity-100">
+                                    <div className="flex items-center justify-between gap-2">
+                                        <div className="min-w-0 flex-1">
+                                            <div className="font-semibold text-gray-200 truncate">{lead.name || 'Sem nome'}</div>
+                                            <div className="text-xs text-gray-500 truncate">
+                                                {lead.vehicle_interest || lead.source || '—'}
+                                            </div>
+                                        </div>
+                                        <span className="text-[10px] text-gray-500">arquivado</span>
+                                    </div>
+                                </Link>
+                            </li>
+                        ))}
+                    </ul>
+                )
             ) : counts.urgent + counts.active + counts.cooling + counts.zombie === 0 ? (
                 <div className="text-gray-400 text-center py-12">
                     <p className="text-lg">Nada na fila.</p>

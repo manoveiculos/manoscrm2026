@@ -88,6 +88,7 @@ async function runFollowupAi() {
         .from('leads_manos_crm')
         .select('id, name, phone, vehicle_interest, proxima_acao, next_step, status, updated_at, assigned_consultant_id, valor_investimento, carro_troca, source, ai_followup_enabled')
         .in('status', activeStatuses)
+        .is('archived_at', null)
         .order('updated_at', { ascending: true })
         .limit(30);
 

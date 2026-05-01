@@ -3,9 +3,17 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
-import { Trophy, X, CalendarPlus, ArrowLeft, MessageSquare, Activity } from 'lucide-react';
+import { Trophy, X, CalendarPlus, ArrowLeft, MessageSquare, Activity, Archive } from 'lucide-react';
 import { parseUid } from '@/lib/services/unifiedLead';
 import CannedResponses, { CannedContext } from '@/components/CannedResponses';
+
+const ARCHIVE_REASONS = [
+    { v: 'nao_e_lead', l: 'Spam / não é lead real' },
+    { v: 'pediu_pra_parar', l: 'Pediu pra parar de receber msgs' },
+    { v: 'comprou_em_outro_lugar', l: 'Já comprou em outro lugar' },
+    { v: 'numero_errado', l: 'Número errado / não responde' },
+    { v: 'outro', l: 'Outro motivo' },
+];
 
 /**
  * /lead/[id] — Tela de FECHAMENTO.
@@ -74,6 +82,8 @@ export default function LeadDetailPage() {
     const [showSold, setShowSold] = useState(false);
     const [showLost, setShowLost] = useState(false);
     const [showSchedule, setShowSchedule] = useState(false);
+    const [showArchive, setShowArchive] = useState(false);
+    const [archiveReason, setArchiveReason] = useState(ARCHIVE_REASONS[0].v);
 
     // Sold
     const [soldValue, setSoldValue] = useState('');
@@ -251,6 +261,28 @@ export default function LeadDetailPage() {
         }
     }
 
+    async function handleArchive() {
+        if (!archiveReason) return;
+        setSubmitting(true);
+        try {
+            await fetch('/api/lead/archive', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    lead_id: leadId,
+                    lead_table: leadTable,
+                    reason: archiveReason,
+                    archived_by: lead?.assigned_consultant_id,
+                    archive: true,
+                }),
+            });
+            setShowArchive(false);
+            router.push('/inbox');
+        } finally {
+            setSubmitting(false);
+        }
+    }
+
     async function handleSchedule() {
         if (!scheduleAt) return;
         setSubmitting(true);
@@ -384,6 +416,12 @@ export default function LeadDetailPage() {
                             Abrir WhatsApp
                         </a>
                     )}
+                    <button
+                        onClick={() => setShowArchive(true)}
+                        className="w-full bg-zinc-800 hover:bg-zinc-700 text-gray-400 hover:text-gray-200 py-2 rounded-lg text-xs flex items-center justify-center gap-1.5 mt-2 border border-zinc-700"
+                    >
+                        <Archive className="w-3.5 h-3.5" /> Arquivar lead
+                    </button>
                 </aside>
             </div>
 
@@ -425,6 +463,25 @@ export default function LeadDetailPage() {
                     <textarea value={scheduleNote} onChange={e => setScheduleNote(e.target.value)} rows={2} className="w-full p-2 rounded bg-zinc-800 text-white mb-4" />
                     <button disabled={submitting || !scheduleAt} onClick={handleSchedule} className="w-full bg-blue-600 disabled:bg-gray-700 text-white py-3 rounded font-bold">
                         {submitting ? 'Salvando…' : 'AGENDAR'}
+                    </button>
+                </Modal>
+            )}
+
+            {showArchive && (
+                <Modal title="Arquivar lead" onClose={() => setShowArchive(false)}>
+                    <p className="text-sm text-gray-400 mb-3">
+                        Arquivar tira o lead da fila e <strong>impede mensagens automáticas</strong> da IA.
+                        Pode desarquivar depois.
+                    </p>
+                    <label className="block text-sm text-gray-300 mb-1">Motivo *</label>
+                    <select value={archiveReason} onChange={e => setArchiveReason(e.target.value)}
+                        className="w-full p-2 rounded bg-zinc-800 text-white mb-4">
+                        {ARCHIVE_REASONS.map(r => <option key={r.v} value={r.v}>{r.l}</option>)}
+                    </select>
+                    <button disabled={submitting} onClick={handleArchive}
+                        className="w-full bg-zinc-700 hover:bg-zinc-600 disabled:bg-gray-800 text-white py-3 rounded font-bold flex items-center justify-center gap-2">
+                        <Archive className="w-4 h-4" />
+                        {submitting ? 'Arquivando…' : 'CONFIRMAR ARQUIVAMENTO'}
                     </button>
                 </Modal>
             )}

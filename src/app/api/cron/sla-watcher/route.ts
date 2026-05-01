@@ -58,6 +58,7 @@ async function fetchLeadsCompra(): Promise<LeadSla[]> {
         .from('leads_compra')
         .select('id, nome, assigned_consultant_id, criado_em, updated_at, status')
         .not('status', 'in', `(${FINAL_STATUSES.map(s => `"${s}"`).join(',')})`)
+        .is('archived_at', null)
         .order('criado_em', { ascending: false })
         .limit(500);
     return (data || []).map(l => ({
@@ -77,6 +78,7 @@ async function fetchLeadsVenda(): Promise<LeadSla[]> {
         .from('leads_manos_crm')
         .select('id, name, assigned_consultant_id, created_at, updated_at, status')
         .not('status', 'in', `(${FINAL_STATUSES.map(s => `"${s}"`).join(',')})`)
+        .is('archived_at', null)
         .order('created_at', { ascending: false })
         .limit(500);
     return (data || []).map(l => ({
