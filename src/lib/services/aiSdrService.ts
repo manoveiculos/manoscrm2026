@@ -2,6 +2,7 @@ import { OpenAI } from 'openai';
 import { createClient } from '@/lib/supabase/admin';
 import { sendWhatsApp, isSenderConfigured } from './whatsappSender';
 import { matchInventoryForInterest, formatInventoryLine, MatchedItem } from './inventoryMatcher';
+import { findMatch as findAltimusMatch, getRecentForPrompt as getAltimusRecent, formatVehicle as formatAltimus } from './altimusInventory';
 
 /**
  * AI SDR — primeiro contato automático com o lead em <60s.
@@ -57,10 +58,24 @@ function fallbackMessage(input: FirstContactInput, matches: MatchedItem[] = []):
 }
 
 async function generateMessage(input: FirstContactInput): Promise<string> {
-    // Para fluxo de venda, traz top 3 do estoque que batem com o interesse.
+    // Para fluxo de venda, busca estoque REAL — Altimus primeiro (fonte da verdade),
+    // banco local como fallback se Altimus tiver fora.
     let matches: MatchedItem[] = [];
+    let altimusBlock = '';
     if (input.flow === 'venda' && input.vehicleInterest) {
-        matches = await matchInventoryForInterest(input.vehicleInterest, { limit: 3 }).catch(() => []);
+        const altimusMatched = await findAltimusMatch(input.vehicleInterest).catch(() => null);
+        if (altimusMatched) {
+            altimusBlock = `\nVEÍCULO REAL DISPONÍVEL AGORA NO ESTOQUE (use ESSE):\n- ${formatAltimus(altimusMatched)}${altimusMatched.link ? ' · ' + altimusMatched.link : ''}`;
+        } else {
+            // Não bateu match exato — pega top 5 do Altimus pra ofertar similar
+            const altimusRecent = await getAltimusRecent(5).catch(() => []);
+            if (altimusRecent.length > 0) {
+                altimusBlock = `\nVEÍCULOS REAIS DISPONÍVEIS AGORA (escolha UM similar):\n${altimusRecent.map(v => `- ${formatAltimus(v)}`).join('\n')}`;
+            } else {
+                // Altimus fora → fallback pro banco local
+                matches = await matchInventoryForInterest(input.vehicleInterest, { limit: 3 }).catch(() => []);
+            }
+        }
     }
 
     if (!process.env.OPENAI_API_KEY) {
@@ -72,16 +87,17 @@ async function generateMessage(input: FirstContactInput): Promise<string> {
         const veh = input.vehicleInterest || '';
         const tipo = input.flow === 'compra' ? 'AVALIAR um carro pra vender' : 'COMPRAR um carro';
 
-        const inventoryBlock = matches.length > 0
-            ? `\nESTOQUE DISPONÍVEL agora que bate com o interesse (use UM se fizer sentido, sem listar todos):\n${matches.map(m => `- ${formatInventoryLine(m)}`).join('\n')}`
-            : '';
+        const inventoryBlock = altimusBlock
+            || (matches.length > 0
+                ? `\nESTOQUE DISPONÍVEL agora que bate com o interesse (use UM se fizer sentido):\n${matches.map(m => `- ${formatInventoryLine(m)}`).join('\n')}`
+                : '');
 
         const sys = `Você escreve a primeira mensagem de WhatsApp de um consultor pra um lead que acabou de chegar.
 Regras inegociáveis:
 - 1 ou 2 frases curtas, máximo 240 caracteres
 - Português do Brasil, tom humano e direto, ZERO emojis ou jargão de marketing
 - Se houver estoque relevante, mencione UM veículo concreto (modelo + ano + preço se fizer sentido)
-- Não invente carro nem preço — só use o que está no bloco de estoque
+- PROIBIDO inventar marca, modelo, ano ou preço fora do bloco de estoque. Só use o que está listado.
 - Não promete desconto
 - Termina com UMA pergunta direta (ex: "Quer que eu te mande mais detalhes?", "Posso te chamar agora?")
 - Sem "tudo bem?". Sem "espero que esteja bem"`;

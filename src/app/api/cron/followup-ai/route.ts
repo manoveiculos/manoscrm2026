@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { OpenAI } from 'openai';
 import { sendWhatsApp, isSenderConfigured } from '@/lib/services/whatsappSender';
 import { withHeartbeat } from '@/lib/services/cronHeartbeat';
+import { findMatch, getRecentForPrompt, formatVehicle, AltimusVehicle } from '@/lib/services/altimusInventory';
 
 export const maxDuration = 120;
 
@@ -123,30 +124,76 @@ async function runFollowupAi() {
                 continue;
             }
 
-            const res = await openai.chat.completions.create({
-                model: 'gpt-4o-mini',
-                messages: [{
-                    role: 'user',
-                    content: `Lead da Manos Veículos (Rio do Sul/SC):
-- Nome: ${lead.name}
-- Interesse: ${lead.vehicle_interest || 'não informado'}
-- Investimento: ${lead.valor_investimento || 'não informado'}
-- Estágio: ${lead.status}
-- Última ação sugerida: "${lead.proxima_acao || lead.next_step || 'sem ação prévia'}"
-
-Gere UMA mensagem de reengajamento curta (1-2 frases, máx 220 chars) para WhatsApp. Sem "tudo bem?", sem gerundismo. Comece pelo primeiro nome. Termine com pergunta direta. Crie urgência real (ex: condição limitada, agenda apertada).
-
-JSON: { "mensagem": "..." }`,
-                }],
-                response_format: { type: 'json_object' },
-                temperature: 0.45,
-                max_tokens: 150,
-            });
-
-            const result = JSON.parse(res.choices[0]?.message?.content || '{}');
             const firstName = (lead.name || 'Cliente').split(' ')[0];
-            const msg = (result.mensagem || '').trim() ||
-                `${firstName}, ainda tenho condição reservada no ${lead.vehicle_interest || 'veículo de interesse'}. Posso te chamar agora?`;
+
+            // ── ANTI-ALUCINAÇÃO: estoque REAL da Altimus ──────────────────
+            // 1. Tenta achar o veículo de interesse no estoque atual
+            const matchedVehicle = await findMatch(lead.vehicle_interest);
+            // 2. Pega top N do estoque real pra dar opções ao LLM
+            const recentInventory = await getRecentForPrompt(10);
+            const altimusOk = recentInventory.length > 0 || matchedVehicle !== null;
+
+            // 3. FALLBACK SEGURO: Altimus fora ou estoque vazio →
+            //    mensagem genérica fixa, SEM LLM (zero risco de alucinação)
+            let msg: string;
+            let mode: 'matched' | 'similar' | 'generic_safe' = 'generic_safe';
+
+            if (!altimusOk) {
+                msg = `${firstName}, vi que você se interessou por um dos nossos veículos. Ele ainda faz sentido pra você? Posso te ajudar?`;
+                mode = 'generic_safe';
+            } else {
+                // Monta bloco de estoque real pro prompt
+                const inventoryBlock = matchedVehicle
+                    ? `VEÍCULO DE INTERESSE DO LEAD QUE AINDA ESTÁ NO ESTOQUE:\n- ${formatVehicle(matchedVehicle)}${matchedVehicle.link ? ' · ' + matchedVehicle.link : ''}`
+                    : `VEÍCULO DO LEAD NÃO ESTÁ MAIS NO ESTOQUE.\nEstoque atual disponível pra sugerir similar:\n${recentInventory.map(v => `- ${formatVehicle(v)}`).join('\n')}`;
+
+                const sysPrompt = `Você gera mensagem de WhatsApp de reengajamento pra concessionária Manos Veículos (Rio do Sul/SC).
+
+REGRAS INEGOCIÁVEIS:
+1. PROIBIDO inventar marca, modelo, ano ou preço que não esteja na lista abaixo. Se inventar, você falha.
+2. Se o lead tem interesse específico AINDA NO ESTOQUE → mencione esse veículo (modelo + ano + preço se relevante).
+3. Se não tem o veículo de interesse → sugira UM similar da lista, ou seja genérico.
+4. NUNCA mencione veículo, ano ou preço fora da lista fornecida.
+5. NUNCA prometa desconto, condição especial ou estoque que não foi confirmado.
+
+FORMATO:
+- Português Brasil, 1-2 frases curtas, máximo 220 caracteres
+- Comece pelo primeiro nome do cliente
+- Termine com pergunta direta ("ainda tem interesse?", "quer mais detalhes?", "posso te chamar?")
+- Sem "tudo bem?", sem gerundismo, sem emojis
+- Tom humano, direto, sem desespero`;
+
+                const userPrompt = `Cliente: ${firstName}
+Interesse original informado pelo lead: ${lead.vehicle_interest || 'não informado'}
+Estágio do lead: ${lead.status}
+
+${inventoryBlock}
+
+Gere a mensagem de reengajamento. JSON: { "mensagem": "..." }`;
+
+                const res = await openai.chat.completions.create({
+                    model: 'gpt-4o-mini',
+                    messages: [
+                        { role: 'system', content: sysPrompt },
+                        { role: 'user', content: userPrompt },
+                    ],
+                    response_format: { type: 'json_object' },
+                    temperature: 0.4,
+                    max_tokens: 150,
+                });
+
+                const parsed = JSON.parse(res.choices[0]?.message?.content || '{}');
+                const llmMsg = (parsed.mensagem || '').trim();
+
+                if (llmMsg && llmMsg.length >= 20) {
+                    msg = llmMsg;
+                    mode = matchedVehicle ? 'matched' : 'similar';
+                } else {
+                    // LLM falhou → mensagem genérica segura
+                    msg = `${firstName}, vi que você se interessou por um dos nossos veículos. Ele ainda faz sentido pra você?`;
+                    mode = 'generic_safe';
+                }
+            }
 
             const priority = ['fechamento', 'negotiation', 'proposed'].includes(lead.status) ? 'high' : 'medium';
             generated++;
@@ -174,12 +221,12 @@ JSON: { "mensagem": "..." }`,
                 status: sendResult.ok ? 'sent' : 'pending',
             });
 
-            // Audit trail (best-effort)
+            // Audit trail (best-effort) — registra modo da geração pra debug
             void admin.from('interactions_manos_crm').insert({
                 lead_id: lead.id,
                 notes: sendResult.ok
-                    ? `[IA AUTO ENVIADO via ${sendResult.provider}] "${msg}"`
-                    : `[IA AUTO GERADO sem envio: ${sendResult.error || 'sem provider'}] "${msg}"`,
+                    ? `[IA AUTO ${mode.toUpperCase()} via ${sendResult.provider}] "${msg}"`
+                    : `[IA AUTO ${mode.toUpperCase()} sem envio: ${sendResult.error || 'sem provider'}] "${msg}"`,
                 new_status: lead.status,
                 type: 'ai_followup',
                 created_at: new Date().toISOString(),
