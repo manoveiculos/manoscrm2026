@@ -85,21 +85,53 @@ async function runFollowupAi() {
     const followupMap = await loadFollowupMap(admin);
     const activeStatuses = Object.keys(DEFAULT_FOLLOWUP_SLA);
 
+    // --- CHECK GLOBAL SETTINGS ---
+    const { data: settings } = await admin
+        .from('system_settings')
+        .select('*');
+    
+    const globalPause = settings?.find(s => s.id === 'global')?.ai_paused ?? false;
+    const aiConfig = settings?.find(s => s.id === 'ai_config')?.value ?? {};
+    const followupEnabled = aiConfig.followup_enabled ?? true;
+
+    if (globalPause) {
+        return { success: true, message: 'IA pausada globalmente.', log: ['IA pausada globalmente.'] };
+    }
+    if (!followupEnabled) {
+        return { success: true, message: 'Follow-up automático desabilitado.', log: ['Follow-up automático desabilitado nas configurações.'] };
+    }
+
+    // Horário de funcionamento check
+    const nowObj = new Date();
+    const currentStr = nowObj.toLocaleTimeString('pt-BR', { hour12: false, hour: '2-digit', minute: '2-digit' });
+    const startHour = aiConfig.start_hour || '08:00';
+    const endHour = aiConfig.end_hour || '20:00';
+
+    if (currentStr < startHour || currentStr > endHour) {
+        log.push(`💤 Fora do horário de funcionamento (${startHour} - ${endHour}). Atual: ${currentStr}`);
+        return { success: true, message: 'Fora do horário de funcionamento.', log };
+    }
+
     const { data: leads, error } = await admin
         .from('leads_manos_crm')
-        .select('id, name, phone, vehicle_interest, proxima_acao, next_step, status, updated_at, assigned_consultant_id, valor_investimento, carro_troca, source, ai_followup_enabled')
+        .select('id, name, phone, vehicle_interest, proxima_acao, next_step, status, updated_at, assigned_consultant_id, valor_investimento, carro_troca, source, ai_followup_enabled, ai_classification, behavioral_profile, ai_summary')
         .in('status', activeStatuses)
         .is('archived_at', null)
         .order('updated_at', { ascending: true })
         .limit(30);
 
     if (error) {
-        return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+        return { success: false, error: error.message };
     }
 
     const eligible = (leads || []).filter((l: any) => {
         if (l.ai_followup_enabled === false) return false;
-        const slaH = getFollowupHours(l.source, l.status, followupMap);
+        
+        // SLA dinâmico por temperatura
+        let slaH = getFollowupHours(l.source, l.status, followupMap);
+        if (l.ai_classification === 'hot') slaH = Math.max(1, Math.floor(slaH * 0.5)); // Hot leads = metade do tempo
+        if (l.ai_classification === 'cold') slaH = slaH * 2; // Cold leads = dobro do tempo
+
         const hoursInactive = (now - new Date(l.updated_at || 0).getTime()) / 3_600_000;
         return hoursInactive >= slaH;
     });
@@ -110,6 +142,7 @@ async function runFollowupAi() {
 
     for (const lead of eligible) {
         try {
+            // ... (check existing followups) ...
             const { data: existing } = await admin
                 .from('follow_ups')
                 .select('id, status, scheduled_at')
@@ -125,51 +158,46 @@ async function runFollowupAi() {
             }
 
             const firstName = (lead.name || 'Cliente').split(' ')[0];
+            const behavior = (lead.behavioral_profile as any) || {};
+            const sentiment = behavior.sentiment || 'Curioso';
 
             // ── ANTI-ALUCINAÇÃO: estoque REAL da Altimus ──────────────────
-            // 1. Tenta achar o veículo de interesse no estoque atual
             const matchedVehicle = await findMatch(lead.vehicle_interest);
-            // 2. Pega top N do estoque real pra dar opções ao LLM
             const recentInventory = await getRecentForPrompt(10);
             const altimusOk = recentInventory.length > 0 || matchedVehicle !== null;
 
-            // 3. FALLBACK SEGURO: Altimus fora ou estoque vazio →
-            //    mensagem genérica fixa, SEM LLM (zero risco de alucinação)
             let msg: string;
             let mode: 'matched' | 'similar' | 'generic_safe' = 'generic_safe';
 
             if (!altimusOk) {
-                msg = `${firstName}, vi que você se interessou por um dos nossos veículos. Ele ainda faz sentido pra você? Posso te ajudar?`;
+                msg = `${firstName}, ainda estou com seu interesse aqui no ${lead.vehicle_interest || 'carro'}. Faz sentido a gente conversar hoje?`;
                 mode = 'generic_safe';
             } else {
-                // Monta bloco de estoque real pro prompt
                 const inventoryBlock = matchedVehicle
                     ? `VEÍCULO DE INTERESSE DO LEAD QUE AINDA ESTÁ NO ESTOQUE:\n- ${formatVehicle(matchedVehicle)}${matchedVehicle.link ? ' · ' + matchedVehicle.link : ''}`
                     : `VEÍCULO DO LEAD NÃO ESTÁ MAIS NO ESTOQUE.\nEstoque atual disponível pra sugerir similar:\n${recentInventory.map(v => `- ${formatVehicle(v)}`).join('\n')}`;
 
                 const sysPrompt = `Você gera mensagem de WhatsApp de reengajamento pra concessionária Manos Veículos (Rio do Sul/SC).
-
+                
 REGRAS INEGOCIÁVEIS:
-1. PROIBIDO inventar marca, modelo, ano ou preço que não esteja na lista abaixo. Se inventar, você falha.
-2. Se o lead tem interesse específico AINDA NO ESTOQUE → mencione esse veículo (modelo + ano + preço se relevante).
-3. Se não tem o veículo de interesse → sugira UM similar da lista, ou seja genérico.
-4. NUNCA mencione veículo, ano ou preço fora da lista fornecida.
-5. NUNCA prometa desconto, condição especial ou estoque que não foi confirmado.
+1. PROIBIDO inventar marca, modelo, ano ou preço fora da lista fornecida.
+2. Seja humano, direto, sem emojis. Use o tom baseado na temperatura do lead.
+3. Se o lead é HOT, seja mais incisivo e convide para a loja.
+4. Se o lead é COLD, seja mais leve e pergunte se ainda busca carro.
 
 FORMATO:
-- Português Brasil, 1-2 frases curtas, máximo 220 caracteres
-- Comece pelo primeiro nome do cliente
-- Termine com pergunta direta ("ainda tem interesse?", "quer mais detalhes?", "posso te chamar?")
-- Sem "tudo bem?", sem gerundismo, sem emojis
-- Tom humano, direto, sem desespero`;
+- Máximo 220 caracteres.
+- Comece pelo nome. Termine com pergunta direta.`;
 
                 const userPrompt = `Cliente: ${firstName}
-Interesse original informado pelo lead: ${lead.vehicle_interest || 'não informado'}
-Estágio do lead: ${lead.status}
+Temperatura: ${lead.ai_classification || 'warm'} (Ajuste o tom aqui)
+Sentimento: ${sentiment}
+Resumo anterior: ${lead.ai_summary || 'Sem resumo'}
+Interesse: ${lead.vehicle_interest || 'não informado'}
 
 ${inventoryBlock}
 
-Gere a mensagem de reengajamento. JSON: { "mensagem": "..." }`;
+Gere a mensagem. JSON: { "mensagem": "..." }`;
 
                 const res = await openai.chat.completions.create({
                     model: 'gpt-4o-mini',
@@ -183,16 +211,8 @@ Gere a mensagem de reengajamento. JSON: { "mensagem": "..." }`;
                 });
 
                 const parsed = JSON.parse(res.choices[0]?.message?.content || '{}');
-                const llmMsg = (parsed.mensagem || '').trim();
-
-                if (llmMsg && llmMsg.length >= 20) {
-                    msg = llmMsg;
-                    mode = matchedVehicle ? 'matched' : 'similar';
-                } else {
-                    // LLM falhou → mensagem genérica segura
-                    msg = `${firstName}, vi que você se interessou por um dos nossos veículos. Ele ainda faz sentido pra você?`;
-                    mode = 'generic_safe';
-                }
+                msg = (parsed.mensagem || '').trim();
+                mode = matchedVehicle ? 'matched' : 'similar';
             }
 
             const priority = ['fechamento', 'negotiation', 'proposed'].includes(lead.status) ? 'high' : 'medium';

@@ -89,35 +89,75 @@ export default function Dashboard() {
     }, [supabase]);
 
     const fetchActivity = useCallback(async () => {
-        // Busca mensagens recentes como proxy de atividade
+        // 1. Mensagens Recentes
         const { data: msgs } = await supabase
             .from('whatsapp_messages')
             .select(`
-                id,
-                message_text,
-                created_at,
-                direction,
+                id, message_text, created_at, direction,
                 leads_manos_crm!lead_id ( name ),
                 leads_compra!lead_compra_id ( nome )
             `)
             .order('created_at', { ascending: false })
-            .limit(15);
+            .limit(10);
+
+        // 2. Interações de IA (First Contact / Followup)
+        const { data: aiActs } = await supabase
+            .from('interactions_manos_crm')
+            .select(`id, type, notes, created_at, lead_id`)
+            .in('type', ['ai_first_contact', 'ai_followup'])
+            .order('created_at', { ascending: false })
+            .limit(10);
+
+        // 3. Alertas de SLA
+        const { data: slaActs } = await supabase
+            .from('sla_escalations')
+            .select(`id, level, notes, created_at, lead_id`)
+            .order('created_at', { ascending: false })
+            .limit(10);
+
+        const items: ActivityItem[] = [];
 
         if (msgs) {
-            const items: ActivityItem[] = msgs.map((m: any) => {
+            msgs.forEach((m: any) => {
                 const leadName = m.leads_manos_crm?.name || m.leads_compra?.nome || 'Lead';
-                return {
-                    id: m.id.toString(),
+                items.push({
+                    id: `msg-${m.id}`,
                     type: 'message',
                     text: m.direction === 'inbound' 
                         ? `Cliente ${leadName} enviou mensagem` 
                         : `Consultor respondeu ${leadName}`,
                     timestamp: m.created_at,
                     userName: leadName
-                };
+                });
             });
-            setActivities(items);
         }
+
+        if (aiActs) {
+            aiActs.forEach((a: any) => {
+                items.push({
+                    id: `ai-${a.id}`,
+                    type: 'followup',
+                    text: a.type === 'ai_first_contact' ? `🤖 IA iniciou contato` : `🤖 IA enviou follow-up`,
+                    timestamp: a.created_at,
+                    userName: 'IA SDR'
+                });
+            });
+        }
+
+        if (slaActs) {
+            slaActs.forEach((s: any) => {
+                items.push({
+                    id: `sla-${s.id}`,
+                    type: 'status',
+                    text: `⚠️ Alerta SLA Nível ${s.level}`,
+                    timestamp: s.created_at,
+                    userName: 'Sistema'
+                });
+            });
+        }
+
+        // Ordena tudo por tempo e pega top 15
+        setActivities(items.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).slice(0, 15));
     }, [supabase]);
 
     useEffect(() => {
@@ -135,6 +175,8 @@ export default function Dashboard() {
                 fetchKpis();
                 fetchActivity();
             })
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'interactions_manos_crm' }, fetchActivity)
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'sla_escalations' }, fetchActivity)
             .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'system_settings' }, fetchSettings)
             .subscribe((status) => {
                 setLive(status === 'SUBSCRIBED');

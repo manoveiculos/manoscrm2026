@@ -149,6 +149,28 @@ export async function sendFirstContact(input: FirstContactInput, table: 'leads_c
         }
     } catch {}
 
+    // 1. Check Global Settings
+    const { data: settings } = await admin
+        .from('system_settings')
+        .select('*');
+    
+    const globalPause = settings?.find(s => s.id === 'global')?.ai_paused ?? false;
+    const aiConfig = settings?.find(s => s.id === 'ai_config')?.value ?? {};
+
+    if (globalPause) {
+        return { sent: false, message: '', provider: 'none', error: 'ai_paused_globally' };
+    }
+
+    // 2. Horário de funcionamento check
+    const nowObj = new Date();
+    const currentStr = nowObj.toLocaleTimeString('pt-BR', { hour12: false, hour: '2-digit', minute: '2-digit' });
+    const startHour = aiConfig.start_hour || '08:00';
+    const endHour = aiConfig.end_hour || '20:00';
+
+    if (currentStr < startHour || currentStr > endHour) {
+        return { sent: false, message: '', provider: 'none', error: 'outside_operating_hours' };
+    }
+
     if (!isSenderConfigured()) {
         return { sent: false, message: '', provider: 'none', error: 'no_provider_configured' };
     }

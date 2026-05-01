@@ -182,6 +182,21 @@ export async function POST(req: NextRequest) {
     }
 
     const admin = createClient();
+
+    // Check if AI is paused globally
+    const { data: settings } = await admin
+        .from('system_settings')
+        .select('ai_paused')
+        .eq('id', 'global')
+        .maybeSingle();
+
+    if (!args.dryRun && settings?.ai_paused) {
+        return NextResponse.json({
+            error: 'ai_paused_globally',
+            message: 'A Inteligência SDR está pausada nas configurações globais.'
+        }, { status: 400 });
+    }
+
     const cutoff = new Date(Date.now() - args.days * 24 * 3600 * 1000).toISOString();
     const FINAL = ['vendido', 'perdido', 'comprado', 'finalizado', 'lost', 'lost_by_inactivity'];
 
