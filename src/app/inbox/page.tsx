@@ -3,9 +3,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import PullToRefresh from 'react-pull-to-refresh';
+import dynamic from 'next/dynamic';
 import { createClient } from '@/lib/supabase/client';
 import { Flame, Snowflake, Thermometer, Clock, Phone, Wifi, Bell, X, AlertTriangle, MessageCircle } from 'lucide-react';
+
+const PTR = dynamic(() => import('react-pull-to-refresh'), { ssr: false }) as any;
 
 /**
  * /inbox — A ÚNICA tela do vendedor.
@@ -130,7 +132,6 @@ function stateLabel(state: LeadState, lastReturn?: string): string {
     }
 }
 
-const PTR = PullToRefresh as any;
 
 export default function InboxPage() {
     const supabase = useMemo(() => createClient(), []);
