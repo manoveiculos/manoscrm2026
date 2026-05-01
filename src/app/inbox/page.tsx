@@ -431,7 +431,7 @@ export default function InboxPage() {
                     <p className="text-sm mt-1">Boa hora pra prospectar.</p>
                 </div>
             ) : (
-                <PTR onRefresh={() => fetchLeads(consultantId)} pullDownThreshold={60} resistance={2.5}>
+                <PTR onRefresh={() => fetchLeads(consultantId)}>
                     <div className="space-y-10 pb-20">
                         <Section title="Urgente" subtitle="Responda agora" icon={<Flame className="w-5 h-5 text-red-500" />} accent="border-red-600"
                             leads={grouped.urgent} lastMessages={lastMessages} emptyText="Nenhum lead urgente. Bom trabalho." expandedUid={expandedUid} onToggle={setExpandedUid} />

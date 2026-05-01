@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client';
 import { 
     Settings, Zap, Clock, Shield, Save, 
     RefreshCw, AlertCircle, CheckCircle2,
-    Activity, Timer, BellRing
+    Activity, Timer, BellRing, Wifi
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 
