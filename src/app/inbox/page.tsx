@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import PullToRefresh from 'react-pull-to-refresh';
 import { createClient } from '@/lib/supabase/client';
 import { Flame, Snowflake, Thermometer, Clock, Phone, Wifi, Bell, X, AlertTriangle, MessageCircle } from 'lucide-react';
 
@@ -32,12 +33,15 @@ interface InboxLead {
     updated_at: string | null;
     created_at: string;
     proxima_acao: string | null;
+    first_contact_channel?: string | null;
+    onboarded_at?: string | null;
 }
 
 interface LastMessage {
     lead_id: string;
     message_text: string | null;
     direction: string | null;
+    created_at: string;
 }
 
 type Filter = 'priority' | 'today' | 'all' | 'archived';
@@ -99,11 +103,43 @@ function formatPhone(p: string | null): string {
     return p;
 }
 
+type LeadState = 'AGUARDANDO_VENDEDOR' | 'AGUARDANDO_CLIENTE' | 'IA_TOCOU' | 'NUNCA_TOCADO';
+
+function getLeadState(lead: InboxLead, lastInbound?: LastMessage, lastOutbound?: LastMessage): LeadState {
+    if (!lastInbound && !lastOutbound) return 'NUNCA_TOCADO';
+    if (!lastInbound && lastOutbound) {
+        return lead.first_contact_channel === 'ai_sdr' ? 'IA_TOCOU' : 'AGUARDANDO_CLIENTE';
+    }
+    if (lastInbound && !lastOutbound) return 'AGUARDANDO_VENDEDOR';
+    
+    if (new Date(lastInbound!.created_at) > new Date(lastOutbound!.created_at)) {
+        return 'AGUARDANDO_VENDEDOR';
+    }
+    return 'AGUARDANDO_CLIENTE';
+}
+
+function stateLabel(state: LeadState, lastReturn?: string): string {
+    switch (state) {
+        case 'IA_TOCOU': return '🤖 IA já respondeu — aguardando cliente';
+        case 'AGUARDANDO_VENDEDOR': return '🔥 CLIENTE ESPERANDO — responda agora';
+        case 'AGUARDANDO_CLIENTE': 
+            if (lastReturn) return `📅 Você marcou retorno pra ${lastReturn}`;
+            return '⏳ Sem resposta há algum tempo';
+        case 'NUNCA_TOCADO': return '🆕 Novo lead — ninguém atendeu ainda';
+        default: return '';
+    }
+}
+
+const PTR = PullToRefresh as any;
+
 export default function InboxPage() {
     const supabase = useMemo(() => createClient(), []);
     const router = useRouter();
     const [leads, setLeads] = useState<InboxLead[]>([]);
-    const [lastMsgByLead, setLastMsgByLead] = useState<Map<string, string>>(new Map());
+    const [lastMessages, setLastMessages] = useState<Map<string, { inbound?: LastMessage, outbound?: LastMessage }>>(new Map());
+    const [soundEnabled, setSoundEnabled] = useState(false);
+    const [onboarded, setOnboarded] = useState(true);
+    const [expandedUid, setExpandedUid] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const [filter, setFilter] = useState<Filter>('priority');
     const [consultantId, setConsultantId] = useState<string | null>(null);
@@ -113,13 +149,20 @@ export default function InboxPage() {
     const initialLoadDoneRef = useRef(false);
     const baseTitleRef = useRef<string>('Inbox');
     const unreadRef = useRef(0);
+    const audioRef = useRef<HTMLAudioElement | null>(null);
+
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            setSoundEnabled(localStorage.getItem('inbox_sound') === 'true');
+            audioRef.current = new Audio('/sounds/ding.mp3');
+        }
+    }, []);
 
     const fetchLeads = useCallback(async (cid: string | null, viewMode: 'active' | 'archived' = 'active') => {
-        // Modo arquivados: pega da view geral filtrando por archived_at IS NOT NULL
         const sourceView = viewMode === 'archived' ? 'leads_unified' : 'leads_unified_active';
         const query = supabase
             .from(sourceView)
-            .select('uid, table_name, native_id, name, phone, vehicle_interest, source, ai_score, ai_classification, status, updated_at, created_at, proxima_acao' + (viewMode === 'archived' ? ', archived_at' : ''))
+            .select('uid, table_name, native_id, name, phone, vehicle_interest, source, ai_score, ai_classification, status, updated_at, created_at, proxima_acao, first_contact_channel' + (viewMode === 'archived' ? ', archived_at' : ''))
             .order(viewMode === 'archived' ? 'updated_at' : 'ai_score', { ascending: false, nullsFirst: false })
             .limit(200);
         if (cid) query.eq('assigned_consultant_id', cid);
@@ -127,7 +170,34 @@ export default function InboxPage() {
         const { data } = await query;
         const next = (data as InboxLead[]) || [];
 
-        // Detecta novos
+        // Busca mensagens para determinar estado
+        const leadIds = next.map(l => l.native_id).slice(0, 100);
+        if (leadIds.length > 0) {
+            const { data: msgs } = await supabase
+                .from('whatsapp_messages')
+                .select('lead_id, message_text, direction, created_at')
+                .in('lead_id', leadIds)
+                .order('created_at', { ascending: false });
+
+            const msgMap = new Map<string, { inbound?: LastMessage, outbound?: LastMessage }>();
+            for (const m of (msgs as LastMessage[]) || []) {
+                const current = msgMap.get(m.lead_id) || {};
+                if (m.direction === 'inbound' && !current.inbound) current.inbound = m;
+                if (m.direction === 'outbound' && !current.outbound) current.outbound = m;
+                msgMap.set(m.lead_id, current);
+            }
+            setLastMessages(msgMap);
+
+            // Som se lead novo ou esperando
+            if (initialLoadDoneRef.current && soundEnabled) {
+                const novelWaiting = next.filter(l => !knownIdsRef.current.has(l.uid)).some(l => {
+                    const state = getLeadState(l, msgMap.get(l.native_id)?.inbound, msgMap.get(l.native_id)?.outbound);
+                    return state === 'NUNCA_TOCADO' || state === 'AGUARDANDO_VENDEDOR';
+                });
+                if (novelWaiting) audioRef.current?.play().catch(() => {});
+            }
+        }
+
         if (initialLoadDoneRef.current) {
             const novel = next.filter(l => !knownIdsRef.current.has(l.uid));
             if (novel.length > 0) {
@@ -143,27 +213,7 @@ export default function InboxPage() {
         knownIdsRef.current = new Set(next.map(l => l.uid));
         initialLoadDoneRef.current = true;
         setLeads(next);
-
-        // Busca última mensagem dos leads SEM vehicle_interest pra preencher o card
-        const idsSemVeiculo = next.filter(l => !l.vehicle_interest).map(l => l.native_id).slice(0, 60);
-        if (idsSemVeiculo.length > 0) {
-            const { data: msgs } = await supabase
-                .from('whatsapp_messages')
-                .select('lead_id, message_text, direction, created_at')
-                .in('lead_id', idsSemVeiculo)
-                .order('created_at', { ascending: false })
-                .limit(200);
-            const map = new Map<string, string>();
-            for (const m of (msgs as LastMessage[]) || []) {
-                if (!map.has(m.lead_id) && m.message_text) {
-                    map.set(m.lead_id, m.message_text);
-                }
-            }
-            setLastMsgByLead(map);
-        } else {
-            setLastMsgByLead(new Map());
-        }
-    }, [supabase]);
+    }, [supabase, soundEnabled]);
 
     useEffect(() => {
         let alive = true;
@@ -172,12 +222,13 @@ export default function InboxPage() {
             if (!auth?.user) { router.push('/login'); return; }
             const { data: cons } = await supabase
                 .from('consultants_manos_crm')
-                .select('id')
+                .select('id, onboarded_at')
                 .eq('user_id', auth.user.id)
                 .maybeSingle();
             const cid = cons?.id || null;
             if (!alive) return;
             setConsultantId(cid);
+            setOnboarded(!!cons?.onboarded_at);
             await fetchLeads(cid, filter === 'archived' ? 'archived' : 'active');
             if (alive) setLoading(false);
         })();
@@ -219,7 +270,7 @@ export default function InboxPage() {
             channel.on('postgres_changes', { event: '*', schema: 'public', table: t },
                 () => { fetchLeads(consultantId, filter === 'archived' ? 'archived' : 'active'); });
         }
-        channel.subscribe(status => { setLive(status === 'SUBSCRIBED'); });
+        channel.subscribe((status: string) => { setLive(status === 'SUBSCRIBED'); });
         return () => { supabase.removeChannel(channel); };
     }, [supabase, consultantId, fetchLeads, filter]);
 
@@ -256,25 +307,72 @@ export default function InboxPage() {
         setToasts(prev => prev.filter(t => t.uid !== uid));
     }
 
+    async function handleOnboarded() {
+        if (!consultantId) return;
+        await supabase
+            .from('consultants_manos_crm')
+            .update({ onboarded_at: new Date().toISOString() })
+            .eq('id', consultantId);
+        setOnboarded(true);
+    }
+
+    const toggleSound = () => {
+        const next = !soundEnabled;
+        setSoundEnabled(next);
+        localStorage.setItem('inbox_sound', String(next));
+    };
+
     return (
-        <div className="p-4 max-w-5xl mx-auto pb-32">
-            {/* HEADER */}
-            <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
-                <div className="flex items-center gap-3">
-                    <h1 className="text-2xl font-bold">Inbox</h1>
-                    <span className={`text-xs flex items-center gap-1 ${live ? 'text-green-400' : 'text-gray-500'}`}>
-                        <Wifi className="w-3 h-3" /> {live ? 'ao vivo' : 'offline'}
-                    </span>
+        <div className="p-2 md:p-4 max-w-5xl mx-auto pb-32">
+            {/* ONBOARDING OVERLAY */}
+            {!onboarded && consultantId && (
+                <div className="fixed inset-0 z-[10000] bg-black/80 flex items-center justify-center p-4">
+                    <div className="bg-zinc-900 border border-zinc-700 rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-in zoom-in duration-300">
+                        <div className="text-4xl mb-4">👋</div>
+                        <h2 className="text-xl font-bold text-white mb-4">Bem-vindo ao Novo Inbox!</h2>
+                        <ul className="space-y-4 text-sm text-gray-300 mb-8">
+                            <li className="flex gap-3">
+                                <span className="flex-shrink-0 w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-[10px] font-bold">1</span>
+                                <p>Aqui ficam todos os seus leads. A fila é automática.</p>
+                            </li>
+                            <li className="flex gap-3">
+                                <span className="flex-shrink-0 w-6 h-6 bg-red-600 text-white rounded-full flex items-center justify-center text-[10px] font-bold">2</span>
+                                <p><strong className="text-red-400">Vermelho pulsante</strong> = cliente esperando. Atenda primeiro.</p>
+                            </li>
+                            <li className="flex gap-3">
+                                <span className="flex-shrink-0 w-6 h-6 bg-zinc-700 text-white rounded-full flex items-center justify-center text-[10px] font-bold">3</span>
+                                <p>Clique em qualquer lead para ver o histórico e usar <strong>mensagens prontas</strong>.</p>
+                            </li>
+                            <li className="flex gap-3">
+                                <span className="flex-shrink-0 w-6 h-6 bg-emerald-600 text-white rounded-full flex items-center justify-center text-[10px] font-bold">4</span>
+                                <p>Use os botões coloridos para marcar vendas ou perdas.</p>
+                            </li>
+                        </ul>
+                        <button onClick={handleOnboarded} className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-blue-900/20">
+                            Entendi! Bora vender
+                        </button>
+                    </div>
                 </div>
-                <div className="flex gap-2 text-sm flex-wrap">
+            )}
+
+            {/* HEADER */}
+            <div className="flex items-center justify-between mb-4 flex-wrap gap-3 sticky top-0 bg-black/80 backdrop-blur-xl py-4 px-2 z-20 -mx-2 border-b border-zinc-800/50">
+                <div className="flex items-center gap-3">
+                    <h1 className="text-2xl font-black tracking-tight text-white">Inbox</h1>
+                    <button onClick={toggleSound} className={`w-10 h-10 flex items-center justify-center rounded-full border transition-all active:scale-90 ${soundEnabled ? 'bg-blue-600/20 border-blue-600 text-blue-400' : 'bg-zinc-800 border-zinc-700 text-gray-500'}`} title="Notificações sonoras">
+                        <Bell className={`w-5 h-5 ${soundEnabled ? 'animate-bounce' : ''}`} />
+                    </button>
+                    <span className={`w-2 h-2 rounded-full ${live ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-gray-600'}`} />
+                </div>
+                <div className="flex gap-2 overflow-x-auto no-scrollbar">
                     {([
-                        ['priority', 'Prioridade'],
+                        ['priority', 'Foco'],
                         ['today', 'Hoje'],
                         ['all', 'Tudo'],
-                        ['archived', '🗄️ Arquivados'],
+                        ['archived', '🗄️'],
                     ] as Array<[Filter, string]>).map(([f, label]) => (
                         <button key={f} onClick={() => setFilter(f)}
-                            className={`px-3 py-1 rounded-full border ${filter === f ? 'bg-blue-600 text-white border-blue-600' : 'border-zinc-700 text-gray-300 hover:bg-zinc-800'}`}>
+                            className={`min-h-[44px] min-w-[44px] px-4 py-2 rounded-xl border font-bold transition-all active:scale-95 whitespace-nowrap ${filter === f ? 'bg-white text-black border-white shadow-xl' : 'bg-zinc-900 border-zinc-800 text-gray-400'}`}>
                             {label}
                         </button>
                     ))}
@@ -333,18 +431,20 @@ export default function InboxPage() {
                     <p className="text-sm mt-1">Boa hora pra prospectar.</p>
                 </div>
             ) : (
-                <div className="space-y-6">
-                    <Section title="Urgente" subtitle="Novos ou com nova mensagem · responda agora" icon={<Flame className="w-4 h-4 text-red-500" />} accent="border-red-700"
-                        leads={grouped.urgent} lastMsgByLead={lastMsgByLead} emptyText="Nenhum lead urgente. Bom trabalho." />
-                    <Section title="Em negociação" subtitle="Conversa ativa · mantenha o ritmo" icon={<Thermometer className="w-4 h-4 text-orange-400" />} accent="border-orange-700"
-                        leads={grouped.active} lastMsgByLead={lastMsgByLead} emptyText="Nenhum em negociação no momento." />
-                    <Section title="Aguardando" subtitle="Sem resposta há 48h+ · reaqueça antes de perder" icon={<Snowflake className="w-4 h-4 text-blue-400" />} accent="border-blue-900"
-                        leads={grouped.cooling} lastMsgByLead={lastMsgByLead} emptyText="Nenhum lead aguardando." />
-                    {filter === 'all' && grouped.zombie.length > 0 && (
-                        <Section title="Zumbis" subtitle={`Mais de ${ZOMBIE_DAYS}d sem atividade · serão fechados pelo SLA`} icon={<AlertTriangle className="w-4 h-4 text-zinc-500" />} accent="border-zinc-800 opacity-60"
-                            leads={grouped.zombie} lastMsgByLead={lastMsgByLead} emptyText="" />
-                    )}
-                </div>
+                <PTR onRefresh={() => fetchLeads(consultantId)} pullDownThreshold={60} resistance={2.5}>
+                    <div className="space-y-10 pb-20">
+                        <Section title="Urgente" subtitle="Responda agora" icon={<Flame className="w-5 h-5 text-red-500" />} accent="border-red-600"
+                            leads={grouped.urgent} lastMessages={lastMessages} emptyText="Nenhum lead urgente. Bom trabalho." expandedUid={expandedUid} onToggle={setExpandedUid} />
+                        <Section title="Em negociação" subtitle="Aguardando cliente" icon={<Thermometer className="w-5 h-5 text-orange-400" />} accent="border-zinc-700"
+                            leads={grouped.active} lastMessages={lastMessages} emptyText="Nenhum em negociação no momento." expandedUid={expandedUid} onToggle={setExpandedUid} />
+                        <Section title="Aguardando" subtitle="Sem resposta há 48h+" icon={<Clock className="w-5 h-5 text-blue-400" />} accent="border-blue-900"
+                            leads={grouped.cooling} lastMessages={lastMessages} emptyText="Nenhum lead aguardando." expandedUid={expandedUid} onToggle={setExpandedUid} />
+                        {filter === 'all' && grouped.zombie.length > 0 && (
+                            <Section title="Zumbis" subtitle={`Mais de ${ZOMBIE_DAYS}d`} icon={<AlertTriangle className="w-5 h-5 text-zinc-500" />} accent="border-zinc-800 opacity-60"
+                                leads={grouped.zombie} lastMessages={lastMessages} emptyText="" expandedUid={expandedUid} onToggle={setExpandedUid} />
+                        )}
+                    </div>
+                </PTR>
             )}
 
             {/* TOASTS */}
@@ -376,76 +476,140 @@ interface SectionProps {
     icon: React.ReactNode;
     accent: string;
     leads: InboxLead[];
-    lastMsgByLead: Map<string, string>;
+    lastMessages: Map<string, { inbound?: LastMessage, outbound?: LastMessage }>;
     emptyText: string;
+    expandedUid: string | null;
+    onToggle: (uid: string | null) => void;
 }
 
-function Section({ title, subtitle, icon, accent, leads, lastMsgByLead, emptyText }: SectionProps) {
+function Section({ title, subtitle, icon, accent, leads, lastMessages, emptyText, expandedUid, onToggle }: SectionProps) {
     return (
         <section>
-            <div className={`flex items-center gap-2 mb-2 pl-2 border-l-4 ${accent}`}>
+            <div className={`flex items-center gap-3 mb-4 pl-3 border-l-4 ${accent}`}>
                 {icon}
                 <div>
-                    <h2 className="text-sm font-bold text-white uppercase tracking-wide">{title} · {leads.length}</h2>
-                    <p className="text-[11px] text-gray-500">{subtitle}</p>
+                    <h2 className="text-base font-black text-white uppercase tracking-tight">{title} · {leads.length}</h2>
+                    <p className="text-[11px] text-gray-500 font-medium">{subtitle}</p>
                 </div>
             </div>
             {leads.length === 0 ? (
                 emptyText && <p className="text-xs text-gray-600 italic pl-3 mb-2">{emptyText}</p>
             ) : (
-                <ul className="space-y-2">
-                    {leads.map(lead => <LeadCard key={lead.uid} lead={lead} lastMsg={lastMsgByLead.get(lead.native_id)} />)}
+                <ul className="space-y-4">
+                    {leads.map(lead => (
+                        <LeadCard 
+                            key={lead.uid} 
+                            lead={lead} 
+                            messages={lastMessages.get(lead.native_id)} 
+                            isExpanded={expandedUid === lead.uid}
+                            onToggle={() => onToggle(expandedUid === lead.uid ? null : lead.uid)}
+                        />
+                    ))}
                 </ul>
             )}
         </section>
     );
 }
 
-function LeadCard({ lead, lastMsg }: { lead: InboxLead; lastMsg?: string }) {
+function LeadCard({ lead, messages, isExpanded, onToggle }: { lead: InboxLead; messages?: { inbound?: LastMessage, outbound?: LastMessage }; isExpanded: boolean; onToggle: () => void }) {
     const sla = slaInfo(lead);
-    const subline = lead.vehicle_interest
-        || (lastMsg ? `"${lastMsg.slice(0, 80)}${lastMsg.length > 80 ? '…' : ''}"` : '')
-        || lead.source
-        || 'Sem detalhes';
-    const isQuoted = !lead.vehicle_interest && !!lastMsg;
+    const state = getLeadState(lead, messages?.inbound, messages?.outbound);
+    
+    const stateColors: Record<LeadState, string> = {
+        AGUARDANDO_VENDEDOR: 'border-red-600 bg-red-950/5 ring-1 ring-red-500/20 shadow-[0_0_15px_rgba(239,68,68,0.1)]',
+        AGUARDANDO_CLIENTE: 'border-zinc-800 bg-zinc-900/30 opacity-90',
+        IA_TOCOU: 'border-emerald-600/30 bg-emerald-950/5',
+        NUNCA_TOCADO: 'border-orange-500 bg-orange-950/5 ring-1 ring-orange-500/20',
+    };
+
+    const lastMsgText = messages?.inbound?.message_text;
 
     return (
-        <li>
-            <Link href={`/lead/${encodeURIComponent(lead.uid)}`}
-                className="block bg-zinc-900 hover:bg-zinc-800 rounded-lg p-3 transition group">
-                <div className="flex items-start justify-between gap-3">
-                    {/* esquerda: nome + dados */}
-                    <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 mb-0.5">
-                            {tempIcon(lead.ai_classification)}
-                            <h3 className="font-bold text-white truncate text-base">{lead.name || 'Sem nome'}</h3>
-                            {lead.ai_score != null && lead.ai_score > 0 && (
-                                <span className="text-[10px] text-gray-500">{lead.ai_score}</span>
-                            )}
+        <li className="list-none">
+            <div 
+                onClick={onToggle}
+                className={`block border rounded-2xl p-5 transition-all duration-300 relative overflow-hidden active:scale-[0.98] cursor-pointer ${stateColors[state]} ${isExpanded ? 'ring-2 ring-blue-500/50 bg-zinc-900' : ''}`}>
+                
+                {/* Linha 1: NOME GRANDE */}
+                <div className="flex justify-between items-start gap-4 mb-2">
+                    <h3 className="font-black text-white text-xl md:text-2xl truncate leading-tight flex-1">{lead.name || 'Sem nome'}</h3>
+                    {lead.ai_score != null && (
+                        <div className={`px-2 py-1 rounded-lg font-black text-xs ${lead.ai_score >= 80 ? 'bg-red-600 text-white' : 'bg-zinc-800 text-gray-400'}`}>
+                            {lead.ai_score}
                         </div>
-                        <div className={`text-xs truncate ${isQuoted ? 'text-gray-400 italic' : 'text-gray-300'}`}>
-                            {isQuoted && <MessageCircle className="inline w-3 h-3 mr-1" />}
-                            {subline}
-                        </div>
-                        {lead.proxima_acao && (
-                            <div className="mt-1.5 text-[11px] text-blue-300/80 truncate">
-                                💡 {lead.proxima_acao}
-                            </div>
-                        )}
-                    </div>
-                    {/* direita: SLA + telefone */}
-                    <div className="flex flex-col items-end gap-1 shrink-0 text-[11px]">
-                        <span className={`px-2 py-0.5 rounded-full font-medium whitespace-nowrap ${sla.color}`}>
-                            {sla.text}
-                        </span>
-                        {lead.phone && (
-                            <span className="text-gray-500 flex items-center gap-1">
-                                <Phone className="w-3 h-3" /> {formatPhone(lead.phone)}
-                            </span>
-                        )}
+                    )}
+                </div>
+
+                {/* Linha 2: SLA + Tempo */}
+                <div className="flex items-center gap-3 mb-4">
+                    <span className={`text-[11px] px-2.5 py-1 rounded-md font-black uppercase tracking-tight shadow-sm ${sla.color}`}>
+                        {sla.text}
+                    </span>
+                    <span className="text-[11px] text-gray-500 font-bold flex items-center gap-1.5 bg-zinc-800/50 px-2 py-1 rounded-md">
+                        <Clock className="w-3.5 h-3.5" /> {new Date(lead.created_at).toLocaleDateString('pt-BR')}
+                    </span>
+                </div>
+
+                {/* Linha 3: ÚLTIMA MENSAGEM DO CLIENTE */}
+                <div className="mb-3">
+                    {lastMsgText ? (
+                        <p className="text-sm md:text-base text-gray-200 italic line-clamp-2 leading-relaxed bg-black/20 p-3 rounded-xl border border-white/5">
+                            <MessageCircle className="inline w-4 h-4 mr-2 text-blue-400" />
+                            "{lastMsgText}"
+                        </p>
+                    ) : (
+                        <p className="text-xs text-gray-500 italic px-1">{lead.vehicle_interest || lead.source || 'Sem mensagens'}</p>
+                    )}
+                </div>
+
+                {/* Linha 4: INDICADOR DE ESTADO */}
+                <div className="mb-4">
+                    <div className={`text-[12px] font-bold flex items-center gap-2 ${state === 'AGUARDANDO_VENDEDOR' ? 'text-red-400' : 'text-gray-400'}`}>
+                        <div className={`w-2 h-2 rounded-full ${state === 'AGUARDANDO_VENDEDOR' ? 'bg-red-500 animate-pulse' : 'bg-zinc-700'}`} />
+                        {stateLabel(state)}
                     </div>
                 </div>
-            </Link>
+
+                {/* Linha 5: CHIPS DE MENSAGENS PRONTAS */}
+                <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
+                    <div className="flex gap-2">
+                        {['welcome', 'financing', 'visit_schedule'].map(k => (
+                            <span key={k} className="text-[11px] bg-zinc-800 text-gray-200 px-3 py-1.5 rounded-xl border border-zinc-700 font-bold whitespace-nowrap">
+                                {k === 'welcome' ? '👋 Boas-vindas' : k === 'financing' ? '💳 Simulação' : '📅 Visita'}
+                            </span>
+                        ))}
+                    </div>
+                    <div className="ml-auto pl-4">
+                        <div className="w-8 h-8 rounded-full bg-blue-600/10 flex items-center justify-center border border-blue-500/20">
+                            <span className="text-blue-400 text-xs font-black">+</span>
+                        </div>
+                    </div>
+                </div>
+
+                {/* DETALHES EXPANSÍVEIS (A.5) */}
+                {isExpanded && (
+                    <div className="mt-6 pt-6 border-t border-zinc-800 animate-in fade-in slide-in-from-top-2 duration-300">
+                        <div className="grid grid-cols-2 gap-3">
+                            <Link href={`/lead/${encodeURIComponent(lead.uid)}`} className="col-span-2 md:col-span-1 min-h-[56px] flex items-center justify-center bg-blue-600 hover:bg-blue-500 text-white rounded-2xl font-black text-lg transition-all active:scale-95 shadow-xl shadow-blue-900/20">
+                                ABRIR CONVERSA
+                            </Link>
+                            <button className="md:col-span-1 min-h-[56px] flex items-center justify-center bg-zinc-800 hover:bg-zinc-700 text-gray-300 rounded-2xl font-bold transition-all active:scale-95">
+                                ARQUIVAR
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {/* Efeito de pulsação customizado */}
+                {(state === 'AGUARDANDO_VENDEDOR' || state === 'NUNCA_TOCADO') && !isExpanded && (
+                    <div className={`absolute top-0 left-0 w-full h-1 ${state === 'AGUARDANDO_VENDEDOR' ? 'bg-red-500 animate-pulse' : 'bg-orange-500 animate-pulse'}`} />
+                )}
+            </div>
+
+            <style jsx>{`
+                .no-scrollbar::-webkit-scrollbar { display: none; }
+                .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+            `}</style>
         </li>
     );
 }
