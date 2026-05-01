@@ -161,7 +161,16 @@ export async function sendFirstContact(input: FirstContactInput, table: 'leads_c
             }
             await admin.from(table).update(updates).eq('id', input.leadId);
 
-            // Audit trail na timeline (best-effort)
+            // Insere a mensagem enviada como bolha 'outbound' no chat do /lead/[id]
+            // Pra vendedor ver em tempo real o que a IA mandou pro cliente.
+            await admin.from('whatsapp_messages').insert({
+                lead_id: input.leadId,
+                direction: 'outbound',
+                message_text: message,
+                message_id: `ai_sdr_${Date.now()}`,
+            }).then(null, () => {}); // best-effort, não falha o fluxo
+
+            // Audit trail na timeline
             const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(input.leadId);
             await admin.from('interactions_manos_crm').insert({
                 [isUUID ? 'lead_id' : 'lead_id_v1']: input.leadId,

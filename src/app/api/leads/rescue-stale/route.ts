@@ -151,9 +151,10 @@ async function processBatch(
             });
         }
 
-        // Rate limit interno: 1.5s entre leads (whatsappSender já tem dedup,
-        // este sleep extra é guardrail anti-ban quando o resgate é grande).
-        await new Promise(r => setTimeout(r, 1500));
+        // Rate limit interno: 5s entre leads — guardrail anti-ban do WhatsApp.
+        // Padrão da indústria pra envio em massa via API/Evolution é 3-8s.
+        // Mantemos 5s pra equilibrar velocidade vs risco de bloqueio do número.
+        await new Promise(r => setTimeout(r, 5000));
     }
 
     result.perTable[table] = stats;

@@ -145,6 +145,39 @@ export default function LeadDetailPage() {
         return () => { alive = false; };
     }, [leadId, leadTable, supabase]);
 
+    // Realtime: nova msg em whatsapp_messages do lead atual aparece automático
+    useEffect(() => {
+        if (!leadId) return;
+        const channel = supabase
+            .channel(`lead-msgs-${leadId}`)
+            .on(
+                'postgres_changes',
+                {
+                    event: 'INSERT',
+                    schema: 'public',
+                    table: 'whatsapp_messages',
+                    filter: `lead_id=eq.${leadId}`,
+                },
+                (payload: any) => {
+                    const m = payload.new;
+                    if (m && m.message_text) {
+                        setMessages(prev => {
+                            // Evita duplicar se a msg já está na lista (vinda do load inicial)
+                            if (prev.some(x => x.id === m.id)) return prev;
+                            return [...prev, {
+                                id: m.id,
+                                direction: m.direction || 'outbound',
+                                message_text: m.message_text,
+                                created_at: m.created_at,
+                            }];
+                        });
+                    }
+                }
+            )
+            .subscribe();
+        return () => { supabase.removeChannel(channel); };
+    }, [leadId, supabase]);
+
     async function handleSold() {
         if (!soldValue || !soldPayment) return;
         setSubmitting(true);

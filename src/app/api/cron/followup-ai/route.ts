@@ -184,11 +184,19 @@ JSON: { "mensagem": "..." }`,
                 created_at: new Date().toISOString(),
             }).then(null, () => {});
 
-            // Atualiza lead pra evitar reenvio em loop
+            // Atualiza lead pra evitar reenvio em loop + insere bolha no chat
             if (sendResult.ok) {
                 await admin.from('leads_manos_crm')
                     .update({ updated_at: new Date().toISOString() })
                     .eq('id', lead.id);
+
+                // Bolha 'outbound' no chat — vendedor vê em tempo real
+                await admin.from('whatsapp_messages').insert({
+                    lead_id: lead.id,
+                    direction: 'outbound',
+                    message_text: msg,
+                    message_id: `ai_followup_${Date.now()}`,
+                }).then(null, () => {});
             }
 
             log.push(`${sendResult.ok ? '📤' : '📝'} ${lead.name} (${lead.status}) → "${msg.slice(0, 60)}..."`);
