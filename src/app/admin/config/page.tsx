@@ -196,7 +196,7 @@ export default function ConfigPage() {
                 </section>
 
                 {/* HORÁRIO DE FUNCIONAMENTO */}
-                <section className="bg-zinc-900 border border-zinc-800 rounded-3xl p-6 space-y-6 md:col-span-2">
+                <section className="bg-zinc-900 border border-zinc-800 rounded-3xl p-6 space-y-6">
                     <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-2xl bg-purple-500/10 text-purple-500 flex items-center justify-center">
                             <Clock size={20} />
@@ -204,7 +204,7 @@ export default function ConfigPage() {
                         <h2 className="text-lg font-bold text-white">Janela de Atendimento</h2>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 gap-4">
                         <div className="space-y-2">
                             <label className="text-xs font-black text-zinc-500 uppercase tracking-widest">Início</label>
                             <input 
@@ -224,7 +224,26 @@ export default function ConfigPage() {
                             />
                         </div>
                     </div>
-                    <p className="text-[10px] text-zinc-600 font-medium">Fora deste horário, a IA apenas recebe os leads mas não envia mensagens (espera a janela abrir).</p>
+                </section>
+
+                {/* INTEGRAÇÕES */}
+                <section className="bg-zinc-900 border border-zinc-800 rounded-3xl p-6 space-y-6">
+                    <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center">
+                            <Wifi size={20} />
+                        </div>
+                        <h2 className="text-lg font-bold text-white">Integrações (API)</h2>
+                    </div>
+
+                    <div className="space-y-4">
+                        <div className="space-y-2">
+                            <label className="text-xs font-black text-zinc-500 uppercase tracking-widest">Webhook Universal</label>
+                            <div className="bg-zinc-950 p-4 rounded-2xl border border-zinc-800 font-mono text-[10px] text-zinc-400 break-all select-all">
+                                https://manoscrm.com.br/api/webhook/universal
+                            </div>
+                            <p className="text-[10px] text-zinc-600">Use esta URL no Zapier, n8n ou Pipedream para enviar leads de qualquer fonte.</p>
+                        </div>
+                    </div>
                 </section>
             </div>
         </div>
