@@ -82,46 +82,77 @@ function asInt(s: string | null): number | null {
 }
 
 /**
- * Parse defensivo: aceita variações de tag (anuncio, veiculo, item, etc.)
- * e variantes de nome de campo. Se nada bater, retorna [].
+ * Parse do feed XML específico da Altimus.
+ *
+ * Formato real (descoberto inspecionando o feed):
+ *   <veiculo>
+ *     <marca>28</marca>          ← ID numérico (NÃO É O NOME)
+ *     <modelo>2533</modelo>       ← ID numérico
+ *     <versao>7631</versao>       ← ID numérico
+ *     <valor>219900.0</valor>     ← preço (não <preco>)
+ *     <ano>2015</ano>
+ *     <descricao>BMW Z4 Roadster sDRIVE 20i 2.0 16V 2p Aut. - Preta - 2014/2015</descricao>
+ *     <km>60000</km>
+ *     <cor>Preto</cor>
+ *     <combustivel>Gasolina</combustivel>
+ *   </veiculo>
+ *
+ * Estratégia: <descricao> é a fonte da verdade do nome do veículo.
+ * Formato comum: "MARCA MODELO VERSÃO - COR - ANO_FAB/ANO_MOD"
  */
+function parseDescription(desc: string): { marca: string; modelo: string; versao?: string } {
+    if (!desc) return { marca: '', modelo: '' };
+
+    // Tira a parte de cor/ano (após o primeiro " - ")
+    const mainPart = desc.split(/\s+-\s+/)[0].trim();
+    const tokens = mainPart.split(/\s+/).filter(Boolean);
+    if (tokens.length === 0) return { marca: '', modelo: '' };
+
+    // 1ª palavra = marca; 2ª = modelo (ou primeiras 2 se for marca composta tipo "Land Rover")
+    const COMPOUND_BRANDS = ['land', 'mercedes', 'alfa', 'aston'];
+    let marcaTokens = 1;
+    if (tokens.length >= 2 && COMPOUND_BRANDS.includes(tokens[0].toLowerCase())) {
+        marcaTokens = 2;
+    }
+    const marca = tokens.slice(0, marcaTokens).join(' ');
+    const modelo = tokens[marcaTokens] || '';
+    const versao = tokens.slice(marcaTokens + 1).join(' ') || undefined;
+    return { marca, modelo, versao };
+}
+
 function parseAltimusXml(xml: string): AltimusVehicle[] {
     if (!xml || xml.length < 50) return [];
 
-    // Tenta detectar bloco do veículo. Altimus geralmente usa <veiculo>...
-    // mas alguns feeds usam <anuncio> ou <ad>.
-    const blockNames = ['veiculo', 'veículo', 'anuncio', 'anúncio', 'ad', 'item'];
-    let blocks: string[] = [];
-    for (const name of blockNames) {
-        const re = new RegExp(`<${name}\\b[^>]*>[\\s\\S]*?<\\/${name}>`, 'gi');
-        const found = xml.match(re);
-        if (found && found.length > 0) {
-            blocks = found;
-            break;
-        }
-    }
+    const blockRe = /<veiculo\b[^>]*>[\s\S]*?<\/veiculo>/gi;
+    const blocks = xml.match(blockRe) || [];
     if (blocks.length === 0) return [];
 
     const out: AltimusVehicle[] = [];
     for (const block of blocks) {
-        const marca = tag(block, 'marca') || tag(block, 'fabricante') || '';
-        const modelo = tag(block, 'modelo') || tag(block, 'nome') || '';
-        if (!marca && !modelo) continue;
+        // Tag <descricao> é a fonte da verdade do nome
+        const descricao = tag(block, 'descricao') || '';
+        const { marca, modelo, versao } = parseDescription(descricao);
 
-        const versao = tag(block, 'versao') || tag(block, 'versão') || undefined;
+        // Se nem da descrição conseguimos extrair, pula (lead vazio é pior do que sem lead)
+        if (!marca || !modelo) continue;
+
         const anoStr = tag(block, 'ano') || tag(block, 'anoModelo');
         const anoFabStr = tag(block, 'anoFabricacao') || tag(block, 'ano_fabricacao');
-        const preco = asNumber(tag(block, 'preco') || tag(block, 'preço') || tag(block, 'valor'));
+        // Altimus usa <valor>, não <preco>
+        const preco = asNumber(tag(block, 'valor') || tag(block, 'preco') || tag(block, 'preço'));
         const km = asInt(tag(block, 'km') || tag(block, 'quilometragem'));
         const cambio = tag(block, 'cambio') || tag(block, 'câmbio') || undefined;
         const combustivel = tag(block, 'combustivel') || tag(block, 'combustível') || undefined;
         const cor = tag(block, 'cor') || undefined;
+        // Altimus normalmente não traz link no feed, mas mantemos como opcional
         const link = tag(block, 'link') || tag(block, 'url') || undefined;
+        // ID interno pra compor link Altimus se quisermos no futuro
+        const idInterno = tag(block, 'id');
 
         out.push({
-            marca: marca.trim(),
-            modelo: modelo.trim(),
-            versao: versao || undefined,
+            marca,
+            modelo,
+            versao,
             ano: asInt(anoStr) || null,
             anoFabricacao: asInt(anoFabStr) || null,
             preco,
@@ -129,7 +160,7 @@ function parseAltimusXml(xml: string): AltimusVehicle[] {
             cambio: cambio || undefined,
             combustivel: combustivel || undefined,
             cor: cor || undefined,
-            link: link || undefined,
+            link: link || (idInterno ? `https://manosveiculos.com.br/veiculo/${idInterno}` : undefined),
         });
     }
     return out;
