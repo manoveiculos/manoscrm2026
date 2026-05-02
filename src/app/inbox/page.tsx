@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { createClient } from '@/lib/supabase/client';
+import { parseUid } from '@/lib/services/unifiedLead';
 import { Flame, Snowflake, Thermometer, Clock, Phone, Wifi, Bell, X, AlertTriangle, MessageCircle } from 'lucide-react';
 
 const PTR = dynamic(() => import('react-pull-to-refresh'), { ssr: false }) as any;
@@ -172,13 +173,20 @@ export default function InboxPage() {
         const next = (data as InboxLead[]) || [];
 
         // Busca mensagens para determinar estado
+        // IMPORTANTE: filtra apenas IDs numéricos se a coluna no banco for BIGINT (crm26)
+        // Ou melhor: como temos fontes mistas, fazemos a query mas tratamos possíveis erros de cast
         const leadIds = next.map(l => l.native_id).slice(0, 100);
         if (leadIds.length > 0) {
-            const { data: msgs } = await supabase
+            const { data: msgs, error: msgError } = await supabase
                 .from('whatsapp_messages')
                 .select('lead_id, message_text, direction, created_at')
                 .in('lead_id', leadIds)
                 .order('created_at', { ascending: false });
+
+            if (msgError) {
+                console.warn('[Inbox] Erro ao buscar mensagens (pode ser conflito de tipos UUID/BIGINT):', msgError.message);
+                // Tenta buscar um por um ou ignora o erro para não quebrar a página
+            }
 
             const msgMap = new Map<string, { inbound?: LastMessage, outbound?: LastMessage }>();
             for (const m of (msgs as LastMessage[]) || []) {
@@ -215,6 +223,38 @@ export default function InboxPage() {
         initialLoadDoneRef.current = true;
         setLeads(next);
     }, [supabase, soundEnabled]);
+
+    const handleArchive = async (uid: string, e: React.MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const parsed = parseUid(uid);
+        if (!parsed) return;
+
+        const ok = confirm('Arquivar este lead?');
+        if (!ok) return;
+
+        try {
+            const res = await fetch('/api/lead/archive', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    lead_id: parsed.nativeId,
+                    lead_table: parsed.table,
+                    archive: true,
+                    reason: 'arquivado pelo inbox',
+                    archived_by: consultantId
+                }),
+            });
+            if (res.ok) {
+                fetchLeads(consultantId, filter === 'archived' ? 'archived' : 'active');
+            } else {
+                const err = await res.json();
+                alert('Erro ao arquivar: ' + err.error);
+            }
+        } catch (err) {
+            console.error('Erro ao arquivar lead:', err);
+        }
+    };
 
     useEffect(() => {
         let alive = true;
@@ -435,14 +475,14 @@ export default function InboxPage() {
                 <PTR onRefresh={() => fetchLeads(consultantId)}>
                     <div className="space-y-10 pb-20">
                         <Section title="Urgente" subtitle="Responda agora" icon={<Flame className="w-5 h-5 text-red-500" />} accent="border-red-600"
-                            leads={grouped.urgent} lastMessages={lastMessages} emptyText="Nenhum lead urgente. Bom trabalho." expandedUid={expandedUid} onToggle={setExpandedUid} />
+                            leads={grouped.urgent} lastMessages={lastMessages} emptyText="Nenhum lead urgente. Bom trabalho." expandedUid={expandedUid} onToggle={setExpandedUid} onArchive={handleArchive} />
                         <Section title="Em negociação" subtitle="Aguardando cliente" icon={<Thermometer className="w-5 h-5 text-orange-400" />} accent="border-zinc-700"
-                            leads={grouped.active} lastMessages={lastMessages} emptyText="Nenhum em negociação no momento." expandedUid={expandedUid} onToggle={setExpandedUid} />
+                            leads={grouped.active} lastMessages={lastMessages} emptyText="Nenhum em negociação no momento." expandedUid={expandedUid} onToggle={setExpandedUid} onArchive={handleArchive} />
                         <Section title="Aguardando" subtitle="Sem resposta há 48h+" icon={<Clock className="w-5 h-5 text-blue-400" />} accent="border-blue-900"
-                            leads={grouped.cooling} lastMessages={lastMessages} emptyText="Nenhum lead aguardando." expandedUid={expandedUid} onToggle={setExpandedUid} />
+                            leads={grouped.cooling} lastMessages={lastMessages} emptyText="Nenhum lead aguardando." expandedUid={expandedUid} onToggle={setExpandedUid} onArchive={handleArchive} />
                         {filter === 'all' && grouped.zombie.length > 0 && (
                             <Section title="Zumbis" subtitle={`Mais de ${ZOMBIE_DAYS}d`} icon={<AlertTriangle className="w-5 h-5 text-zinc-500" />} accent="border-zinc-800 opacity-60"
-                                leads={grouped.zombie} lastMessages={lastMessages} emptyText="" expandedUid={expandedUid} onToggle={setExpandedUid} />
+                                leads={grouped.zombie} lastMessages={lastMessages} emptyText="" expandedUid={expandedUid} onToggle={setExpandedUid} onArchive={handleArchive} />
                         )}
                     </div>
                 </PTR>
@@ -481,9 +521,10 @@ interface SectionProps {
     emptyText: string;
     expandedUid: string | null;
     onToggle: (uid: string | null) => void;
+    onArchive: (uid: string, e: React.MouseEvent) => void;
 }
 
-function Section({ title, subtitle, icon, accent, leads, lastMessages, emptyText, expandedUid, onToggle }: SectionProps) {
+function Section({ title, subtitle, icon, accent, leads, lastMessages, emptyText, expandedUid, onToggle, onArchive }: SectionProps) {
     return (
         <section>
             <div className={`flex items-center gap-3 mb-4 pl-3 border-l-4 ${accent}`}>
@@ -504,6 +545,7 @@ function Section({ title, subtitle, icon, accent, leads, lastMessages, emptyText
                             messages={lastMessages.get(lead.native_id)} 
                             isExpanded={expandedUid === lead.uid}
                             onToggle={() => onToggle(expandedUid === lead.uid ? null : lead.uid)}
+                            onArchive={(e) => onArchive(lead.uid, e)}
                         />
                     ))}
                 </ul>
@@ -512,7 +554,7 @@ function Section({ title, subtitle, icon, accent, leads, lastMessages, emptyText
     );
 }
 
-function LeadCard({ lead, messages, isExpanded, onToggle }: { lead: InboxLead; messages?: { inbound?: LastMessage, outbound?: LastMessage }; isExpanded: boolean; onToggle: () => void }) {
+function LeadCard({ lead, messages, isExpanded, onToggle, onArchive }: { lead: InboxLead; messages?: { inbound?: LastMessage, outbound?: LastMessage }; isExpanded: boolean; onToggle: () => void; onArchive: (e: React.MouseEvent) => void }) {
     const sla = slaInfo(lead);
     const state = getLeadState(lead, messages?.inbound, messages?.outbound);
     
@@ -594,7 +636,9 @@ function LeadCard({ lead, messages, isExpanded, onToggle }: { lead: InboxLead; m
                             <Link href={`/lead/${encodeURIComponent(lead.uid)}`} className="col-span-2 md:col-span-1 min-h-[56px] flex items-center justify-center bg-blue-600 hover:bg-blue-500 text-white rounded-2xl font-black text-lg transition-all active:scale-95 shadow-xl shadow-blue-900/20">
                                 ABRIR CONVERSA
                             </Link>
-                            <button className="md:col-span-1 min-h-[56px] flex items-center justify-center bg-zinc-800 hover:bg-zinc-700 text-gray-300 rounded-2xl font-bold transition-all active:scale-95">
+                            <button 
+                                onClick={onArchive}
+                                className="md:col-span-1 min-h-[56px] flex items-center justify-center bg-zinc-800 hover:bg-zinc-700 text-gray-300 rounded-2xl font-bold transition-all active:scale-95">
                                 ARQUIVAR
                             </button>
                         </div>

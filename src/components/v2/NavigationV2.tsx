@@ -47,6 +47,7 @@ const NAV_ITEMS: NavItem[] = [
     { label: 'Consultores', icon: Shield, href: '/admin/users', adminOnly: true },
     { label: 'Saúde', icon: Activity, href: '/admin/health', adminOnly: true },
     { label: 'SDR Bench', icon: Bot, href: '/admin/sdr-bench', adminOnly: true },
+    { label: 'War Room', icon: Activity, href: '/admin/live', adminOnly: true },
     { label: 'Configurações', icon: SlidersHorizontal, href: '/admin/config', adminOnly: true },
 ];
 

@@ -77,3 +77,6 @@ skills/
 skills-lock.json
 tmp/
 sync_errors.log
+scratch/
+
+fix_db_errors.sql

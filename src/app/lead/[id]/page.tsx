@@ -128,12 +128,16 @@ export default function LeadDetailPage() {
             setLead(lead);
             setSoldVehicle(lead?.vehicle_interest || '');
 
-            const { data: msgs } = await supabase
+            const { data: msgs, error: msgError } = await supabase
                 .from('whatsapp_messages')
                 .select('id, direction, message_text, created_at')
                 .eq('lead_id', leadId)
                 .order('created_at', { ascending: false })
                 .limit(30);
+            
+            if (msgError) {
+                console.warn('[LeadDetail] Erro ao buscar mensagens:', msgError.message);
+            }
             if (alive) setMessages((msgs || []).reverse());
 
             // Resolve nome do consultor logado pra usar nas mensagens prontas

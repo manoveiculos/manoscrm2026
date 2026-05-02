@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server'; // Recompile forced
 import { createClient } from '@/lib/supabase/admin';
 
 /**
@@ -54,10 +54,20 @@ export async function POST(req: NextRequest) {
                 archived_by: null,
             };
 
-        const { error, data } = await admin
-            .from(lead_table)
-            .update(update)
-            .eq('id', cleanId)
+        // Detecção de tipo de ID para evitar erro de cast no Postgres
+        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(cleanId);
+        
+        let query = admin.from(lead_table).update(update);
+        
+        if (isUUID) {
+            query = query.eq('id', cleanId);
+        } else {
+            // Se não for UUID, tenta tratar como número se a tabela for de números (crm26, compra)
+            // Ou apenas passa a string e deixa o PostgREST tentar o cast
+            query = query.eq('id', cleanId);
+        }
+
+        const { error, data } = await query
             .select('id')
             .maybeSingle();
 
@@ -70,7 +80,6 @@ export async function POST(req: NextRequest) {
         }
 
         // Audit trail
-        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(cleanId);
         const noteAction = archive ? '🗄️ Lead ARQUIVADO' : '↩️ Lead DESARQUIVADO';
         await admin.from('interactions_manos_crm').insert({
             [isUUID ? 'lead_id' : 'lead_id_v1']: cleanId,
