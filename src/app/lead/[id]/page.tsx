@@ -336,66 +336,97 @@ export default function LeadDetailPage() {
                     )}
                 </aside>
 
-                {/* Centro — conversa */}
-                <section className="md:col-span-6 bg-zinc-900 rounded-lg p-3 md:p-4 flex flex-col min-w-0" style={{ maxHeight: '75vh' }}>
-                    <div className="flex items-center justify-between mb-2 gap-2">
-                        <h3 className="text-sm font-semibold text-gray-300 flex items-center gap-2">
-                            <MessageSquare className="w-4 h-4" /> Conversa WhatsApp
-                        </h3>
-                        <CannedResponses
-                            ctx={{
-                                leadFirstName: (lead.name || '').trim().split(/\s+/)[0] || '',
-                                vehicleInterest: lead.vehicle_interest || '',
-                                consultantFirstName: (consultantName || '').trim().split(/\s+/)[0] || '',
-                                leadPhone: lead.phone || undefined,
-                            } as CannedContext}
-                        />
-                    </div>
-                    <div className="flex-1 overflow-y-auto space-y-2">
-                        {lead.ai_summary ? (
-                            <div className="mb-6 p-4 bg-zinc-800/80 border-l-4 border-emerald-500 rounded-r-lg shadow-lg relative group">
-                                <div className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider mb-1 flex items-center gap-1">
-                                    <MessageSquare className="w-3 h-3" /> Resumo Estratégico da IA
+                {/* Centro — conversa real + resumo IA empilhados */}
+                <section className="md:col-span-6 flex flex-col gap-3 min-w-0">
+                    {/* CONVERSA REAL */}
+                    <div className="bg-zinc-900 rounded-lg p-3 md:p-4 flex flex-col min-w-0" style={{ maxHeight: '50vh', minHeight: '300px' }}>
+                        <div className="flex items-center justify-between mb-2 gap-2">
+                            <h3 className="text-sm font-semibold text-gray-300 flex items-center gap-2">
+                                <MessageSquare className="w-4 h-4" /> Conversa WhatsApp
+                                {messages.length > 0 && (
+                                    <span className="text-[10px] font-mono text-gray-500 bg-zinc-800 px-1.5 py-0.5 rounded">
+                                        {messages.length} msg{messages.length !== 1 ? 's' : ''}
+                                    </span>
+                                )}
+                            </h3>
+                            <CannedResponses
+                                ctx={{
+                                    leadFirstName: (lead.name || '').trim().split(/\s+/)[0] || '',
+                                    vehicleInterest: lead.vehicle_interest || '',
+                                    consultantFirstName: (consultantName || '').trim().split(/\s+/)[0] || '',
+                                    leadPhone: lead.phone || undefined,
+                                } as CannedContext}
+                            />
+                        </div>
+                        <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+                            {messages.length === 0 ? (
+                                <div className="h-full flex flex-col items-center justify-center text-center py-8 px-4">
+                                    <MessageSquare className="w-10 h-10 text-zinc-700 mb-3" />
+                                    <p className="text-sm text-gray-500 mb-1">Nenhuma conversa registrada ainda</p>
+                                    <p className="text-xs text-gray-600 mb-4">
+                                        Quando o cliente responder ou você mandar a primeira msg, ela aparece aqui em tempo real.
+                                    </p>
+                                    {lead.phone && (
+                                        <a
+                                            href={`https://wa.me/${lead.phone.replace(/\D/g, '')}`}
+                                            target="_blank" rel="noreferrer"
+                                            className="text-xs px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded font-medium"
+                                        >
+                                            Iniciar conversa no WhatsApp
+                                        </a>
+                                    )}
                                 </div>
-                                <p className="text-gray-100 text-sm leading-relaxed whitespace-pre-line break-words mb-2">
-                                    {lead.ai_summary}
-                                </p>
-                                <button 
-                                    onClick={handleAnalyze}
-                                    disabled={analyzing}
-                                    className="md:absolute md:top-2 md:right-2 text-[10px] bg-zinc-700 hover:bg-zinc-600 text-gray-300 px-3 py-1.5 rounded md:opacity-0 md:group-hover:opacity-100 transition-opacity disabled:opacity-50 mt-2 md:mt-0 flex items-center gap-1.5 w-full md:w-auto justify-center"
-                                >
-                                    <Activity size={10} />
-                                    {analyzing ? 'Analisando...' : 'Atualizar Resumo'}
-                                </button>
-                            </div>
-                        ) : (
-                            messages.length > 0 && (
-                                <div className="mb-6 p-4 bg-blue-900/20 border border-dashed border-blue-700 rounded-lg text-center">
-                                    <p className="text-sm text-blue-300 mb-2">Gostaria de um resumo estratégico desta conversa?</p>
-                                    <button 
-                                        onClick={handleAnalyze}
-                                        disabled={analyzing}
-                                        className="bg-blue-600 hover:bg-blue-500 text-white text-xs px-4 py-2 rounded-full font-medium transition-all"
+                            ) : (
+                                messages.map(m => (
+                                    <div
+                                        key={m.id}
+                                        className={`text-sm p-2 rounded max-w-[90%] md:max-w-[85%] break-words ${
+                                            m.direction === 'inbound'
+                                                ? 'bg-zinc-800 text-gray-100'
+                                                : 'bg-blue-900/40 text-blue-100 ml-auto'
+                                        }`}
                                     >
-                                        {analyzing ? 'Analisando...' : '✨ Gerar Resumo com IA'}
-                                    </button>
-                                </div>
-                            )
-                        )}
+                                        <div className="flex items-center gap-1.5 mb-1">
+                                            <span className="text-[10px] font-bold uppercase tracking-wide opacity-70">
+                                                {m.direction === 'inbound' ? '👤 Cliente' : '🟢 Loja/IA'}
+                                            </span>
+                                        </div>
+                                        {m.message_text}
+                                        <div className="text-[10px] text-gray-500 mt-1">
+                                            {new Date(m.created_at).toLocaleString('pt-BR')}
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </div>
 
-                        {messages.length === 0 ? (
-                            <p className="text-sm text-gray-500">Nenhuma mensagem ainda.</p>
+                    {/* RESUMO IA — bloco separado, abaixo da conversa */}
+                    <div className="bg-zinc-900 rounded-lg p-3 md:p-4 border-l-4 border-emerald-500 min-w-0">
+                        <div className="flex items-center justify-between mb-2 gap-2">
+                            <h3 className="text-sm font-semibold text-emerald-400 flex items-center gap-2">
+                                🧠 Resumo Estratégico da IA
+                            </h3>
+                            <button
+                                onClick={handleAnalyze}
+                                disabled={analyzing}
+                                className="text-[10px] bg-zinc-800 hover:bg-zinc-700 text-gray-300 px-3 py-1.5 rounded disabled:opacity-50 flex items-center gap-1.5"
+                            >
+                                <Activity className="w-3 h-3" />
+                                {analyzing ? 'Analisando…' : (lead.ai_summary ? 'Atualizar análise' : 'Gerar análise')}
+                            </button>
+                        </div>
+                        {lead.ai_summary ? (
+                            <p className="text-gray-100 text-sm leading-relaxed whitespace-pre-line break-words">
+                                {lead.ai_summary}
+                            </p>
                         ) : (
-                            messages.map(m => (
-                                <div
-                                    key={m.id}
-                                    className={`text-sm p-2 rounded max-w-[90%] md:max-w-[85%] break-words ${m.direction === 'inbound' ? 'bg-zinc-800 text-gray-100' : 'bg-blue-900/40 text-blue-100 ml-auto'}`}
-                                >
-                                    {m.message_text}
-                                    <div className="text-[10px] text-gray-500 mt-1">{new Date(m.created_at).toLocaleString('pt-BR')}</div>
-                                </div>
-                            ))
+                            <p className="text-sm text-gray-500 italic">
+                                Nenhuma análise gerada ainda.
+                                {messages.length === 0
+                                    ? ' Aguarde mensagens do cliente pra gerar contexto.'
+                                    : ' Clique em "Gerar análise" pra IA estudar a conversa.'}
+                            </p>
                         )}
                     </div>
                 </section>
