@@ -1,13 +1,13 @@
 /**
- * Manos CRM v2.1 - Background Service Worker
- * Handles: API proxying, chrome.alarms for new-leads polling, tab management
+ * Manos CRM v2.3.0 - Background Service Worker
+ * Handles: API proxying, chrome.alarms for new-leads polling, heartbeat tracking
  */
 
 // Regex para validar UUID
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 chrome.runtime.onInstalled.addListener(() => {
-    console.log("Manos CRM v2.1 Ready!");
+    console.log("Manos CRM v2.3.0 Ready!");
     chrome.alarms.create('poll-new-leads', { periodInMinutes: 1 });
     // Limpar cache antigo de leads ao instalar/atualizar
     chrome.storage.local.remove(['pendingLeads', 'pendingLeadsCount']);

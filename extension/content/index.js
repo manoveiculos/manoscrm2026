@@ -26,14 +26,27 @@ const App = {
     },
 
     async init() {
-        console.log('Manos CRM v2.1: Iniciando...');
+        console.log('Manos CRM v2.3.0: Iniciando…');
         const s = await chrome.storage.local.get(['crmToken', 'crmConsultantEmail', 'crmConsultantName', 'pendingLeadsCount', 'pendingLeads']);
 
         this.baseUrl = 'https://manoscrm.com.br';
         this.apiToken = s.crmToken || '';
         this.consultantEmail = s.crmConsultantEmail || '';
         this.consultantName = s.crmConsultantName || '';
-        console.log('Manos CRM v2.1: API ->', this.API_BASE, 'Consultor:', this.consultantName || this.consultantEmail);
+
+        const consultorIdent = this.consultantName || this.consultantEmail;
+        if (consultorIdent) {
+            console.log(`Manos CRM v2.3.0: Consultor identificado → ${consultorIdent}`);
+        } else {
+            console.warn(
+                '⚠️ Manos CRM v2.3.0: CONSULTOR NÃO IDENTIFICADO.\n' +
+                'Heartbeat (tracking ao vivo) e atribuição de mensagens NÃO vão funcionar.\n' +
+                '👉 Clica no ícone da extensão → preencha "Email" e "Nome" → Salvar → recarregue esta aba.'
+            );
+        }
+        if (!this.apiToken) {
+            console.error('❌ Manos CRM v2.3.0: TOKEN AUSENTE. Clica no popup da extensão e cola o token.');
+        }
 
         // Inicializar UI
         UI.init();
@@ -116,6 +129,13 @@ const App = {
      */
     _sendHeartbeat(phone, action, reason) {
         if (!phone) return;
+        // Sem identificação do consultor o backend nem aceita; evita request inútil.
+        if (!this.consultantEmail && !this.consultantName) {
+            if (action === 'opened') {
+                console.warn('Manos CRM: heartbeat ignorado — consultor não configurado no popup.');
+            }
+            return;
+        }
         const body = {
             consultant_email: this.consultantEmail || undefined,
             consultant_name: this.consultantName || undefined,
@@ -133,7 +153,11 @@ const App = {
                 headers: this.authHeaders(),
                 body: JSON.stringify(body),
             }
-        }, () => { /* fire-and-forget */ });
+        }, (response) => {
+            if (response && response.success === false) {
+                console.warn(`Manos CRM: heartbeat ${action} falhou →`, response.error);
+            }
+        });
     },
 
     _startHeartbeat(phone, name) {
