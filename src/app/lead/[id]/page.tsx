@@ -79,6 +79,7 @@ export default function LeadDetailPage() {
     const [analyzing, setAnalyzing] = useState(false);
     const [consultantName, setConsultantName] = useState<string>('');
     const [showConfetti, setShowConfetti] = useState(false);
+    const [loadError, setLoadError] = useState<string | null>(null);
 
     const [showSold, setShowSold] = useState(false);
     const [showLost, setShowLost] = useState(false);
@@ -103,14 +104,40 @@ export default function LeadDetailPage() {
         let alive = true;
         async function load() {
             // Lê da view unificada — funciona para qualquer tabela origem
-            const { data: l } = await supabase
-                .from('leads_unified')
-                .select('uid, table_name, native_id, name, phone, vehicle_interest, source, ai_score, ai_classification, status, proxima_acao, assigned_consultant_id, ai_summary')
-                .eq('table_name', leadTable)
-                .eq('native_id', leadId)
-                .maybeSingle();
+            // Se a view não tiver alguma coluna nova (caso após migration falha),
+            // tentamos primeiro com ai_summary e fazemos retry sem ele.
+            const COLS_FULL = 'uid, table_name, native_id, name, phone, vehicle_interest, source, ai_score, ai_classification, status, proxima_acao, assigned_consultant_id, ai_summary';
+            const COLS_FALLBACK = 'uid, table_name, native_id, name, phone, vehicle_interest, source, ai_score, ai_classification, status, proxima_acao, assigned_consultant_id';
+
+            let l: any = null;
+            let queryError: string | null = null;
+            const tryQuery = async (cols: string) =>
+                supabase.from('leads_unified')
+                    .select(cols)
+                    .eq('table_name', leadTable)
+                    .eq('native_id', leadId)
+                    .maybeSingle();
+
+            const r1 = await tryQuery(COLS_FULL);
+            if (r1.error) {
+                console.warn('[LeadDetail] view sem ai_summary, tentando fallback:', r1.error.message);
+                const r2 = await tryQuery(COLS_FALLBACK);
+                if (r2.error) {
+                    queryError = r2.error.message;
+                } else {
+                    l = r2.data;
+                }
+            } else {
+                l = r1.data;
+            }
 
             if (!alive) return;
+            if (queryError) {
+                setLoadError(`Erro ao buscar lead: ${queryError}`);
+                setLoading(false);
+                return;
+            }
+
             const lead: Lead | null = l ? {
                 id: l.native_id,
                 name: l.name,
@@ -124,7 +151,7 @@ export default function LeadDetailPage() {
                 last_scripts_json: null,
                 valor_investimento: null,
                 assigned_consultant_id: l.assigned_consultant_id,
-                ai_summary: l.ai_summary,
+                ai_summary: l.ai_summary ?? null,
             } : null;
             setLead(lead);
             setSoldVehicle(lead?.vehicle_interest || '');
@@ -309,7 +336,46 @@ export default function LeadDetailPage() {
     }
 
     if (loading) return <div className="p-6 text-gray-400">Carregando…</div>;
-    if (!lead) return <div className="p-6 text-gray-400">Lead não encontrado.</div>;
+    if (loadError) {
+        return (
+            <div className="p-6 max-w-2xl mx-auto">
+                <button onClick={() => router.push('/inbox')} className="text-sm text-gray-400 hover:text-white flex items-center gap-1 mb-3">
+                    <ArrowLeft className="w-4 h-4" /> Voltar
+                </button>
+                <div className="bg-red-900/30 border border-red-800 rounded-lg p-5">
+                    <h2 className="text-lg font-bold text-red-300 mb-2">Erro ao carregar lead</h2>
+                    <p className="text-sm text-red-100 mb-3">{loadError}</p>
+                    <p className="text-xs text-gray-400">
+                        UID solicitado: <code className="bg-zinc-900 px-2 py-0.5 rounded">{leadTable}:{leadId}</code>
+                    </p>
+                    <p className="text-xs text-gray-400 mt-2">
+                        Se o erro mencionar coluna inexistente, aplique a última migration SQL no Supabase
+                        (<code>20260505_view_add_ai_summary.sql</code>).
+                    </p>
+                    <button
+                        onClick={() => window.location.reload()}
+                        className="mt-3 text-xs bg-zinc-800 hover:bg-zinc-700 text-gray-200 px-3 py-1.5 rounded"
+                    >
+                        Tentar novamente
+                    </button>
+                </div>
+            </div>
+        );
+    }
+    if (!lead) return (
+        <div className="p-6 max-w-2xl mx-auto">
+            <button onClick={() => router.push('/inbox')} className="text-sm text-gray-400 hover:text-white flex items-center gap-1 mb-3">
+                <ArrowLeft className="w-4 h-4" /> Voltar
+            </button>
+            <div className="bg-zinc-900 rounded-lg p-5 border border-zinc-800">
+                <h2 className="text-lg font-bold text-gray-300 mb-1">Lead não encontrado</h2>
+                <p className="text-sm text-gray-400">Esse UID não existe mais ou foi arquivado.</p>
+                <p className="text-xs text-gray-500 mt-2">
+                    UID: <code className="bg-zinc-950 px-2 py-0.5 rounded">{leadTable}:{leadId}</code>
+                </p>
+            </div>
+        </div>
+    );
 
     return (
         <div className="p-2 md:p-4 max-w-7xl mx-auto w-full overflow-x-hidden">
