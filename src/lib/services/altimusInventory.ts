@@ -65,11 +65,48 @@ function tag(block: string, name: string): string | null {
     return decodeXmlEntities(content).trim();
 }
 
+/**
+ * Parse de número que detecta formato BR vs US.
+ *   BR:  "67.900,00"  → ponto = milhar, vírgula = decimal
+ *   US:  "93900.0"    → ponto = decimal (Altimus usa esse)
+ *   Bug histórico: replace(/\./g, '') destruía decimal US transformando 93900.0 em 939000.
+ */
 function asNumber(s: string | null): number | null {
     if (!s) return null;
-    // Aceita "67.900,00" / "67900" / "67900.50"
-    const cleaned = s.replace(/\./g, '').replace(',', '.').replace(/[^\d.\-]/g, '');
-    const n = Number(cleaned);
+    const trimmed = s.trim();
+    if (!trimmed) return null;
+
+    // Remove tudo que não é dígito, ponto, vírgula ou sinal
+    const cleaned = trimmed.replace(/[^\d.,\-]/g, '');
+    if (!cleaned) return null;
+
+    const hasComma = cleaned.includes(',');
+    const dotCount = (cleaned.match(/\./g) || []).length;
+
+    let normalized: string;
+    if (hasComma) {
+        // Formato BR: pontos são milhar, vírgula é decimal → remove pontos, vírgula vira ponto
+        normalized = cleaned.replace(/\./g, '').replace(',', '.');
+    } else if (dotCount === 1) {
+        // 1 ponto sem vírgula:
+        //   "93900.0"   → US decimal (mantém)
+        //   "12.500"    → BR sem decimais explícitos (3 dígitos depois) → milhar (multiplica por 1)
+        // Heurística: se há 3 dígitos APÓS o ponto, é separador de milhar (formato BR);
+        //             senão é decimal US/internacional.
+        const afterDot = cleaned.split('.')[1] || '';
+        if (afterDot.length === 3 && /^\d+$/.test(afterDot)) {
+            normalized = cleaned.replace(/\./g, ''); // BR milhar
+        } else {
+            normalized = cleaned; // US decimal — mantém o ponto
+        }
+    } else if (dotCount >= 2) {
+        // Múltiplos pontos = separadores de milhar (BR sem vírgula)
+        normalized = cleaned.replace(/\./g, '');
+    } else {
+        normalized = cleaned;
+    }
+
+    const n = Number(normalized);
     return Number.isFinite(n) && n > 0 ? n : null;
 }
 

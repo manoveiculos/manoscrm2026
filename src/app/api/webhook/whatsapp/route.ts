@@ -137,18 +137,38 @@ export async function POST(req: NextRequest) {
             }
         } else if (existingLead) {
             // BOIA: toda msg inbound atualiza atualizado_em → lead sobe pro topo do /inbox
-            // Se status era final (post_sale/lost), ressuscita pra received
+            // V3: cliente respondeu → marca respondeu_follow_up + status atendimento_manual
+            //     pra IA NÃO mandar mais follow-ups automáticos.
             const isFinal = existingLead.status === 'post_sale' || existingLead.status === 'lost' ||
-                            existingLead.status === 'vendido' || existingLead.status === 'perdido';
+                            existingLead.status === 'vendido' || existingLead.status === 'perdido' ||
+                            existingLead.status === 'frio';
+            const now = new Date().toISOString();
             const updates: Record<string, any> = {
-                atualizado_em: new Date().toISOString(),
+                atualizado_em: now,
+                respondeu_follow_up: true,             // V3: trava IA
+                atendimento_manual_at: now,            // V3: vendedor assume agora
             };
-            if (isFinal) updates.status = 'received';
+            // Status:
+            //   - se era frio/lost/vendido → ressuscita pra received (cliente voltou)
+            //   - se era received/triagem → mantém status mas marca atendimento_manual
+            if (isFinal) {
+                updates.status = 'received';
+            } else if (existingLead.status === 'received' || existingLead.status === 'triagem') {
+                updates.status = 'attempt'; // vendedor agora tem que tentar fechar
+            }
 
             await supabase
                 .from('leads_distribuicao_crm_26')
                 .update(updates)
                 .eq('id', leadId);
+
+            // V3: marca histórico de follow-up como respondido
+            await supabase
+                .from('historico_followup')
+                .update({ respondido_em: now, resposta_cliente: messageText })
+                .eq('lead_id', String(leadId))
+                .is('respondido_em', null)
+                .then(null, () => {});
         }
 
         // 3. Salva a mensagem no histórico (nova tabela whatsapp_messages)

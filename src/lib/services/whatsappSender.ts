@@ -28,6 +28,10 @@ const EVOLUTION_BASE = process.env.EVOLUTION_BASE_URL;
 const EVOLUTION_INSTANCE = process.env.EVOLUTION_INSTANCE_NAME;
 const EVOLUTION_TOKEN = process.env.EVOLUTION_INSTANCE_TOKEN;
 
+// Instância separada pra FOLLOW-UP (anti-ban: separa tráfego do SDR e do reengajamento)
+const EVOLUTION_FOLLOWUP_INSTANCE = process.env.EVOLUTION_FOLLOWUP_INSTANCE;
+const EVOLUTION_FOLLOWUP_TOKEN = process.env.EVOLUTION_FOLLOWUP_TOKEN;
+
 export type SendKind = 'ai_first_contact' | 'ai_followup' | 'vendor_alert' | 'manual';
 
 export interface SendArgs {
@@ -38,6 +42,14 @@ export interface SendArgs {
     consultantId?: string;
     /** Ignora dedup (use só se souber o que está fazendo). */
     skipDedup?: boolean;
+    /**
+     * Override da instância Evolution. Usado por follow-up pra rodar numa
+     * instância separada do AI SDR (anti-ban + tracking separado).
+     * Se não passar, usa default por kind:
+     *   - 'ai_followup' → EVOLUTION_FOLLOWUP_INSTANCE (se setado)
+     *   - resto → EVOLUTION_INSTANCE
+     */
+    evolutionInstance?: { name: string; token?: string };
 }
 
 export interface SendResult {
@@ -158,16 +170,33 @@ async function sendViaWebhook(to: string, text: string, kind: SendKind, meta: Re
     }
 }
 
-async function sendViaEvolutionAPI(to: string, text: string): Promise<SendResult> {
+async function sendViaEvolutionAPI(to: string, text: string, args: SendArgs): Promise<SendResult> {
     try {
-        if (!EVOLUTION_BASE || !EVOLUTION_INSTANCE || !EVOLUTION_TOKEN) {
+        if (!EVOLUTION_BASE) {
             return { ok: false, provider: 'evolution_api', error: 'config_missing' };
+        }
+
+        // Decide instância: override > followup (se kind=ai_followup) > default
+        let instanceName: string | undefined = args.evolutionInstance?.name;
+        let instanceToken: string | undefined = args.evolutionInstance?.token || EVOLUTION_TOKEN;
+
+        if (!instanceName) {
+            if (args.kind === 'ai_followup' && EVOLUTION_FOLLOWUP_INSTANCE) {
+                instanceName = EVOLUTION_FOLLOWUP_INSTANCE;
+                instanceToken = EVOLUTION_FOLLOWUP_TOKEN || EVOLUTION_TOKEN;
+            } else {
+                instanceName = EVOLUTION_INSTANCE;
+            }
+        }
+
+        if (!instanceName || !instanceToken) {
+            return { ok: false, provider: 'evolution_api', error: 'instance_or_token_missing' };
         }
 
         // Remove aspas se presentes nas envs
         const baseUrl = EVOLUTION_BASE.replace(/"/g, '').replace(/\/$/, '');
-        const instance = EVOLUTION_INSTANCE.replace(/"/g, '');
-        const token = EVOLUTION_TOKEN.replace(/"/g, '');
+        const instance = instanceName.replace(/"/g, '');
+        const token = instanceToken.replace(/"/g, '');
 
         const url = `${baseUrl}/message/sendText/${instance}`;
         const res = await fetch(url, {
@@ -214,8 +243,8 @@ export async function sendWhatsApp(args: SendArgs): Promise<SendResult> {
 
     if (CLOUD_TOKEN && CLOUD_PHONE_ID) {
         result = await sendViaCloudAPI(to, args.message);
-    } else if (EVOLUTION_BASE && EVOLUTION_INSTANCE && EVOLUTION_TOKEN) {
-        result = await sendViaEvolutionAPI(to, args.message);
+    } else if (EVOLUTION_BASE && (args.evolutionInstance || EVOLUTION_INSTANCE)) {
+        result = await sendViaEvolutionAPI(to, args.message, args);
     } else if (SEND_WEBHOOK) {
         result = await sendViaWebhook(to, args.message, args.kind, {
             lead_id: args.leadId,
