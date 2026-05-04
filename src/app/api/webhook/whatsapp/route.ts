@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { pickNextConsultant } from '@/lib/services/consultantService';
+import { scheduleFirstContact } from '@/lib/services/aiSdrService';
 
 // Handler para Verificação do Webhook (GET)
 export async function GET(req: NextRequest) {
@@ -114,6 +115,26 @@ export async function POST(req: NextRequest) {
             }
 
             leadId = newLead.id;
+
+            // 🤖 AI SDR — primeiro contato automático em ~30s
+            // Dispara só para leads NOVOS (existingLead == null), e só se nome
+            // for real (não placeholder "Lead WhatsApp").
+            // Cliente já mandou msg → IA responde rapidinho com contexto inicial.
+            const hasRealName = senderName && senderName.toLowerCase() !== 'lead whatsapp';
+            try {
+                scheduleFirstContact({
+                    leadId: String(leadId),
+                    leadName: hasRealName ? senderName : null,
+                    leadPhone: cleanPhone,
+                    vehicleInterest: null, // não temos da entrada inbound
+                    source: 'WhatsApp Ativo',
+                    consultantName: assignedName,
+                    flow: 'venda',
+                }, 'leads_distribuicao_crm_26', 30_000);
+                console.log(`[Webhook WA] AI SDR agendado para lead ${leadId} (${senderName})`);
+            } catch (sdrErr: any) {
+                console.error('[Webhook WA] Falha ao agendar AI SDR (não-bloqueante):', sdrErr?.message);
+            }
         } else if (existingLead) {
             // BOIA: toda msg inbound atualiza atualizado_em → lead sobe pro topo do /inbox
             // Se status era final (post_sale/lost), ressuscita pra received
