@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client';
 import { Trophy, X, CalendarPlus, ArrowLeft, MessageSquare, Activity, Archive } from 'lucide-react';
 import { parseUid } from '@/lib/services/unifiedLead';
 import CannedResponses, { CannedContext } from '@/components/CannedResponses';
+import FollowupHistory from '@/components/FollowupHistory';
 
 const ARCHIVE_REASONS = [
     { v: 'nao_e_lead', l: 'Spam / não é lead real' },
@@ -429,6 +430,9 @@ export default function LeadDetailPage() {
                             </p>
                         )}
                     </div>
+
+                    {/* HISTÓRICO DE FOLLOW-UP IA */}
+                    <FollowupHistory leadNativeId={leadId} />
                 </section>
 
                 {/* Direita — ações */}
