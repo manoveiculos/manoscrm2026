@@ -54,6 +54,24 @@ interface Lead {
     valor_investimento: string | null;
     assigned_consultant_id: string | null;
     ai_summary: string | null;
+    created_at: string | null;
+}
+
+function formatLeadEntryDate(iso: string | null): { date: string; time: string; ago: string } | null {
+    if (!iso) return null;
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return null;
+    const date = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const time = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    const diffMs = Date.now() - d.getTime();
+    const diffMin = Math.floor(diffMs / 60000);
+    let ago: string;
+    if (diffMin < 1) ago = 'agora há pouco';
+    else if (diffMin < 60) ago = `há ${diffMin} min`;
+    else if (diffMin < 60 * 24) ago = `há ${Math.floor(diffMin / 60)}h`;
+    else if (diffMin < 60 * 24 * 30) ago = `há ${Math.floor(diffMin / 60 / 24)}d`;
+    else ago = `há ${Math.floor(diffMin / 60 / 24 / 30)} meses`;
+    return { date, time, ago };
 }
 
 interface Message {
@@ -106,8 +124,8 @@ export default function LeadDetailPage() {
             // Lê da view unificada — funciona para qualquer tabela origem
             // Se a view não tiver alguma coluna nova (caso após migration falha),
             // tentamos primeiro com ai_summary e fazemos retry sem ele.
-            const COLS_FULL = 'uid, table_name, native_id, name, phone, vehicle_interest, source, ai_score, ai_classification, status, proxima_acao, assigned_consultant_id, ai_summary';
-            const COLS_FALLBACK = 'uid, table_name, native_id, name, phone, vehicle_interest, source, ai_score, ai_classification, status, proxima_acao, assigned_consultant_id';
+            const COLS_FULL = 'uid, table_name, native_id, name, phone, vehicle_interest, source, ai_score, ai_classification, status, proxima_acao, assigned_consultant_id, ai_summary, created_at';
+            const COLS_FALLBACK = 'uid, table_name, native_id, name, phone, vehicle_interest, source, ai_score, ai_classification, status, proxima_acao, assigned_consultant_id, created_at';
 
             let l: any = null;
             let queryError: string | null = null;
@@ -152,6 +170,7 @@ export default function LeadDetailPage() {
                 valor_investimento: null,
                 assigned_consultant_id: l.assigned_consultant_id,
                 ai_summary: l.ai_summary ?? null,
+                created_at: l.created_at ?? null,
             } : null;
             setLead(lead);
             setSoldVehicle(lead?.vehicle_interest || '');
@@ -393,6 +412,20 @@ export default function LeadDetailPage() {
                         <div><span className="text-gray-500">Origem:</span> {lead.source || '—'}</div>
                         <div><span className="text-gray-500">Score IA:</span> {lead.ai_score ?? 0}</div>
                         <div><span className="text-gray-500">Status:</span> {lead.status || 'novo'}</div>
+                        {(() => {
+                            const entry = formatLeadEntryDate(lead.created_at);
+                            return entry ? (
+                                <div className="pt-2 mt-2 border-t border-zinc-800">
+                                    <div className="text-[10px] text-gray-500 uppercase tracking-wide font-bold mb-0.5">
+                                        🕐 Lead recebido em
+                                    </div>
+                                    <div className="text-gray-200 text-sm font-medium">
+                                        {entry.date} <span className="text-gray-500">·</span> {entry.time}
+                                    </div>
+                                    <div className="text-[11px] text-gray-500 mt-0.5">{entry.ago}</div>
+                                </div>
+                            ) : null;
+                        })()}
                     </div>
 
                     {lead.proxima_acao && (
