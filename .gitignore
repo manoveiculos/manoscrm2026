@@ -80,3 +80,6 @@ sync_errors.log
 scratch/
 
 fix_db_errors.sql
+
+scripts/maintenance/
+scripts/

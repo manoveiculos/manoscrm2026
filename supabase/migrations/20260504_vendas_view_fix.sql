@@ -38,17 +38,24 @@ WITH all_sales AS (
 
     UNION ALL
 
-    -- 3. Vendas em sales_manos_crm (TODAS, sem deduplicação por enquanto)
+    -- 3. Vendas em sales_manos_crm (Prioritária para valor e nome)
     SELECT
         DATE(COALESCE(s.sale_date, s.created_at)) AS dia,
         COALESCE(s.lead_id::text, 'sale_' || s.id::text) AS lead_id,
         s.consultant_id,
-        COALESCE(s.consultant_name, 'Sem vendedor'),
+        COALESCE(l.name, s.consultant_name, 'Venda Registrada') AS lead_name,
         s.vehicle_name,
         COALESCE(s.sale_value, 0)::DECIMAL,
         'sales_manos_crm'
     FROM sales_manos_crm s
-    WHERE COALESCE(s.sale_date, s.created_at) IS NOT NULL
+    LEFT JOIN leads_manos_crm l ON l.id::text = s.lead_id::text
+    WHERE NOT EXISTS (
+        -- Evita duplicar se já contamos via status 'vendido' no mesmo dia
+        SELECT 1 FROM leads_manos_crm l2 
+        WHERE l2.id::text = s.lead_id::text 
+        AND LOWER(COALESCE(l2.status, '')) IN ('vendido', 'comprado', 'venda', 'closed', 'fechado', 'ganho')
+        AND DATE(COALESCE(l2.won_at, l2.updated_at, l2.created_at)) = DATE(COALESCE(s.sale_date, s.created_at))
+    )
 )
 SELECT
     dia,
@@ -73,7 +80,7 @@ WITH all_recent_sales AS (
         0::DECIMAL AS sale_value
     FROM leads_manos_crm l
     WHERE LOWER(COALESCE(l.status, '')) IN ('vendido', 'comprado', 'venda', 'closed', 'fechado', 'ganho')
-      AND COALESCE(l.won_at, l.updated_at) >= NOW() - INTERVAL '7 days'
+      AND DATE(COALESCE(l.won_at, l.updated_at, l.created_at)) >= DATE(NOW() - INTERVAL '7 days')
 
     UNION ALL
 
@@ -82,7 +89,13 @@ WITH all_recent_sales AS (
         COALESCE(s.lead_id::text, 'sale_' || s.id::text),
         COALESCE(s.sale_value, 0)::DECIMAL
     FROM sales_manos_crm s
-    WHERE COALESCE(s.sale_date, s.created_at) >= NOW() - INTERVAL '7 days'
+    WHERE DATE(COALESCE(s.sale_date, s.created_at)) >= DATE(NOW() - INTERVAL '7 days')
+      AND NOT EXISTS (
+        SELECT 1 FROM leads_manos_crm l2 
+        WHERE l2.id::text = s.lead_id::text 
+        AND LOWER(COALESCE(l2.status, '')) IN ('vendido', 'comprado', 'venda', 'closed', 'fechado', 'ganho')
+        AND DATE(COALESCE(l2.won_at, l2.updated_at, l2.created_at)) = DATE(COALESCE(s.sale_date, s.created_at))
+      )
 )
 SELECT
     c.id AS consultant_id,
@@ -104,7 +117,7 @@ WITH all_recent_sales AS (
         0::DECIMAL AS sale_value
     FROM leads_manos_crm l
     WHERE LOWER(COALESCE(l.status, '')) IN ('vendido', 'comprado', 'venda', 'closed', 'fechado', 'ganho')
-      AND COALESCE(l.won_at, l.updated_at) >= NOW() - INTERVAL '30 days'
+      AND DATE(COALESCE(l.won_at, l.updated_at, l.created_at)) >= DATE(NOW() - INTERVAL '30 days')
 
     UNION ALL
 
@@ -113,7 +126,13 @@ WITH all_recent_sales AS (
         COALESCE(s.lead_id::text, 'sale_' || s.id::text),
         COALESCE(s.sale_value, 0)::DECIMAL
     FROM sales_manos_crm s
-    WHERE COALESCE(s.sale_date, s.created_at) >= NOW() - INTERVAL '30 days'
+    WHERE DATE(COALESCE(s.sale_date, s.created_at)) >= DATE(NOW() - INTERVAL '30 days')
+      AND NOT EXISTS (
+        SELECT 1 FROM leads_manos_crm l2 
+        WHERE l2.id::text = s.lead_id::text 
+        AND LOWER(COALESCE(l2.status, '')) IN ('vendido', 'comprado', 'venda', 'closed', 'fechado', 'ganho')
+        AND DATE(COALESCE(l2.won_at, l2.updated_at, l2.created_at)) = DATE(COALESCE(s.sale_date, s.created_at))
+      )
 )
 SELECT
     c.id AS consultant_id,
@@ -130,14 +149,15 @@ ORDER BY vendas_30d DESC, faturamento_30d DESC;
 -- Validação final
 DO $$
 DECLARE
-    v_total INT;
+    v_total_dias INT;
+    v_total_vendas INT;
 BEGIN
-    SELECT COUNT(*) INTO v_total FROM vendas_por_dia;
-    RAISE NOTICE 'vendas_por_dia: % linhas (cada uma é um dia com venda)', v_total;
+    SELECT COUNT(*) INTO v_total_dias FROM vendas_por_dia;
+    RAISE NOTICE 'vendas_por_dia: % linhas (cada uma é um dia com venda)', v_total_dias;
 
-    SELECT COUNT(*) INTO v_total FROM vendas_por_dia WHERE dia >= NOW() - INTERVAL '30 days';
-    RAISE NOTICE 'vendas últimos 30 dias: % dias', v_total;
+    SELECT COUNT(*) INTO v_total_dias FROM vendas_por_dia WHERE dia >= DATE(NOW() - INTERVAL '30 days');
+    RAISE NOTICE 'vendas últimos 30 dias: % dias', v_total_dias;
 
-    SELECT SUM(vendas) INTO v_total FROM vendas_por_dia WHERE dia >= NOW() - INTERVAL '30 days';
-    RAISE NOTICE 'TOTAL DE VENDAS últimos 30 dias: %', v_total;
+    SELECT SUM(vendas) INTO v_total_vendas FROM vendas_por_dia WHERE dia >= DATE(NOW() - INTERVAL '30 days');
+    RAISE NOTICE 'TOTAL DE VENDAS últimos 30 dias: %', COALESCE(v_total_vendas, 0);
 END $$;

@@ -29,6 +29,7 @@ export async function GET(_req: NextRequest) {
         escRes,
         hotRes,
         consRes,
+        activeChatsRes,
     ] = await Promise.all([
         // 1. IA enviou pro CLIENTE
         admin.from('whatsapp_send_log')
@@ -78,6 +79,8 @@ export async function GET(_req: NextRequest) {
 
         admin.from('consultants_manos_crm')
             .select('id, name'),
+
+        admin.from('active_chats_now').select('*'),
     ]);
 
     // Consultor lookup
@@ -224,6 +227,19 @@ export async function GET(_req: NextRequest) {
         };
     });
 
+    // Atendimentos AO VIVO (extensão envia heartbeat)
+    const activeChats = ((activeChatsRes.data || []) as any[]).map(c => ({
+        id: c.id,
+        consultantName: c.consultant_name || consMap.get(c.consultant_id) || '—',
+        consultantId: c.consultant_id,
+        leadName: c.lead_name || '(contato sem nome)',
+        leadPhone: c.lead_phone,
+        leadUid: c.lead_id && c.lead_table ? `${c.lead_table}:${c.lead_id}` : null,
+        openedAt: c.opened_at,
+        atendendoHaSegundos: c.atendendo_ha_segundos || 0,
+        secDesdeHeartbeat: c.sec_desde_heartbeat || 0,
+    }));
+
     return NextResponse.json({
         ok: true,
         generated_at: new Date().toISOString(),
@@ -232,12 +248,14 @@ export async function GET(_req: NextRequest) {
         vendorAlerts,
         reassigned,
         hotLeads,
+        activeChats,
         kpis: {
             aiSentLast24h: aiSent.length,
             repliesLast24h: clientReplies.length,
             vendorAlertsLast24h: vendorAlerts.length,
             reassignedLast24h: reassigned.length,
             hotLeadsActive: hotLeads.length,
+            atendendoAgora: activeChats.length,
         },
     });
 }

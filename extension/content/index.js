@@ -13,6 +13,10 @@ const App = {
     currentNextSteps: null,
     isFetching: false,
     _pollInterval: null,
+    _heartbeatInterval: null,
+    _lastHeartbeatPhone: null,
+    consultantEmail: '',
+    consultantName: '',
 
     // Retorna headers padrão incluindo Authorization token
     authHeaders() {
@@ -23,11 +27,13 @@ const App = {
 
     async init() {
         console.log('Manos CRM v2.1: Iniciando...');
-        const s = await chrome.storage.local.get(['crmToken', 'pendingLeadsCount', 'pendingLeads']);
+        const s = await chrome.storage.local.get(['crmToken', 'crmConsultantEmail', 'crmConsultantName', 'pendingLeadsCount', 'pendingLeads']);
 
         this.baseUrl = 'https://manoscrm.com.br';
         this.apiToken = s.crmToken || '';
-        console.log('Manos CRM v2.1: API ->', this.API_BASE);
+        this.consultantEmail = s.crmConsultantEmail || '';
+        this.consultantName = s.crmConsultantName || '';
+        console.log('Manos CRM v2.1: API ->', this.API_BASE, 'Consultor:', this.consultantName || this.consultantEmail);
 
         // Inicializar UI
         UI.init();
@@ -72,21 +78,81 @@ const App = {
                 console.log('Manos CRM: novo chat ->', phone, name);
                 // Novo contato detectado — para polling anterior e limpa estado
                 this._stopLeadPolling();
+
+                // V3 LIVE TRACKING: avisa backend que vendedor mudou de chat
+                if (this._lastHeartbeatPhone) {
+                    this._sendHeartbeat(this._lastHeartbeatPhone, 'closed', 'switched_chat');
+                }
+                this._stopHeartbeat();
+
                 this.currentPhone = phone;
                 this.currentLeadId = null;
                 this.currentNextSteps = null;
                 UI.setLeadFound(false);
                 UI.setLoading();
                 await this.fetchLead(phone);
+
+                // Após fetchLead, dispara heartbeat 'opened' + agenda repetições
+                this._startHeartbeat(phone, name);
             }
         } else {
             // Sem telefone identificável — pode ser grupo ou tela inicial
             this._stopLeadPolling();
+            if (this._lastHeartbeatPhone) {
+                this._sendHeartbeat(this._lastHeartbeatPhone, 'closed', 'left_chat');
+            }
+            this._stopHeartbeat();
             this.currentPhone = null;
             this.currentLeadId = null;
             this.currentNextSteps = null;
             UI.setLeadFound(false);
         }
+    },
+
+    // ── V3 LIVE TRACKING (Heartbeat) ──────────────────
+    /**
+     * Envia heartbeat pro backend pra dashboard saber em tempo real
+     * quem está atendendo qual lead.
+     */
+    _sendHeartbeat(phone, action, reason) {
+        if (!phone) return;
+        const body = {
+            consultant_email: this.consultantEmail || undefined,
+            consultant_name: this.consultantName || undefined,
+            lead_phone: phone,
+            lead_id: this.currentLeadId || undefined,
+            lead_name: Scraper.getName() || undefined,
+            action,
+            reason,
+        };
+        chrome.runtime.sendMessage({
+            type: 'FETCH_DATA',
+            url: `${this.API_BASE}/heartbeat`,
+            options: {
+                method: 'POST',
+                headers: this.authHeaders(),
+                body: JSON.stringify(body),
+            }
+        }, () => { /* fire-and-forget */ });
+    },
+
+    _startHeartbeat(phone, name) {
+        this._stopHeartbeat();
+        this._lastHeartbeatPhone = phone;
+        // Dispara 'opened' imediatamente
+        this._sendHeartbeat(phone, 'opened', null);
+        // Repete a cada 30s enquanto chat estiver aberto
+        this._heartbeatInterval = setInterval(() => {
+            this._sendHeartbeat(this._lastHeartbeatPhone, 'heartbeat', null);
+        }, 30_000);
+    },
+
+    _stopHeartbeat() {
+        if (this._heartbeatInterval) {
+            clearInterval(this._heartbeatInterval);
+            this._heartbeatInterval = null;
+        }
+        this._lastHeartbeatPhone = null;
     },
 
     // ── Feedback de Score ────────────────────────────

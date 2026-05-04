@@ -181,6 +181,7 @@ export async function GET(req: NextRequest) {
                 blockingModals: 0,
                 reassigned: 0,
                 autoFinished: 0,
+                staleChatsClosed: 0,
                 errors: 0,
             };
             const [compra, venda] = await Promise.all([fetchLeadsCompra(), fetchLeadsVenda()]);
@@ -195,6 +196,24 @@ export async function GET(req: NextRequest) {
                     console.error('[sla-watcher] lead', lead.id, 'erro:', e?.message);
                 }
             }
+
+            // V3 LIVE: cleanup de chats stale (>5min sem heartbeat = vendedor fechou aba ou perdeu conexão)
+            try {
+                const admin = createClient();
+                const { data: stale } = await admin
+                    .from('consultant_active_chats')
+                    .update({
+                        closed_at: new Date().toISOString(),
+                        closed_reason: 'stale_timeout',
+                    })
+                    .is('closed_at', null)
+                    .lt('last_heartbeat_at', new Date(Date.now() - 5 * 60_000).toISOString())
+                    .select('id');
+                r.staleChatsClosed = (stale || []).length;
+            } catch (e: any) {
+                console.warn('[sla-watcher] cleanup stale chats falhou:', e?.message);
+            }
+
             return { result: r, metrics: r };
         });
 

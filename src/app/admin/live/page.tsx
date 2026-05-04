@@ -26,14 +26,24 @@ interface ReplyItem { id: string; ts: string; leadName: string; leadUid: string 
 interface VendorAlert { id: string; ts: string; consultantName: string; phone: string | null; kind: string; title: string; message: string; acknowledged: string | null; leadUid?: string | null; }
 interface ReassignItem { id: string; ts: string; level: number; levelLabel: string; leadName: string; leadUid: string | null; consultantName: string | null; notes: string; }
 interface HotLead { uid: string; name: string; phone: string | null; vehicle: string | null; score: number; classification: string | null; consultantName: string | null; firstContactAt: string | null; updatedAt: string | null; minSinceUpdate: number | null; status: 'urgent' | 'waiting_vendor' | 'ai_only' | 'ok'; }
+interface ActiveChat { id: string; consultantName: string; consultantId: string; leadName: string; leadPhone: string; leadUid: string | null; openedAt: string; atendendoHaSegundos: number; secDesdeHeartbeat: number; }
 interface FeedData {
     aiSent: AiSentItem[];
     clientReplies: ReplyItem[];
     vendorAlerts: VendorAlert[];
     reassigned: ReassignItem[];
     hotLeads: HotLead[];
-    kpis: { aiSentLast24h: number; repliesLast24h: number; vendorAlertsLast24h: number; reassignedLast24h: number; hotLeadsActive: number };
+    activeChats: ActiveChat[];
+    kpis: { aiSentLast24h: number; repliesLast24h: number; vendorAlertsLast24h: number; reassignedLast24h: number; hotLeadsActive: number; atendendoAgora: number };
     generated_at: string;
+}
+
+function formatDuration(sec: number): string {
+    if (sec < 60) return `${sec}s`;
+    const min = Math.floor(sec / 60);
+    if (min < 60) return `${min}min ${sec % 60}s`;
+    const h = Math.floor(min / 60);
+    return `${h}h ${min % 60}min`;
 }
 
 function timeAgo(iso: string): string {
@@ -92,7 +102,7 @@ export default function LivePage() {
     // Realtime: qualquer evento das 5 fontes recarrega o feed
     useEffect(() => {
         const channel = supabase.channel('admin-live-feed');
-        const tables = ['whatsapp_send_log', 'whatsapp_messages', 'cowork_alerts', 'sla_escalations', 'leads_manos_crm', 'leads_compra', 'leads_distribuicao_crm_26'];
+        const tables = ['whatsapp_send_log', 'whatsapp_messages', 'cowork_alerts', 'sla_escalations', 'leads_manos_crm', 'leads_compra', 'leads_distribuicao_crm_26', 'consultant_active_chats'];
         for (const t of tables) {
             channel.on('postgres_changes', { event: '*', schema: 'public', table: t }, () => {
                 fetchFeed();
@@ -130,12 +140,70 @@ export default function LivePage() {
 
                 {/* KPIs TOPO */}
                 {data && (
-                    <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-5">
+                    <div className="grid grid-cols-2 md:grid-cols-6 gap-2 mb-5">
+                        <KpiTile icon={<Users className="w-4 h-4" />} label="🟢 Atendendo agora" value={data.kpis.atendendoAgora} accent="text-emerald-400" pulse />
                         <KpiTile icon={<Bot className="w-4 h-4" />} label="IA enviou (24h)" value={data.kpis.aiSentLast24h} accent="text-blue-400" />
                         <KpiTile icon={<MessageCircle className="w-4 h-4" />} label="Clientes responderam" value={data.kpis.repliesLast24h} accent="text-emerald-400" />
                         <KpiTile icon={<AlertTriangle className="w-4 h-4" />} label="Cobranças vendedor" value={data.kpis.vendorAlertsLast24h} accent="text-amber-400" />
-                        <KpiTile icon={<RefreshCw className="w-4 h-4" />} label="Reativações/reatribuições" value={data.kpis.reassignedLast24h} accent="text-purple-400" />
-                        <KpiTile icon={<Flame className="w-4 h-4" />} label="🔥 Leads quentes ativos" value={data.kpis.hotLeadsActive} accent="text-red-400" pulse />
+                        <KpiTile icon={<RefreshCw className="w-4 h-4" />} label="Reativações" value={data.kpis.reassignedLast24h} accent="text-purple-400" />
+                        <KpiTile icon={<Flame className="w-4 h-4" />} label="🔥 Quentes ativos" value={data.kpis.hotLeadsActive} accent="text-red-400" pulse />
+                    </div>
+                )}
+
+                {/* PAINEL ATENDENDO AGORA — destaque máximo */}
+                {data && (
+                    <div className="bg-gradient-to-br from-emerald-950/40 to-zinc-900 rounded-lg border border-emerald-800/50 mb-5 overflow-hidden">
+                        <div className="px-4 py-3 border-b border-emerald-900/50 flex items-center justify-between">
+                            <div>
+                                <h2 className="text-sm font-bold text-emerald-300 flex items-center gap-2">
+                                    <span className="relative flex h-2 w-2">
+                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
+                                    </span>
+                                    🟢 ATENDENDO AGORA · em tempo real
+                                </h2>
+                                <p className="text-[11px] text-zinc-500">Vendedores com conversa aberta no WhatsApp Web (extensão)</p>
+                            </div>
+                            <span className="text-2xl font-black text-emerald-400">{data.activeChats.length}</span>
+                        </div>
+                        {data.activeChats.length === 0 ? (
+                            <div className="p-6 text-center text-zinc-500 text-sm">
+                                Ninguém atendendo cliente neste momento.
+                            </div>
+                        ) : (
+                            <div className="divide-y divide-emerald-900/30">
+                                {data.activeChats.map(c => (
+                                    <div key={c.id} className="px-4 py-3 flex items-center gap-3 hover:bg-emerald-900/10 transition">
+                                        {/* Avatar com inicial */}
+                                        <div className="w-10 h-10 rounded-full bg-emerald-700 flex items-center justify-center font-bold text-emerald-100 shrink-0">
+                                            {(c.consultantName || '?').charAt(0).toUpperCase()}
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="text-sm font-bold text-white">
+                                                <span className="text-emerald-300">{c.consultantName}</span>
+                                                <span className="text-zinc-500 mx-2">→</span>
+                                                <span>{c.leadName}</span>
+                                            </div>
+                                            <div className="text-xs text-zinc-500 mt-0.5 flex items-center gap-3">
+                                                <span className="flex items-center gap-1">
+                                                    <Clock className="w-3 h-3" /> Atendendo há {formatDuration(c.atendendoHaSegundos)}
+                                                </span>
+                                                <span>📞 {c.leadPhone.slice(-11)}</span>
+                                                {c.secDesdeHeartbeat > 60 && (
+                                                    <span className="text-amber-400">⚠️ heartbeat {c.secDesdeHeartbeat}s</span>
+                                                )}
+                                            </div>
+                                        </div>
+                                        {c.leadUid && (
+                                            <Link href={`/lead/${encodeURIComponent(c.leadUid)}`}
+                                                className="text-xs px-3 py-1 bg-emerald-700 hover:bg-emerald-600 text-white rounded font-bold inline-flex items-center gap-1">
+                                                Ver lead <ArrowUpRight className="w-3 h-3" />
+                                            </Link>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
                     </div>
                 )}
 
