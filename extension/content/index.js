@@ -86,7 +86,7 @@ const App = {
         const name  = Scraper.getName();
 
         if (phone) {
-            if (phone.length > 13 || !phone.startsWith('55')) return;
+            if (phone.length < 8 || phone.length > 18) return;
             if (phone !== this.currentPhone && !this.isFetching) {
                 console.log('Manos CRM: novo chat ->', phone, name);
                 // Novo contato detectado — para polling anterior e limpa estado
@@ -194,71 +194,78 @@ const App = {
     },
 
     // ── Buscar Lead ───────────────────────────────────
-    async fetchLead(phone) {
-        if (this.isFetching) return;
-        this.isFetching = true;
-        try {
-            const url = `${this.API_BASE}/lead-info?phone=${phone}`;
-            chrome.runtime.sendMessage({
-                type: 'FETCH_DATA', url,
-                options: { headers: this.authHeaders() }
-            }, (response) => {
-                this.isFetching = false;
-                if (!response?.success) {
-                    console.warn('Manos CRM: API erro ->', response?.error || 'sem resposta');
-                }
+    fetchLead(phone) {
+        return new Promise((resolve) => {
+            if (this.isFetching) return resolve();
+            this.isFetching = true;
+            try {
+                const url = `${this.API_BASE}/lead-info?phone=${phone}`;
+                chrome.runtime.sendMessage({
+                    type: 'FETCH_DATA', url,
+                    options: { headers: this.authHeaders() }
+                }, (response) => {
+                    this.isFetching = false;
+                    if (!response?.success) {
+                        console.warn('Manos CRM: API erro ->', response?.error || 'sem resposta');
+                    }
 
-                if (response?.success && response.data?.success) {
-                    const lead = response.data.lead;
-                    if (lead) {
-                        // Normaliza ID: produção antiga retorna UUID puro (sem prefixo).
-                        // Reconstruímos o prefixo a partir de response.data.source.
-                        const rawId = String(lead.id || '');
-                        const uuidOnly = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawId);
-                        let cleanId;
-                        if (uuidOnly) {
-                            const src = response.data.source || 'main';
-                            cleanId = `${src}_${rawId}`;
+                    if (response?.success && response.data?.success) {
+                        const lead = response.data.lead;
+                        if (lead) {
+                            // Normaliza ID: produção antiga retorna UUID puro (sem prefixo).
+                            // Reconstruímos o prefixo a partir de response.data.source.
+                            const rawId = String(lead.id || '');
+                            const uuidOnly = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawId);
+                            let cleanId;
+                            if (uuidOnly) {
+                                const src = response.data.source || 'main';
+                                if (src.includes('distribuicao_crm_26') || src === 'crm26') cleanId = `crm26_${rawId}`;
+                                else if (src.includes('compra')) cleanId = `compra_${rawId}`;
+                                else if (src.includes('master')) cleanId = `master_${rawId}`;
+                                else cleanId = `main_${rawId}`; // default para leads_manos_crm
+                            } else {
+                                cleanId = rawId.replace(/^master_/, '') || rawId;
+                            }
+                            lead.id = cleanId;
+                            this.currentLeadId = cleanId;
+                            UI.setLeadFound(true);
+                            UI.renderLead(lead, {
+                                onStatusChange: (s) => this.handleStatusChange(lead.id, s),
+                                onSync: () => this.handleSync(lead.id),
+                                onTimeline: () => this.handleTimeline(lead.id),
+                                onFollowUp: () => this.handleFollowUp(lead.id),
+                                onArsenal: () => this.handleArsenal(),
+                                onInventory: () => this.handleInventory(),
+                                onAddNote: (note) => this.handleAddNote(lead.id, note),
+                                onUpdateField: (field, val) => this.handleUpdateField(lead.id, field, val),
+                                onFipeSearch: (brand, model, year) => this.handleFipeSearch(brand, model, year),
+                                onScoreFeedback: (fb) => this.handleScoreFeedback(lead.id, fb),
+                                onCreateFollowUp: (id, data) => this.handleCreateFollowUp(id, data),
+                                onCompleteFollowUp: (fuId, id) => this.handleCompleteFollowUp(fuId, id),
+                                onFinishLead: (id, type, details) => this.handleFinishLead(id, type, details),
+                                onDeleteLead: (id) => this.handleDeleteLead(id),
+                                nextSteps: this.currentNextSteps,
+                                crmUrl: this.baseUrl
+                            });
+                            this.fetchNextSteps(phone, lead);
                         } else {
-                            cleanId = rawId.replace(/^master_/, '') || rawId;
+                            UI.setLeadFound(false);
+                            const contactName = Scraper.getName();
+                            UI.renderNotFound(phone, contactName, (formData) => this.handleCreate(formData));
                         }
-                        lead.id = cleanId;
-                        this.currentLeadId = cleanId;
-                        UI.setLeadFound(true);
-                        UI.renderLead(lead, {
-                            onStatusChange: (s) => this.handleStatusChange(lead.id, s),
-                            onSync: () => this.handleSync(lead.id),
-                            onTimeline: () => this.handleTimeline(lead.id),
-                            onFollowUp: () => this.handleFollowUp(lead.id),
-                            onArsenal: () => this.handleArsenal(),
-                            onInventory: () => this.handleInventory(),
-                            onAddNote: (note) => this.handleAddNote(lead.id, note),
-                            onUpdateField: (field, val) => this.handleUpdateField(lead.id, field, val),
-                            onFipeSearch: (brand, model, year) => this.handleFipeSearch(brand, model, year),
-                            onScoreFeedback: (fb) => this.handleScoreFeedback(lead.id, fb),
-                            onCreateFollowUp: (id, data) => this.handleCreateFollowUp(id, data),
-                            onCompleteFollowUp: (fuId, id) => this.handleCompleteFollowUp(fuId, id),
-                            onFinishLead: (id, type, details) => this.handleFinishLead(id, type, details),
-                            onDeleteLead: (id) => this.handleDeleteLead(id),
-                            nextSteps: this.currentNextSteps,
-                            crmUrl: this.baseUrl
-                        });
-                        this.fetchNextSteps(phone, lead);
                     } else {
                         UI.setLeadFound(false);
                         const contactName = Scraper.getName();
                         UI.renderNotFound(phone, contactName, (formData) => this.handleCreate(formData));
                     }
-                } else {
-                    UI.setLeadFound(false);
-                    const contactName = Scraper.getName();
-                    UI.renderNotFound(phone, contactName, (formData) => this.handleCreate(formData));
-                }
-            });
-        } catch (err) {
-            console.error('Manos CRM v2.1: Erro fetchLead ->', err);
-            this.isFetching = false;
-        }
+                    resolve();
+                });
+            } catch (err) {
+                console.error('Manos CRM v2.1: Erro fetchLead ->', err);
+                this.isFetching = false;
+                resolve();
+            }
+        });
     },
 
     // ── Próximos Passos (IA) ──────────────────────────
