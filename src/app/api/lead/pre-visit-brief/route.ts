@@ -43,9 +43,9 @@ export async function POST(req: NextRequest) {
         // Busca dados completos do lead + últimas interações
         const [leadRes, interactionsRes] = await Promise.all([
             admin
-                .from('leads_manos_crm')
-                .select('id, name, nome, status, vehicle_interest, interesse, ai_score, ai_classification, ai_summary, behavioral_profile, valor_investimento, carro_troca, origem, source, next_step, proxima_acao, scheduled_at, assigned_consultant_id')
-                .eq('id', leadId)
+                .from('leads_unified')
+                .select('native_id, name, status, vehicle_interest, ai_score, ai_classification, ai_summary, behavioral_profile, next_step, proxima_acao, assigned_consultant_id')
+                .eq('native_id', leadId)
                 .single(),
             admin
                 .from('interactions_manos_crm')

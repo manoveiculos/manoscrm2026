@@ -253,7 +253,27 @@ export async function POST(req: NextRequest) {
             if (filteredMessages.length > 0) {
                 await supabaseAdmin.from('whatsapp_messages').insert(filteredMessages);
                 console.log(`[Sync API] Inseridas ${filteredMessages.length} novas msgs p/ lead ${leadType === 'crm26' ? numericId : compraId}`);
+                
+                // V3: Atualiza timestamp de atividade manual e BOIA (atualizado_em)
+                const now = new Date().toISOString();
+                const activityUpdates: any = {
+                    atendimento_manual_at: now,
+                    respondeu_follow_up: true // Se estamos sincronizando, assumimos que houve interação
+                };
+                
+                if (leadType === 'crm26') {
+                    activityUpdates.atualizado_em = now;
+                    await supabaseAdmin.from('leads_distribuicao_crm_26').update(activityUpdates).eq('id', numericId);
+                } else if (leadType === 'compra') {
+                    activityUpdates.updated_at = now;
+                    await supabaseAdmin.from('leads_compra').update(activityUpdates).eq('id', compraId);
+                } else {
+                    activityUpdates.updated_at = now;
+                    const table = leadFound?.source_table || 'leads_master';
+                    await supabaseAdmin.from(table).update(activityUpdates).eq('id', uuidId);
+                }
             }
+
         }
 
         // 4. Trigger AI Analysis — delega ao Elite Closer oficial.

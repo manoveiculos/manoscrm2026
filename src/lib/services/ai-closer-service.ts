@@ -183,9 +183,25 @@ Responda SOMENTE o primeiro nome (ex: "Carlos") ou null:`
     const leadScore = lead.ai_score || 0;
     const isHot = leadScore >= 50 || leadScore === 0;
 
-    const hoursInactive = Math.round(
-        (Date.now() - new Date(lead.updated_at || lead.created_at).getTime()) / 3_600_000
+    // ── CÁLCULO DE INATIVIDADE (Respeita múltiplos nomes de colunas V1/V2) ──────
+    const lastActivityBase = lead.atendimento_manual_at || lead.updated_at || lead.atualizado_em || lead.created_at || lead.criado_em;
+    let hoursInactive = Math.round(
+        (Date.now() - new Date(lastActivityBase).getTime()) / 3_600_000
     );
+
+    // Se houver mensagens sincronizadas agora, elas representam a atividade mais recente
+    if (messages && messages.length > 0) {
+        const latestMsg = messages.reduce((prev, curr) => 
+            new Date(curr.created_at || curr.timestamp).getTime() > new Date(prev.created_at || prev.timestamp).getTime() ? curr : prev
+        );
+        const msgTime = new Date(latestMsg.created_at || latestMsg.timestamp).getTime();
+        const msgHours = (Date.now() - msgTime) / 3_600_000;
+        if (msgHours < hoursInactive) {
+            hoursInactive = Math.max(0, Math.round(msgHours));
+        }
+    }
+    // ────────────────────────────────────────────────────────────────────────────
+
 
     // MEMÓRIA DE AÇÕES — busca análises anteriores para NÃO repetir
     let memoriaAcoes = '';
@@ -435,10 +451,19 @@ JSON: {
     }
 
     // Marca como Abandonado se passar do limite de Churn
-    if (churnProb > 85 && !['fechado', 'perdido', 'abandonado', 'ganho', 'vendido'].some(s => oldStatus.toLowerCase().includes(s))) {
-        newStatus = 'perdido';
-        ghostTriggered = true;
+    if (churnProb > 85 && !['fechado', 'perdido', 'abandonado', 'ganho', 'vendido', 'vendido_outra'].some(s => oldStatus.toLowerCase().includes(s))) {
+        // V3 PROTECTION: Se houve atendimento manual nas últimas 72h, não deixa a IA matar o lead
+        const manualThreshold = 72 * 3600_000;
+        const isRecentlyManual = lead.atendimento_manual_at && (Date.now() - new Date(lead.atendimento_manual_at).getTime()) < manualThreshold;
+        
+        if (!isRecentlyManual) {
+            newStatus = 'perdido';
+            ghostTriggered = true;
+        } else {
+            console.log(`[AI-Closer] Lead ${cleanId} com churn alto (${churnProb}%), mas protegido por atendimento manual recente.`);
+        }
     }
+
 
     // Piloto Automático (Auto Pilot) de Movimentação Positiva
     if (finalUrgency >= 90 && !ghostTriggered) {

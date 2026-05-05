@@ -37,9 +37,9 @@ export async function POST(req: NextRequest) {
         );
 
         const { data: lead } = await supabase
-            .from('leads_manos_crm')
-            .select('name, nome, status, vehicle_interest, interesse, ai_score, ai_summary, next_step, proxima_acao, valor_investimento, origem, source, behavioral_profile, ai_classification')
-            .eq('id', leadId)
+            .from('leads_unified')
+            .select('table_name, name, status, vehicle_interest, ai_score, ai_summary, next_step, proxima_acao, source, behavioral_profile, ai_classification')
+            .eq('native_id', leadId)
             .single();
 
         if (!lead) {
@@ -51,8 +51,8 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: 'OpenAI não configurada' }, { status: 500 });
         }
 
-        const leadName = lead.name || lead.nome || 'Cliente';
-        const vehicle = lead.vehicle_interest || lead.interesse || 'não informado';
+        const leadName = lead.name || 'Cliente';
+        const vehicle = lead.vehicle_interest || 'não informado';
         const nextAction = lead.next_step || lead.proxima_acao || 'sem ação definida';
         const profile = lead.behavioral_profile as any;
         const sentiment = profile?.sentiment || 'Neutro';
@@ -77,8 +77,7 @@ Score IA: ${lead.ai_score}% (${lead.ai_classification || 'warm'})
 Sentimento detectado: ${sentiment} | Urgência: ${urgency}
 Resumo da negociação: ${lead.ai_summary || 'Sem histórico de análise'}
 Próxima ação recomendada: ${nextAction}
-Investimento estimado: ${lead.valor_investimento || 'não informado'}
-Origem: ${lead.origem || lead.source || 'não informada'}
+Origem: ${lead.source || 'não informada'}
 
 Retorne JSON: {
   "handoff_summary": "Briefing em 3-4 frases para ${newConsultantName || 'o novo consultor'}: contexto da negociação, onde o cliente está emocionalmente, ponto crítico de atenção e exata próxima ação recomendada. Máximo 220 chars."
@@ -97,9 +96,9 @@ Retorne JSON: {
 
         const now = new Date().toISOString();
 
-        // Salva no lead
+        // Salva no lead (na tabela original correta)
         await supabase
-            .from('leads_manos_crm')
+            .from(lead.table_name || 'leads_manos_crm')
             .update({ handoff_summary: summary, handoff_at: now })
             .eq('id', leadId);
 
