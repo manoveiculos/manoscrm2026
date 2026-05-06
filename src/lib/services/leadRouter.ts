@@ -4,13 +4,13 @@
  */
 
 export function getTableForLead(leadId: string): string {
-    if (!leadId) return 'leads_master';
+    if (!leadId) return 'leads_manos_crm';
     if (leadId.startsWith('compra_')) return 'leads_compra';
     if (leadId.startsWith('main_')) return 'leads_manos_crm';
     if (leadId.startsWith('crm26_')) return 'leads_distribuicao_crm_26';
     if (leadId.startsWith('dist_')) return 'leads_distribuicao';
     if (leadId.startsWith('master_')) return 'leads_master';
-    return 'leads_master'; // fallback
+    return 'leads_manos_crm';
 }
 
 export function stripPrefix(leadId: string): string {
