@@ -40,52 +40,83 @@ function firstName(name?: string | null): string {
     return trimmed.charAt(0).toUpperCase() + trimmed.slice(1).toLowerCase();
 }
 
-function fallbackMessage(input: FirstContactInput, matches: MatchedItem[] = []): string {
+/**
+ * Mensagem qualificadora — usada quando NÃO sabemos o que o cliente quer.
+ * Nunca menciona carro específico. Pergunta direta pra abrir conversa.
+ */
+function qualifyingMessage(input: FirstContactInput): string {
     const cons = firstName(input.consultantName) || 'time da Manos';
     const cli = firstName(input.leadName);
     const greet = cli ? `Olá ${cli}!` : 'Olá!';
     if (input.flow === 'compra') {
-        const veh = input.vehicleInterest ? ` o ${input.vehicleInterest}` : ' seu carro';
-        return `${greet} Aqui é ${cons} da Manos Veículos. Recebi seu interesse em vender${veh}. Posso te chamar agora pra avaliar?`;
+        return `${greet} Aqui é ${cons} da Manos Veículos. Recebi seu contato sobre vender seu carro. Pode me dizer qual carro é (modelo e ano) pra eu te passar uma avaliação?`;
     }
-    const top = matches[0];
-    if (top) {
-        const line = formatInventoryLine(top);
-        return `${greet} Aqui é ${cons} da Manos Veículos. Tenho um ${line} disponível agora. Quer que eu te mande mais detalhes?`.slice(0, 280);
-    }
-    const veh = input.vehicleInterest ? ` no ${input.vehicleInterest}` : '';
-    return `${greet} Aqui é ${cons} da Manos Veículos. Vi seu interesse${veh}. Posso te ajudar com mais informações agora?`;
+    return `${greet} Aqui é ${cons} da Manos Veículos. Vi que você entrou em contato. Qual carro você está procurando hoje? (modelo, ano, ou faixa de preço)`;
+}
+
+/**
+ * Mensagem quando cliente disse o que quer mas não temos no estoque.
+ * Honesto: avisa que não tem aquele exato e abre pra alternativas.
+ */
+function noMatchMessage(input: FirstContactInput): string {
+    const cons = firstName(input.consultantName) || 'time da Manos';
+    const cli = firstName(input.leadName);
+    const greet = cli ? `Olá ${cli}!` : 'Olá!';
+    const veh = input.vehicleInterest || 'esse modelo';
+    return `${greet} Aqui é ${cons} da Manos Veículos. Vi seu interesse em ${veh}. Não tenho exatamente esse no estoque agora, mas posso buscar algo parecido — qual o orçamento e qual ano você considera?`;
 }
 
 async function generateMessage(input: FirstContactInput): Promise<string> {
-    // Para fluxo de venda, busca estoque REAL — Altimus primeiro (fonte da verdade),
-    // banco local como fallback se Altimus tiver fora.
-    let matches: MatchedItem[] = [];
-    let altimusBlock = '';
-    if (input.flow === 'venda' && input.vehicleInterest) {
-        const altimusMatched = await findAltimusMatch(input.vehicleInterest).catch(() => null);
-        if (altimusMatched) {
-            altimusBlock = `\nVEÍCULO REAL DISPONÍVEL AGORA NO ESTOQUE (use ESSE):\n- ${formatAltimus(altimusMatched)}${altimusMatched.link ? ' · ' + altimusMatched.link : ''}`;
-        } else {
-            // Não bateu match exato — pega top 5 do Altimus pra ofertar similar
-            const altimusRecent = await getAltimusRecent(5).catch(() => []);
-            if (altimusRecent.length > 0) {
-                altimusBlock = `\nVEÍCULOS REAIS DISPONÍVEIS AGORA (escolha UM similar):\n${altimusRecent.map(v => `- ${formatAltimus(v)}`).join('\n')}`;
-            } else {
-                // Altimus fora → fallback pro banco local
-                matches = await matchInventoryForInterest(input.vehicleInterest, { limit: 3 }).catch(() => []);
-            }
-        }
+    // CAMINHO 1 — Cliente NÃO disse o que quer.
+    // NUNCA empurrar carro aleatório. Sempre qualificar primeiro.
+    if (!input.vehicleInterest || input.vehicleInterest.trim().length < 2) {
+        return qualifyingMessage(input);
     }
 
-    if (!process.env.OPENAI_API_KEY) {
-        return fallbackMessage(input, matches);
+    // CAMINHO 2 — flow=compra: cliente vai vender, não há "estoque" relevante.
+    if (input.flow === 'compra') {
+        const cons = firstName(input.consultantName) || 'time da Manos';
+        const cli = firstName(input.leadName);
+        const greet = cli ? `Olá ${cli}!` : 'Olá!';
+        return `${greet} Aqui é ${cons} da Manos Veículos. Recebi seu interesse em vender o ${input.vehicleInterest}. Posso te chamar agora pra avaliar?`;
     }
+
+    // CAMINHO 3 — flow=venda + cliente disse o que quer: busca estoque REAL.
+    const altimusMatched = await findAltimusMatch(input.vehicleInterest).catch(() => null);
+
+    // 3a — Não temos o veículo no estoque: mensagem honesta abrindo pra alternativas.
+    if (!altimusMatched) {
+        // Tenta banco local como segunda chance antes de desistir
+        const localMatches = await matchInventoryForInterest(input.vehicleInterest, { limit: 1 }).catch(() => []);
+        if (localMatches.length === 0) {
+            return noMatchMessage(input);
+        }
+        // Achou no banco local mas não no Altimus → ainda monta GPT com esse match
+        return await generateGptMessage(input, '', localMatches);
+    }
+
+    // 3b — Match no Altimus: monta GPT com o veículo travado no prompt.
+    const altimusBlock = `\nVEÍCULO REAL DISPONÍVEL AGORA NO ESTOQUE (use ESSE — é o ÚNICO permitido mencionar):\n- ${formatAltimus(altimusMatched)}${altimusMatched.link ? ' · ' + altimusMatched.link : ''}`;
+    return await generateGptMessage(input, altimusBlock, []);
+}
+
+/**
+ * Chamada GPT travada: só pode mencionar veículos do bloco de estoque.
+ * Retorna fallback se GPT alucinar/falhar.
+ */
+async function generateGptMessage(
+    input: FirstContactInput,
+    altimusBlock: string,
+    matches: MatchedItem[]
+): Promise<string> {
+    if (!process.env.OPENAI_API_KEY) {
+        return fallbackWithMatch(input, matches);
+    }
+
     try {
         const cons = firstName(input.consultantName) || 'consultor da Manos';
         const cli = firstName(input.leadName) || '';
         const veh = input.vehicleInterest || '';
-        const tipo = input.flow === 'compra' ? 'AVALIAR um carro pra vender' : 'COMPRAR um carro';
 
         const inventoryBlock = altimusBlock
             || (matches.length > 0
@@ -96,8 +127,8 @@ async function generateMessage(input: FirstContactInput): Promise<string> {
 Regras inegociáveis:
 - 1 ou 2 frases curtas, máximo 240 caracteres
 - Português do Brasil, tom humano e direto, ZERO emojis ou jargão de marketing
-- Se houver estoque relevante, mencione UM veículo concreto (modelo + ano + preço se fizer sentido)
-- PROIBIDO inventar marca, modelo, ano ou preço fora do bloco de estoque. Só use o que está listado.
+- Mencione UM veículo concreto APENAS se estiver listado no bloco de estoque (modelo + ano)
+- PROIBIDO inventar marca, modelo, ano ou preço fora do bloco de estoque. Se o bloco estiver vazio, NÃO mencione nenhum veículo.
 - Não promete desconto
 - Termina com UMA pergunta direta (ex: "Quer que eu te mande mais detalhes?", "Posso te chamar agora?")
 - Sem "tudo bem?". Sem "espero que esteja bem"`;
@@ -105,8 +136,7 @@ Regras inegociáveis:
         const user = `Consultor: ${cons}
 Cliente: ${cli || 'não informado'}
 Origem do lead: ${input.source || 'não informada'}
-Interesse: ${veh || 'não informado'}
-Objetivo do lead: ${tipo}
+Interesse declarado pelo cliente: ${veh}
 Loja: Manos Veículos (Rio do Sul/SC)${inventoryBlock}
 
 Gere apenas o texto final da mensagem, sem aspas.`;
@@ -117,16 +147,32 @@ Gere apenas o texto final da mensagem, sem aspas.`;
                 { role: 'system', content: sys },
                 { role: 'user', content: user },
             ],
-            temperature: 0.5,
+            temperature: 0.4,
             max_tokens: 140,
         }, { timeout: 8000 });
 
         const out = (res.choices[0]?.message?.content || '').trim();
-        if (!out || out.length < 20) return fallbackMessage(input, matches);
+        if (!out || out.length < 20) return fallbackWithMatch(input, matches);
         return out.replace(/^["']|["']$/g, '').slice(0, 300);
     } catch {
-        return fallbackMessage(input, matches);
+        return fallbackWithMatch(input, matches);
     }
+}
+
+/**
+ * Fallback usado quando OpenAI não responde / falha.
+ * Sempre conservador: ou menciona o match real ou abre conversa qualificadora.
+ */
+function fallbackWithMatch(input: FirstContactInput, matches: MatchedItem[]): string {
+    const cons = firstName(input.consultantName) || 'time da Manos';
+    const cli = firstName(input.leadName);
+    const greet = cli ? `Olá ${cli}!` : 'Olá!';
+    const top = matches[0];
+    if (top) {
+        const line = formatInventoryLine(top);
+        return `${greet} Aqui é ${cons} da Manos Veículos. Tenho um ${line} disponível agora. Quer que eu te mande mais detalhes?`.slice(0, 280);
+    }
+    return qualifyingMessage(input);
 }
 
 /**
@@ -256,14 +302,14 @@ export async function previewFirstContact(input: FirstContactInput): Promise<Fir
             message = await generateMessage(input);
             // generateMessage cai pro fallback internamente em caso de erro;
             // detectar isso requer comparar — mais simples: regenerar fallback e comparar
-            const fb = fallbackMessage(input, matches);
+            const fb = fallbackWithMatch(input, matches);
             fallback = message === fb;
         } catch {
-            message = fallbackMessage(input, matches);
+            message = fallbackWithMatch(input, matches);
             fallback = true;
         }
     } else {
-        message = fallbackMessage(input, matches);
+        message = fallbackWithMatch(input, matches);
         fallback = true;
     }
 
