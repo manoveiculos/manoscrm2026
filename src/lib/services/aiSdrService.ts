@@ -66,12 +66,46 @@ function noMatchMessage(input: FirstContactInput): string {
     return `${greet} Aqui é ${cons} da Manos Veículos. Vi seu interesse em ${veh}. Não tenho exatamente esse no estoque agora, mas posso buscar algo parecido — qual o orçamento e qual ano você considera?`;
 }
 
-async function generateMessage(input: FirstContactInput): Promise<string> {
-    // CAMINHO 1 — Cliente NÃO disse o que quer.
-    // NUNCA empurrar carro aleatório. Sempre qualificar primeiro.
-    if (!input.vehicleInterest || input.vehicleInterest.trim().length < 2) {
-        return qualifyingMessage(input);
+/**
+ * Padrões de "interesse lixo" que o n8n / formulário gravam no campo
+ * vehicleInterest mas NÃO são veículo real. Tratamos como null pra cair
+ * direto na mensagem qualificadora ("qual carro você procura?").
+ *
+ * Regra: se NÃO contém marca/modelo de carro real, é lixo.
+ */
+const INTEREST_GARBAGE_PATTERNS = [
+    /^lead\s+(google|whatsapp|facebook|meta|instagram)/i,
+    /^analisar\s+perfil/i,
+    /^n[aã]o\s+especificad/i,
+    /^lead\s+(novo|sem)/i,
+    /^sem\s+(interesse|info|especifica)/i,
+    /^teste/i,
+    /^entrada\s+manual/i,
+    /^contato\s+(novo|inicial)/i,
+];
+
+function normalizeInterest(raw: string | null | undefined): string | null {
+    if (!raw) return null;
+    const trimmed = raw.trim();
+    if (trimmed.length < 2) return null;
+    for (const pattern of INTEREST_GARBAGE_PATTERNS) {
+        if (pattern.test(trimmed)) return null;
     }
+    return trimmed;
+}
+
+async function generateMessage(input: FirstContactInput): Promise<string> {
+    // Normaliza interest: tags internas do n8n viram null pra cair em qualifying.
+    const cleanInterest = normalizeInterest(input.vehicleInterest);
+    const normalized: FirstContactInput = { ...input, vehicleInterest: cleanInterest };
+
+    // CAMINHO 1 — Cliente NÃO disse o que quer (ou interesse era lixo).
+    // NUNCA empurrar carro aleatório. Sempre qualificar primeiro.
+    if (!cleanInterest) {
+        return qualifyingMessage(normalized);
+    }
+    // Substitui input pelo normalizado nos próximos caminhos.
+    input = normalized;
 
     // CAMINHO 2 — flow=compra: cliente vai vender, não há "estoque" relevante.
     if (input.flow === 'compra') {
