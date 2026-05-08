@@ -33,19 +33,12 @@ export async function GET(request: Request) {
 
 async function runAiSdrQueue() {
     const admin = createClient();
-    const now = new Date().toISOString();
-
-    const { data: jobs, error } = await admin
-        .from('ai_sdr_queue')
-        .select('id, lead_id, lead_table, payload, attempts')
-        .lte('scheduled_at', now)
-        .is('processed_at', null)
-        .lt('attempts', 5)
-        .order('scheduled_at', { ascending: true })
-        .limit(20);
+    // Claim atômico via FOR UPDATE SKIP LOCKED — 2 runners simultâneos
+    // não pegam o mesmo job (evita envio duplicado pro cliente).
+    const { data: jobs, error } = await admin.rpc('claim_ai_sdr_jobs', { p_limit: 20 });
 
     if (error) {
-        console.error('[ai-sdr-runner] fetch fila falhou:', error.message);
+        console.error('[ai-sdr-runner] claim fila falhou:', error.message);
         return { ok: false, error: error.message };
     }
 
@@ -58,12 +51,6 @@ async function runAiSdrQueue() {
 
     for (const job of jobs) {
         try {
-            // Bump attempts antes de processar (cobre crash silencioso).
-            await admin
-                .from('ai_sdr_queue')
-                .update({ attempts: (job.attempts || 0) + 1 })
-                .eq('id', job.id);
-
             const result = await sendFirstContact(
                 job.payload as any,
                 job.lead_table as 'leads_compra' | 'leads_manos_crm' | 'leads_master' | 'leads_distribuicao_crm_26'
