@@ -166,9 +166,9 @@ export async function POST(req: NextRequest) {
                             console.warn('[Webhook] notifyLeadArrival falhou:', e?.message)
                         );
 
-                        // 4b. AI SDR — primeira mensagem ao CLIENTE em ~30s (fire-and-forget)
+                        // 4b. AI SDR — primeira mensagem ao CLIENTE em ~30s (enfileira no DB)
                         // Garante que o lead nunca espere pelo vendedor pra ter resposta.
-                        scheduleFirstContact({
+                        await scheduleFirstContact({
                             leadId: newLead.id,
                             leadName: name,
                             leadPhone: cleanPhone,
@@ -176,7 +176,9 @@ export async function POST(req: NextRequest) {
                             source: finalSource,
                             consultantName: null,
                             flow: 'compra',
-                        }, 'leads_compra');
+                        }, 'leads_compra').catch(e => {
+                            console.error('[Webhook FB] enqueue AI SDR falhou:', e?.message);
+                        });
 
                         // 5. Gerar Proposta Automática se o Score for > 60
                         if (analysis && analysis.urgencyScore > 60) {

@@ -122,7 +122,7 @@ export async function POST(req: NextRequest) {
             // Cliente já mandou msg → IA responde rapidinho com contexto inicial.
             const hasRealName = senderName && senderName.toLowerCase() !== 'lead whatsapp';
             try {
-                scheduleFirstContact({
+                await scheduleFirstContact({
                     leadId: String(leadId),
                     leadName: hasRealName ? senderName : null,
                     leadPhone: cleanPhone,
@@ -131,9 +131,9 @@ export async function POST(req: NextRequest) {
                     consultantName: assignedName,
                     flow: 'venda',
                 }, 'leads_distribuicao_crm_26', 30_000);
-                console.log(`[Webhook WA] AI SDR agendado para lead ${leadId} (${senderName})`);
+                console.log(`[Webhook WA] AI SDR enfileirado para lead ${leadId} (${senderName})`);
             } catch (sdrErr: any) {
-                console.error('[Webhook WA] Falha ao agendar AI SDR (não-bloqueante):', sdrErr?.message);
+                console.error('[Webhook WA] Falha ao enfileirar AI SDR (não-bloqueante):', sdrErr?.message);
             }
         } else if (existingLead) {
             // BOIA: toda msg inbound atualiza atualizado_em → lead sobe pro topo do /inbox

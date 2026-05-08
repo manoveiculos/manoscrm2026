@@ -85,8 +85,8 @@ export async function POST(req: NextRequest) {
         // 3. ATRIBUIÇÃO AUTOMÁTICA
         const consultantId = await assignNextConsultant(newLead.id, 'leads_manos_crm');
 
-        // 4. AI SDR (Primeiro Contato em ~30s)
-        scheduleFirstContact({
+        // 4. AI SDR (Primeiro Contato em ~30s — enfileira no DB)
+        await scheduleFirstContact({
             leadId: newLead.id,
             leadName: name,
             leadPhone: cleanPhone,
@@ -94,7 +94,9 @@ export async function POST(req: NextRequest) {
             source: source,
             consultantName: null,
             flow: 'venda',
-        }, 'leads_manos_crm');
+        }, 'leads_manos_crm').catch(e => {
+            console.error('[Webhook Universal] enqueue AI SDR falhou:', e?.message);
+        });
 
         // 5. NOTIFICAÇÃO VENDEDOR
         notifyLeadArrival(newLead.id).catch(console.error);

@@ -281,13 +281,30 @@ export async function previewFirstContact(input: FirstContactInput): Promise<Fir
 }
 
 /**
- * Versão fire-and-forget com delay de 30s.
- * Usar nos webhooks pra não bloquear o response e parecer mais humano.
+ * Enfileira o primeiro contato pra ser processado pelo cron /api/cron/ai-sdr-runner.
+ *
+ * Por que fila e não setTimeout? Em Next.js o route handler encerra o processo
+ * quando retorna a Response — qualquer timer agendado vira fantasma. A fila
+ * persiste em ai_sdr_queue e o runner (1min) drena. Sobrevive a deploy/restart.
  */
-export function scheduleFirstContact(input: FirstContactInput, table: 'leads_compra' | 'leads_manos_crm' | 'leads_master' | 'leads_distribuicao_crm_26', delayMs = 30_000) {
-    setTimeout(() => {
-        sendFirstContact(input, table).catch(err => {
-            console.error('[aiSdr] sendFirstContact falhou:', err?.message);
+export async function scheduleFirstContact(
+    input: FirstContactInput,
+    table: 'leads_compra' | 'leads_manos_crm' | 'leads_master' | 'leads_distribuicao_crm_26',
+    delayMs = 30_000
+): Promise<void> {
+    try {
+        const admin = createClient();
+        const scheduledAt = new Date(Date.now() + delayMs).toISOString();
+        const { error } = await admin.from('ai_sdr_queue').insert({
+            lead_id: input.leadId,
+            lead_table: table,
+            payload: input as any,
+            scheduled_at: scheduledAt,
         });
-    }, delayMs);
+        if (error && !String(error.message || '').includes('duplicate key')) {
+            console.error('[aiSdr] enqueue falhou:', error.message);
+        }
+    } catch (e: any) {
+        console.error('[aiSdr] enqueue exception:', e?.message);
+    }
 }
