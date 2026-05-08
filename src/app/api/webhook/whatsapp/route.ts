@@ -29,14 +29,52 @@ export async function POST(req: NextRequest) {
     try {
         const payload = await req.json();
 
-        // Extrai os campos básicos (suporta formato direto ou do n8n)
-        const phoneRaw = payload.phone || payload.wa_id || payload.sender;
-        const messageText = payload.message || payload.text || payload.body;
-        const messageId = payload.message_id || payload.id;
-        const senderName = payload.name || payload.pushName || 'Lead WhatsApp';
+        // Evolution API manda em payload.data.{key,message,pushName}.
+        // Filtramos eventos não-mensagem cedo (CONNECTION_UPDATE, etc).
+        const evt = payload.event || payload.type || '';
+        const evolutionData = payload.data;
+
+        // Pula eventos que não são mensagem (status conexão, presence, etc)
+        if (evt && !/messages\.?upsert|messages\.?new/i.test(evt)) {
+            return NextResponse.json({ success: true, ignored: evt }, { status: 200 });
+        }
+
+        // Pula mensagens que NÓS enviamos (fromMe=true). Senão eco-loop.
+        if (evolutionData?.key?.fromMe === true) {
+            return NextResponse.json({ success: true, ignored: 'fromMe' }, { status: 200 });
+        }
+
+        // Extrai campos com suporte a 4 formatos: Evolution, n8n, Cloud API, direto.
+        const phoneRaw =
+            // Evolution API: data.key.remoteJid = "554799...@s.whatsapp.net"
+            (evolutionData?.key?.remoteJid && String(evolutionData.key.remoteJid).split('@')[0]) ||
+            payload.phone ||
+            payload.wa_id ||
+            payload.sender;
+
+        const messageText =
+            // Evolution API: text na message.conversation OU message.extendedTextMessage.text
+            evolutionData?.message?.conversation ||
+            evolutionData?.message?.extendedTextMessage?.text ||
+            evolutionData?.message?.imageMessage?.caption ||
+            evolutionData?.message?.videoMessage?.caption ||
+            payload.message ||
+            payload.text ||
+            payload.body;
+
+        const messageId =
+            evolutionData?.key?.id ||
+            payload.message_id ||
+            payload.id;
+
+        const senderName =
+            evolutionData?.pushName ||
+            payload.name ||
+            payload.pushName ||
+            'Lead WhatsApp';
 
         if (!phoneRaw || !messageText) {
-            console.error(`[Webhook WA] Rejeitado: Campos obrigatórios faltando. Phone: ${phoneRaw}, Msg: ${messageText}`);
+            console.error(`[Webhook WA] Rejeitado: campos faltando. Event=${evt} Phone=${phoneRaw} Msg=${typeof messageText} Payload keys=${Object.keys(payload).join(',')}`);
             return NextResponse.json({ success: false, error: 'Campos phone e message são obrigatórios' }, { status: 400 });
         }
 
