@@ -30,9 +30,14 @@ export function useLeadTimeline(leadId: string | null, leadPhone?: string) {
     const phoneClean = (leadPhone || '').replace(/\D/g, '');
     const phoneSuffix = phoneClean.slice(-8);
 
+    // 6 fontes independentes rodam em paralelo via Promise.allSettled.
+    // Antes (sequencial): ~250ms × 6 = ~1500ms p/ abrir modal.
+    // Agora: max(fontes) = ~400ms.
+    await Promise.allSettled([
     // ══════════════════════════════════════
     // FONTE 1: interactions_manos_crm (V2)
     // ══════════════════════════════════════
+    (async () => {
     try {
       const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(cleanId);
       let query = supabase.from('interactions_manos_crm').select('*');
@@ -62,10 +67,12 @@ export function useLeadTimeline(leadId: string | null, leadPhone?: string) {
         data.forEach(item => all.push(mapInteraction(item)));
       }
     } catch (e) { console.error('[Timeline] interactions error:', e); }
+    })(),
 
     // ══════════════════════════════════════
     // FONTE 2: whatsapp_messages (V2)
     // ══════════════════════════════════════
+    (async () => {
     try {
       let messages: any[] = [];
       
@@ -94,10 +101,12 @@ export function useLeadTimeline(leadId: string | null, leadPhone?: string) {
 
       messages.forEach(msg => all.push(mapWhatsAppMessage(msg)));
     } catch (e) { console.error('[Timeline] whatsapp error:', e); }
+    })(),
 
     // ══════════════════════════════════════
     // FONTE 3: concessionaria_mensagens (V1 — IA Lab)
     // ══════════════════════════════════════
+    (async () => {
     try {
       let msgs: any[] = [];
       
@@ -148,10 +157,12 @@ export function useLeadTimeline(leadId: string | null, leadPhone?: string) {
         }
       });
     } catch (_e) { /* concessionaria_mensagens inacessível — tabela V1 opcional */ }
+    })(),
 
     // ══════════════════════════════════════
     // FONTE 4: tracking_leads (V1 — Análises da IA)
     // ══════════════════════════════════════
+    (async () => {
     try {
       const { data } = await supabase
         .from('tracking_leads')
@@ -177,10 +188,12 @@ export function useLeadTimeline(leadId: string | null, leadPhone?: string) {
         });
       }
     } catch (_e) { /* tracking_leads inacessível — tabela V1 opcional */ }
+    })(),
 
     // ══════════════════════════════════════
     // FONTE 5: follow_ups
     // ══════════════════════════════════════
+    (async () => {
     try {
       const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(cleanId);
       const { data } = await supabase
@@ -194,10 +207,12 @@ export function useLeadTimeline(leadId: string | null, leadPhone?: string) {
         data.forEach(fu => all.push(mapFollowUp(fu)));
       }
     } catch (e) { console.error('[Timeline] follow_ups error:', e); }
+    })(),
 
     // ══════════════════════════════════════
     // FONTE 6: ai_summary do lead (Resumo Estratégico)
     // ══════════════════════════════════════
+    (async () => {
     try {
       let aiSummary = '';
       let dateToUse = '';
@@ -241,6 +256,8 @@ export function useLeadTimeline(leadId: string | null, leadPhone?: string) {
         });
       }
     } catch (_e) { /* ai_summary inacessível — campo opcional */ }
+    })(),
+    ]); // fim Promise.allSettled
 
     // Ordenar e Deduplicar
     all.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());

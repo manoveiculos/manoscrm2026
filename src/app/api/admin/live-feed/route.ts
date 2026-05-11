@@ -240,22 +240,30 @@ export async function GET(_req: NextRequest) {
         secDesdeHeartbeat: c.sec_desde_heartbeat || 0,
     }));
 
-    return NextResponse.json({
-        ok: true,
-        generated_at: new Date().toISOString(),
-        aiSent,
-        clientReplies,
-        vendorAlerts,
-        reassigned,
-        hotLeads,
-        activeChats,
-        kpis: {
-            aiSentLast24h: aiSent.length,
-            repliesLast24h: clientReplies.length,
-            vendorAlertsLast24h: vendorAlerts.length,
-            reassignedLast24h: reassigned.length,
-            hotLeadsActive: hotLeads.length,
-            atendendoAgora: activeChats.length,
+    return NextResponse.json(
+        {
+            ok: true,
+            generated_at: new Date().toISOString(),
+            aiSent,
+            clientReplies,
+            vendorAlerts,
+            reassigned,
+            hotLeads,
+            activeChats,
+            kpis: {
+                aiSentLast24h: aiSent.length,
+                repliesLast24h: clientReplies.length,
+                vendorAlertsLast24h: vendorAlerts.length,
+                reassignedLast24h: reassigned.length,
+                hotLeadsActive: hotLeads.length,
+                atendendoAgora: activeChats.length,
+            },
         },
-    });
+        {
+            // Cache de 30s no edge — atualização realtime continua via Supabase
+            // postgres_changes, então o snapshot inicial pode ser servido stale
+            // sem prejuízo. Reduz drasticamente carga em refresh/redes mobile.
+            headers: { 'Cache-Control': 'private, max-age=30, stale-while-revalidate=60' },
+        }
+    );
 }

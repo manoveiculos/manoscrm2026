@@ -303,16 +303,27 @@ export default function InboxPage() {
         };
     }, []);
 
-    // Realtime
+    // Realtime — com debounce de 1.5s pra evitar refetch em rajada.
+    // Um único evento real pode disparar callback em 2-3 das 3 tabelas; sem
+    // debounce o inbox refazia fetchLeads 3x em <100ms (cada um ~300ms).
     useEffect(() => {
         const tables = ['leads_manos_crm', 'leads_compra', 'leads_distribuicao_crm_26'];
         const channel = supabase.channel('inbox-live');
+        let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+        const scheduleRefetch = () => {
+            if (debounceTimer) clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+                fetchLeads(consultantId, filter === 'archived' ? 'archived' : 'active');
+            }, 1500);
+        };
         for (const t of tables) {
-            channel.on('postgres_changes', { event: '*', schema: 'public', table: t },
-                () => { fetchLeads(consultantId, filter === 'archived' ? 'archived' : 'active'); });
+            channel.on('postgres_changes', { event: '*', schema: 'public', table: t }, scheduleRefetch);
         }
         channel.subscribe((status: string) => { setLive(status === 'SUBSCRIBED'); });
-        return () => { supabase.removeChannel(channel); };
+        return () => {
+            if (debounceTimer) clearTimeout(debounceTimer);
+            supabase.removeChannel(channel);
+        };
     }, [supabase, consultantId, fetchLeads, filter]);
 
     // Buckets + filtros
