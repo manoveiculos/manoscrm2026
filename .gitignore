@@ -83,3 +83,6 @@ fix_db_errors.sql
 
 scripts/maintenance/
 scripts/
+
+# Extension build artifact
+manos-crm-extension-*.zip
