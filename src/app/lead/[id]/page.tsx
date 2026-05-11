@@ -534,16 +534,43 @@ export default function LeadDetailPage() {
                     <FollowupHistory leadNativeId={leadId} />
                 </section>
 
-                {/* Direita — ações */}
+                {/* Direita — ações grandes e claras pro vendedor leigo.
+                    Cada botão tem subtítulo explicando QUANDO usar (vendedor
+                    não precisa adivinhar). */}
                 <aside className="md:col-span-3 space-y-3 min-w-0">
-                    <button onClick={() => setShowSold(true)} className="w-full bg-green-600 hover:bg-green-500 text-white py-4 rounded-lg font-bold text-lg flex items-center justify-center gap-2">
-                        <Trophy className="w-5 h-5" /> VENDIDO
+                    <div className="text-xs uppercase tracking-wider text-zinc-500 font-bold mb-1">O que aconteceu com esse lead?</div>
+
+                    <button
+                        onClick={() => setShowSold(true)}
+                        title="Cliente fechou compra. Vou registrar valor e forma de pagamento."
+                        className="w-full bg-green-600 hover:bg-green-500 active:scale-[0.98] transition text-white py-5 rounded-xl font-bold text-xl flex flex-col items-center justify-center gap-1 shadow-lg"
+                    >
+                        <div className="flex items-center gap-2">
+                            <Trophy className="w-6 h-6" /> VENDIDO
+                        </div>
+                        <span className="text-xs font-normal opacity-80">Fechei a venda 🎉</span>
                     </button>
-                    <button onClick={() => setShowLost(true)} className="w-full bg-red-700 hover:bg-red-600 text-white py-4 rounded-lg font-bold text-lg flex items-center justify-center gap-2">
-                        <X className="w-5 h-5" /> PERDIDO
+
+                    <button
+                        onClick={() => setShowLost(true)}
+                        title="Cliente não vai comprar. Vou registrar o motivo (preço, concorrente, sem interesse, etc)."
+                        className="w-full bg-red-700 hover:bg-red-600 active:scale-[0.98] transition text-white py-5 rounded-xl font-bold text-xl flex flex-col items-center justify-center gap-1 shadow-lg"
+                    >
+                        <div className="flex items-center gap-2">
+                            <X className="w-6 h-6" /> PERDIDO
+                        </div>
+                        <span className="text-xs font-normal opacity-80">Não vai comprar (preciso dizer o motivo)</span>
                     </button>
-                    <button onClick={() => setShowSchedule(true)} className="w-full bg-zinc-700 hover:bg-zinc-600 text-white py-4 rounded-lg font-semibold flex items-center justify-center gap-2">
-                        <CalendarPlus className="w-5 h-5" /> AGENDAR RETORNO
+
+                    <button
+                        onClick={() => setShowSchedule(true)}
+                        title="Não vai fechar hoje, mas continua interessado. Vou agendar um retorno."
+                        className="w-full bg-amber-600 hover:bg-amber-500 active:scale-[0.98] transition text-white py-5 rounded-xl font-bold text-xl flex flex-col items-center justify-center gap-1 shadow-lg"
+                    >
+                        <div className="flex items-center gap-2">
+                            <CalendarPlus className="w-6 h-6" /> AGENDAR
+                        </div>
+                        <span className="text-xs font-normal opacity-80">Não fecha hoje — vou voltar depois</span>
                     </button>
                     {lead.phone && (
                         <a

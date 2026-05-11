@@ -485,6 +485,14 @@ export default function InboxPage() {
             ) : (
                 <PTR onRefresh={() => fetchLeads(consultantId)}>
                     <div className="space-y-10 pb-20">
+                        {/* Card guia: PRÓXIMO LEAD A TOCAR. Vendedor leigo abre o
+                            CRM e já sabe o que fazer agora, sem precisar interpretar
+                            seções/buckets. Aparece só quando há urgentes. */}
+                        <NextActionCard
+                            lead={grouped.urgent[0] || grouped.active[0] || null}
+                            lastMessages={lastMessages}
+                            consultantId={consultantId}
+                        />
                         <Section title="Urgente" subtitle="Responda agora" icon={<Flame className="w-5 h-5 text-red-500" />} accent="border-red-600"
                             leads={grouped.urgent} lastMessages={lastMessages} emptyText="Nenhum lead urgente. Bom trabalho." expandedUid={expandedUid} onToggle={setExpandedUid} onArchive={handleArchive} />
                         <Section title="Em negociação" subtitle="Aguardando cliente" icon={<Thermometer className="w-5 h-5 text-orange-400" />} accent="border-zinc-700"
@@ -533,6 +541,79 @@ interface SectionProps {
     expandedUid: string | null;
     onToggle: (uid: string | null) => void;
     onArchive: (uid: string, e: React.MouseEvent) => void;
+}
+
+/**
+ * Card de orientação no topo do Inbox.
+ * Mostra UM lead — o mais urgente — com nome grande, contexto curto e
+ * 1 botão claro: "ABRIR CONVERSA". Pra vendedor leigo que abre o CRM e
+ * não sabe o que fazer primeiro.
+ */
+function NextActionCard({ lead, lastMessages, consultantId }: {
+    lead: InboxLead | null;
+    lastMessages: Map<string, { inbound?: LastMessage; outbound?: LastMessage }>;
+    consultantId: string | null;
+}) {
+    if (!lead) {
+        return (
+            <div className="rounded-2xl bg-gradient-to-br from-emerald-900/30 to-zinc-900/40 border border-emerald-700/40 p-6">
+                <div className="flex items-center gap-3 mb-2">
+                    <div className="text-3xl">✅</div>
+                    <h2 className="text-xl font-bold text-emerald-300">Tudo em dia</h2>
+                </div>
+                <p className="text-sm text-emerald-100/70">
+                    Você não tem nenhum lead urgente agora. Hora de prospectar — peça pra IA cobrar quem ainda não respondeu, ou aguarde o próximo lead chegar.
+                </p>
+            </div>
+        );
+    }
+
+    const msgs = lastMessages.get(lead.uid);
+    const lastIn = msgs?.inbound;
+    const lastOut = msgs?.outbound;
+    const lastMsg = lastIn?.created_at && lastOut?.created_at
+        ? (new Date(lastIn.created_at) > new Date(lastOut.created_at) ? lastIn : lastOut)
+        : (lastIn || lastOut);
+    const lastMsgFrom = lastMsg === lastIn ? '👤 Cliente' : (lastMsg === lastOut ? '🤖 Você/IA' : null);
+    const lastMsgAge = lastMsg?.created_at ? Math.floor((Date.now() - new Date(lastMsg.created_at).getTime()) / 60000) : null;
+
+    let timeLabel = 'Acabou de chegar';
+    let timeColor = 'text-red-300';
+    if (lastMsgAge !== null) {
+        if (lastMsgAge < 60) { timeLabel = `${lastMsgAge}min sem resposta`; timeColor = 'text-yellow-300'; }
+        else if (lastMsgAge < 1440) { timeLabel = `${Math.floor(lastMsgAge / 60)}h sem resposta`; timeColor = 'text-orange-300'; }
+        else { timeLabel = `${Math.floor(lastMsgAge / 1440)}d sem resposta`; timeColor = 'text-red-300'; }
+    }
+
+    return (
+        <div className="rounded-2xl bg-gradient-to-br from-red-950/40 via-zinc-900 to-zinc-900 border-2 border-red-600/50 p-5 shadow-xl">
+            <div className="flex items-start gap-4">
+                <div className="text-3xl">🔥</div>
+                <div className="flex-1 min-w-0">
+                    <div className="text-xs uppercase tracking-wider text-red-400 font-bold mb-1">Próximo lead a tocar agora</div>
+                    <div className="text-2xl font-bold text-white truncate">{lead.name || 'Sem nome'}</div>
+                    <div className="text-sm text-zinc-300 truncate">
+                        {lead.vehicle_interest || lead.source || 'Lead novo — qualifique o interesse'}
+                    </div>
+                    <div className={`text-sm mt-2 ${timeColor}`}>
+                        ⏱ {timeLabel}
+                    </div>
+                    {lastMsg?.message_text && (
+                        <div className="mt-3 p-2 rounded-md bg-zinc-800/60 border border-zinc-700/50 text-sm text-zinc-200">
+                            <div className="text-xs text-zinc-400 mb-1">{lastMsgFrom} disse:</div>
+                            <div className="line-clamp-2">{lastMsg.message_text}</div>
+                        </div>
+                    )}
+                </div>
+                <Link
+                    href={`/lead/${encodeURIComponent(lead.uid)}`}
+                    className="shrink-0 bg-red-600 hover:bg-red-500 transition text-white font-bold px-6 py-3 rounded-xl text-sm flex items-center gap-2 shadow-lg"
+                >
+                    Abrir conversa →
+                </Link>
+            </div>
+        </div>
+    );
 }
 
 function Section({ title, subtitle, icon, accent, leads, lastMessages, emptyText, expandedUid, onToggle, onArchive }: SectionProps) {

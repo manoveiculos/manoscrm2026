@@ -37,11 +37,14 @@ interface NavItem {
     blocked?: boolean;
 }
 
+// Vendedor leigo vê APENAS Inbox. Pipeline/Leads/Dashboard duplicavam
+// informação e confundiam — gerente já tem War Room + Conversão pra visão
+// geral, vendedor não precisa.
 const NAV_ITEMS: NavItem[] = [
     { label: 'Inbox', icon: Bot, href: '/inbox' },
-    { label: 'Pipeline', icon: KanbanSquare, href: '/pipeline' },
-    { label: 'Leads', icon: LayoutDashboard, href: '/leads' },
-    { label: 'Dashboard', icon: BarChart3, href: '/' },
+    { label: 'Pipeline', icon: KanbanSquare, href: '/pipeline', adminOnly: true },
+    { label: 'Leads', icon: LayoutDashboard, href: '/leads', adminOnly: true },
+    { label: 'Dashboard', icon: BarChart3, href: '/', adminOnly: true },
     { label: 'Conversão', icon: BarChart3, href: '/admin/conversion', adminOnly: true },
     { label: 'Resgate', icon: Bot, href: '/admin/rescue', adminOnly: true },
     { label: 'Consultores', icon: Shield, href: '/admin/users', adminOnly: true },
