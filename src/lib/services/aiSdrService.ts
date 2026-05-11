@@ -363,9 +363,13 @@ export async function previewFirstContact(input: FirstContactInput): Promise<Fir
 /**
  * Enfileira o primeiro contato pra ser processado pelo cron /api/cron/ai-sdr-runner.
  *
- * Por que fila e não setTimeout? Em Next.js o route handler encerra o processo
- * quando retorna a Response — qualquer timer agendado vira fantasma. A fila
- * persiste em ai_sdr_queue e o runner (1min) drena. Sobrevive a deploy/restart.
+ * Anti-spam: novo job é agendado pra MAX(scheduled_at pendente) + 2-5min random.
+ * Garante que mensagens nunca saem em rajada (WhatsApp bane por padrão de bot).
+ * Janela 2-5min = 12-30 msgs/hora máximo por instância = humano.
+ *
+ * Por que fila e não setTimeout? Em Next.js o route handler encerra quando
+ * retorna a Response — qualquer timer agendado vira fantasma. A fila persiste
+ * em ai_sdr_queue e o runner (1min) drena. Sobrevive a deploy/restart.
  */
 export async function scheduleFirstContact(
     input: FirstContactInput,
@@ -374,7 +378,23 @@ export async function scheduleFirstContact(
 ): Promise<void> {
     try {
         const admin = createClient();
-        const scheduledAt = new Date(Date.now() + delayMs).toISOString();
+
+        // Anti-ban: pega o último scheduled_at pendente. Próximo envio sai 2-5min depois.
+        const { data: lastPending } = await admin
+            .from('ai_sdr_queue')
+            .select('scheduled_at')
+            .is('processed_at', null)
+            .order('scheduled_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+        const baseTime = Date.now() + delayMs;
+        const lastPendingTime = lastPending?.scheduled_at ? new Date(lastPending.scheduled_at).getTime() : 0;
+        // Janela 2-5min random pra parecer humano
+        const jitter = 120_000 + Math.floor(Math.random() * 180_000);
+        const finalTime = Math.max(baseTime, lastPendingTime + jitter);
+        const scheduledAt = new Date(finalTime).toISOString();
+
         const { error } = await admin.from('ai_sdr_queue').insert({
             lead_id: input.leadId,
             lead_table: table,

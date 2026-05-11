@@ -35,7 +35,11 @@ async function runAiSdrQueue() {
     const admin = createClient();
     // Claim atômico via FOR UPDATE SKIP LOCKED — 2 runners simultâneos
     // não pegam o mesmo job (evita envio duplicado pro cliente).
-    const { data: jobs, error } = await admin.rpc('claim_ai_sdr_jobs', { p_limit: 20 });
+    //
+    // Anti-ban WhatsApp: limit=1 garante 1 msg por execução do cron (1min).
+    // Combinado com o scheduling 2-5min do scheduleFirstContact, dá ritmo
+    // humano (12-30 msgs/hora máximo por instância).
+    const { data: jobs, error } = await admin.rpc('claim_ai_sdr_jobs', { p_limit: 1 });
 
     if (error) {
         console.error('[ai-sdr-runner] claim fila falhou:', error.message);
