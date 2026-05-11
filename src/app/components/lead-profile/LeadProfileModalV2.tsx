@@ -230,13 +230,31 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
     }, [lead, newNote, userName, supabase, timeline]);
 
     const handleDeleteLead = async () => {
-        if (!window.confirm('🚨 TEM CERTEZA? Esta ação irá deletar permanentemente o lead e todo o seu histórico. Não há como desfazer!')) {
+        if (!window.confirm(
+            '🚨 EXCLUSÃO DEFINITIVA\n\n' +
+            'Esta ação vai:\n' +
+            '• Deletar o lead e todo histórico (mensagens, follow-ups, alertas)\n' +
+            '• BLOQUEAR este telefone — se cliente vier de novo via Google/n8n, NÃO será re-criado\n\n' +
+            'Não há como desfazer. Confirmar?'
+        )) {
             return;
         }
 
         setIsDeleting(true);
         try {
-            await leadService.deleteLead(supabase, lead.id);
+            const res = await fetch('/api/lead/permanent-delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    lead_id: lead.id,
+                    reason: 'manual_modal',
+                    deleted_by: userName || null,
+                }),
+            });
+            const data = await res.json();
+            if (!res.ok || !data.success) {
+                throw new Error(data.error || `HTTP ${res.status}`);
+            }
             if (setLeads) {
                 setLeads(prev => prev.filter(l => l.id !== lead.id));
             }
