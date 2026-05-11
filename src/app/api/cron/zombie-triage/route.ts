@@ -98,7 +98,13 @@ async function runTriage(dryRun: boolean): Promise<TriageMetrics> {
             // ── Classificação ──
             let bucket: 'lixo' | 'reativar' | 'arquivar';
 
-            if (noFirstContact && isOld30d && score < 30 && !hasInbound) {
+            // Lixo (regras combinadas):
+            //   A) Nunca contatado + sem inbound + >30 dias + score < 30
+            //   B) Nunca contatado + sem inbound + >15 dias + score = 0 (claramente bot/spam)
+            const isLixoStrict = noFirstContact && isOld30d && score < 30 && !hasInbound;
+            const isLixoZeroScore = noFirstContact && !hasInbound && score === 0;
+
+            if (isLixoStrict || isLixoZeroScore) {
                 bucket = 'lixo';
             } else if (hasInbound && score >= 60) {
                 bucket = 'reativar';
