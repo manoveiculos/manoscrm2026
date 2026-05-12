@@ -81,7 +81,32 @@ interface Message {
     direction: string;
     message_text: string;
     created_at: string;
+    message_id?: string | null;
 }
+
+/**
+ * Classifica a origem da mensagem.
+ * - 'cliente'      → inbound, cliente respondendo
+ * - 'ia_sdr'       → outbound da IA SDR (primeiro contato)
+ * - 'ia_followup'  → outbound da IA Follow-up (reengajamento)
+ * - 'vendedor'     → outbound manual do vendedor (extensão WhatsApp Web)
+ */
+type MessageOrigin = 'cliente' | 'ia_sdr' | 'ia_followup' | 'vendedor';
+
+function getMessageOrigin(m: Message): MessageOrigin {
+    if (m.direction === 'inbound') return 'cliente';
+    const mid = m.message_id || '';
+    if (mid.startsWith('ai_sdr_')) return 'ia_sdr';
+    if (mid.startsWith('ai_followup_')) return 'ia_followup';
+    return 'vendedor';
+}
+
+const ORIGIN_META: Record<MessageOrigin, { label: string; emoji: string; bgClass: string; borderClass: string; textClass: string }> = {
+    cliente:     { label: 'Cliente',          emoji: '👤', bgClass: 'bg-zinc-800/60',  borderClass: 'border-zinc-700',  textClass: 'text-zinc-200' },
+    vendedor:    { label: 'Você (vendedor)',  emoji: '🧑‍💼', bgClass: 'bg-emerald-900/40', borderClass: 'border-emerald-700/50', textClass: 'text-emerald-100' },
+    ia_sdr:      { label: 'IA SDR',           emoji: '🤖', bgClass: 'bg-blue-900/40',  borderClass: 'border-blue-700/50', textClass: 'text-blue-100' },
+    ia_followup: { label: 'IA Follow-up',     emoji: '🔁', bgClass: 'bg-purple-900/40', borderClass: 'border-purple-700/50', textClass: 'text-purple-100' },
+};
 
 export default function LeadDetailPage() {
     const params = useParams();
@@ -94,6 +119,7 @@ export default function LeadDetailPage() {
 
     const [lead, setLead] = useState<Lead | null>(null);
     const [messages, setMessages] = useState<Message[]>([]);
+    const [msgFilter, setMsgFilter] = useState<'todas' | MessageOrigin>('todas');
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
     const [analyzing, setAnalyzing] = useState(false);
@@ -179,12 +205,19 @@ export default function LeadDetailPage() {
             setLead(lead);
             setSoldVehicle(lead?.vehicle_interest || '');
 
+            // Performance: cast pra int se leadId for numérico (tabelas legadas
+            // têm whatsapp_messages.lead_id BIGINT — cast implícito de string
+            // pra bigint causa timeout em produção). Filtro extra de 90 dias
+            // garante uso do índice composto (lead_id, created_at).
+            const leadIdParam: any = /^\d+$/.test(leadId) ? parseInt(leadId, 10) : leadId;
+            const cutoff90d = new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString();
             const { data: msgs, error: msgError } = await supabase
                 .from('whatsapp_messages')
-                .select('id, direction, message_text, created_at')
-                .eq('lead_id', leadId)
+                .select('id, direction, message_text, created_at, message_id')
+                .eq('lead_id', leadIdParam)
+                .gte('created_at', cutoff90d)
                 .order('created_at', { ascending: false })
-                .limit(30);
+                .limit(50);
             
             if (msgError) {
                 console.warn('[LeadDetail] Erro ao buscar mensagens:', msgError.message);
@@ -444,7 +477,7 @@ export default function LeadDetailPage() {
                 <section className="md:col-span-6 flex flex-col gap-3 min-w-0">
                     {/* CONVERSA REAL */}
                     <div className="bg-zinc-900 rounded-lg p-3 md:p-4 flex flex-col min-w-0" style={{ maxHeight: '50vh', minHeight: '300px' }}>
-                        <div className="flex items-center justify-between mb-2 gap-2">
+                        <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
                             <h3 className="text-sm font-semibold text-gray-300 flex items-center gap-2">
                                 <MessageSquare className="w-4 h-4" /> Conversa WhatsApp
                                 {messages.length > 0 && (
@@ -462,6 +495,44 @@ export default function LeadDetailPage() {
                                 } as CannedContext}
                             />
                         </div>
+
+                        {/* Tabs de filtro por origem — vendedor leigo entende
+                            de onde veio cada mensagem. Conta msgs por tipo. */}
+                        {messages.length > 0 && (() => {
+                            const counts: Record<'todas' | MessageOrigin, number> = {
+                                todas: messages.length,
+                                cliente: 0, vendedor: 0, ia_sdr: 0, ia_followup: 0,
+                            };
+                            for (const m of messages) counts[getMessageOrigin(m)]++;
+                            const tabs: Array<{ key: 'todas' | MessageOrigin; label: string; emoji: string }> = [
+                                { key: 'todas',       label: 'Todas',     emoji: '💬' },
+                                { key: 'cliente',     label: 'Cliente',   emoji: '👤' },
+                                { key: 'vendedor',    label: 'Vendedor',  emoji: '🧑‍💼' },
+                                { key: 'ia_sdr',      label: 'IA SDR',    emoji: '🤖' },
+                                { key: 'ia_followup', label: 'IA Follow', emoji: '🔁' },
+                            ];
+                            return (
+                                <div className="flex items-center gap-1 mb-2 flex-wrap">
+                                    {tabs.map(t => {
+                                        const active = msgFilter === t.key;
+                                        const n = counts[t.key];
+                                        return (
+                                            <button
+                                                key={t.key}
+                                                onClick={() => setMsgFilter(t.key)}
+                                                disabled={n === 0 && t.key !== 'todas'}
+                                                className={`text-[11px] px-2 py-1 rounded-md font-bold transition disabled:opacity-30 disabled:cursor-not-allowed ${
+                                                    active ? 'bg-white text-zinc-900' : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
+                                                }`}
+                                            >
+                                                {t.emoji} {t.label} <span className="opacity-60">·{n}</span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            );
+                        })()}
+
                         <div className="flex-1 overflow-y-auto space-y-2 pr-1">
                             {messages.length === 0 ? (
                                 <div className="h-full flex flex-col items-center justify-center text-center py-8 px-4">
@@ -481,26 +552,29 @@ export default function LeadDetailPage() {
                                     )}
                                 </div>
                             ) : (
-                                messages.map(m => (
-                                    <div
-                                        key={m.id}
-                                        className={`text-sm p-2 rounded max-w-[90%] md:max-w-[85%] break-words ${
-                                            m.direction === 'inbound'
-                                                ? 'bg-zinc-800 text-gray-100'
-                                                : 'bg-blue-900/40 text-blue-100 ml-auto'
-                                        }`}
-                                    >
-                                        <div className="flex items-center gap-1.5 mb-1">
-                                            <span className="text-[10px] font-bold uppercase tracking-wide opacity-70">
-                                                {m.direction === 'inbound' ? '👤 Cliente' : '🟢 Loja/IA'}
-                                            </span>
-                                        </div>
-                                        {m.message_text}
-                                        <div className="text-[10px] text-gray-500 mt-1">
-                                            {new Date(m.created_at).toLocaleString('pt-BR')}
-                                        </div>
-                                    </div>
-                                ))
+                                messages
+                                    .filter(m => msgFilter === 'todas' || getMessageOrigin(m) === msgFilter)
+                                    .map(m => {
+                                        const origin = getMessageOrigin(m);
+                                        const meta = ORIGIN_META[origin];
+                                        const alignRight = origin !== 'cliente';
+                                        return (
+                                            <div
+                                                key={m.id}
+                                                className={`text-sm p-2 rounded-lg max-w-[90%] md:max-w-[85%] break-words border ${meta.bgClass} ${meta.borderClass} ${meta.textClass} ${alignRight ? 'ml-auto' : ''}`}
+                                            >
+                                                <div className="flex items-center gap-1.5 mb-1">
+                                                    <span className="text-[10px] font-bold uppercase tracking-wide opacity-80">
+                                                        {meta.emoji} {meta.label}
+                                                    </span>
+                                                </div>
+                                                {m.message_text}
+                                                <div className="text-[10px] text-gray-500 mt-1">
+                                                    {new Date(m.created_at).toLocaleString('pt-BR')}
+                                                </div>
+                                            </div>
+                                        );
+                                    })
                             )}
                         </div>
                     </div>
