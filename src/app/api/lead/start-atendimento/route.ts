@@ -59,15 +59,32 @@ export async function POST(req: NextRequest) {
             atendimento_iniciado_por: consultant.id,
         };
 
-        // Se vendedor ainda não está atribuído, atribui agora
+        // Lê estado atual do lead pra decidir o que fazer
         const { data: leadRow } = await admin
             .from(table)
-            .select('assigned_consultant_id, atendimento_iniciado_em')
+            .select('assigned_consultant_id, atendimento_iniciado_em, atendimento_iniciado_por')
             .eq('id', realId)
             .maybeSingle();
 
-        if (leadRow?.atendimento_iniciado_em) {
-            // Já iniciado: retorna sem sobrescrever
+        // BLOQUEIO: já iniciado por OUTRO consultor → não permite ataque
+        if (leadRow?.atendimento_iniciado_em && leadRow.atendimento_iniciado_por && leadRow.atendimento_iniciado_por !== consultant.id) {
+            // Busca nome do dono pra mostrar mensagem clara
+            const { data: dono } = await admin
+                .from('consultants_manos_crm')
+                .select('name')
+                .eq('id', leadRow.atendimento_iniciado_por)
+                .maybeSingle();
+            const donoName = dono?.name || 'outro vendedor';
+            return NextResponse.json({
+                success: false,
+                locked: true,
+                locked_by: donoName,
+                error: `Lead já está sendo atendido por ${donoName.split(' ')[0]}.`,
+            }, { status: 409 });
+        }
+
+        // Já iniciado por VOCÊ → idempotente, retorna sem mudar nada
+        if (leadRow?.atendimento_iniciado_em && leadRow.atendimento_iniciado_por === consultant.id) {
             return NextResponse.json({
                 success: true,
                 already_started: true,
@@ -75,9 +92,10 @@ export async function POST(req: NextRequest) {
             });
         }
 
-        if (!leadRow?.assigned_consultant_id) {
-            updates.assigned_consultant_id = consultant.id;
-        }
+        // Atribui ao consultor que iniciou (mesmo se já tinha outro dono sem atendimento iniciado)
+        // — é "quem chega primeiro e clica leva". Isso protege contra distribuição automática
+        // que não foi seguida na prática.
+        updates.assigned_consultant_id = consultant.id;
 
         const { error } = await admin.from(table).update(updates).eq('id', realId);
         if (error) {

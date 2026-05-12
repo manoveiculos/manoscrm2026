@@ -553,8 +553,11 @@ export default function LeadDetailPage() {
                                         body: JSON.stringify({ lead_id: lead.id }),
                                     });
                                     const data = await res.json();
+                                    if (res.status === 409 && data.locked) {
+                                        alert(`🔒 ${data.error}\n\nVocê não pode atender — outro vendedor já está cuidando deste lead.`);
+                                        return;
+                                    }
                                     if (!res.ok || !data.success) throw new Error(data.error || 'falha');
-                                    // Atualiza estado local sem refetch
                                     setLead(prev => prev ? { ...prev, atendimento_iniciado_em: data.started_at || new Date().toISOString() } : prev);
                                 } catch (e: any) {
                                     alert('Erro: ' + (e?.message || 'tente de novo'));

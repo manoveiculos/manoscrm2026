@@ -22,6 +22,7 @@ import {
     SlidersHorizontal, // Calibração da IA
     DollarSign,
     Radar, // Radar de Tráfego
+    PlayCircle, // Atendimento ativo
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
@@ -37,11 +38,12 @@ interface NavItem {
     blocked?: boolean;
 }
 
-// Vendedor leigo vê APENAS Inbox. Pipeline/Leads/Dashboard duplicavam
+// Vendedor leigo vê Inbox + Atendimento. Pipeline/Leads/Dashboard duplicavam
 // informação e confundiam — gerente já tem War Room + Conversão pra visão
 // geral, vendedor não precisa.
 const NAV_ITEMS: NavItem[] = [
     { label: 'Inbox', icon: Bot, href: '/inbox' },
+    { label: 'Atendimento', icon: PlayCircle, href: '/atendimento' },
     { label: 'Pipeline', icon: KanbanSquare, href: '/pipeline', adminOnly: true },
     { label: 'Leads', icon: LayoutDashboard, href: '/leads', adminOnly: true },
     { label: 'Dashboard', icon: BarChart3, href: '/', adminOnly: true },
