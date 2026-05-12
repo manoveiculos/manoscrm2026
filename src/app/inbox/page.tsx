@@ -202,14 +202,12 @@ export default function InboxPage() {
         // Ou melhor: como temos fontes mistas, fazemos a query mas tratamos possíveis erros de cast
         const leadIds = next.map(l => l.native_id).slice(0, 100);
         if (leadIds.length > 0) {
-            // Whatsapp_messages.lead_id é BIGINT/TEXT misto.
-            // Separar IDs numéricos (BIGINT) de UUIDs (TEXT) pra fazer 2 queries
-            // tipadas — cast implícito quebrava silenciosamente em produção.
-            const numericIds = leadIds.filter(id => /^\d+$/.test(String(id))).map(id => parseInt(String(id), 10));
-            const uuidIds = leadIds.filter(id => !/^\d+$/.test(String(id)));
             const cutoff90d = new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString();
-
+            // Separar por tipo evita cast implícito BIGINT/UUID que falha silenciosamente
+            const numericIds = leadIds.filter(id => /^\d+$/.test(String(id))).map(id => parseInt(String(id), 10));
+            const uuidIds = leadIds.filter(id => !/^\d+$/.test(String(id))).map(id => String(id));
             const queries: Promise<any>[] = [];
+
             if (numericIds.length > 0) {
                 queries.push(
                     supabase.from('whatsapp_messages')
@@ -409,7 +407,7 @@ export default function InboxPage() {
             if (debounceTimer) clearTimeout(debounceTimer);
             debounceTimer = setTimeout(() => {
                 fetchLeads(consultantId, filter === 'archived' ? 'archived' : 'active');
-            }, 1500);
+            }, 3500);
         };
         for (const t of tables) {
             channel.on('postgres_changes', { event: '*', schema: 'public', table: t }, scheduleRefetch);
