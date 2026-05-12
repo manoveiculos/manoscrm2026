@@ -26,6 +26,7 @@ interface LeadSla {
     createdAt: string;
     lastActivityAt: string;
     status: string;
+    atendimentoIniciadoEm?: string | null;
 }
 
 const FINAL_STATUSES = ['vendido', 'perdido', 'comprado', 'finalizado', 'lost', 'lost_by_inactivity'];
@@ -56,7 +57,7 @@ async function fetchLeadsCompra(): Promise<LeadSla[]> {
     const admin = createClient();
     const { data } = await admin
         .from('leads_compra')
-        .select('id, nome, assigned_consultant_id, criado_em, updated_at, status')
+        .select('id, nome, assigned_consultant_id, criado_em, updated_at, status, atendimento_iniciado_em')
         .not('status', 'in', `(${FINAL_STATUSES.map(s => `"${s}"`).join(',')})`)
         .is('archived_at', null)
         .order('criado_em', { ascending: false })
@@ -69,6 +70,7 @@ async function fetchLeadsCompra(): Promise<LeadSla[]> {
         createdAt: l.criado_em,
         lastActivityAt: l.updated_at || l.criado_em,
         status: l.status || 'novo',
+        atendimentoIniciadoEm: l.atendimento_iniciado_em || null,
     }));
 }
 
@@ -76,7 +78,7 @@ async function fetchLeadsVenda(): Promise<LeadSla[]> {
     const admin = createClient();
     const { data } = await admin
         .from('leads_manos_crm')
-        .select('id, name, assigned_consultant_id, created_at, updated_at, status')
+        .select('id, name, assigned_consultant_id, created_at, updated_at, status, atendimento_iniciado_em')
         .not('status', 'in', `(${FINAL_STATUSES.map(s => `"${s}"`).join(',')})`)
         .is('archived_at', null)
         .order('created_at', { ascending: false })
@@ -89,6 +91,7 @@ async function fetchLeadsVenda(): Promise<LeadSla[]> {
         createdAt: l.created_at,
         lastActivityAt: l.updated_at || l.created_at,
         status: l.status || 'novo',
+        atendimentoIniciadoEm: l.atendimento_iniciado_em || null,
     }));
 }
 
@@ -100,6 +103,58 @@ async function processLead(lead: LeadSla, results: any) {
     const minsSinceCreated = await ageMinutes(lead.createdAt);
     const minsSinceActivity = await ageMinutes(lead.lastActivityAt);
     const isNew = lead.status === 'novo' || lead.status === 'received';
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // Cobrança PÓS-ATENDIMENTO: vendedor iniciou mas não finalizou.
+    // 2h, 4h, 24h → push WhatsApp pessoal escalando urgência.
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    if (lead.atendimentoIniciadoEm && lead.consultantId) {
+        const minsAtendendo = await ageMinutes(lead.atendimentoIniciadoEm);
+
+        // Nível 7: 24h sem fechar — escalation crítica
+        if (minsAtendendo > 60 * 24 && !(await getOpenLevel(lead.id, 7))) {
+            await notifyConsultant({
+                consultantId: lead.consultantId,
+                leadId: lead.id,
+                level: 3,
+                title: `⏰ Lead ${lead.name} parado há +24h`,
+                message: 'Você assumiu mas não fechou ainda. Marca VENDIDO, PERDIDO ou AGENDAR agora.',
+                blocking: true,
+            });
+            await recordEscalation(lead.id, lead.table, lead.consultantId, 7, `Atendimento parado ${Math.floor(minsAtendendo/60)}h`);
+            results.blockingModals = (results.blockingModals || 0) + 1;
+            return;
+        }
+        // Nível 6: 4h sem fechar
+        if (minsAtendendo > 240 && !(await getOpenLevel(lead.id, 6))) {
+            await notifyConsultant({
+                consultantId: lead.consultantId,
+                leadId: lead.id,
+                level: 2,
+                title: `Lead ${lead.name} aguardando você há 4h`,
+                message: 'Cliente esperando definição. Avança ou justifica perda.',
+            });
+            await recordEscalation(lead.id, lead.table, lead.consultantId, 6, `Atendimento parado 4h`);
+            results.pushes = (results.pushes || 0) + 1;
+            return;
+        }
+        // Nível 5: 2h sem fechar
+        if (minsAtendendo > 120 && !(await getOpenLevel(lead.id, 5))) {
+            await notifyConsultant({
+                consultantId: lead.consultantId,
+                leadId: lead.id,
+                level: 1,
+                title: `Lead ${lead.name} contigo há 2h`,
+                message: 'Algum progresso? Não esquece de marcar o resultado no CRM.',
+            });
+            await recordEscalation(lead.id, lead.table, lead.consultantId, 5, `Atendimento parado 2h`);
+            results.pushes = (results.pushes || 0) + 1;
+            return;
+        }
+        // Se já iniciou atendimento, NÃO aplica SLA de "lead novo sem resposta" abaixo.
+        // Vendedor já assumiu — a cobrança é por progresso, não por primeiro toque.
+        return;
+    }
 
     // Auto-finish após 7 dias sem atividade
     if (minsSinceActivity > 60 * 24 * 7) {

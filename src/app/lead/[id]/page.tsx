@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
-import { Trophy, X, CalendarPlus, ArrowLeft, MessageSquare, Activity, Archive } from 'lucide-react';
+import { Trophy, X, CalendarPlus, ArrowLeft, MessageSquare, Activity, Archive, PlayCircle } from 'lucide-react';
 import { parseUid } from '@/lib/services/unifiedLead';
 import CannedResponses, { CannedContext } from '@/components/CannedResponses';
 import FollowupHistory from '@/components/FollowupHistory';
@@ -55,6 +55,7 @@ interface Lead {
     assigned_consultant_id: string | null;
     ai_summary: string | null;
     created_at: string | null;
+    atendimento_iniciado_em: string | null;
 }
 
 function formatLeadEntryDate(iso: string | null): { date: string; time: string; ago: string } | null {
@@ -124,7 +125,7 @@ export default function LeadDetailPage() {
             // Lê da view unificada — funciona para qualquer tabela origem
             // Se a view não tiver alguma coluna nova (caso após migration falha),
             // tentamos primeiro com ai_summary e fazemos retry sem ele.
-            const COLS_FULL = 'uid, table_name, native_id, name, phone, vehicle_interest, source, ai_score, ai_classification, status, proxima_acao, assigned_consultant_id, ai_summary, created_at';
+            const COLS_FULL = 'uid, table_name, native_id, name, phone, vehicle_interest, source, ai_score, ai_classification, status, proxima_acao, assigned_consultant_id, ai_summary, created_at, atendimento_iniciado_em';
             const COLS_FALLBACK = 'uid, table_name, native_id, name, phone, vehicle_interest, source, ai_score, ai_classification, status, proxima_acao, assigned_consultant_id, created_at';
 
             let l: any = null;
@@ -171,6 +172,7 @@ export default function LeadDetailPage() {
                 assigned_consultant_id: l.assigned_consultant_id,
                 ai_summary: l.ai_summary ?? null,
                 created_at: l.created_at ?? null,
+                atendimento_iniciado_em: l.atendimento_iniciado_em ?? null,
             } : null;
             setLead(lead);
             setSoldVehicle(lead?.vehicle_interest || '');
@@ -538,7 +540,46 @@ export default function LeadDetailPage() {
                     Cada botão tem subtítulo explicando QUANDO usar (vendedor
                     não precisa adivinhar). */}
                 <aside className="md:col-span-3 space-y-3 min-w-0">
-                    <div className="text-xs uppercase tracking-wider text-zinc-500 font-bold mb-1">O que aconteceu com esse lead?</div>
+                    {/* Botão "INICIAR ATENDIMENTO" — mostra se ainda não iniciou.
+                        Quando vendedor clica, marca timestamp; SLA Watcher cobra
+                        depois (2h, 4h, 24h). Some depois que iniciou. */}
+                    {!lead.atendimento_iniciado_em ? (
+                        <button
+                            onClick={async () => {
+                                try {
+                                    const res = await fetch('/api/lead/start-atendimento', {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ lead_id: lead.id }),
+                                    });
+                                    const data = await res.json();
+                                    if (!res.ok || !data.success) throw new Error(data.error || 'falha');
+                                    // Atualiza estado local sem refetch
+                                    setLead(prev => prev ? { ...prev, atendimento_iniciado_em: data.started_at || new Date().toISOString() } : prev);
+                                } catch (e: any) {
+                                    alert('Erro: ' + (e?.message || 'tente de novo'));
+                                }
+                            }}
+                            title="Marca que você assumiu este lead. Você é responsável por fechar ou justificar perda."
+                            className="w-full bg-blue-600 hover:bg-blue-500 active:scale-[0.98] transition text-white py-5 rounded-xl font-bold text-xl flex flex-col items-center justify-center gap-1 shadow-lg animate-pulse"
+                        >
+                            <div className="flex items-center gap-2">
+                                <PlayCircle className="w-6 h-6" /> INICIAR ATENDIMENTO
+                            </div>
+                            <span className="text-xs font-normal opacity-80">Estou cuidando deste lead agora</span>
+                        </button>
+                    ) : (
+                        <div className="w-full bg-blue-900/30 border border-blue-700/50 text-blue-200 py-3 rounded-xl text-center">
+                            <div className="text-xs uppercase tracking-wider text-blue-400 font-bold">Atendendo desde</div>
+                            <div className="text-sm font-semibold mt-0.5">
+                                {new Date(lead.atendimento_iniciado_em).toLocaleString('pt-BR', {
+                                    day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
+                                })}
+                            </div>
+                        </div>
+                    )}
+
+                    <div className="text-xs uppercase tracking-wider text-zinc-500 font-bold mb-1 pt-2">O que aconteceu com esse lead?</div>
 
                     <button
                         onClick={() => setShowSold(true)}
