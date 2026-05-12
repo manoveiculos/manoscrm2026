@@ -39,6 +39,8 @@ interface InboxLead {
     first_contact_channel?: string | null;
     onboarded_at?: string | null;
     assigned_consultant_id?: string | null;
+    atendimento_iniciado_em?: string | null;
+    atendimento_iniciado_por?: string | null;
 }
 
 interface LastMessage {
@@ -171,7 +173,7 @@ export default function InboxPage() {
         // Outros modos: filtra pelo consultor logado.
         const query = supabase
             .from(sourceView)
-            .select('uid, table_name, native_id, name, phone, vehicle_interest, source, ai_score, ai_classification, status, updated_at, created_at, proxima_acao, first_contact_channel, assigned_consultant_id' + (viewMode === 'archived' ? ', archived_at' : ''))
+            .select('uid, table_name, native_id, name, phone, vehicle_interest, source, ai_score, ai_classification, status, updated_at, created_at, proxima_acao, first_contact_channel, assigned_consultant_id, atendimento_iniciado_em, atendimento_iniciado_por' + (viewMode === 'archived' ? ', archived_at' : ''))
             .order(isTodayMode ? 'created_at' : (viewMode === 'archived' ? 'updated_at' : 'ai_score'), { ascending: isTodayMode ? false : false, nullsFirst: false })
             .limit(200);
         if (cid && !isTodayMode) query.eq('assigned_consultant_id', cid);
@@ -181,10 +183,18 @@ export default function InboxPage() {
             query.gte('created_at', todayStart.toISOString());
         }
         if (viewMode === 'archived') query.not('archived_at', 'is', null);
-        const { data, error: leadsErr } = await query;
+        const { data: rawData, error: leadsErr } = await query;
         if (leadsErr) {
             console.error('[Inbox] fetchLeads erro:', leadsErr.message, leadsErr.details);
         }
+
+        // BLOQUEIO CROSS-VENDOR: leads que OUTRO vendedor já iniciou atendimento
+        // somem do meu Inbox imediatamente. Quando A clica INICIAR, B perde o
+        // lead da fila no próximo refresh (que vem rápido via realtime).
+        const data = (rawData || []).filter((l: any) => {
+            if (!l.atendimento_iniciado_em || !l.atendimento_iniciado_por) return true;
+            return !cid || l.atendimento_iniciado_por === cid;
+        });
         const next = (data as InboxLead[]) || [];
 
         // Busca mensagens para determinar estado
@@ -192,25 +202,54 @@ export default function InboxPage() {
         // Ou melhor: como temos fontes mistas, fazemos a query mas tratamos possíveis erros de cast
         const leadIds = next.map(l => l.native_id).slice(0, 100);
         if (leadIds.length > 0) {
-            const { data: msgs, error: msgError } = await supabase
-                .from('whatsapp_messages')
-                .select('lead_id, message_text, direction, created_at')
-                .in('lead_id', leadIds)
-                .order('created_at', { ascending: false });
+            // Whatsapp_messages.lead_id é BIGINT/TEXT misto.
+            // Separar IDs numéricos (BIGINT) de UUIDs (TEXT) pra fazer 2 queries
+            // tipadas — cast implícito quebrava silenciosamente em produção.
+            const numericIds = leadIds.filter(id => /^\d+$/.test(String(id))).map(id => parseInt(String(id), 10));
+            const uuidIds = leadIds.filter(id => !/^\d+$/.test(String(id)));
+            const cutoff90d = new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString();
 
-            if (msgError) {
-                console.warn('[Inbox] Erro ao buscar mensagens (pode ser conflito de tipos UUID/BIGINT):', msgError.message);
-                // Tenta buscar um por um ou ignora o erro para não quebrar a página
+            const queries: Promise<any>[] = [];
+            if (numericIds.length > 0) {
+                queries.push(
+                    supabase.from('whatsapp_messages')
+                        .select('lead_id, message_text, direction, created_at')
+                        .in('lead_id', numericIds)
+                        .gte('created_at', cutoff90d)
+                        .order('created_at', { ascending: false })
+                        .limit(500)
+                );
+            }
+            if (uuidIds.length > 0) {
+                queries.push(
+                    supabase.from('whatsapp_messages')
+                        .select('lead_id, message_text, direction, created_at')
+                        .in('lead_id', uuidIds)
+                        .gte('created_at', cutoff90d)
+                        .order('created_at', { ascending: false })
+                        .limit(500)
+                );
+            }
+
+            const results = await Promise.allSettled(queries);
+            const allMsgs: any[] = [];
+            for (const r of results) {
+                if (r.status === 'fulfilled') {
+                    if (r.value.error) console.warn('[Inbox] msg fetch erro:', r.value.error.message);
+                    if (r.value.data) allMsgs.push(...r.value.data);
+                }
             }
 
             const msgMap = new Map<string, { inbound?: LastMessage, outbound?: LastMessage }>();
-            for (const m of (msgs as LastMessage[]) || []) {
-                const current = msgMap.get(m.lead_id) || {};
+            for (const m of allMsgs as LastMessage[]) {
+                const leadKey = String(m.lead_id);
+                const current = msgMap.get(leadKey) || {};
                 if (m.direction === 'inbound' && !current.inbound) current.inbound = m;
                 if (m.direction === 'outbound' && !current.outbound) current.outbound = m;
-                msgMap.set(m.lead_id, current);
+                msgMap.set(leadKey, current);
             }
             setLastMessages(msgMap);
+            const msgs = allMsgs; // alias pra compat com bloco abaixo
 
             // Som se lead novo ou esperando
             if (initialLoadDoneRef.current && soundEnabled) {
