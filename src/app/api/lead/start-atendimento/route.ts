@@ -16,7 +16,7 @@ import { getTableForLead, stripPrefix } from '@/lib/services/leadRouter';
 export async function POST(req: NextRequest) {
     try {
         const body = await req.json();
-        const { lead_id } = body;
+        const { lead_id, lead_table } = body;
 
         if (!lead_id) {
             return NextResponse.json({ success: false, error: 'lead_id obrigatório' }, { status: 400 });
@@ -50,9 +50,13 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ success: false, error: 'consultor não encontrado' }, { status: 403 });
         }
 
-        const table = getTableForLead(lead_id);
+        // Prioriza lead_table explícito (frontend mais novo passa esse campo).
+        // Cai no leadRouter pra retro-compatibilidade com chamadas antigas.
+        const table = (lead_table && ['leads_compra', 'leads_manos_crm', 'leads_distribuicao_crm_26', 'leads_master'].includes(lead_table))
+            ? lead_table
+            : getTableForLead(lead_id);
         const cleanId = stripPrefix(lead_id);
-        const realId = table === 'leads_distribuicao_crm_26' ? parseInt(cleanId) : cleanId;
+        const realId: any = table === 'leads_distribuicao_crm_26' ? parseInt(cleanId) : cleanId;
 
         const updates: Record<string, any> = {
             atendimento_iniciado_em: new Date().toISOString(),

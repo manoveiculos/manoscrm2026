@@ -42,6 +42,7 @@ const PAYMENT_METHODS = ['à vista', 'financiado', 'consórcio', 'CDC', 'troca +
 
 interface Lead {
     id: string;
+    table_name: string;
     name: string | null;
     phone: string | null;
     vehicle_interest: string | null;
@@ -159,6 +160,7 @@ export default function LeadDetailPage() {
 
             const lead: Lead | null = l ? {
                 id: l.native_id,
+                table_name: l.table_name,
                 name: l.name,
                 phone: l.phone,
                 vehicle_interest: l.vehicle_interest,
@@ -550,7 +552,7 @@ export default function LeadDetailPage() {
                                     const res = await fetch('/api/lead/start-atendimento', {
                                         method: 'POST',
                                         headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({ lead_id: lead.id }),
+                                        body: JSON.stringify({ lead_id: lead.id, lead_table: lead.table_name }),
                                     });
                                     const data = await res.json();
                                     if (res.status === 409 && data.locked) {
