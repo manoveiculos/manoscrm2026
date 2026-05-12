@@ -90,6 +90,71 @@ export async function POST(req: NextRequest) {
             created_at: now,
         }).then(null, () => {});
 
+        // 🔁 Lead arquivado vai pra fila de reengajamento da IA.
+        // IA analisa contexto da conversa e:
+        //   - tem histórico → manda msg contextualizada de reengajamento
+        //   - sem histórico → notifica vendedor pra decidir antes
+        // Não voltará pro Inbox até cliente responder (webhook ressuscita).
+        if (archive) {
+            try {
+                // Busca dados do lead pra montar payload
+                const { data: leadInfo } = await admin
+                    .from(lead_table)
+                    .select(lead_table === 'leads_manos_crm'
+                        ? 'name, phone, vehicle_interest, source, assigned_consultant_id'
+                        : lead_table === 'leads_compra'
+                            ? 'nome, telefone, veiculo_original, origem, assigned_consultant_id'
+                            : 'nome, telefone, interesse, origem, assigned_consultant_id'
+                    )
+                    .eq('id', isUUID ? cleanId : cleanId)
+                    .maybeSingle();
+
+                if (leadInfo) {
+                    const leadInfoAny = leadInfo as any;
+                    const leadName = leadInfoAny.name || leadInfoAny.nome;
+                    const leadPhone = leadInfoAny.phone || leadInfoAny.telefone;
+                    const vehicleInterest = leadInfoAny.vehicle_interest || leadInfoAny.veiculo_original || leadInfoAny.interesse;
+                    const source = leadInfoAny.source || leadInfoAny.origem || 'arquivado';
+
+                    if (leadPhone) {
+                        // Agenda reengajamento em 30min (dá tempo de vendedor mudar de ideia)
+                        await admin.from('ai_sdr_queue').insert({
+                            lead_id: cleanId,
+                            lead_table,
+                            payload: {
+                                leadId: cleanId,
+                                leadName,
+                                leadPhone,
+                                vehicleInterest,
+                                source,
+                                consultantName: null,
+                                flow: lead_table === 'leads_compra' ? 'compra' : 'venda',
+                                from_archive: true,                       // ← flag pra IA tratar diferente
+                                archive_reason: reason || null,
+                                assigned_consultant_id: leadInfoAny.assigned_consultant_id || null,
+                            },
+                            scheduled_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+                        }).then(null, (e: any) => {
+                            // unique_violation = OK, já enfileirado
+                            if (!String(e?.message || '').includes('duplicate')) {
+                                console.warn('[archive] enqueue reengajamento falhou:', e?.message);
+                            }
+                        });
+                    }
+                }
+            } catch (e: any) {
+                console.warn('[archive] reengajamento erro:', e?.message);
+            }
+        } else {
+            // Desarquivou → remove da fila de reengajamento se ainda pendente
+            await admin.from('ai_sdr_queue')
+                .delete()
+                .eq('lead_id', cleanId)
+                .eq('lead_table', lead_table)
+                .is('processed_at', null)
+                .then(null, () => {});
+        }
+
         return NextResponse.json({ ok: true, archived: archive, lead_id: cleanId });
     } catch (e: any) {
         console.error('[archive]', e);

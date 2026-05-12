@@ -24,6 +24,10 @@ export interface FirstContactInput {
     consultantName?: string | null;
     /** 'compra' = lead que quer VENDER carro pra nós; 'venda' = lead querendo COMPRAR. */
     flow: 'compra' | 'venda';
+    /** Lead foi arquivado pelo vendedor e está sendo reengajado pela IA. */
+    from_archive?: boolean;
+    /** UUID do consultor responsável (usado pra cobrar antes de IA enviar sem contexto). */
+    assigned_consultant_id?: string | null;
 }
 
 export interface FirstContactResult {
@@ -309,6 +313,36 @@ export async function sendFirstContact(input: FirstContactInput, table: 'leads_c
 
     if (!isSenderConfigured()) {
         return { sent: false, message: '', provider: 'none', error: 'no_provider_configured' };
+    }
+
+    // 🔁 REENGAJAMENTO PÓS-ARQUIVO: lead arquivado pelo vendedor.
+    // Antes de mandar msg pro cliente, IA verifica se há contexto suficiente.
+    // Sem histórico de conversa → NÃO envia (seria msg fria/inadequada).
+    // Em vez disso, cobra o vendedor responsável pra decidir.
+    if (input.from_archive) {
+        const { count: msgCount } = await admin
+            .from('whatsapp_messages')
+            .select('id', { count: 'exact', head: true })
+            .eq('lead_id', input.leadId);
+
+        const hasContext = (msgCount || 0) >= 2; // pelo menos 1 nossa + 1 dele (ou ida+volta)
+
+        if (!hasContext && input.assigned_consultant_id) {
+            // Cobra vendedor antes de IA mandar nada
+            try {
+                const { notifyConsultant } = await import('./consultantNotifier');
+                await notifyConsultant({
+                    consultantId: input.assigned_consultant_id,
+                    leadId: input.leadId,
+                    level: 1,
+                    title: `🤔 Lead ${input.leadName || 'arquivado'} sem contexto`,
+                    message: `Você arquivou esse lead mas nunca houve conversa. Quer reativar manualmente (responder direto) ou descartar de vez? Se ficar parado, IA não vai mandar msg às cegas.`,
+                });
+            } catch (e) {
+                console.warn('[aiSdr] notifyConsultant falhou:', e);
+            }
+            return { sent: false, message: '', provider: 'none', error: 'no_context_pinged_vendor' };
+        }
     }
 
     const message = await generateMessage(input);

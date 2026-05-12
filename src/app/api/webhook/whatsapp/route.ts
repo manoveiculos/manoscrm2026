@@ -103,7 +103,7 @@ export async function POST(req: NextRequest) {
         // 1. Busca o lead pela varredura de telefone
         const { data: existingLead, error: leadError } = await supabase
             .from('leads_distribuicao_crm_26')
-            .select('id, telefone, status')
+            .select('id, telefone, status, archived_at')
             .eq('telefone', cleanPhone)
             .limit(1)
             .maybeSingle();
@@ -187,16 +187,23 @@ export async function POST(req: NextRequest) {
             const isFinal = existingLead.status === 'post_sale' || existingLead.status === 'lost' ||
                             existingLead.status === 'vendido' || existingLead.status === 'perdido' ||
                             existingLead.status === 'frio';
+            const wasArchived = !!existingLead.archived_at;
             const now = new Date().toISOString();
             const updates: Record<string, any> = {
                 atualizado_em: now,
                 respondeu_follow_up: true,             // V3: trava IA
                 atendimento_manual_at: now,            // V3: vendedor assume agora
             };
-            // Status:
-            //   - se era frio/lost/vendido → ressuscita pra received (cliente voltou)
-            //   - se era received/triagem → mantém status mas marca atendimento_manual
-            if (isFinal) {
+            // Status / Archive:
+            //   - era arquivado E cliente respondeu → desarquiva (volta ao Inbox)
+            //   - era frio/lost/vendido → ressuscita pra received (cliente voltou)
+            //   - era received/triagem → marca atendimento_manual
+            if (wasArchived) {
+                updates.archived_at = null;
+                updates.archived_reason = null;
+                updates.archived_by = null;
+                updates.status = 'received';  // volta limpo pro Inbox
+            } else if (isFinal) {
                 updates.status = 'received';
             } else if (existingLead.status === 'received' || existingLead.status === 'triagem') {
                 updates.status = 'attempt'; // vendedor agora tem que tentar fechar
