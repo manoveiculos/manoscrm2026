@@ -38,6 +38,7 @@ interface InboxLead {
     proxima_acao: string | null;
     first_contact_channel?: string | null;
     onboarded_at?: string | null;
+    assigned_consultant_id?: string | null;
 }
 
 interface LastMessage {
@@ -145,6 +146,7 @@ export default function InboxPage() {
     const [loading, setLoading] = useState(true);
     const [filter, setFilter] = useState<Filter>('priority');
     const [consultantId, setConsultantId] = useState<string | null>(null);
+    const [consultantsMap, setConsultantsMap] = useState<Map<string, string>>(new Map());
     const [live, setLive] = useState(false);
     const [toasts, setToasts] = useState<Array<{ uid: string; name: string | null; vehicle: string | null }>>([]);
     const knownIdsRef = useRef<Set<string>>(new Set());
@@ -162,12 +164,22 @@ export default function InboxPage() {
 
     const fetchLeads = useCallback(async (cid: string | null, viewMode: 'active' | 'archived' = 'active') => {
         const sourceView = viewMode === 'archived' ? 'leads_unified' : 'leads_unified_active';
+        const isTodayMode = filter === 'today' && viewMode === 'active';
+
+        // Modo "Hoje": traz todos os leads criados hoje (qualquer vendedor),
+        // pra vendedor ver chegadas do dia inteiro e pegar órfãos.
+        // Outros modos: filtra pelo consultor logado.
         const query = supabase
             .from(sourceView)
-            .select('uid, table_name, native_id, name, phone, vehicle_interest, source, ai_score, ai_classification, status, updated_at, created_at, proxima_acao, first_contact_channel' + (viewMode === 'archived' ? ', archived_at' : ''))
-            .order(viewMode === 'archived' ? 'updated_at' : 'ai_score', { ascending: false, nullsFirst: false })
+            .select('uid, table_name, native_id, name, phone, vehicle_interest, source, ai_score, ai_classification, status, updated_at, created_at, proxima_acao, first_contact_channel, assigned_consultant_id' + (viewMode === 'archived' ? ', archived_at' : ''))
+            .order(isTodayMode ? 'created_at' : (viewMode === 'archived' ? 'updated_at' : 'ai_score'), { ascending: isTodayMode ? false : false, nullsFirst: false })
             .limit(200);
-        if (cid) query.eq('assigned_consultant_id', cid);
+        if (cid && !isTodayMode) query.eq('assigned_consultant_id', cid);
+        if (isTodayMode) {
+            const todayStart = new Date();
+            todayStart.setHours(0, 0, 0, 0);
+            query.gte('created_at', todayStart.toISOString());
+        }
         if (viewMode === 'archived') query.not('archived_at', 'is', null);
         const { data } = await query;
         const next = (data as InboxLead[]) || [];
@@ -222,7 +234,7 @@ export default function InboxPage() {
         knownIdsRef.current = new Set(next.map(l => l.uid));
         initialLoadDoneRef.current = true;
         setLeads(next);
-    }, [supabase, soundEnabled]);
+    }, [supabase, soundEnabled, filter]);
 
     const handleArchive = async (uid: string, e: React.MouseEvent) => {
         e.preventDefault();
@@ -270,6 +282,18 @@ export default function InboxPage() {
             if (!alive) return;
             setConsultantId(cid);
             setOnboarded(!!cons?.onboarded_at);
+
+            // Carrega mapa de consultores pra mostrar nome de quem está com cada lead
+            const { data: allCons } = await supabase
+                .from('consultants_manos_crm')
+                .select('id, name')
+                .eq('is_active', true);
+            if (alive && allCons) {
+                const m = new Map<string, string>();
+                for (const c of allCons) m.set(c.id, (c.name || '').split(' ')[0]);
+                setConsultantsMap(m);
+            }
+
             await fetchLeads(cid, filter === 'archived' ? 'archived' : 'active');
             if (alive) setLoading(false);
         })();
@@ -338,8 +362,15 @@ export default function InboxPage() {
         }
 
         if (filter === 'today') {
-            const all = leads.filter(l => new Date(l.created_at).getTime() >= todayStart.getTime() && bucketFor(l) !== 'zombie');
-            return { urgent: all.filter(l => bucketFor(l) === 'urgent'), active: all.filter(l => bucketFor(l) === 'active'), cooling: all.filter(l => bucketFor(l) === 'cooling'), zombie: [] };
+            // Backend já filtrou por created_at >= today + ordem cronológica.
+            // Aqui só agrupamos por bucket pra UI manter consistência visual.
+            const all = leads.filter(l => bucketFor(l) !== 'zombie');
+            return {
+                urgent: all.filter(l => bucketFor(l) === 'urgent'),
+                active: all.filter(l => bucketFor(l) === 'active'),
+                cooling: all.filter(l => bucketFor(l) === 'cooling'),
+                zombie: [],
+            };
         }
         if (filter === 'all') {
             return buckets;
@@ -494,14 +525,14 @@ export default function InboxPage() {
                             consultantId={consultantId}
                         />
                         <Section title="Urgente" subtitle="Responda agora" icon={<Flame className="w-5 h-5 text-red-500" />} accent="border-red-600"
-                            leads={grouped.urgent} lastMessages={lastMessages} emptyText="Nenhum lead urgente. Bom trabalho." expandedUid={expandedUid} onToggle={setExpandedUid} onArchive={handleArchive} />
+                            leads={grouped.urgent} lastMessages={lastMessages} emptyText="Nenhum lead urgente. Bom trabalho." expandedUid={expandedUid} onToggle={setExpandedUid} onArchive={handleArchive} consultantsMap={consultantsMap} />
                         <Section title="Em negociação" subtitle="Aguardando cliente" icon={<Thermometer className="w-5 h-5 text-orange-400" />} accent="border-zinc-700"
-                            leads={grouped.active} lastMessages={lastMessages} emptyText="Nenhum em negociação no momento." expandedUid={expandedUid} onToggle={setExpandedUid} onArchive={handleArchive} />
+                            leads={grouped.active} lastMessages={lastMessages} emptyText="Nenhum em negociação no momento." expandedUid={expandedUid} onToggle={setExpandedUid} onArchive={handleArchive} consultantsMap={consultantsMap} />
                         <Section title="Aguardando" subtitle="Sem resposta há 48h+" icon={<Clock className="w-5 h-5 text-blue-400" />} accent="border-blue-900"
-                            leads={grouped.cooling} lastMessages={lastMessages} emptyText="Nenhum lead aguardando." expandedUid={expandedUid} onToggle={setExpandedUid} onArchive={handleArchive} />
+                            leads={grouped.cooling} lastMessages={lastMessages} emptyText="Nenhum lead aguardando." expandedUid={expandedUid} onToggle={setExpandedUid} onArchive={handleArchive} consultantsMap={consultantsMap} />
                         {filter === 'all' && grouped.zombie.length > 0 && (
                             <Section title="Zumbis" subtitle={`Mais de ${ZOMBIE_DAYS}d`} icon={<AlertTriangle className="w-5 h-5 text-zinc-500" />} accent="border-zinc-800 opacity-60"
-                                leads={grouped.zombie} lastMessages={lastMessages} emptyText="" expandedUid={expandedUid} onToggle={setExpandedUid} onArchive={handleArchive} />
+                                leads={grouped.zombie} lastMessages={lastMessages} emptyText="" expandedUid={expandedUid} onToggle={setExpandedUid} onArchive={handleArchive} consultantsMap={consultantsMap} />
                         )}
                     </div>
                 </PTR>
@@ -541,6 +572,7 @@ interface SectionProps {
     expandedUid: string | null;
     onToggle: (uid: string | null) => void;
     onArchive: (uid: string, e: React.MouseEvent) => void;
+    consultantsMap?: Map<string, string>;
 }
 
 /**
@@ -616,7 +648,7 @@ function NextActionCard({ lead, lastMessages, consultantId }: {
     );
 }
 
-function Section({ title, subtitle, icon, accent, leads, lastMessages, emptyText, expandedUid, onToggle, onArchive }: SectionProps) {
+function Section({ title, subtitle, icon, accent, leads, lastMessages, emptyText, expandedUid, onToggle, onArchive, consultantsMap }: SectionProps) {
     return (
         <section>
             <div className={`flex items-center gap-3 mb-4 pl-3 border-l-4 ${accent}`}>
@@ -631,13 +663,14 @@ function Section({ title, subtitle, icon, accent, leads, lastMessages, emptyText
             ) : (
                 <ul className="space-y-4">
                     {leads.map(lead => (
-                        <LeadCard 
-                            key={lead.uid} 
-                            lead={lead} 
-                            messages={lastMessages.get(lead.native_id)} 
+                        <LeadCard
+                            key={lead.uid}
+                            lead={lead}
+                            messages={lastMessages.get(lead.native_id)}
                             isExpanded={expandedUid === lead.uid}
                             onToggle={() => onToggle(expandedUid === lead.uid ? null : lead.uid)}
                             onArchive={(e) => onArchive(lead.uid, e)}
+                            consultantName={lead.assigned_consultant_id ? consultantsMap?.get(lead.assigned_consultant_id) : undefined}
                         />
                     ))}
                 </ul>
@@ -646,7 +679,7 @@ function Section({ title, subtitle, icon, accent, leads, lastMessages, emptyText
     );
 }
 
-function LeadCard({ lead, messages, isExpanded, onToggle, onArchive }: { lead: InboxLead; messages?: { inbound?: LastMessage, outbound?: LastMessage }; isExpanded: boolean; onToggle: () => void; onArchive: (e: React.MouseEvent) => void }) {
+function LeadCard({ lead, messages, isExpanded, onToggle, onArchive, consultantName }: { lead: InboxLead; messages?: { inbound?: LastMessage, outbound?: LastMessage }; isExpanded: boolean; onToggle: () => void; onArchive: (e: React.MouseEvent) => void; consultantName?: string }) {
     const sla = slaInfo(lead);
     const state = getLeadState(lead, messages?.inbound, messages?.outbound);
     
@@ -675,14 +708,23 @@ function LeadCard({ lead, messages, isExpanded, onToggle, onArchive }: { lead: I
                     )}
                 </div>
 
-                {/* Linha 2: SLA + Tempo */}
-                <div className="flex items-center gap-3 mb-4">
+                {/* Linha 2: SLA + Tempo + Vendedor responsável */}
+                <div className="flex items-center gap-2 flex-wrap mb-4">
                     <span className={`text-[11px] px-2.5 py-1 rounded-md font-black uppercase tracking-tight shadow-sm ${sla.color}`}>
                         {sla.text}
                     </span>
                     <span className="text-[11px] text-gray-500 font-bold flex items-center gap-1.5 bg-zinc-800/50 px-2 py-1 rounded-md">
-                        <Clock className="w-3.5 h-3.5" /> {new Date(lead.created_at).toLocaleDateString('pt-BR')}
+                        <Clock className="w-3.5 h-3.5" /> {new Date(lead.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
                     </span>
+                    {lead.assigned_consultant_id ? (
+                        <span className="text-[11px] font-bold flex items-center gap-1 bg-blue-900/40 border border-blue-700/40 text-blue-200 px-2 py-1 rounded-md">
+                            👤 {consultantName || '...'}
+                        </span>
+                    ) : (
+                        <span className="text-[11px] font-bold flex items-center gap-1 bg-amber-900/40 border border-amber-600/40 text-amber-200 px-2 py-1 rounded-md animate-pulse">
+                            ⚠️ SEM VENDEDOR
+                        </span>
+                    )}
                 </div>
 
                 {/* Linha 3: ÚLTIMA MENSAGEM DO CLIENTE */}
