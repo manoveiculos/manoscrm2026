@@ -181,7 +181,10 @@ export default function InboxPage() {
             query.gte('created_at', todayStart.toISOString());
         }
         if (viewMode === 'archived') query.not('archived_at', 'is', null);
-        const { data } = await query;
+        const { data, error: leadsErr } = await query;
+        if (leadsErr) {
+            console.error('[Inbox] fetchLeads erro:', leadsErr.message, leadsErr.details);
+        }
         const next = (data as InboxLead[]) || [];
 
         // Busca mensagens para determinar estado
@@ -270,34 +273,63 @@ export default function InboxPage() {
 
     useEffect(() => {
         let alive = true;
-        (async () => {
-            const { data: auth } = await supabase.auth.getUser();
-            if (!auth?.user) { router.push('/login'); return; }
-            const { data: cons } = await supabase
-                .from('consultants_manos_crm')
-                .select('id, onboarded_at')
-                .eq('user_id', auth.user.id)
-                .maybeSingle();
-            const cid = cons?.id || null;
-            if (!alive) return;
-            setConsultantId(cid);
-            setOnboarded(!!cons?.onboarded_at);
+        let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
-            // Carrega mapa de consultores pra mostrar nome de quem está com cada lead
-            const { data: allCons } = await supabase
-                .from('consultants_manos_crm')
-                .select('id, name')
-                .eq('is_active', true);
-            if (alive && allCons) {
-                const m = new Map<string, string>();
-                for (const c of allCons) m.set(c.id, (c.name || '').split(' ')[0]);
-                setConsultantsMap(m);
+        // Safety net: força fim do loading em 10s independentemente do que aconteça.
+        // Sem isso, qualquer await travado deixa "Carregando..." pra sempre.
+        timeoutId = setTimeout(() => {
+            if (alive) {
+                console.warn('[Inbox] Timeout de 10s no carregamento. Forçando exibição.');
+                setLoading(false);
             }
+        }, 10000);
 
-            await fetchLeads(cid, filter === 'archived' ? 'archived' : 'active');
-            if (alive) setLoading(false);
+        (async () => {
+            try {
+                const { data: auth, error: authErr } = await supabase.auth.getUser();
+                if (authErr) console.error('[Inbox] auth error:', authErr.message);
+                if (!auth?.user) { router.push('/login'); return; }
+
+                const { data: cons, error: consErr } = await supabase
+                    .from('consultants_manos_crm')
+                    .select('id, onboarded_at')
+                    .eq('user_id', auth.user.id)
+                    .maybeSingle();
+                if (consErr) console.error('[Inbox] consultant lookup error:', consErr.message);
+
+                const cid = cons?.id || null;
+                if (!alive) return;
+                setConsultantId(cid);
+                setOnboarded(!!cons?.onboarded_at);
+
+                // Carrega mapa de consultores pra mostrar nome de quem está com cada lead
+                // (não-crítico — se falhar, sem nome aparece e segue).
+                try {
+                    const { data: allCons } = await supabase
+                        .from('consultants_manos_crm')
+                        .select('id, name')
+                        .eq('is_active', true);
+                    if (alive && allCons) {
+                        const m = new Map<string, string>();
+                        for (const c of allCons) m.set(c.id, (c.name || '').split(' ')[0]);
+                        setConsultantsMap(m);
+                    }
+                } catch (e) {
+                    console.warn('[Inbox] Falha ao carregar consultores:', e);
+                }
+
+                await fetchLeads(cid, filter === 'archived' ? 'archived' : 'active');
+            } catch (e: any) {
+                console.error('[Inbox] Erro fatal no useEffect:', e?.message || e);
+            } finally {
+                if (timeoutId) clearTimeout(timeoutId);
+                if (alive) setLoading(false);
+            }
         })();
-        return () => { alive = false; };
+        return () => {
+            alive = false;
+            if (timeoutId) clearTimeout(timeoutId);
+        };
     }, [supabase, router, fetchLeads, filter]);
 
     // Tab title flasher
