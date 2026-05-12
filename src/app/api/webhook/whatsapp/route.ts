@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { pickNextConsultant } from '@/lib/services/consultantService';
 import { scheduleFirstContact } from '@/lib/services/aiSdrService';
+import { notifyLeadArrival } from '@/lib/services/vendorNotifyService';
 
 // Handler para Verificação do Webhook (GET)
 export async function GET(req: NextRequest) {
@@ -173,6 +174,12 @@ export async function POST(req: NextRequest) {
             } catch (sdrErr: any) {
                 console.error('[Webhook WA] Falha ao enfileirar AI SDR (não-bloqueante):', sdrErr?.message);
             }
+
+            // 📲 Push WhatsApp pessoal ao vendedor — vê o lead em <30s no celular,
+            // não precisa abrir CRM. Speed-to-lead crítico.
+            notifyLeadArrival(String(leadId)).catch(e =>
+                console.warn('[Webhook WA] notifyLeadArrival falhou:', e?.message)
+            );
         } else if (existingLead) {
             // BOIA: toda msg inbound atualiza atualizado_em → lead sobe pro topo do /inbox
             // V3: cliente respondeu → marca respondeu_follow_up + status atendimento_manual

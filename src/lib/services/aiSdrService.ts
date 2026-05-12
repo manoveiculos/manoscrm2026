@@ -94,14 +94,58 @@ function normalizeInterest(raw: string | null | undefined): string | null {
     return trimmed;
 }
 
+/**
+ * Lê últimas mensagens da conversa do lead (whatsapp_messages).
+ * IA SDR usa pra NUNCA falar offtopic se cliente já disse algo.
+ * Ex: cliente já mandou "tem o Corolla 2020?" — IA tem que responder
+ * SOBRE o Corolla, não mandar "qual carro você procura?".
+ *
+ * Retorna texto pronto pra injetar no prompt OU '' se sem histórico.
+ */
+async function getConversationContext(leadId: string): Promise<string> {
+    try {
+        const admin = createClient();
+        const { data: msgs } = await admin
+            .from('whatsapp_messages')
+            .select('direction, message_text, created_at')
+            .eq('lead_id', leadId)
+            .order('created_at', { ascending: false })
+            .limit(6);
+
+        if (!msgs || msgs.length === 0) return '';
+
+        const ordered = [...msgs].reverse();
+        const lines = ordered
+            .map(m => {
+                const who = m.direction === 'inbound' ? 'CLIENTE' : 'NÓS';
+                const text = (m.message_text || '').slice(0, 200).replace(/\s+/g, ' ').trim();
+                if (!text) return null;
+                return `${who}: ${text}`;
+            })
+            .filter(Boolean)
+            .join('\n');
+
+        if (!lines) return '';
+
+        return `\n\nHISTÓRICO DA CONVERSA (mais recentes primeiro embaixo):\n${lines}\n\nRESPONDA O QUE O CLIENTE PEDIU. Não ignore o que ele já disse. Se ele já mencionou modelo/ano/preço, use essa info — nunca pergunte de novo.`;
+    } catch {
+        return '';
+    }
+}
+
 async function generateMessage(input: FirstContactInput): Promise<string> {
     // Normaliza interest: tags internas do n8n viram null pra cair em qualifying.
     const cleanInterest = normalizeInterest(input.vehicleInterest);
     const normalized: FirstContactInput = { ...input, vehicleInterest: cleanInterest };
 
-    // CAMINHO 1 — Cliente NÃO disse o que quer (ou interesse era lixo).
+    // Lê histórico ANTES de decidir caminho — se cliente já falou algo,
+    // priorizamos contextualizar em vez de mandar mensagem genérica.
+    const history = await getConversationContext(input.leadId);
+    const hasHistory = history.length > 0;
+
+    // CAMINHO 1 — Cliente NÃO disse o que quer E não há histórico de conversa.
     // NUNCA empurrar carro aleatório. Sempre qualificar primeiro.
-    if (!cleanInterest) {
+    if (!cleanInterest && !hasHistory) {
         return qualifyingMessage(normalized);
     }
     // Substitui input pelo normalizado nos próximos caminhos.
@@ -109,28 +153,40 @@ async function generateMessage(input: FirstContactInput): Promise<string> {
 
     // CAMINHO 2 — flow=compra: cliente vai vender, não há "estoque" relevante.
     if (input.flow === 'compra') {
+        // Se há histórico, ainda passa pelo GPT pra responder no contexto.
+        if (hasHistory) {
+            return await generateGptMessage(input, history, []);
+        }
         const cons = firstName(input.consultantName) || 'time da Manos';
         const cli = firstName(input.leadName);
         const greet = cli ? `Olá ${cli}!` : 'Olá!';
         return `${greet} Aqui é ${cons} da Manos Veículos. Recebi seu interesse em vender o ${input.vehicleInterest}. Posso te chamar agora pra avaliar?`;
     }
 
-    // CAMINHO 3 — flow=venda + cliente disse o que quer: busca estoque REAL.
-    const altimusMatched = await findAltimusMatch(input.vehicleInterest).catch(() => null);
-
-    // 3a — Não temos o veículo no estoque: mensagem honesta abrindo pra alternativas.
-    if (!altimusMatched) {
-        // Tenta banco local como segunda chance antes de desistir
-        const localMatches = await matchInventoryForInterest(input.vehicleInterest, { limit: 1 }).catch(() => []);
-        if (localMatches.length === 0) {
-            return noMatchMessage(input);
-        }
-        // Achou no banco local mas não no Altimus → ainda monta GPT com esse match
-        return await generateGptMessage(input, '', localMatches);
+    // CAMINHO 3 — flow=venda. Busca estoque e injeta histórico.
+    let altimusMatched = null;
+    if (cleanInterest) {
+        altimusMatched = await findAltimusMatch(cleanInterest).catch(() => null);
     }
 
-    // 3b — Match no Altimus: monta GPT com o veículo travado no prompt.
-    const altimusBlock = `\nVEÍCULO REAL DISPONÍVEL AGORA NO ESTOQUE (use ESSE — é o ÚNICO permitido mencionar):\n- ${formatAltimus(altimusMatched)}${altimusMatched.link ? ' · ' + altimusMatched.link : ''}`;
+    // 3a — Sem estoque match: se há histórico, ainda passa pelo GPT pra ler o que cliente disse.
+    if (!altimusMatched) {
+        const localMatches = cleanInterest
+            ? await matchInventoryForInterest(cleanInterest, { limit: 1 }).catch(() => [])
+            : [];
+
+        if (localMatches.length === 0) {
+            // Se há histórico mas sem estoque, ainda manda GPT só pra reagir ao histórico.
+            if (hasHistory) {
+                return await generateGptMessage(input, history, []);
+            }
+            return noMatchMessage(input);
+        }
+        return await generateGptMessage(input, history, localMatches);
+    }
+
+    // 3b — Match no Altimus: combina histórico + bloco de estoque travado.
+    const altimusBlock = `${history}\n\nVEÍCULO REAL DISPONÍVEL AGORA NO ESTOQUE (use ESSE — é o ÚNICO permitido mencionar):\n- ${formatAltimus(altimusMatched)}${altimusMatched.link ? ' · ' + altimusMatched.link : ''}`;
     return await generateGptMessage(input, altimusBlock, []);
 }
 
