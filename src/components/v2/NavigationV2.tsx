@@ -44,8 +44,8 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
     { label: 'Inbox', icon: Bot, href: '/inbox' },
     { label: 'Atendimento', icon: PlayCircle, href: '/atendimento' },
+    { label: 'Leads', icon: LayoutDashboard, href: '/leads' },
     { label: 'Pipeline', icon: KanbanSquare, href: '/pipeline', adminOnly: true },
-    { label: 'Leads', icon: LayoutDashboard, href: '/leads', adminOnly: true },
     { label: 'Dashboard', icon: BarChart3, href: '/', adminOnly: true },
     { label: 'Conversão', icon: BarChart3, href: '/admin/conversion', adminOnly: true },
     { label: 'Resgate', icon: Bot, href: '/admin/rescue', adminOnly: true },

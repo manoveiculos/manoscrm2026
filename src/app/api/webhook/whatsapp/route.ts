@@ -197,6 +197,7 @@ export async function POST(req: NextRequest) {
                 atualizado_em: now,
                 respondeu_follow_up: true,             // V3: trava IA
                 atendimento_manual_at: now,            // V3: vendedor assume agora
+                ultima_interacao_humana: now,          // cliente respondeu = humano agiu
             };
             // Status / Archive:
             //   - era em reversão → marca flagged_reversao + status received

@@ -27,6 +27,7 @@ interface LeadSla {
     lastActivityAt: string;
     status: string;
     atendimentoIniciadoEm?: string | null;
+    ultimaInteracaoHumana?: string | null;
 }
 
 const FINAL_STATUSES = ['vendido', 'perdido', 'comprado', 'finalizado', 'lost', 'lost_by_inactivity'];
@@ -57,7 +58,7 @@ async function fetchLeadsCompra(): Promise<LeadSla[]> {
     const admin = createClient();
     const { data } = await admin
         .from('leads_compra')
-        .select('id, nome, assigned_consultant_id, criado_em, updated_at, status, atendimento_iniciado_em')
+        .select('id, nome, assigned_consultant_id, criado_em, updated_at, status, atendimento_iniciado_em, ultima_interacao_humana')
         .not('status', 'in', `(${FINAL_STATUSES.map(s => `"${s}"`).join(',')})`)
         .is('archived_at', null)
         .order('criado_em', { ascending: false })
@@ -71,6 +72,7 @@ async function fetchLeadsCompra(): Promise<LeadSla[]> {
         lastActivityAt: l.updated_at || l.criado_em,
         status: l.status || 'novo',
         atendimentoIniciadoEm: l.atendimento_iniciado_em || null,
+        ultimaInteracaoHumana: l.ultima_interacao_humana || null,
     }));
 }
 
@@ -78,7 +80,7 @@ async function fetchLeadsVenda(): Promise<LeadSla[]> {
     const admin = createClient();
     const { data } = await admin
         .from('leads_manos_crm')
-        .select('id, name, assigned_consultant_id, created_at, updated_at, status, atendimento_iniciado_em')
+        .select('id, name, assigned_consultant_id, created_at, updated_at, status, atendimento_iniciado_em, ultima_interacao_humana')
         .not('status', 'in', `(${FINAL_STATUSES.map(s => `"${s}"`).join(',')})`)
         .is('archived_at', null)
         .order('created_at', { ascending: false })
@@ -92,6 +94,7 @@ async function fetchLeadsVenda(): Promise<LeadSla[]> {
         lastActivityAt: l.updated_at || l.created_at,
         status: l.status || 'novo',
         atendimentoIniciadoEm: l.atendimento_iniciado_em || null,
+        ultimaInteracaoHumana: l.ultima_interacao_humana || null,
     }));
 }
 
@@ -110,6 +113,26 @@ async function processLead(lead: LeadSla, results: any) {
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     if (lead.atendimentoIniciadoEm && lead.consultantId) {
         const minsAtendendo = await ageMinutes(lead.atendimentoIniciadoEm);
+
+        // Nível 8: 8h SEM INTERAÇÃO HUMANA — cobrança nova de progresso.
+        // ultima_interacao_humana é atualizada quando: vendedor inicia
+        // atendimento, cliente responde (webhook), vendedor move status no
+        // Kanban, vendedor exporta msg do WhatsApp Web. Sem nada disso
+        // em 8h, a IA cobra: "lead parado há 8h, vamos avançar?".
+        const refInteracao = lead.ultimaInteracaoHumana || lead.atendimentoIniciadoEm;
+        const minsSemInteracao = await ageMinutes(refInteracao);
+        if (minsSemInteracao >= 60 * 8 && minsAtendendo < 60 * 24 && !(await getOpenLevel(lead.id, 8))) {
+            await notifyConsultant({
+                consultantId: lead.consultantId,
+                leadId: lead.id,
+                level: 2,
+                title: `⏸ Lead ${lead.name} parado há 8h`,
+                message: `Vendedor, esse lead não teve movimentação há 8 horas. Vamos avançar? Mande uma msg ou marque o resultado (vendido/perdido/agendar).`,
+            });
+            await recordEscalation(lead.id, lead.table, lead.consultantId, 8, `Sem interação humana há ${Math.floor(minsSemInteracao/60)}h`);
+            results.pushes = (results.pushes || 0) + 1;
+            return;
+        }
 
         // Nível 7: 24h sem fechar — escalation crítica
         if (minsAtendendo > 60 * 24 && !(await getOpenLevel(lead.id, 7))) {

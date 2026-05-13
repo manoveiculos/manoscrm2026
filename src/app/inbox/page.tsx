@@ -156,6 +156,9 @@ export default function InboxPage() {
     const [toasts, setToasts] = useState<Array<{ uid: string; name: string | null; vehicle: string | null }>>([]);
     const knownIdsRef = useRef<Set<string>>(new Set());
     const initialLoadDoneRef = useRef(false);
+    // Timestamp da PRIMEIRA carga. Som só dispara pra leads com created_at >
+    // este timestamp — evita falsos positivos ao trocar de filtro/aba.
+    const firstLoadAtRef = useRef<number>(Date.now());
     const baseTitleRef = useRef<string>('Inbox');
     const unreadRef = useRef(0);
     const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -169,34 +172,60 @@ export default function InboxPage() {
 
     const fetchLeads = useCallback(async (cid: string | null, viewMode: 'active' | 'archived' = 'active') => {
         const sourceView = viewMode === 'archived' ? 'leads_unified' : 'leads_unified_active';
-        const isTodayMode = filter === 'today' && viewMode === 'active';
 
-        // Modo "Hoje": traz todos os leads criados hoje (qualquer vendedor),
-        // pra vendedor ver chegadas do dia inteiro e pegar órfãos.
-        // Outros modos: filtra pelo consultor logado.
+        // Inbox ESTRITAMENTE individual: sem cid, nada aparece.
+        // Filtros decidem o recorte:
+        //   • priority (Foco): leads do consultor sem atendimento iniciado +
+        //     leads em reversão (cliente respondeu IA — precisa virar)
+        //   • today (Hoje): só leads NOVOS de hoje do consultor (sem atendimento)
+        //   • all (Tudo): todos do consultor (inclui em conversa, exclui arquivados)
+        //   • archived: arquivados do consultor
+        if (!cid && viewMode === 'active') {
+            // Sem consultor: vendedor não logado ou sem vínculo. Mostra vazio.
+            setLeads([]);
+            setLastMessages(new Map());
+            return;
+        }
+
         const query = supabase
             .from(sourceView)
             .select('uid, table_name, native_id, name, phone, vehicle_interest, source, ai_score, ai_classification, status, updated_at, created_at, proxima_acao, first_contact_channel, assigned_consultant_id, atendimento_iniciado_em, atendimento_iniciado_por, flagged_reversao' + (viewMode === 'archived' ? ', archived_at' : ''))
-            .order(isTodayMode ? 'created_at' : (viewMode === 'archived' ? 'updated_at' : 'ai_score'), { ascending: isTodayMode ? false : false, nullsFirst: false })
             .limit(200);
-        if (cid && !isTodayMode) query.eq('assigned_consultant_id', cid);
-        if (isTodayMode) {
+
+        // SEMPRE filtra pelo consultor (Inbox individual)
+        if (cid) query.eq('assigned_consultant_id', cid);
+
+        if (filter === 'today' && viewMode === 'active') {
+            // Hoje = NOVOS leads de hoje, sem atendimento iniciado
             const todayStart = new Date();
             todayStart.setHours(0, 0, 0, 0);
-            query.gte('created_at', todayStart.toISOString());
+            query.gte('created_at', todayStart.toISOString())
+                 .is('atendimento_iniciado_em', null);
+            query.order('created_at', { ascending: false });
+        } else if (filter === 'priority' && viewMode === 'active') {
+            // Foco = leads SEM atendimento iniciado (entrada) + leads de reversão
+            // que cliente respondeu (flagged_reversao=true vai pro topo no JS)
+            query.order('ai_score', { ascending: false, nullsFirst: false });
+        } else if (filter === 'all' && viewMode === 'active') {
+            query.order('updated_at', { ascending: false, nullsFirst: false });
+        } else {
+            query.order('updated_at', { ascending: false, nullsFirst: false });
         }
+
         if (viewMode === 'archived') query.not('archived_at', 'is', null);
+
         const { data: rawData, error: leadsErr } = await query;
         if (leadsErr) {
             console.error('[Inbox] fetchLeads erro:', leadsErr.message, leadsErr.details);
         }
 
         // BLOQUEIO CROSS-VENDOR: leads que OUTRO vendedor já iniciou atendimento
-        // somem do meu Inbox imediatamente. Quando A clica INICIAR, B perde o
-        // lead da fila no próximo refresh (que vem rápido via realtime).
+        // somem do meu Inbox imediatamente. Lead em reversão respondida
+        // (flagged_reversao=true) tem prioridade — ignora esse filtro.
         const data = (rawData || []).filter((l: any) => {
+            if (l.flagged_reversao) return true;  // reversão sempre aparece
             if (!l.atendimento_iniciado_em || !l.atendimento_iniciado_por) return true;
-            return !cid || l.atendimento_iniciado_por === cid;
+            return l.atendimento_iniciado_por === cid;
         });
         const next = (data as InboxLead[]) || [];
 
@@ -252,25 +281,34 @@ export default function InboxPage() {
             setLastMessages(msgMap);
             const msgs = allMsgs; // alias pra compat com bloco abaixo
 
-            // Som se lead novo ou esperando
-            if (initialLoadDoneRef.current && soundEnabled) {
-                const novelWaiting = next.filter(l => !knownIdsRef.current.has(l.uid)).some(l => {
-                    const state = getLeadState(l, msgMap.get(l.native_id)?.inbound, msgMap.get(l.native_id)?.outbound);
-                    return state === 'NUNCA_TOCADO' || state === 'AGUARDANDO_VENDEDOR';
+            // Som E toast SÓ pra leads criados APÓS a primeira carga.
+            // Evita disparo ao trocar de filtro (Foco→Hoje→Tudo) ou refetch:
+            // o set knownIdsRef muda em cada filtro, mas created_at é absoluto.
+            if (initialLoadDoneRef.current) {
+                const cutoff = firstLoadAtRef.current;
+                const truelyNew = next.filter(l => {
+                    if (knownIdsRef.current.has(l.uid)) return false;
+                    const ts = new Date(l.created_at).getTime();
+                    return ts > cutoff;
                 });
-                if (novelWaiting) audioRef.current?.play().catch(() => {});
-            }
-        }
 
-        if (initialLoadDoneRef.current) {
-            const novel = next.filter(l => !knownIdsRef.current.has(l.uid));
-            if (novel.length > 0) {
-                setToasts(prev => [
-                    ...prev,
-                    ...novel.slice(0, 5).map(l => ({ uid: l.uid, name: l.name, vehicle: l.vehicle_interest })),
-                ]);
-                if (typeof document !== 'undefined' && document.hidden) {
-                    unreadRef.current += novel.length;
+                if (truelyNew.length > 0) {
+                    // Som apenas se há lead aguardando ação humana
+                    if (soundEnabled) {
+                        const novelWaiting = truelyNew.some(l => {
+                            const state = getLeadState(l, msgMap.get(l.native_id)?.inbound, msgMap.get(l.native_id)?.outbound);
+                            return state === 'NUNCA_TOCADO' || state === 'AGUARDANDO_VENDEDOR';
+                        });
+                        if (novelWaiting) audioRef.current?.play().catch(() => {});
+                    }
+                    // Toasts
+                    setToasts(prev => [
+                        ...prev,
+                        ...truelyNew.slice(0, 5).map(l => ({ uid: l.uid, name: l.name, vehicle: l.vehicle_interest })),
+                    ]);
+                    if (typeof document !== 'undefined' && document.hidden) {
+                        unreadRef.current += truelyNew.length;
+                    }
                 }
             }
         }
@@ -776,13 +814,23 @@ function LeadCard({ lead, messages, isExpanded, onToggle, onArchive, consultantN
         NUNCA_TOCADO: 'border-orange-500 bg-orange-950/5 ring-1 ring-orange-500/20',
     };
 
+    // Lead de reversão (cliente respondeu IA) entra pulsante — ignora cor de estado
+    const reversaoClass = lead.flagged_reversao
+        ? 'border-pink-500 ring-2 ring-pink-500/40 shadow-[0_0_20px_rgba(236,72,153,0.35)] animate-pulse-soft'
+        : '';
+
     const lastMsgText = messages?.inbound?.message_text;
 
     return (
         <li className="list-none">
-            <div 
+            <div
                 onClick={onToggle}
-                className={`block border rounded-2xl p-5 transition-all duration-300 relative overflow-hidden active:scale-[0.98] cursor-pointer ${stateColors[state]} ${isExpanded ? 'ring-2 ring-blue-500/50 bg-zinc-900' : ''}`}>
+                className={`block border rounded-2xl p-5 transition-all duration-300 relative overflow-hidden active:scale-[0.98] cursor-pointer ${reversaoClass || stateColors[state]} ${isExpanded ? 'ring-2 ring-blue-500/50 bg-zinc-900' : ''}`}>
+                {lead.flagged_reversao && (
+                    <div className="absolute -top-1 -right-1 px-2 py-0.5 bg-pink-500 text-white text-[10px] font-black rounded-bl-lg uppercase tracking-wider animate-pulse">
+                        🔥 IA pescou
+                    </div>
+                )}
                 
                 {/* Linha 1: NOME GRANDE */}
                 <div className="flex justify-between items-start gap-4 mb-2">

@@ -61,6 +61,7 @@ export async function POST(req: NextRequest) {
         const updates: Record<string, any> = {
             atendimento_iniciado_em: new Date().toISOString(),
             atendimento_iniciado_por: consultant.id,
+            ultima_interacao_humana: new Date().toISOString(),
         };
 
         // Lê estado atual do lead pra decidir o que fazer
