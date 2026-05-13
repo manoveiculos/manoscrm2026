@@ -84,10 +84,14 @@ function LeadsContent() {
                 let userRole: 'admin' | 'consultant' = 'consultant';
                 
                 if (user) {
+                    // Busca consultor por user_id OU auth_id (algumas contas têm
+                    // só um dos dois preenchido). Sem isso, vendedor caía em
+                    // role='consultant' + consultantId=null → vê 0 OU vê tudo,
+                    // dependendo do código abaixo.
                     const { data: consultant } = await supabase
                         .from('consultants_manos_crm')
                         .select('id, name, role')
-                        .eq('auth_id', user.id)
+                        .or(`user_id.eq.${user.id},auth_id.eq.${user.id}`)
                         .maybeSingle();
 
                     let currentRole: 'admin' | 'consultant' = 'consultant';
