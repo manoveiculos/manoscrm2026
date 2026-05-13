@@ -27,6 +27,20 @@ interface VendorAlert { id: string; ts: string; consultantName: string; phone: s
 interface ReassignItem { id: string; ts: string; level: number; levelLabel: string; leadName: string; leadUid: string | null; consultantName: string | null; notes: string; }
 interface HotLead { uid: string; name: string; phone: string | null; vehicle: string | null; score: number; classification: string | null; consultantName: string | null; firstContactAt: string | null; updatedAt: string | null; minSinceUpdate: number | null; status: 'urgent' | 'waiting_vendor' | 'ai_only' | 'ok'; }
 interface ActiveChat { id: string; consultantName: string; consultantId: string; leadName: string; leadPhone: string; leadUid: string | null; openedAt: string; atendendoHaSegundos: number; secDesdeHeartbeat: number; }
+interface ClaimedLead {
+    uid: string;
+    leadName: string;
+    leadPhone: string | null;
+    vehicleInterest: string | null;
+    status: string | null;
+    aiScore: number | null;
+    flaggedReversao: boolean;
+    consultantId: string | null;
+    consultantName: string;
+    startedAt: string;
+    ageMin: number;
+    urgency: 'ok' | 'warn' | 'critical';
+}
 interface FeedData {
     aiSent: AiSentItem[];
     clientReplies: ReplyItem[];
@@ -34,7 +48,8 @@ interface FeedData {
     reassigned: ReassignItem[];
     hotLeads: HotLead[];
     activeChats: ActiveChat[];
-    kpis: { aiSentLast24h: number; repliesLast24h: number; vendorAlertsLast24h: number; reassignedLast24h: number; hotLeadsActive: number; atendendoAgora: number };
+    claimedLeads: ClaimedLead[];
+    kpis: { aiSentLast24h: number; repliesLast24h: number; vendorAlertsLast24h: number; reassignedLast24h: number; hotLeadsActive: number; atendendoAgora: number; claimedLeadsActive: number; claimedLeadsCritical: number };
     generated_at: string;
 }
 
@@ -202,6 +217,100 @@ export default function LivePage() {
                                         )}
                                     </div>
                                 ))}
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {/* PAINEL LEADS EM ATENDIMENTO — vendedor clicou INICIAR ATENDIMENTO.
+                    Diferente de "Atendendo Agora" (heartbeat efêmero), este é o
+                    commit explícito: vendedor assumiu o lead, admin cobra resultado. */}
+                {data && (
+                    <div className="bg-gradient-to-br from-blue-950/40 to-zinc-900 rounded-lg border border-blue-800/50 mb-5 overflow-hidden">
+                        <div className="px-4 py-3 border-b border-blue-900/50 flex items-center justify-between">
+                            <div>
+                                <h2 className="text-sm font-bold text-blue-300 flex items-center gap-2">
+                                    🎯 LEADS EM ATENDIMENTO · controle do admin
+                                </h2>
+                                <p className="text-[11px] text-zinc-500">
+                                    Vendedor clicou &quot;INICIAR ATENDIMENTO&quot;. Cada um é cobrado em 2h / 4h / 24h pelo SLA.
+                                </p>
+                            </div>
+                            <div className="text-right">
+                                <div className="text-2xl font-black text-blue-300">{data.claimedLeads?.length || 0}</div>
+                                {data.kpis.claimedLeadsCritical > 0 && (
+                                    <div className="text-[10px] text-red-400 font-bold mt-0.5">
+                                        ⚠️ {data.kpis.claimedLeadsCritical} parado(s) +24h
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                        {!data.claimedLeads || data.claimedLeads.length === 0 ? (
+                            <div className="p-6 text-center text-zinc-500 text-sm">
+                                Nenhum lead em atendimento ativo.
+                            </div>
+                        ) : (
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm">
+                                    <thead className="bg-blue-950/40 text-blue-300 text-[11px] uppercase tracking-wider">
+                                        <tr>
+                                            <th className="text-left px-4 py-2 font-bold">Lead</th>
+                                            <th className="text-left px-4 py-2 font-bold">Vendedor</th>
+                                            <th className="text-left px-4 py-2 font-bold">Atendendo desde</th>
+                                            <th className="text-left px-4 py-2 font-bold">Há quanto tempo</th>
+                                            <th className="text-left px-4 py-2 font-bold">Status</th>
+                                            <th className="px-4 py-2"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-blue-900/20">
+                                        {data.claimedLeads.map(l => {
+                                            const ageH = Math.floor(l.ageMin / 60);
+                                            const ageMinRest = l.ageMin % 60;
+                                            const ageText = ageH > 0 ? `${ageH}h ${ageMinRest}min` : `${l.ageMin}min`;
+                                            const urgencyClass = l.urgency === 'critical'
+                                                ? 'text-red-300 font-bold'
+                                                : l.urgency === 'warn'
+                                                    ? 'text-amber-300 font-bold'
+                                                    : 'text-emerald-300';
+                                            const startedFmt = new Date(l.startedAt).toLocaleString('pt-BR', {
+                                                day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+                                            });
+                                            return (
+                                                <tr key={l.uid} className="hover:bg-blue-900/10 transition">
+                                                    <td className="px-4 py-2.5">
+                                                        <div className="text-white font-medium flex items-center gap-2">
+                                                            {l.flaggedReversao && <span className="text-pink-400" title="Reversão bem-sucedida">🔥</span>}
+                                                            {l.leadName}
+                                                        </div>
+                                                        <div className="text-[11px] text-zinc-500">
+                                                            {l.vehicleInterest || '—'}
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-4 py-2.5 text-zinc-200">{l.consultantName}</td>
+                                                    <td className="px-4 py-2.5 text-zinc-300 text-xs">{startedFmt}</td>
+                                                    <td className={`px-4 py-2.5 ${urgencyClass}`}>
+                                                        {ageText}
+                                                        {l.urgency === 'critical' && ' 🚨'}
+                                                        {l.urgency === 'warn' && ' ⏰'}
+                                                    </td>
+                                                    <td className="px-4 py-2.5">
+                                                        <span className="text-[11px] px-2 py-0.5 rounded bg-zinc-800 text-zinc-300">
+                                                            {l.status || '—'}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-4 py-2.5 text-right">
+                                                        <Link
+                                                            href={`/lead/${encodeURIComponent(l.uid)}`}
+                                                            className="text-xs px-3 py-1 bg-blue-700 hover:bg-blue-600 text-white rounded font-bold inline-flex items-center gap-1"
+                                                        >
+                                                            Abrir <ArrowUpRight className="w-3 h-3" />
+                                                        </Link>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
                             </div>
                         )}
                     </div>

@@ -30,6 +30,7 @@ export async function GET(_req: NextRequest) {
         hotRes,
         consRes,
         activeChatsRes,
+        claimedLeadsRes,
     ] = await Promise.all([
         // 1. IA enviou pro CLIENTE
         admin.from('whatsapp_send_log')
@@ -81,6 +82,14 @@ export async function GET(_req: NextRequest) {
             .select('id, name'),
 
         admin.from('active_chats_now').select('*'),
+
+        // Leads em atendimento explícito (vendedor clicou INICIAR ATENDIMENTO)
+        // — controle do admin sobre quem pegou o que e há quanto tempo.
+        admin.from('leads_unified_active')
+            .select('uid, table_name, native_id, name, phone, vehicle_interest, status, atendimento_iniciado_em, atendimento_iniciado_por, assigned_consultant_id, ai_score, flagged_reversao')
+            .not('atendimento_iniciado_em', 'is', null)
+            .order('atendimento_iniciado_em', { ascending: true })
+            .limit(100),
     ]);
 
     // Consultor lookup
@@ -240,6 +249,34 @@ export async function GET(_req: NextRequest) {
         secDesdeHeartbeat: c.sec_desde_heartbeat || 0,
     }));
 
+    // Leads em atendimento EXPLÍCITO (vendedor clicou INICIAR ATENDIMENTO).
+    // Mais sólido que heartbeat — vendedor disse "eu pego". Admin vê em ms
+    // quem pegou o quê, quanto tempo está parado, e se já está atrasado.
+    const claimedLeads = ((claimedLeadsRes.data || []) as any[]).map(l => {
+        const startedAt = l.atendimento_iniciado_em;
+        const ageMs = startedAt ? Date.now() - new Date(startedAt).getTime() : 0;
+        const ageMin = Math.floor(ageMs / 60_000);
+        // Classifica urgência pelo tempo desde início (SLA Watcher cobra 2h/4h/24h)
+        let urgency: 'ok' | 'warn' | 'critical' = 'ok';
+        if (ageMin >= 60 * 24) urgency = 'critical';     // > 24h sem fechar
+        else if (ageMin >= 60 * 4) urgency = 'warn';     // > 4h sem fechar
+        else if (ageMin >= 60 * 2) urgency = 'warn';     // > 2h sem fechar = começou push
+        return {
+            uid: l.uid,
+            leadName: l.name || '(sem nome)',
+            leadPhone: l.phone,
+            vehicleInterest: l.vehicle_interest,
+            status: l.status,
+            aiScore: l.ai_score,
+            flaggedReversao: !!l.flagged_reversao,
+            consultantId: l.atendimento_iniciado_por || l.assigned_consultant_id,
+            consultantName: consMap.get(l.atendimento_iniciado_por || l.assigned_consultant_id) || '—',
+            startedAt,
+            ageMin,
+            urgency,
+        };
+    });
+
     return NextResponse.json(
         {
             ok: true,
@@ -250,6 +287,7 @@ export async function GET(_req: NextRequest) {
             reassigned,
             hotLeads,
             activeChats,
+            claimedLeads,
             kpis: {
                 aiSentLast24h: aiSent.length,
                 repliesLast24h: clientReplies.length,
@@ -257,6 +295,8 @@ export async function GET(_req: NextRequest) {
                 reassignedLast24h: reassigned.length,
                 hotLeadsActive: hotLeads.length,
                 atendendoAgora: activeChats.length,
+                claimedLeadsActive: claimedLeads.length,
+                claimedLeadsCritical: claimedLeads.filter(l => l.urgency === 'critical').length,
             },
         },
         {
