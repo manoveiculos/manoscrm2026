@@ -229,13 +229,20 @@ export default function InboxPage() {
         });
         const next = (data as InboxLead[]) || [];
 
-        // Busca mensagens para determinar estado
-        // IMPORTANTE: filtra apenas IDs numéricos se a coluna no banco for BIGINT (crm26)
-        // Ou melhor: como temos fontes mistas, fazemos a query mas tratamos possíveis erros de cast
+        // PERFORMANCE: renderiza a lista de leads IMEDIATAMENTE.
+        // As mensagens (preview do card) carregam em background depois,
+        // sem bloquear o Inbox. Vendedor vê os cards em <500ms.
+        knownIdsRef.current = new Set(next.map(l => l.uid));
+        if (!initialLoadDoneRef.current) {
+            firstLoadAtRef.current = Date.now();
+        }
+        initialLoadDoneRef.current = true;
+        setLeads(next);
+
+        // ── Carregar mensagens em background (não bloqueia render) ──────────
         const leadIds = next.map(l => l.native_id).slice(0, 100);
         if (leadIds.length > 0) {
-            const cutoff90d = new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString();
-            // Separar por tipo evita cast implícito BIGINT/UUID que falha silenciosamente
+            const cutoff30d = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
             const numericIds = leadIds.filter(id => /^\d+$/.test(String(id))).map(id => parseInt(String(id), 10));
             const uuidIds = leadIds.filter(id => !/^\d+$/.test(String(id))).map(id => String(id));
             const queries: Promise<any>[] = [];
@@ -245,9 +252,9 @@ export default function InboxPage() {
                     supabase.from('whatsapp_messages')
                         .select('lead_id, message_text, direction, created_at')
                         .in('lead_id', numericIds)
-                        .gte('created_at', cutoff90d)
+                        .gte('created_at', cutoff30d)
                         .order('created_at', { ascending: false })
-                        .limit(500)
+                        .limit(200)
                 );
             }
             if (uuidIds.length > 0) {
@@ -255,66 +262,51 @@ export default function InboxPage() {
                     supabase.from('whatsapp_messages')
                         .select('lead_id, message_text, direction, created_at')
                         .in('lead_id', uuidIds)
-                        .gte('created_at', cutoff90d)
+                        .gte('created_at', cutoff30d)
                         .order('created_at', { ascending: false })
-                        .limit(500)
+                        .limit(200)
                 );
             }
 
-            const results = await Promise.allSettled(queries);
-            const allMsgs: any[] = [];
-            for (const r of results) {
-                if (r.status === 'fulfilled') {
-                    if (r.value.error) console.warn('[Inbox] msg fetch erro:', r.value.error.message);
-                    if (r.value.data) allMsgs.push(...r.value.data);
-                }
-            }
-
-            const msgMap = new Map<string, { inbound?: LastMessage, outbound?: LastMessage }>();
-            for (const m of allMsgs as LastMessage[]) {
-                const leadKey = String(m.lead_id);
-                const current = msgMap.get(leadKey) || {};
-                if (m.direction === 'inbound' && !current.inbound) current.inbound = m;
-                if (m.direction === 'outbound' && !current.outbound) current.outbound = m;
-                msgMap.set(leadKey, current);
-            }
-            setLastMessages(msgMap);
-            const msgs = allMsgs; // alias pra compat com bloco abaixo
-
-            // Som E toast SÓ pra leads criados APÓS a primeira carga.
-            // Evita disparo ao trocar de filtro (Foco→Hoje→Tudo) ou refetch:
-            // o set knownIdsRef muda em cada filtro, mas created_at é absoluto.
-            if (initialLoadDoneRef.current) {
-                const cutoff = firstLoadAtRef.current;
-                const truelyNew = next.filter(l => {
-                    if (knownIdsRef.current.has(l.uid)) return false;
-                    const ts = new Date(l.created_at).getTime();
-                    return ts > cutoff;
-                });
-
-                if (truelyNew.length > 0) {
-                    // Som apenas se há lead aguardando ação humana
-                    if (soundEnabled) {
-                        const novelWaiting = truelyNew.some(l => {
-                            const state = getLeadState(l, msgMap.get(l.native_id)?.inbound, msgMap.get(l.native_id)?.outbound);
-                            return state === 'NUNCA_TOCADO' || state === 'AGUARDANDO_VENDEDOR';
-                        });
-                        if (novelWaiting) audioRef.current?.play().catch(() => {});
-                    }
-                    // Toasts
-                    setToasts(prev => [
-                        ...prev,
-                        ...truelyNew.slice(0, 5).map(l => ({ uid: l.uid, name: l.name, vehicle: l.vehicle_interest })),
-                    ]);
-                    if (typeof document !== 'undefined' && document.hidden) {
-                        unreadRef.current += truelyNew.length;
+            // Fire-and-forget: atualiza msgMap depois sem await
+            Promise.allSettled(queries).then(results => {
+                const allMsgs: any[] = [];
+                for (const r of results) {
+                    if (r.status === 'fulfilled') {
+                        if (r.value.error) console.warn('[Inbox] msg fetch erro:', r.value.error.message);
+                        if (r.value.data) allMsgs.push(...r.value.data);
                     }
                 }
+                const msgMap = new Map<string, { inbound?: LastMessage, outbound?: LastMessage }>();
+                for (const m of allMsgs as LastMessage[]) {
+                    const leadKey = String(m.lead_id);
+                    const current = msgMap.get(leadKey) || {};
+                    if (m.direction === 'inbound' && !current.inbound) current.inbound = m;
+                    if (m.direction === 'outbound' && !current.outbound) current.outbound = m;
+                    msgMap.set(leadKey, current);
+                }
+                setLastMessages(msgMap);
+            });
+        }
+        // ────────────────────────────────────────────────────────────────────
+
+        // Som + toast pra leads criados APÓS a primeira carga.
+        // Trocar de filtro não dispara (timestamp é absoluto).
+        const cutoff = firstLoadAtRef.current;
+        const truelyNew = next.filter(l => {
+            const ts = new Date(l.created_at).getTime();
+            return ts > cutoff;
+        });
+        if (truelyNew.length > 0) {
+            if (soundEnabled) audioRef.current?.play().catch(() => {});
+            setToasts(prev => [
+                ...prev,
+                ...truelyNew.slice(0, 5).map(l => ({ uid: l.uid, name: l.name, vehicle: l.vehicle_interest })),
+            ]);
+            if (typeof document !== 'undefined' && document.hidden) {
+                unreadRef.current += truelyNew.length;
             }
         }
-        knownIdsRef.current = new Set(next.map(l => l.uid));
-        initialLoadDoneRef.current = true;
-        setLeads(next);
     }, [supabase, soundEnabled, filter]);
 
     const handleArchive = async (uid: string, e: React.MouseEvent) => {

@@ -227,7 +227,22 @@ export default function LeadDetailPage() {
             if (msgError) {
                 console.warn('[LeadDetail] Erro ao buscar mensagens:', msgError.message);
             }
-            if (alive) setMessages((msgs || []).reverse());
+            // Dedup no client: rejeita msgs com mesmo texto + direção +
+            // janela de 30s. Cobre histórico já duplicado no banco enquanto
+            // sync-messages não é refeito.
+            const rawMsgs = (msgs || []).reverse();
+            const seen = new Map<string, number>();
+            const deduped = rawMsgs.filter((m: any) => {
+                const text = (m.message_text || '').trim();
+                if (!text) return false;
+                const key = `${m.direction}|${text}`;
+                const ts = new Date(m.created_at).getTime();
+                const lastTs = seen.get(key);
+                if (lastTs && Math.abs(ts - lastTs) < 30_000) return false;
+                seen.set(key, ts);
+                return true;
+            });
+            if (alive) setMessages(deduped);
 
             // Resolve nome do consultor logado pra usar nas mensagens prontas
             try {

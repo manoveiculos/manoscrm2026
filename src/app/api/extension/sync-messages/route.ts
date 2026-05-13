@@ -238,16 +238,20 @@ export async function POST(req: NextRequest) {
                 .order('created_at', { ascending: false })
                 .limit(messagesToInsert.length + 100);
 
+            // Dedup robusta: rejeita se MATCH por message_id OU por
+            // (texto + direção) — Evolution e extensão usam IDs diferentes
+            // pra mesma msg, então só comparar message_id deixava duplicar.
+            const normalizeText = (s: string | null | undefined) => (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
             const filteredMessages = messagesToInsert.filter(newMsg => {
-                // Se temos message_id, usamos ele (mais preciso)
-                if (newMsg.message_id) {
-                    return !existingMsgs?.some(extMsg => extMsg.message_id === newMsg.message_id);
-                }
-                // Fallback: Conteúdo Exato + Direção
-                return !existingMsgs?.some(extMsg => 
-                    extMsg.message_text === newMsg.message_text && 
-                    extMsg.direction === newMsg.direction
-                );
+                const newText = normalizeText(newMsg.message_text);
+                if (!newText) return false;
+                return !existingMsgs?.some(extMsg => {
+                    // Match por message_id (quando ambos têm)
+                    if (newMsg.message_id && extMsg.message_id && newMsg.message_id === extMsg.message_id) return true;
+                    // Match por texto + direção (cobre Evolution vs extensão)
+                    return normalizeText(extMsg.message_text) === newText
+                        && extMsg.direction === newMsg.direction;
+                });
             });
 
             if (filteredMessages.length > 0) {
