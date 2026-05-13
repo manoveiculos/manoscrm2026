@@ -29,13 +29,19 @@ const ARCHIVE_REASONS = [
  * Direita:  botões de ação
  */
 
+// Motivos estruturados do módulo de Reversão.
+// Os 3 financeiros (credito_negado, cpf_ruim, score_baixo) marcam o lead
+// como descarte_financeiro=true — IA NÃO tenta reverter (sem crédito).
 const LOSS_REASONS = [
-    { v: 'preco', l: 'Preço' },
-    { v: 'concorrente', l: 'Concorrente' },
-    { v: 'sem_interesse', l: 'Sem interesse' },
-    { v: 'sem_resposta', l: 'Sem resposta' },
-    { v: 'credito_negado', l: 'Crédito negado' },
-    { v: 'outro', l: 'Outro' },
+    { v: 'preco',          l: 'Preço alto',           hint: 'Cliente achou caro' },
+    { v: 'parcela',        l: 'Parcela cara',         hint: 'Parcela não cabe no bolso' },
+    { v: 'credito_negado', l: '❌ Crédito negado',     hint: 'Descarta IA (sem reversão)' },
+    { v: 'cpf_ruim',       l: '❌ CPF ruim',           hint: 'Descarta IA' },
+    { v: 'score_baixo',    l: '❌ Score baixo',        hint: 'Descarta IA' },
+    { v: 'modelo',         l: 'Queria outro modelo',  hint: 'IA tenta novidade do estoque' },
+    { v: 'concorrente',    l: 'Foi pro concorrente',  hint: 'IA reforça diferencial Manos' },
+    { v: 'sumiu',          l: 'Sumiu / não responde', hint: 'IA tenta reabertura leve' },
+    { v: 'outro',          l: 'Outro',                hint: 'Use o campo abaixo pra detalhar' },
 ];
 
 const PAYMENT_METHODS = ['à vista', 'financiado', 'consórcio', 'CDC', 'troca + diferença'];
@@ -209,12 +215,11 @@ export default function LeadDetailPage() {
             // têm whatsapp_messages.lead_id BIGINT — cast implícito de string
             // pra bigint causa timeout em produção). Filtro extra de 90 dias
             // garante uso do índice composto (lead_id, created_at).
-            const leadIdParam: any = /^\d+$/.test(leadId) ? parseInt(leadId, 10) : leadId;
             const cutoff90d = new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString();
             const { data: msgs, error: msgError } = await supabase
                 .from('whatsapp_messages')
                 .select('id, direction, message_text, created_at, message_id')
-                .eq('lead_id', leadIdParam)
+                .eq('lead_id', String(leadId))
                 .gte('created_at', cutoff90d)
                 .order('created_at', { ascending: false })
                 .limit(50);
@@ -311,7 +316,11 @@ export default function LeadDetailPage() {
                     lead_id: leadId,
                     lead_table: leadTable,
                     finish_type: 'perda',
+                    // legado (mantém pra compat e classifyLossReasonAsync)
                     loss_reason: lossNote ? `${lossReason}: ${lossNote}` : lossReason,
+                    // Módulo de Reversão: estruturado + diagnóstico
+                    motivo_perda_estruturado: lossReason,
+                    diagnostico_atendimento: lossNote || null,
                     consultant_id: lead?.assigned_consultant_id,
                 }),
             });
@@ -726,19 +735,49 @@ export default function LeadDetailPage() {
                 </Modal>
             )}
 
-            {showLost && (
-                <Modal title="Marcar PERDA" onClose={() => setShowLost(false)}>
-                    <label className="block text-sm text-gray-300 mb-1">Motivo *</label>
-                    <select value={lossReason} onChange={e => setLossReason(e.target.value)} className="w-full p-2 rounded bg-zinc-800 text-white mb-3">
-                        {LOSS_REASONS.map(r => <option key={r.v} value={r.v}>{r.l}</option>)}
-                    </select>
-                    <label className="block text-sm text-gray-300 mb-1">Observação (opcional)</label>
-                    <textarea value={lossNote} onChange={e => setLossNote(e.target.value)} rows={3} className="w-full p-2 rounded bg-zinc-800 text-white mb-4" />
-                    <button disabled={submitting} onClick={handleLost} className="w-full bg-red-700 disabled:bg-gray-700 text-white py-3 rounded font-bold">
-                        {submitting ? 'Salvando…' : 'CONFIRMAR PERDA'}
-                    </button>
-                </Modal>
-            )}
+            {showLost && (() => {
+                const selectedReason = LOSS_REASONS.find(r => r.v === lossReason);
+                const isFinanceiro = ['credito_negado', 'cpf_ruim', 'score_baixo'].includes(lossReason);
+                return (
+                    <Modal title="Marcar PERDA" onClose={() => setShowLost(false)}>
+                        <label className="block text-sm text-gray-300 mb-1">Por que esse lead não fechou? *</label>
+                        <select
+                            value={lossReason}
+                            onChange={e => setLossReason(e.target.value)}
+                            className="w-full p-2 rounded bg-zinc-800 text-white mb-1"
+                        >
+                            {LOSS_REASONS.map(r => <option key={r.v} value={r.v}>{r.l}</option>)}
+                        </select>
+                        {selectedReason?.hint && (
+                            <p className="text-[11px] text-zinc-400 mb-3 px-1">{selectedReason.hint}</p>
+                        )}
+
+                        {isFinanceiro && (
+                            <div className="mb-3 p-2 rounded bg-red-950/50 border border-red-700/50 text-xs text-red-200">
+                                ⚠️ Motivo financeiro detectado. IA <strong>não vai tentar reverter</strong> esse lead — sem crédito, sem reengajamento.
+                            </div>
+                        )}
+
+                        <label className="block text-sm text-gray-300 mb-1">
+                            Diagnóstico do atendimento <span className="text-zinc-500">(opcional, ajuda a IA)</span>
+                        </label>
+                        <textarea
+                            value={lossNote}
+                            onChange={e => setLossNote(e.target.value)}
+                            rows={3}
+                            placeholder="Ex: cliente queria Onix 2020 mas tinha só R$ 50k; achou parcela alta de 36x; gostou da loja"
+                            className="w-full p-2 rounded bg-zinc-800 text-white mb-4 text-sm"
+                        />
+                        <button
+                            disabled={submitting}
+                            onClick={handleLost}
+                            className="w-full bg-red-700 disabled:bg-gray-700 text-white py-3 rounded font-bold"
+                        >
+                            {submitting ? 'Salvando…' : 'CONFIRMAR PERDA'}
+                        </button>
+                    </Modal>
+                );
+            })()}
 
             {showSchedule && (
                 <Modal title="Agendar retorno" onClose={() => setShowSchedule(false)}>

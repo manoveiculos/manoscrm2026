@@ -39,9 +39,22 @@ const SCHEMA: Record<LeadTable, TableSchema> = {
 
 const VALID_TABLES = new Set<LeadTable>(['leads_manos_crm', 'leads_compra', 'leads_distribuicao_crm_26', 'leads_master']);
 
+// Motivos de perda que descartam o lead da fila de reversão da IA
+// (lead sem crédito não vai virar via reengajamento).
+const DESCARTE_FINANCEIRO_MOTIVOS = new Set([
+    'credito_negado',
+    'cpf_ruim',
+    'score_baixo',
+]);
+
 export async function POST(req: NextRequest) {
     try {
-        const { lead_id, lead_table, finish_type, vehicle_details, loss_reason, consultant_name, consultant_id } = await req.json();
+        const {
+            lead_id, lead_table, finish_type, vehicle_details, loss_reason,
+            consultant_name, consultant_id,
+            motivo_perda_estruturado,    // dropdown novo (9 opções)
+            diagnostico_atendimento,     // texto livre opcional
+        } = await req.json();
 
         if (!lead_id || !finish_type) {
             return NextResponse.json({ error: 'lead_id e finish_type são obrigatórios' }, { status: 400 });
@@ -88,6 +101,18 @@ export async function POST(req: NextRequest) {
         if (finish_type === 'perda') {
             if (schema.lostAtCol) updatePayload[schema.lostAtCol] = now;
             if (schema.lossReasonCol) updatePayload[schema.lossReasonCol] = loss_reason || 'Não informado';
+
+            // Módulo de Reversão: grava motivo estruturado + diagnóstico do vendedor.
+            // Se motivo for financeiro, marca descarte_financeiro=true (IA ignora pra sempre).
+            if (motivo_perda_estruturado) {
+                updatePayload.motivo_perda_estruturado = motivo_perda_estruturado;
+                if (DESCARTE_FINANCEIRO_MOTIVOS.has(String(motivo_perda_estruturado).toLowerCase())) {
+                    updatePayload.descarte_financeiro = true;
+                }
+            }
+            if (typeof diagnostico_atendimento === 'string' && diagnostico_atendimento.trim().length > 0) {
+                updatePayload.diagnostico_atendimento = diagnostico_atendimento.trim().slice(0, 2000);
+            }
         } else if (schema.wonAtCol) {
             updatePayload[schema.wonAtCol] = now;
         }

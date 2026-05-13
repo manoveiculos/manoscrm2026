@@ -103,7 +103,7 @@ export async function POST(req: NextRequest) {
         // 1. Busca o lead pela varredura de telefone
         const { data: existingLead, error: leadError } = await supabase
             .from('leads_distribuicao_crm_26')
-            .select('id, telefone, status, archived_at')
+            .select('id, telefone, status, archived_at, reversao_attempt_count, assigned_consultant_id, nome')
             .eq('telefone', cleanPhone)
             .limit(1)
             .maybeSingle();
@@ -188,6 +188,10 @@ export async function POST(req: NextRequest) {
                             existingLead.status === 'vendido' || existingLead.status === 'perdido' ||
                             existingLead.status === 'frio';
             const wasArchived = !!existingLead.archived_at;
+            // REVERSÃO BEM-SUCEDIDA: lead estava em fluxo de reversão (perdido/arquivado
+            // com pelo menos 1 tentativa da IA) e cliente respondeu agora.
+            const eraEmReversao = (existingLead.reversao_attempt_count || 0) > 0
+                                  && (isFinal || wasArchived);
             const now = new Date().toISOString();
             const updates: Record<string, any> = {
                 atualizado_em: now,
@@ -195,18 +199,25 @@ export async function POST(req: NextRequest) {
                 atendimento_manual_at: now,            // V3: vendedor assume agora
             };
             // Status / Archive:
+            //   - era em reversão → marca flagged_reversao + status received
             //   - era arquivado E cliente respondeu → desarquiva (volta ao Inbox)
             //   - era frio/lost/vendido → ressuscita pra received (cliente voltou)
             //   - era received/triagem → marca atendimento_manual
-            if (wasArchived) {
+            if (eraEmReversao) {
+                updates.flagged_reversao = true;
                 updates.archived_at = null;
                 updates.archived_reason = null;
                 updates.archived_by = null;
-                updates.status = 'received';  // volta limpo pro Inbox
+                updates.status = 'received';
+            } else if (wasArchived) {
+                updates.archived_at = null;
+                updates.archived_reason = null;
+                updates.archived_by = null;
+                updates.status = 'received';
             } else if (isFinal) {
                 updates.status = 'received';
             } else if (existingLead.status === 'received' || existingLead.status === 'triagem') {
-                updates.status = 'attempt'; // vendedor agora tem que tentar fechar
+                updates.status = 'attempt';
             }
 
             await supabase
@@ -221,6 +232,23 @@ export async function POST(req: NextRequest) {
                 .eq('lead_id', String(leadId))
                 .is('respondido_em', null)
                 .then(null, () => {});
+
+            // 🔥 REVERSÃO BEM-SUCEDIDA: notifica vendedor responsável com alerta crítico
+            if (eraEmReversao && existingLead.assigned_consultant_id) {
+                try {
+                    const { notifyConsultant } = await import('@/lib/services/consultantNotifier');
+                    await notifyConsultant({
+                        consultantId: existingLead.assigned_consultant_id,
+                        leadId: String(leadId),
+                        level: 3,
+                        title: `🔥 REVERSÃO: ${existingLead.nome || 'Cliente'} respondeu!`,
+                        message: `Cliente que estava perdido voltou após msg da IA. Abra o lead AGORA pra fechar.`,
+                        blocking: true,
+                    });
+                } catch (e: any) {
+                    console.warn('[Webhook WA] notifyConsultant reversão falhou:', e?.message);
+                }
+            }
         }
 
         // 3. Salva a mensagem no histórico (nova tabela whatsapp_messages)

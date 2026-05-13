@@ -41,6 +41,7 @@ interface InboxLead {
     assigned_consultant_id?: string | null;
     atendimento_iniciado_em?: string | null;
     atendimento_iniciado_por?: string | null;
+    flagged_reversao?: boolean | null;
 }
 
 interface LastMessage {
@@ -51,7 +52,7 @@ interface LastMessage {
 }
 
 type Filter = 'priority' | 'today' | 'all' | 'archived';
-type Bucket = 'urgent' | 'active' | 'cooling' | 'zombie';
+type Bucket = 'reversao' | 'urgent' | 'active' | 'cooling' | 'zombie';
 
 const ZOMBIE_DAYS = 15;
 const URGENT_MINUTES = 30;     // novos OU com nova interação <30min
@@ -64,12 +65,14 @@ function ageMinutes(updatedAt: string | null, createdAt: string): number {
 }
 
 function bucketFor(lead: InboxLead): Bucket {
+    // 🔥 REVERSÃO BEM-SUCEDIDA tem prioridade máxima: cliente perdido respondeu
+    // msg da IA. Vendedor precisa abrir AGORA. Some quando vendedor inicia
+    // atendimento ou marca como vendido/perdido novamente.
+    if (lead.flagged_reversao) return 'reversao';
     const min = ageMinutes(lead.updated_at, lead.created_at);
     if (min > ZOMBIE_DAYS * 24 * 60) return 'zombie';
     const score = lead.ai_score ?? 0;
-    // Urgente: <30min (novo OU lead que acabou de receber msg = boia) OU score alto
     if (min < URGENT_MINUTES || score >= URGENT_SCORE) return 'urgent';
-    // Em negociação: até 48h
     if (min < ACTIVE_HOURS * 60 || score >= ACTIVE_SCORE) return 'active';
     return 'cooling';
 }
@@ -173,7 +176,7 @@ export default function InboxPage() {
         // Outros modos: filtra pelo consultor logado.
         const query = supabase
             .from(sourceView)
-            .select('uid, table_name, native_id, name, phone, vehicle_interest, source, ai_score, ai_classification, status, updated_at, created_at, proxima_acao, first_contact_channel, assigned_consultant_id, atendimento_iniciado_em, atendimento_iniciado_por' + (viewMode === 'archived' ? ', archived_at' : ''))
+            .select('uid, table_name, native_id, name, phone, vehicle_interest, source, ai_score, ai_classification, status, updated_at, created_at, proxima_acao, first_contact_channel, assigned_consultant_id, atendimento_iniciado_em, atendimento_iniciado_por, flagged_reversao' + (viewMode === 'archived' ? ', archived_at' : ''))
             .order(isTodayMode ? 'created_at' : (viewMode === 'archived' ? 'updated_at' : 'ai_score'), { ascending: isTodayMode ? false : false, nullsFirst: false })
             .limit(200);
         if (cid && !isTodayMode) query.eq('assigned_consultant_id', cid);
@@ -424,17 +427,16 @@ export default function InboxPage() {
         const todayStart = new Date();
         todayStart.setHours(0, 0, 0, 0);
 
-        const buckets: Record<Bucket, InboxLead[]> = { urgent: [], active: [], cooling: [], zombie: [] };
+        const buckets: Record<Bucket, InboxLead[]> = { reversao: [], urgent: [], active: [], cooling: [], zombie: [] };
         for (const lead of leads) {
             const b = bucketFor(lead);
             buckets[b].push(lead);
         }
 
         if (filter === 'today') {
-            // Backend já filtrou por created_at >= today + ordem cronológica.
-            // Aqui só agrupamos por bucket pra UI manter consistência visual.
             const all = leads.filter(l => bucketFor(l) !== 'zombie');
             return {
+                reversao: all.filter(l => bucketFor(l) === 'reversao'),
                 urgent: all.filter(l => bucketFor(l) === 'urgent'),
                 active: all.filter(l => bucketFor(l) === 'active'),
                 cooling: all.filter(l => bucketFor(l) === 'cooling'),
@@ -444,11 +446,11 @@ export default function InboxPage() {
         if (filter === 'all') {
             return buckets;
         }
-        // priority: oculta zombies por padrão
         return { ...buckets, zombie: [] };
     }, [leads, filter]);
 
     const counts = {
+        reversao: grouped.reversao.length,
         urgent: grouped.urgent.length,
         active: grouped.active.length,
         cooling: grouped.cooling.length,
@@ -589,10 +591,25 @@ export default function InboxPage() {
                             CRM e já sabe o que fazer agora, sem precisar interpretar
                             seções/buckets. Aparece só quando há urgentes. */}
                         <NextActionCard
-                            lead={grouped.urgent[0] || grouped.active[0] || null}
+                            lead={grouped.reversao[0] || grouped.urgent[0] || grouped.active[0] || null}
                             lastMessages={lastMessages}
                             consultantId={consultantId}
                         />
+                        {grouped.reversao.length > 0 && (
+                            <Section
+                                title="🔥 REVERSÃO BEM-SUCEDIDA"
+                                subtitle="Cliente perdido respondeu — feche AGORA"
+                                icon={<Flame className="w-5 h-5 text-pink-400 animate-pulse" />}
+                                accent="border-pink-500 ring-2 ring-pink-500/30 shadow-lg shadow-pink-500/20"
+                                leads={grouped.reversao}
+                                lastMessages={lastMessages}
+                                emptyText=""
+                                expandedUid={expandedUid}
+                                onToggle={setExpandedUid}
+                                onArchive={handleArchive}
+                                consultantsMap={consultantsMap}
+                            />
+                        )}
                         <Section title="Urgente" subtitle="Responda agora" icon={<Flame className="w-5 h-5 text-red-500" />} accent="border-red-600"
                             leads={grouped.urgent} lastMessages={lastMessages} emptyText="Nenhum lead urgente. Bom trabalho." expandedUid={expandedUid} onToggle={setExpandedUid} onArchive={handleArchive} consultantsMap={consultantsMap} />
                         <Section title="Em negociação" subtitle="Aguardando cliente" icon={<Thermometer className="w-5 h-5 text-orange-400" />} accent="border-zinc-700"
