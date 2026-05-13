@@ -244,16 +244,29 @@ export default function LeadDetailPage() {
             });
             if (alive) setMessages(deduped);
 
-            // Resolve nome do consultor logado pra usar nas mensagens prontas
+            // Resolve consultor logado + verifica permissão de acesso ao lead.
+            // Vendedor não-admin só pode abrir lead atribuído a ele.
             try {
                 const { data: auth } = await supabase.auth.getUser();
                 if (auth?.user) {
                     const { data: cons } = await supabase
                         .from('consultants_manos_crm')
-                        .select('name')
-                        .eq('user_id', auth.user.id)
+                        .select('id, name, role')
+                        .or(`user_id.eq.${auth.user.id},auth_id.eq.${auth.user.id}`)
                         .maybeSingle();
                     if (alive && cons?.name) setConsultantName(cons.name);
+                    // Guard: vendedor não-admin tentando acessar lead de outro
+                    const isAdminUser = (cons as any)?.role === 'admin'
+                        || auth.user.email === 'alexandre_gorges@hotmail.com';
+                    if (!isAdminUser && lead && lead.assigned_consultant_id
+                        && cons?.id && lead.assigned_consultant_id !== cons.id) {
+                        if (alive) {
+                            setLoadError('Você não tem permissão pra acessar este lead. Ele está atribuído a outro vendedor.');
+                            setLead(null);
+                            setLoading(false);
+                        }
+                        return;
+                    }
                 }
             } catch {}
 

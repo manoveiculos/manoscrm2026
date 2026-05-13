@@ -109,9 +109,27 @@ function LeadsContent() {
                     setRole(currentRole);
                     setConsultantId(currentConsultantId);
 
+                    console.log('[Leads] User:', user.email, 'Role:', currentRole, 'ConsultantId:', currentConsultantId);
+
+                    // Vendedor sem vínculo (consultantId=null) NÃO carrega nada.
+                    // Evita o fallback '00000000...' pesado e protege contra
+                    // race conditions.
+                    if (currentRole === 'consultant' && !currentConsultantId) {
+                        console.warn('[Leads] Consultor sem ID — não carrega leads');
+                        setLeads([]);
+                        setTotalLeadsCount(0);
+                        const [consultantsData, inventoryData] = await Promise.all([
+                            dataService.getConsultants(),
+                            dataService.getInventory(),
+                        ]);
+                        setConsultants(consultantsData || []);
+                        setInventory(inventoryData || []);
+                        return;
+                    }
+
                     const [leadsResult, consultantsData, inventoryData] = await Promise.all([
                         leadService.getLeadsPaginated(undefined, {
-                            consultantId: currentRole === 'admin' ? undefined : (currentConsultantId || '00000000-0000-0000-0000-000000000000'),
+                            consultantId: currentRole === 'admin' ? undefined : currentConsultantId!,
                             role: currentRole,
                             limit: 2000
                         }),

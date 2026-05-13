@@ -165,7 +165,7 @@ export default function AtendimentoKanbanPage() {
                 const { data: cons } = await supabase
                     .from('consultants_manos_crm')
                     .select('id')
-                    .eq('user_id', auth.user.id)
+                    .or(`user_id.eq.${auth.user.id},auth_id.eq.${auth.user.id}`)
                     .maybeSingle();
                 const cid = cons?.id || null;
                 if (!alive) return;

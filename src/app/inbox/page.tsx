@@ -151,6 +151,7 @@ export default function InboxPage() {
     const [loading, setLoading] = useState(true);
     const [filter, setFilter] = useState<Filter>('priority');
     const [consultantId, setConsultantId] = useState<string | null>(null);
+    const [isAdmin, setIsAdmin] = useState<boolean>(false);
     const [consultantsMap, setConsultantsMap] = useState<Map<string, string>>(new Map());
     const [live, setLive] = useState(false);
     const [toasts, setToasts] = useState<Array<{ uid: string; name: string | null; vehicle: string | null }>>([]);
@@ -170,18 +171,12 @@ export default function InboxPage() {
         }
     }, []);
 
-    const fetchLeads = useCallback(async (cid: string | null, viewMode: 'active' | 'archived' = 'active') => {
+    const fetchLeads = useCallback(async (cid: string | null, viewMode: 'active' | 'archived' = 'active', adminMode: boolean = false) => {
         const sourceView = viewMode === 'archived' ? 'leads_unified' : 'leads_unified_active';
 
-        // Inbox ESTRITAMENTE individual: sem cid, nada aparece.
-        // Filtros decidem o recorte:
-        //   • priority (Foco): leads do consultor sem atendimento iniciado +
-        //     leads em reversão (cliente respondeu IA — precisa virar)
-        //   • today (Hoje): só leads NOVOS de hoje do consultor (sem atendimento)
-        //   • all (Tudo): todos do consultor (inclui em conversa, exclui arquivados)
-        //   • archived: arquivados do consultor
-        if (!cid && viewMode === 'active') {
-            // Sem consultor: vendedor não logado ou sem vínculo. Mostra vazio.
+        // ADMIN: vê todos os leads (visão completa do dia, gestão).
+        // VENDEDOR: vê estritamente os seus. Sem cid = vazio.
+        if (!cid && !adminMode && viewMode === 'active') {
             setLeads([]);
             setLastMessages(new Map());
             return;
@@ -190,10 +185,10 @@ export default function InboxPage() {
         const query = supabase
             .from(sourceView)
             .select('uid, table_name, native_id, name, phone, vehicle_interest, source, ai_score, ai_classification, status, updated_at, created_at, proxima_acao, first_contact_channel, assigned_consultant_id, atendimento_iniciado_em, atendimento_iniciado_por, flagged_reversao' + (viewMode === 'archived' ? ', archived_at' : ''))
-            .limit(200);
+            .limit(adminMode ? 500 : 200);
 
-        // SEMPRE filtra pelo consultor (Inbox individual)
-        if (cid) query.eq('assigned_consultant_id', cid);
+        // Filtra pelo consultor (Inbox individual). Admin NÃO filtra.
+        if (cid && !adminMode) query.eq('assigned_consultant_id', cid);
 
         if (filter === 'today' && viewMode === 'active') {
             // Hoje = NOVOS leads de hoje, sem atendimento iniciado
@@ -222,8 +217,9 @@ export default function InboxPage() {
         // BLOQUEIO CROSS-VENDOR: leads que OUTRO vendedor já iniciou atendimento
         // somem do meu Inbox imediatamente. Lead em reversão respondida
         // (flagged_reversao=true) tem prioridade — ignora esse filtro.
-        const data = (rawData || []).filter((l: any) => {
-            if (l.flagged_reversao) return true;  // reversão sempre aparece
+        // Admin vê TUDO (sem bloqueio).
+        const data = adminMode ? (rawData || []) : (rawData || []).filter((l: any) => {
+            if (l.flagged_reversao) return true;
             if (!l.atendimento_iniciado_em || !l.atendimento_iniciado_por) return true;
             return l.atendimento_iniciado_por === cid;
         });
@@ -307,7 +303,7 @@ export default function InboxPage() {
                 unreadRef.current += truelyNew.length;
             }
         }
-    }, [supabase, soundEnabled, filter]);
+    }, [supabase, soundEnabled, filter, isAdmin]);
 
     const handleArchive = async (uid: string, e: React.MouseEvent) => {
         e.preventDefault();
@@ -331,7 +327,7 @@ export default function InboxPage() {
                 }),
             });
             if (res.ok) {
-                fetchLeads(consultantId, filter === 'archived' ? 'archived' : 'active');
+                fetchLeads(consultantId, filter === 'archived' ? 'archived' : 'active', isAdmin);
             } else {
                 const err = await res.json();
                 alert('Erro ao arquivar: ' + err.error);
@@ -362,14 +358,17 @@ export default function InboxPage() {
 
                 const { data: cons, error: consErr } = await supabase
                     .from('consultants_manos_crm')
-                    .select('id, onboarded_at')
-                    .eq('user_id', auth.user.id)
+                    .select('id, onboarded_at, role')
+                    .or(`user_id.eq.${auth.user.id},auth_id.eq.${auth.user.id}`)
                     .maybeSingle();
                 if (consErr) console.error('[Inbox] consultant lookup error:', consErr.message);
 
                 const cid = cons?.id || null;
+                const consRole = (cons as any)?.role || '';
+                const adminFlag = consRole === 'admin' || auth.user.email === 'alexandre_gorges@hotmail.com';
                 if (!alive) return;
                 setConsultantId(cid);
+                setIsAdmin(adminFlag);
                 setOnboarded(!!cons?.onboarded_at);
 
                 // Carrega mapa de consultores pra mostrar nome de quem está com cada lead
@@ -388,7 +387,7 @@ export default function InboxPage() {
                     console.warn('[Inbox] Falha ao carregar consultores:', e);
                 }
 
-                await fetchLeads(cid, filter === 'archived' ? 'archived' : 'active');
+                await fetchLeads(cid, filter === 'archived' ? 'archived' : 'active', adminFlag);
             } catch (e: any) {
                 console.error('[Inbox] Erro fatal no useEffect:', e?.message || e);
             } finally {
@@ -439,7 +438,7 @@ export default function InboxPage() {
         const scheduleRefetch = () => {
             if (debounceTimer) clearTimeout(debounceTimer);
             debounceTimer = setTimeout(() => {
-                fetchLeads(consultantId, filter === 'archived' ? 'archived' : 'active');
+                fetchLeads(consultantId, filter === 'archived' ? 'archived' : 'active', isAdmin);
             }, 3500);
         };
         for (const t of tables) {
@@ -615,7 +614,7 @@ export default function InboxPage() {
                     <p className="text-sm mt-1">Boa hora pra prospectar.</p>
                 </div>
             ) : (
-                <PTR onRefresh={() => fetchLeads(consultantId)}>
+                <PTR onRefresh={() => fetchLeads(consultantId, 'active', isAdmin)}>
                     <div className="space-y-10 pb-20">
                         {/* Card guia: PRÓXIMO LEAD A TOCAR. Vendedor leigo abre o
                             CRM e já sabe o que fazer agora, sem precisar interpretar
