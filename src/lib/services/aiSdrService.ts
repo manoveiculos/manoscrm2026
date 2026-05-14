@@ -26,6 +26,12 @@ export interface FirstContactInput {
     flow: 'compra' | 'venda';
     /** Lead foi arquivado pelo vendedor e está sendo reengajado pela IA. */
     from_archive?: boolean;
+    /** V3: Lead em processo de reversão (perdido -> retomado). */
+    isReversal?: boolean;
+    /** V3: Contexto do porquê o lead foi perdido/arquivado. */
+    diagnostico?: string | null;
+    /** V3: Status atual do lead no banco. */
+    currentStatus?: string | null;
     /** UUID do consultor responsável (usado pra cobrar antes de IA enviar sem contexto). */
     assigned_consultant_id?: string | null;
 }
@@ -217,7 +223,18 @@ async function generateGptMessage(
                 ? `\nESTOQUE DISPONÍVEL agora que bate com o interesse (use UM se fizer sentido):\n${matches.map(m => `- ${formatInventoryLine(m)}`).join('\n')}`
                 : '');
 
-        const sys = `Você escreve a primeira mensagem de WhatsApp de um consultor pra um lead que acabou de chegar.
+        const isRev = input.isReversal || input.from_archive;
+        const diag = input.diagnostico ? `\nDiagnóstico do atendimento anterior: ${input.diagnostico}` : '';
+
+        const sys = isRev
+            ? `Você é o Agente de Reversão da Manos Veículos. O cliente parou de responder ou foi arquivado.
+Seu objetivo é reengajar o cliente de forma empática e leve, sem pressão.
+Regras:
+- 1 ou 2 frases curtas, máximo 240 caracteres. Tom humano e direto.
+- Se houver diagnóstico, use-o para ser pertinente (ex: se achou caro, sugira ver outras opções).
+- PROIBIDO prometer descontos ou ser invasivo.
+- Termine com uma pergunta aberta e gentil.`
+            : `Você escreve a primeira mensagem de WhatsApp de um consultor pra um lead que acabou de chegar.
 Regras inegociáveis:
 - 1 ou 2 frases curtas, máximo 240 caracteres
 - Português do Brasil, tom humano e direto, ZERO emojis ou jargão de marketing
@@ -229,8 +246,8 @@ Regras inegociáveis:
 
         const user = `Consultor: ${cons}
 Cliente: ${cli || 'não informado'}
-Origem do lead: ${input.source || 'não informada'}
-Interesse declarado pelo cliente: ${veh}
+Origem: ${input.source || 'não informada'}
+Interesse: ${veh}${diag}
 Loja: Manos Veículos (Rio do Sul/SC)${inventoryBlock}
 
 Gere apenas o texto final da mensagem, sem aspas.`;
@@ -241,8 +258,8 @@ Gere apenas o texto final da mensagem, sem aspas.`;
                 { role: 'system', content: sys },
                 { role: 'user', content: user },
             ],
-            temperature: 0.4,
-            max_tokens: 140,
+            temperature: isRev ? 0.7 : 0.4,
+            max_tokens: 200,
         }, { timeout: 8000 });
 
         const out = (res.choices[0]?.message?.content || '').trim();
@@ -277,15 +294,43 @@ function fallbackWithMatch(input: FirstContactInput, matches: MatchedItem[]): st
 export async function sendFirstContact(input: FirstContactInput, table: 'leads_compra' | 'leads_manos_crm' | 'leads_master' | 'leads_distribuicao_crm_26'): Promise<FirstContactResult> {
     const admin = createClient();
 
-    // Idempotência: checa se já houve primeiro contato
+    // Idempotência e Bloqueio de Status V3
     try {
         const { data } = await admin
             .from(table)
-            .select('first_contact_at')
+            .select('first_contact_at, status, archived_at, diagnostico_atendimento')
             .eq('id', input.leadId)
             .maybeSingle();
-        if (data?.first_contact_at) {
+
+        if (data?.first_contact_at && !input.isReversal) {
             return { sent: false, message: '', provider: 'skipped', error: 'already_contacted' };
+        }
+
+        const status = (data?.status || '').toLowerCase();
+        const isArchived = !!data?.archived_at;
+        const diagnostico = data?.diagnostico_atendimento || input.diagnostico || '';
+
+        // 1. Bloqueio de Leads Novos (IA SDR não faz atendimento inicial na V3)
+        if (['novo', 'received', 'received_triagem'].includes(status)) {
+            return { sent: false, message: '', provider: 'none', error: 'ai_prohibited_initial_contact' };
+        }
+
+        // 2. Bloqueio de Arquivados
+        if (isArchived || ['arquivado', 'arquivados'].includes(status)) {
+            return { sent: false, message: '', provider: 'none', error: 'ai_prohibited_archived' };
+        }
+
+        // 3. Foco em PERDIDOS (V3 Reversão)
+        // Se não for reversão e não estiver perdido, pula.
+        if (!['perdido', 'lost', 'lost_by_inactivity'].includes(status) && !input.isReversal) {
+            return { sent: false, message: '', provider: 'none', error: 'ai_focus_reversal_only' };
+        }
+
+        // 4. Filtro de Qualidade Financeira (Rigoroso V3)
+        const creditKeywords = ['cpf ruim', 'sem margem', 'score baixo', 'reprovado', 'restrição', 'financeiro'];
+        const hasCreditIssue = creditKeywords.some(k => diagnostico.toLowerCase().includes(k));
+        if (hasCreditIssue) {
+            return { sent: false, message: '', provider: 'none', error: 'credit_issue_detected' };
         }
     } catch {}
 
@@ -367,6 +412,11 @@ export async function sendFirstContact(input: FirstContactInput, table: 'leads_c
             } else {
                 updates.updated_at = now;
             }
+
+            if (input.isReversal || input.from_archive) {
+                updates.flagged_reversao = true;
+            }
+
             await admin.from(table).update(updates).eq('id', input.leadId);
 
             // Insere a mensagem enviada como bolha 'outbound' no chat do /lead/[id]

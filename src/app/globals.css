@@ -30,8 +30,12 @@
   }
 
   @keyframes pulse-glow {
-    0%, 100% { box-shadow: 0 0 10px rgba(227, 30, 36, 0.15); }
-    50% { box-shadow: 0 0 20px rgba(227, 30, 36, 0.3); }
+    0%, 100% { opacity: 1; transform: scale(1); filter: drop-shadow(0 0 0px rgba(239, 68, 68, 0)); }
+    50% { opacity: 0.9; transform: scale(1.02); filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.6)); }
+  }
+  @keyframes pulse-soft {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.05); }
   }
 }
 
@@ -79,6 +83,10 @@
 
   .text-glow-red {
     text-shadow: 0 0 8px rgba(227, 30, 36, 0.5);
+  }
+
+  .animate-pulse-soft {
+    animation: pulse-soft 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   }
 }
 

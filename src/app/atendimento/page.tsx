@@ -86,9 +86,12 @@ function ageInfo(iso: string | null | undefined): { text: string; color: string;
     const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
     if (mins < 60) return { text: `${mins}min`, color: 'text-emerald-300', stale: false, alert: false };
     const h = Math.floor(mins / 60);
+    
+    // Alerta de Inatividade V3: 8h úteis (considerando que vendedor quer ser cobrado se passar um dia útil sem mexer)
     if (h < 8) return { text: `${h}h`, color: 'text-yellow-300', stale: false, alert: false };
-    if (h < 24) return { text: `${h}h`, color: 'text-orange-400', stale: true, alert: false };
-    return { text: `${Math.floor(h / 24)}d`, color: 'text-red-400', stale: true, alert: true };
+    if (h < 12) return { text: `${h}h - PARADO`, color: 'text-orange-400', stale: true, alert: true };
+    
+    return { text: `${Math.floor(h / 24)}d - URGENTE`, color: 'text-red-400', stale: true, alert: true };
 }
 
 export default function AtendimentoKanbanPage() {

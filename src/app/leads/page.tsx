@@ -230,9 +230,12 @@ function LeadsContent() {
                 true
             );
 
-            // ── REGRA DE ACESSO (ESTRITA) ──────────────────────────
+            // ── REGRA DE ACESSO V5 (FILA DE PESCA) ──────────────────
+            // Um lead NUNCA aparece na aba Leads sem atendimento iniciado para consultores.
+            // Administradores veem TUDO sem restrição.
+            if (role !== 'admin' && !lead.atendimento_iniciado_em) return false;
+
             // Se não for admin, o consultor só pode ver leads atribuídos a ele.
-            // O RLS no banco já cuida disso, mas mantemos o filtro aqui para segurança absoluta.
             if (role !== 'admin') {
                 if (!consultantId) return false; // Fail closed se não identificado
                 const isMine = lead.assigned_consultant_id === consultantId;

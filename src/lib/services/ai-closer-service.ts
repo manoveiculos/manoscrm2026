@@ -127,18 +127,41 @@ export async function runEliteCloser(leadId: string, messages: any[] = [], consu
                 }
             }
 
-            // Também tenta interactions_manos_crm como fallback
+            // Se sem mensagens do frontend, busca na View Unificada (Arthur + Vendedor + Karol)
+            if (convSample.length === 0) {
+                const { data: unifiedMsgs } = await supabaseAdmin
+                    .from('unified_whatsapp_messages')
+                    .select('direction, message_text, created_at, message_id')
+                    .eq('lead_uid', String(cleanId))
+                    .order('created_at', { ascending: false })
+                    .limit(20);
+                
+                if (unifiedMsgs && unifiedMsgs.length > 0) {
+                    convSample = unifiedMsgs.reverse().map((m: any) => {
+                        const mid = m.message_id || '';
+                        let role = m.direction === 'inbound' ? 'CLIENTE' : 'VENDEDOR';
+                        if (mid.startsWith('ai_sdr_')) role = 'IA ARTHUR (Triagem)';
+                        if (mid.startsWith('ai_followup_')) role = 'IA KAROL (Reversão)';
+                        return `${role}: ${m.message_text}`;
+                    });
+                }
+            }
+
+            // Fallback Adicional: interactions_manos_crm (Notas manuais e eventos)
             if (convSample.length === 0) {
                 const isUUIDCheck = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(cleanId);
                 const { data: interactions } = await supabaseAdmin
                     .from('interactions_manos_crm')
                     .select('notes, type')
                     .eq(isUUIDCheck ? 'lead_id' : 'lead_id_v1', cleanId)
-                    .in('type', ['whatsapp_in', 'whatsapp_out', 'call', 'note'])
+                    .in('type', ['whatsapp_in', 'whatsapp_out', 'call', 'note', 'ai_analysis'])
                     .order('created_at', { ascending: true })
                     .limit(15);
                 if (interactions) {
-                    convSample = interactions.map((i: any) => i.notes || '').filter((n: string) => n.length > 5);
+                    convSample = interactions.map((i: any) => {
+                        if (i.type === 'ai_analysis') return `IA ANÁLISE ANTERIOR: ${i.notes?.slice(0, 200)}`;
+                        return i.notes || '';
+                    }).filter((n: string) => n.length > 5);
                 }
             }
 

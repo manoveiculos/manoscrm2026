@@ -100,20 +100,18 @@ export async function POST(req: NextRequest) {
             }
         );
 
-        // 1. Busca o lead pela varredura de telefone
-        const { data: existingLead, error: leadError } = await supabase
-            .from('leads_distribuicao_crm_26')
-            .select('id, telefone, status, archived_at, reversao_attempt_count, assigned_consultant_id, nome')
-            .eq('telefone', cleanPhone)
-            .limit(1)
+        // 1. Busca o lead pela varredura unificada (V1, V2 e Compra)
+        const { data: leadMatch, error: leadError } = await supabase
+            .rpc('find_lead_by_phone', { p_phone: cleanPhone })
             .maybeSingle();
 
-        if (leadError && leadError.code !== 'PGRST116') {
-            console.error('Erro ao buscar lead:', leadError);
-            throw leadError;
+        if (leadError) {
+            console.error('Erro ao buscar lead unificado:', leadError);
         }
 
-        let leadId = existingLead?.id;
+        let leadId = leadMatch?.native_id;
+        let leadTable = leadMatch?.table_name || 'leads_distribuicao_crm_26';
+        let existingLead = leadMatch; // Alias para compatibilidade com código abaixo
 
         // 2. Cria o lead caso não exista
         if (!leadId) {
@@ -139,14 +137,19 @@ export async function POST(req: NextRequest) {
                     telefone: cleanPhone,
                     status: 'received',
                     origem: 'WhatsApp Ativo',
-                    ai_classification: 'warm', // Classificação padrão até a IA atuar
+                    ai_classification: 'warm',
                     ai_score: 50,
                     assigned_consultant_id: assignedId,
-                    vendedor: assignedName, // Campo legado string
-                    primeiro_vendedor: assignedName // Rastreabilidade do primeiro dono
+                    vendedor: assignedName,
+                    primeiro_vendedor: assignedName
                 })
-                .select('id')
+                .select('id, table_name')
                 .single();
+            
+            leadId = newLead?.id;
+            leadTable = 'leads_distribuicao_crm_26';
+            // Re-alimenta o existingLead para as lógicas de status abaixo
+            existingLead = { ...newLead, native_id: newLead.id, table_name: 'leads_distribuicao_crm_26' };
 
             if (insertLeadError) {
                 console.error('Erro ao criar lead:', insertLeadError);
@@ -222,7 +225,7 @@ export async function POST(req: NextRequest) {
             }
 
             await supabase
-                .from('leads_distribuicao_crm_26')
+                .from(leadTable)
                 .update(updates)
                 .eq('id', leadId);
 
@@ -252,15 +255,23 @@ export async function POST(req: NextRequest) {
             }
         }
 
-        // 3. Salva a mensagem no histórico (nova tabela whatsapp_messages)
+        // 3. Salva a mensagem no histórico unificado
+        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(String(leadId));
+        const msgPayload: any = {
+            direction: 'inbound',
+            message_text: messageText,
+            message_id: messageId || `in_${Date.now()}`
+        };
+
+        if (isUUID) {
+            msgPayload.lead_compra_id = leadId;
+        } else {
+            msgPayload.lead_id = leadId;
+        }
+
         const { error: msgInsertError } = await supabase
             .from('whatsapp_messages')
-            .insert({
-                lead_id: leadId,
-                direction: 'inbound', // Mensagem recebida do cliente
-                message_text: messageText,
-                message_id: messageId || null
-            });
+            .insert(msgPayload);
 
         if (msgInsertError) {
             // Pode falhar se a tabela não tiver sido criada ainda. Vamos logar e seguir, 

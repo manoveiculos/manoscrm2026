@@ -41,34 +41,47 @@ export default function Dashboard() {
     const [aiPaused, setAiPaused] = useState(false);
     const [loading, setLoading] = useState(true);
     const [live, setLive] = useState(false);
+    const [consultantId, setConsultantId] = useState<string | null>(null);
+    const [lastKnownLeads, setLastKnownLeads] = useState<Set<string>>(new Set());
 
     const fetchKpis = useCallback(async () => {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
 
-        // 1. Ganhamos Hoje
+        const { data: sess } = await supabase.auth.getSession();
+        const userId = sess?.session?.user?.id;
+        if (!userId) return;
+
+        // Resolve o ID do consultor (UUID auth.users)
+        setConsultantId(userId);
+
+        // 1. Ganhamos Hoje (Indiv.)
         const { count: wonToday } = await supabase
             .from('leads_unified')
             .select('uid', { count: 'exact', head: true })
+            .eq('assigned_consultant_id', userId)
             .eq('status', 'vendido')
             .gte('updated_at', today.toISOString());
 
-        // 2. Perdemos Hoje
+        // 2. Perdemos Hoje (Indiv.)
         const { count: lostToday } = await supabase
             .from('leads_unified')
             .select('uid', { count: 'exact', head: true })
+            .eq('assigned_consultant_id', userId)
             .in('status', ['perdido', 'lost', 'lost_by_inactivity'])
             .gte('updated_at', today.toISOString());
 
-        // 3. Fila (Ativos)
-        const { count: queue } = await supabase
+        // 3. Fila (Ativos Indiv.)
+        const { count: queue, data: queueLeads } = await supabase
             .from('leads_unified_active')
-            .select('uid', { count: 'exact', head: true });
+            .select('uid', { count: 'exact' })
+            .eq('assigned_consultant_id', userId);
 
-        // 4. SLA Crítico (Score >= 80)
+        // 4. SLA Crítico (Score >= 80 Indiv.)
         const { count: criticalSla } = await supabase
             .from('leads_unified_active')
             .select('uid', { count: 'exact', head: true })
+            .eq('assigned_consultant_id', userId)
             .gte('ai_score', 80);
 
         setKpis({
@@ -77,7 +90,21 @@ export default function Dashboard() {
             queue: queue || 0,
             criticalSla: criticalSla || 0
         });
-    }, [supabase]);
+
+        // Som de Notificação V3:
+        // Identifica se entrou algum lead NOVO na fila que não conhecíamos nesta sessão.
+        if (queueLeads) {
+            const currentUids = new Set(queueLeads.map(l => l.uid));
+            if (lastKnownLeads.size > 0) {
+                const hasNew = queueLeads.some(l => !lastKnownLeads.has(l.uid));
+                if (hasNew && document.visibilityState === 'visible') {
+                    const audio = new Audio('/ding.mp3');
+                    audio.play().catch(() => {});
+                }
+            }
+            setLastKnownLeads(currentUids);
+        }
+    }, [supabase, lastKnownLeads]);
 
     const fetchSettings = useCallback(async () => {
         const { data } = await supabase

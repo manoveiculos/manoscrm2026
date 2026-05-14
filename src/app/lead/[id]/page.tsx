@@ -211,18 +211,16 @@ export default function LeadDetailPage() {
             setLead(lead);
             setSoldVehicle(lead?.vehicle_interest || '');
 
-            // Performance: cast pra int se leadId for numérico (tabelas legadas
-            // têm whatsapp_messages.lead_id BIGINT — cast implícito de string
-            // pra bigint causa timeout em produção). Filtro extra de 90 dias
-            // garante uso do índice composto (lead_id, created_at).
+            // Unificação V3: Busca na view unificada que contempla Arthur, Karol e Vendedor.
+            // O filtro por lead_uid suporta tanto IDs numéricos quanto UUIDs.
             const cutoff90d = new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString();
             const { data: msgs, error: msgError } = await supabase
-                .from('whatsapp_messages')
+                .from('unified_whatsapp_messages')
                 .select('id, direction, message_text, created_at, message_id')
-                .eq('lead_id', String(leadId))
+                .eq('lead_uid', String(leadId))
                 .gte('created_at', cutoff90d)
                 .order('created_at', { ascending: false })
-                .limit(50);
+                .limit(100); // Aumentado limite para contexto completo
             
             if (msgError) {
                 console.warn('[LeadDetail] Erro ao buscar mensagens:', msgError.message);
@@ -302,8 +300,7 @@ export default function LeadDetailPage() {
                 {
                     event: 'INSERT',
                     schema: 'public',
-                    table: 'whatsapp_messages',
-                    filter: `lead_id=eq.${leadId}`,
+                    table: 'whatsapp_messages', // Monitora a tabela base
                 },
                 (payload: any) => {
                     const m = payload.new;

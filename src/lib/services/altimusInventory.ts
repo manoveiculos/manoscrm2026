@@ -85,28 +85,26 @@ function asNumber(s: string | null): number | null {
 
     let normalized: string;
     if (hasComma) {
-        // Formato BR: pontos são milhar, vírgula é decimal → remove pontos, vírgula vira ponto
+        // Formato BR: "93.900,00" ou "93900,00"
         normalized = cleaned.replace(/\./g, '').replace(',', '.');
     } else if (dotCount === 1) {
-        // 1 ponto sem vírgula:
-        //   "93900.0"   → US decimal (mantém)
-        //   "12.500"    → BR sem decimais explícitos (3 dígitos depois) → milhar (multiplica por 1)
-        // Heurística: se há 3 dígitos APÓS o ponto, é separador de milhar (formato BR);
-        //             senão é decimal US/internacional.
-        const afterDot = cleaned.split('.')[1] || '';
-        if (afterDot.length === 3 && /^\d+$/.test(afterDot)) {
-            normalized = cleaned.replace(/\./g, ''); // BR milhar
-        } else {
-            normalized = cleaned; // US decimal — mantém o ponto
-        }
+        // Formato US (Altimus): "93900.0" -> ponto é decimal.
+        // Se remover o ponto vira 939000 (bug).
+        // Regra: se só tem um ponto e NENHUMA vírgula, o ponto é decimal.
+        normalized = cleaned;
     } else if (dotCount >= 2) {
-        // Múltiplos pontos = separadores de milhar (BR sem vírgula)
+        // "1.250.000" -> pontos são milhares.
         normalized = cleaned.replace(/\./g, '');
     } else {
         normalized = cleaned;
     }
 
     const n = Number(normalized);
+    
+    // Validação de sanidade V3: 
+    // Se o número for absurdamente alto (> 5 milhões), ignoramos por segurança.
+    if (n > 5000000) return null;
+    
     return Number.isFinite(n) && n > 0 ? n : null;
 }
 
@@ -175,8 +173,9 @@ function parseAltimusXml(xml: string): AltimusVehicle[] {
 
         const anoStr = tag(block, 'ano') || tag(block, 'anoModelo');
         const anoFabStr = tag(block, 'anoFabricacao') || tag(block, 'ano_fabricacao');
-        // Altimus usa <valor>, não <preco>
-        const preco = asNumber(tag(block, 'valor') || tag(block, 'preco') || tag(block, 'preço'));
+        // Altimus usa <valor> ou <PrecoVenda>, não <preco>
+        const precoRaw = tag(block, 'PrecoVenda') || tag(block, 'valor') || tag(block, 'preco') || tag(block, 'preço');
+        const preco = asNumber(precoRaw);
         const km = asInt(tag(block, 'km') || tag(block, 'quilometragem'));
         const cambio = tag(block, 'cambio') || tag(block, 'câmbio') || undefined;
         const combustivel = tag(block, 'combustivel') || tag(block, 'combustível') || undefined;
@@ -185,6 +184,15 @@ function parseAltimusXml(xml: string): AltimusVehicle[] {
         const link = tag(block, 'link') || tag(block, 'url') || undefined;
         // ID interno pra compor link Altimus se quisermos no futuro
         const idInterno = tag(block, 'id');
+
+        // Regra Anti-Alucinação: Se o preço for incoerente (ex: popular > 300k), ignora o veículo
+        // Lista simples de modelos populares para o filtro
+        const populares = ['gol', 'uno', 'palio', 'onix', 'hb20', 'ka', 'kwid', 'mobi', 'sandero', 'fiesta', 'corsa', 'celta'];
+        const isPopular = populares.some(p => modelo.toLowerCase().includes(p));
+        if (isPopular && preco && preco > 300000) {
+            console.warn(`[altimus] Preço incoerente detectado para popular: ${marca} ${modelo} - R$ ${preco}. Ignorando.`);
+            continue;
+        }
 
         out.push({
             marca,

@@ -1,12 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { createClient } from '@/lib/supabase/client';
 import { parseUid } from '@/lib/services/unifiedLead';
-import { Flame, Snowflake, Thermometer, Clock, Phone, Wifi, Bell, X, AlertTriangle, MessageCircle } from 'lucide-react';
+import { Flame, Snowflake, Thermometer, Clock, Phone, Wifi, Bell, X, AlertTriangle, MessageCircle, Zap, PhoneOff } from 'lucide-react';
 
 const PTR = dynamic(() => import('react-pull-to-refresh'), { ssr: false }) as any;
 
@@ -54,7 +54,7 @@ interface LastMessage {
 }
 
 type Filter = 'priority' | 'today' | 'all' | 'archived';
-type Bucket = 'reversao' | 'urgent' | 'active' | 'cooling' | 'zombie';
+type Bucket = 'fishing' | 'reversao' | 'urgent' | 'active' | 'cooling' | 'zombie';
 
 const ZOMBIE_DAYS = 15;
 const URGENT_MINUTES = 30;     // novos OU com nova interação <30min
@@ -67,21 +67,25 @@ function ageMinutes(updatedAt: string | null, createdAt: string): number {
 }
 
 function bucketFor(lead: InboxLead): Bucket {
-    // 🔥 REVERSÃO BEM-SUCEDIDA: cliente perdido respondeu msg da IA.
-    // Prioridade máxima — vendedor precisa abrir AGORA.
+    // 🎣 FILA DE PESCA (V5): Lead novo sem atendimento iniciado.
+    // Todos os vendedores podem ver mesmo se já houver um nome no assigned_consultant_id (vindo da origem).
+    if (!lead.atendimento_iniciado_em) return 'fishing';
+
+    // 🔥 REVERSÃO: cliente perdido respondeu msg da IA. Prioridade Máxima.
     if (lead.flagged_reversao) return 'reversao';
 
     const min = ageMinutes(lead.updated_at, lead.created_at);
     if (min > ZOMBIE_DAYS * 24 * 60) return 'zombie';
 
-    // URGENTE: lead novo do dia QUE NÃO foi tocado ainda (sem atendimento + sem interação humana).
-    // Leads em negociação JAMAIS são "urgentes" — eles estão na aba Atendimento (Kanban).
-    const semInteracao = !lead.ultima_interacao_humana && !lead.atendimento_iniciado_em;
+    const semAtendimento = !lead.atendimento_iniciado_em;
     const criadoHoje = new Date(lead.created_at).toDateString() === new Date().toDateString();
-    if (semInteracao && criadoHoje) return 'urgent';
+    
+    // URGENTE (V3): Lead NOVO que nunca foi tocado (Hoje ou Anteriores).
+    if (semAtendimento) return 'urgent';
+    
+    // Em negociação (V3): Leads de HOJE que já iniciaram atendimento humano.
+    if (criadoHoje) return 'active';
 
-    // Em conversa: ainda dentro de 48h, vendedor mexeu mas não fechou
-    if (min < ACTIVE_HOURS * 60) return 'active';
     return 'cooling';
 }
 
@@ -164,6 +168,7 @@ export default function InboxPage() {
     const [onboarded, setOnboarded] = useState(true);
     const [expandedUid, setExpandedUid] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
+    const [lastKnownUids, setLastKnownUids] = useState<Set<string>>(new Set());
     const [filter, setFilter] = useState<Filter>('priority');
     const [consultantId, setConsultantId] = useState<string | null>(null);
     const [isAdmin, setIsAdmin] = useState<boolean>(false);
@@ -189,8 +194,6 @@ export default function InboxPage() {
     const fetchLeads = useCallback(async (cid: string | null, viewMode: 'active' | 'archived' = 'active', adminMode: boolean = false) => {
         const sourceView = viewMode === 'archived' ? 'leads_unified' : 'leads_unified_active';
 
-        // ADMIN: vê todos os leads (visão completa do dia, gestão).
-        // VENDEDOR: vê estritamente os seus. Sem cid = vazio.
         if (!cid && !adminMode && viewMode === 'active') {
             setLeads([]);
             setLastMessages(new Map());
@@ -200,28 +203,24 @@ export default function InboxPage() {
         const query = supabase
             .from(sourceView)
             .select('uid, table_name, native_id, name, phone, vehicle_interest, source, ai_score, ai_classification, status, updated_at, created_at, proxima_acao, first_contact_channel, assigned_consultant_id, atendimento_iniciado_em, atendimento_iniciado_por, flagged_reversao, ultima_interacao_humana, descarte_financeiro' + (viewMode === 'archived' ? ', archived_at' : ''))
-            .limit(adminMode ? 500 : 200);
+            .limit(adminMode ? 300 : 100);
 
-        // Filtra pelo consultor (Inbox individual). Admin NÃO filtra.
-        if (cid && !adminMode) query.eq('assigned_consultant_id', cid);
+        // FILA DE PESCA (V5): Vendedor vê seus leads OU QUALQUER lead sem atendimento iniciado.
+        if (cid && !adminMode) {
+            query.or(`assigned_consultant_id.eq.${cid},atendimento_iniciado_em.is.null`);
+        }
 
-        // Inbox NÃO mostra leads descartados financeiramente (CPF ruim,
-        // crédito negado, score baixo). Esses vão direto pro arquivado.
         if (viewMode === 'active') query.eq('descarte_financeiro', false);
 
         if (filter === 'today' && viewMode === 'active') {
-            // Hoje = NOVOS leads de hoje, sem atendimento iniciado
             const todayStart = new Date();
             todayStart.setHours(0, 0, 0, 0);
             query.gte('created_at', todayStart.toISOString())
                  .is('atendimento_iniciado_em', null);
             query.order('created_at', { ascending: false });
         } else if (filter === 'priority' && viewMode === 'active') {
-            // Foco = leads SEM atendimento iniciado (entrada) + leads de reversão
-            // que cliente respondeu (flagged_reversao=true vai pro topo no JS)
-            query.order('ai_score', { ascending: false, nullsFirst: false });
-        } else if (filter === 'all' && viewMode === 'active') {
-            query.order('updated_at', { ascending: false, nullsFirst: false });
+            query.order('flagged_reversao', { ascending: false });
+            query.order('created_at', { ascending: false });
         } else {
             query.order('updated_at', { ascending: false, nullsFirst: false });
         }
@@ -233,10 +232,6 @@ export default function InboxPage() {
             console.error('[Inbox] fetchLeads erro:', leadsErr.message, leadsErr.details);
         }
 
-        // BLOQUEIO CROSS-VENDOR: leads que OUTRO vendedor já iniciou atendimento
-        // somem do meu Inbox imediatamente. Lead em reversão respondida
-        // (flagged_reversao=true) tem prioridade — ignora esse filtro.
-        // Admin vê TUDO (sem bloqueio).
         const data = adminMode ? (rawData || []) : (rawData || []).filter((l: any) => {
             if (l.flagged_reversao) return true;
             if (!l.atendimento_iniciado_em || !l.atendimento_iniciado_por) return true;
@@ -244,9 +239,6 @@ export default function InboxPage() {
         });
         const next = (data as InboxLead[]) || [];
 
-        // PERFORMANCE: renderiza a lista de leads IMEDIATAMENTE.
-        // As mensagens (preview do card) carregam em background depois,
-        // sem bloquear o Inbox. Vendedor vê os cards em <500ms.
         knownIdsRef.current = new Set(next.map(l => l.uid));
         if (!initialLoadDoneRef.current) {
             firstLoadAtRef.current = Date.now();
@@ -254,7 +246,6 @@ export default function InboxPage() {
         initialLoadDoneRef.current = true;
         setLeads(next);
 
-        // ── Carregar mensagens em background (não bloqueia render) ──────────
         const leadIds = next.map(l => l.native_id).slice(0, 100);
         if (leadIds.length > 0) {
             const cutoff30d = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
@@ -283,7 +274,6 @@ export default function InboxPage() {
                 );
             }
 
-            // Fire-and-forget: atualiza msgMap depois sem await
             Promise.allSettled(queries).then(results => {
                 const allMsgs: any[] = [];
                 for (const r of results) {
@@ -303,26 +293,27 @@ export default function InboxPage() {
                 setLastMessages(msgMap);
             });
         }
-        // ────────────────────────────────────────────────────────────────────
 
-        // Som + toast pra leads criados APÓS a primeira carga.
-        // Trocar de filtro não dispara (timestamp é absoluto).
         const cutoff = firstLoadAtRef.current;
-        const truelyNew = next.filter(l => {
-            const ts = new Date(l.created_at).getTime();
-            return ts > cutoff;
-        });
+        const truelyNew = next.filter(l => new Date(l.created_at).getTime() > cutoff);
+        
         if (truelyNew.length > 0) {
-            if (soundEnabled) audioRef.current?.play().catch(() => {});
+            // Notificação Sonora (V4): Apenas para leads que caem na Fila Geral (sem dono)
+            const fishingLeads = truelyNew.filter(l => !l.assigned_consultant_id);
+            if (fishingLeads.length > 0 && soundEnabled && typeof document !== 'undefined' && document.visibilityState === 'visible') {
+                audioRef.current?.play().catch(() => {});
+            }
+            
             setToasts(prev => [
                 ...prev,
                 ...truelyNew.slice(0, 5).map(l => ({ uid: l.uid, name: l.name, vehicle: l.vehicle_interest })),
             ]);
+            
             if (typeof document !== 'undefined' && document.hidden) {
                 unreadRef.current += truelyNew.length;
             }
         }
-    }, [supabase, soundEnabled, filter, isAdmin]);
+    }, [supabase, soundEnabled, filter, isAdmin, consultantId]);
 
     const handleArchive = async (uid: string, e: React.MouseEvent) => {
         e.preventDefault();
@@ -359,9 +350,6 @@ export default function InboxPage() {
     useEffect(() => {
         let alive = true;
         let timeoutId: ReturnType<typeof setTimeout> | null = null;
-
-        // Safety net: força fim do loading em 10s independentemente do que aconteça.
-        // Sem isso, qualquer await travado deixa "Carregando..." pra sempre.
         timeoutId = setTimeout(() => {
             if (alive) {
                 console.warn('[Inbox] Timeout de 10s no carregamento. Forçando exibição.');
@@ -371,9 +359,6 @@ export default function InboxPage() {
 
         (async () => {
             try {
-                // getSession() em vez de getUser() — não usa lock no localStorage
-                // (evita 'Lock broken by another request' quando outros hooks
-                // auth.getUser() rodam em paralelo).
                 const { data: sess } = await supabase.auth.getSession();
                 const authUser = sess?.session?.user || null;
                 if (!authUser) { router.push('/login'); return; }
@@ -394,8 +379,6 @@ export default function InboxPage() {
                 setIsAdmin(adminFlag);
                 setOnboarded(!!cons?.onboarded_at);
 
-                // Carrega mapa de consultores pra mostrar nome de quem está com cada lead
-                // (não-crítico — se falhar, sem nome aparece e segue).
                 try {
                     const { data: allCons } = await supabase
                         .from('consultants_manos_crm')
@@ -424,7 +407,6 @@ export default function InboxPage() {
         };
     }, [supabase, router, fetchLeads, filter]);
 
-    // Tab title flasher
     useEffect(() => {
         if (typeof document === 'undefined') return;
         baseTitleRef.current = document.title || 'Inbox';
@@ -451,9 +433,6 @@ export default function InboxPage() {
         };
     }, []);
 
-    // Realtime — com debounce de 1.5s pra evitar refetch em rajada.
-    // Um único evento real pode disparar callback em 2-3 das 3 tabelas; sem
-    // debounce o inbox refazia fetchLeads 3x em <100ms (cada um ~300ms).
     useEffect(() => {
         const tables = ['leads_manos_crm', 'leads_compra', 'leads_distribuicao_crm_26'];
         const channel = supabase.channel('inbox-live');
@@ -474,39 +453,39 @@ export default function InboxPage() {
         };
     }, [supabase, consultantId, fetchLeads, filter]);
 
-    // Buckets + filtros
-    const grouped = useMemo(() => {
-        const todayStart = new Date();
-        todayStart.setHours(0, 0, 0, 0);
+    const groups = useMemo(() => {
+        const todayStr = new Date().toDateString();
+        const buckets: Record<Bucket | 'pending', InboxLead[]> = { 
+            fishing: [],
+            reversao: [], 
+            urgent: [], 
+            active: [], 
+            cooling: [], 
+            zombie: [],
+            pending: []
+        };
 
-        const buckets: Record<Bucket, InboxLead[]> = { reversao: [], urgent: [], active: [], cooling: [], zombie: [] };
         for (const lead of leads) {
             const b = bucketFor(lead);
-            buckets[b].push(lead);
+            const isToday = new Date(lead.created_at).toDateString() === todayStr;
+            const semAtendimento = !lead.atendimento_iniciado_em;
+
+            if (b === 'fishing') buckets.fishing.push(lead);
+            else if (b === 'reversao') buckets.reversao.push(lead);
+            else if (semAtendimento && !isToday) buckets.pending.push(lead);
+            else if (semAtendimento && isToday) buckets.urgent.push(lead);
+            else buckets[b].push(lead);
         }
 
-        if (filter === 'today') {
-            const all = leads.filter(l => bucketFor(l) !== 'zombie');
-            return {
-                reversao: all.filter(l => bucketFor(l) === 'reversao'),
-                urgent: all.filter(l => bucketFor(l) === 'urgent'),
-                active: all.filter(l => bucketFor(l) === 'active'),
-                cooling: all.filter(l => bucketFor(l) === 'cooling'),
-                zombie: [],
-            };
-        }
-        if (filter === 'all') {
-            return buckets;
-        }
-        return { ...buckets, zombie: [] };
-    }, [leads, filter]);
+        return buckets;
+    }, [leads]);
 
     const counts = {
-        reversao: grouped.reversao.length,
-        urgent: grouped.urgent.length,
-        active: grouped.active.length,
-        cooling: grouped.cooling.length,
-        zombie: grouped.zombie.length,
+        reversao: groups.reversao.length,
+        urgent: groups.urgent.length,
+        active: groups.active.length,
+        cooling: groups.cooling.length,
+        zombie: groups.zombie.length,
     };
 
     function dismissToast(uid: string) {
@@ -530,7 +509,6 @@ export default function InboxPage() {
 
     return (
         <div className="p-2 md:p-4 max-w-5xl mx-auto pb-32">
-            {/* ONBOARDING OVERLAY */}
             {!onboarded && consultantId && (
                 <div className="fixed inset-0 z-[10000] bg-black/80 flex items-center justify-center p-4">
                     <div className="bg-zinc-900 border border-zinc-700 rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-in zoom-in duration-300">
@@ -561,7 +539,6 @@ export default function InboxPage() {
                 </div>
             )}
 
-            {/* HEADER */}
             <div className="flex items-center justify-between mb-4 flex-wrap gap-3 sticky top-0 bg-black/80 backdrop-blur-xl py-4 px-2 z-20 -mx-2 border-b border-zinc-800/50">
                 <div className="flex items-center gap-3">
                     <h1 className="text-2xl font-black tracking-tight text-white">Inbox</h1>
@@ -585,7 +562,6 @@ export default function InboxPage() {
                 </div>
             </div>
 
-            {/* CONTADORES */}
             {filter !== 'archived' && (
                 <div className="flex items-center gap-3 mb-5 text-xs text-gray-400">
                     <span>🔥 <strong className="text-red-400">{counts.urgent}</strong> urgentes</span>
@@ -631,52 +607,86 @@ export default function InboxPage() {
                         ))}
                     </ul>
                 )
-            ) : counts.urgent + counts.active + counts.cooling + counts.zombie === 0 ? (
+            ) : (groups.fishing.length + counts.urgent + counts.active + counts.cooling + counts.zombie === 0) ? (
                 <div className="text-gray-400 text-center py-12">
                     <p className="text-lg">Nada na fila.</p>
                     <p className="text-sm mt-1">Boa hora pra prospectar.</p>
                 </div>
             ) : (
                 <PTR onRefresh={() => fetchLeads(consultantId, 'active', isAdmin)}>
-                    <div className="space-y-10 pb-20">
-                        {/* Card guia: PRÓXIMO LEAD A TOCAR. Vendedor leigo abre o
-                            CRM e já sabe o que fazer agora, sem precisar interpretar
-                            seções/buckets. Aparece só quando há urgentes. */}
-                        <NextActionCard
-                            lead={grouped.reversao[0] || grouped.urgent[0] || grouped.active[0] || null}
-                            lastMessages={lastMessages}
-                            consultantId={consultantId}
-                        />
-                        {grouped.reversao.length > 0 && (
+                    <div className="space-y-12 pb-20">
+                        {/* Fila de Pesca (V4) */}
+                        {groups.fishing.length > 0 && (
                             <Section
-                                title="🔥 REVERSÃO BEM-SUCEDIDA"
-                                subtitle="Cliente perdido respondeu — feche AGORA"
-                                icon={<Flame className="w-5 h-5 text-pink-400 animate-pulse" />}
-                                accent="border-pink-500 ring-2 ring-pink-500/30 shadow-lg shadow-pink-500/20"
-                                leads={grouped.reversao}
+                                title="🎣 Fila Geral (Pesca)"
+                                subtitle="Leads novos aguardando atendimento. Seja rápido!"
+                                icon={<Zap className="w-5 h-5 text-amber-400 animate-pulse" />}
+                                accent="border-amber-500"
+                                leads={groups.fishing}
                                 lastMessages={lastMessages}
                                 emptyText=""
                                 expandedUid={expandedUid}
                                 onToggle={setExpandedUid}
                                 onArchive={handleArchive}
                                 consultantsMap={consultantsMap}
+                                supabase={supabase}
+                                router={router}
+                                consultantId={consultantId}
+                                isAdmin={isAdmin}
+                                isFishing={true}
                             />
                         )}
-                        <Section title="Urgente" subtitle="Responda agora" icon={<Flame className="w-5 h-5 text-red-500" />} accent="border-red-600"
-                            leads={grouped.urgent} lastMessages={lastMessages} emptyText="Nenhum lead urgente. Bom trabalho." expandedUid={expandedUid} onToggle={setExpandedUid} onArchive={handleArchive} consultantsMap={consultantsMap} />
-                        <Section title="Em negociação" subtitle="Aguardando cliente" icon={<Thermometer className="w-5 h-5 text-orange-400" />} accent="border-zinc-700"
-                            leads={grouped.active} lastMessages={lastMessages} emptyText="Nenhum em negociação no momento." expandedUid={expandedUid} onToggle={setExpandedUid} onArchive={handleArchive} consultantsMap={consultantsMap} />
+
+                        <NextActionCard
+                            lead={groups.reversao[0] || groups.urgent[0] || groups.active[0] || null}
+                            lastMessages={lastMessages}
+                            consultantId={consultantId}
+                        />
+
+                        {groups.reversao.length > 0 && (
+                            <Section
+                                title="🔥 REVERSÃO BEM-SUCEDIDA"
+                                subtitle="Cliente perdido respondeu — feche AGORA"
+                                icon={<Flame className="w-5 h-5 text-pink-400 animate-pulse" />}
+                                accent="border-pink-500 ring-2 ring-pink-500/30 shadow-lg shadow-pink-500/20"
+                                leads={groups.reversao}
+                                lastMessages={lastMessages}
+                                emptyText=""
+                                expandedUid={expandedUid}
+                                onToggle={setExpandedUid}
+                                onArchive={handleArchive}
+                                consultantsMap={consultantsMap}
+                                supabase={supabase}
+                                router={router}
+                                consultantId={consultantId}
+                                isAdmin={isAdmin}
+                            />
+                        )}
+                        <Section title="Hoje" subtitle="Chegaram agora" icon={<Flame className="w-5 h-5 text-red-500 animate-pulse" />} accent="border-red-600 ring-2 red-500/20 shadow-lg shadow-red-600/20"
+                            leads={groups.urgent} lastMessages={lastMessages} emptyText="Nenhum lead novo hoje." expandedUid={expandedUid} onToggle={setExpandedUid} onArchive={handleArchive} consultantsMap={consultantsMap}
+                            supabase={supabase} router={router} consultantId={consultantId} />
+                        
+                        {(groups as any).pending.length > 0 && (
+                            <Section title="Pendências" subtitle="Leads de dias anteriores sem resposta" icon={<AlertTriangle className="w-5 h-5 text-amber-500" />} accent="border-amber-600"
+                                leads={(groups as any).pending} lastMessages={lastMessages} emptyText="" expandedUid={expandedUid} onToggle={setExpandedUid} onArchive={handleArchive} consultantsMap={consultantsMap}
+                                supabase={supabase} router={router} consultantId={consultantId} />
+                        )}
+
+                        <Section title="Em atendimento" subtitle="Conversas ativas" icon={<Thermometer className="w-5 h-5 text-orange-400" />} accent="border-zinc-700"
+                            leads={groups.active} lastMessages={lastMessages} emptyText="Nenhuma conversa ativa." expandedUid={expandedUid} onToggle={setExpandedUid} onArchive={handleArchive} consultantsMap={consultantsMap}
+                            supabase={supabase} router={router} consultantId={consultantId} />
+                        
                         <Section title="Aguardando" subtitle="Sem resposta há 48h+" icon={<Clock className="w-5 h-5 text-blue-400" />} accent="border-blue-900"
-                            leads={grouped.cooling} lastMessages={lastMessages} emptyText="Nenhum lead aguardando." expandedUid={expandedUid} onToggle={setExpandedUid} onArchive={handleArchive} consultantsMap={consultantsMap} />
-                        {filter === 'all' && grouped.zombie.length > 0 && (
+                            leads={groups.cooling} lastMessages={lastMessages} emptyText="" expandedUid={expandedUid} onToggle={setExpandedUid} onArchive={handleArchive} consultantsMap={consultantsMap}
+                            supabase={supabase} router={router} consultantId={consultantId} />
+                        {filter === 'all' && groups.zombie.length > 0 && (
                             <Section title="Zumbis" subtitle={`Mais de ${ZOMBIE_DAYS}d`} icon={<AlertTriangle className="w-5 h-5 text-zinc-500" />} accent="border-zinc-800 opacity-60"
-                                leads={grouped.zombie} lastMessages={lastMessages} emptyText="" expandedUid={expandedUid} onToggle={setExpandedUid} onArchive={handleArchive} consultantsMap={consultantsMap} />
+                                leads={groups.zombie} lastMessages={lastMessages} emptyText="" expandedUid={expandedUid} onToggle={setExpandedUid} onArchive={handleArchive} consultantsMap={consultantsMap} supabase={supabase} router={router} consultantId={consultantId} />
                         )}
                     </div>
                 </PTR>
             )}
 
-            {/* TOASTS */}
             {toasts.length > 0 && (
                 <div className="fixed bottom-4 right-4 z-[9000] space-y-2 max-w-sm w-full pointer-events-none">
                     {toasts.map(t => (
@@ -706,19 +716,17 @@ interface SectionProps {
     accent: string;
     leads: InboxLead[];
     lastMessages: Map<string, { inbound?: LastMessage, outbound?: LastMessage }>;
-    emptyText: string;
+    emptyText?: string;
     expandedUid: string | null;
     onToggle: (uid: string | null) => void;
     onArchive: (uid: string, e: React.MouseEvent) => void;
     consultantsMap?: Map<string, string>;
+    supabase: any;
+    router: any;
+    consultantId: string | null;
+    isFishing?: boolean;
 }
 
-/**
- * Card de orientação no topo do Inbox.
- * Mostra UM lead — o mais urgente — com nome grande, contexto curto e
- * 1 botão claro: "ABRIR CONVERSA". Pra vendedor leigo que abre o CRM e
- * não sabe o que fazer primeiro.
- */
 function NextActionCard({ lead, lastMessages, consultantId }: {
     lead: InboxLead | null;
     lastMessages: Map<string, { inbound?: LastMessage; outbound?: LastMessage }>;
@@ -786,7 +794,7 @@ function NextActionCard({ lead, lastMessages, consultantId }: {
     );
 }
 
-function Section({ title, subtitle, icon, accent, leads, lastMessages, emptyText, expandedUid, onToggle, onArchive, consultantsMap }: SectionProps) {
+const Section = memo(function Section({ title, subtitle, icon, accent, leads, lastMessages, emptyText, expandedUid, onToggle, onArchive, consultantsMap, supabase, router, consultantId, isAdmin, isFishing }: SectionProps) {
     return (
         <section>
             <div className={`flex items-center gap-3 mb-4 pl-3 border-l-4 ${accent}`}>
@@ -804,22 +812,28 @@ function Section({ title, subtitle, icon, accent, leads, lastMessages, emptyText
                         <LeadCard
                             key={lead.uid}
                             lead={lead}
-                            messages={lastMessages.get(lead.native_id)}
+                            messages={lastMessages.get(lead.uid)}
                             isExpanded={expandedUid === lead.uid}
                             onToggle={() => onToggle(expandedUid === lead.uid ? null : lead.uid)}
                             onArchive={(e) => onArchive(lead.uid, e)}
                             consultantName={lead.assigned_consultant_id ? consultantsMap?.get(lead.assigned_consultant_id) : undefined}
+                            supabase={supabase}
+                            router={router}
+                            consultantId={consultantId}
+                            isAdmin={isAdmin}
+                            isFishing={isFishing}
                         />
                     ))}
                 </ul>
             )}
         </section>
     );
-}
+});
 
-function LeadCard({ lead, messages, isExpanded, onToggle, onArchive, consultantName }: { lead: InboxLead; messages?: { inbound?: LastMessage, outbound?: LastMessage }; isExpanded: boolean; onToggle: () => void; onArchive: (e: React.MouseEvent) => void; consultantName?: string }) {
+const LeadCard = memo(function LeadCard({ lead, messages, isExpanded, onToggle, onArchive, consultantName, supabase, router, consultantId, isAdmin, isFishing }: { lead: InboxLead; messages?: { inbound?: LastMessage, outbound?: LastMessage }; isExpanded: boolean; onToggle: () => void; onArchive: (e: React.MouseEvent) => void; consultantName?: string; supabase: any; router: any; consultantId: string | null; isAdmin?: boolean; isFishing?: boolean }) {
     const sla = slaInfo(lead);
     const state = getLeadState(lead, messages?.inbound, messages?.outbound);
+    const showMask = isFishing && !isAdmin;
     
     const stateColors: Record<LeadState, string> = {
         AGUARDANDO_VENDEDOR: 'border-red-600 bg-red-950/5 ring-1 ring-red-500/20 shadow-[0_0_15px_rgba(239,68,68,0.1)]',
@@ -828,7 +842,6 @@ function LeadCard({ lead, messages, isExpanded, onToggle, onArchive, consultantN
         NUNCA_TOCADO: 'border-orange-500 bg-orange-950/5 ring-1 ring-orange-500/20',
     };
 
-    // Lead de reversão (cliente respondeu IA) entra pulsante — ignora cor de estado
     const reversaoClass = lead.flagged_reversao
         ? 'border-pink-500 ring-2 ring-pink-500/40 shadow-[0_0_20px_rgba(236,72,153,0.35)] animate-pulse-soft'
         : '';
@@ -841,19 +854,23 @@ function LeadCard({ lead, messages, isExpanded, onToggle, onArchive, consultantN
                 onClick={onToggle}
                 className={`block border rounded-2xl p-5 transition-all duration-300 relative overflow-hidden active:scale-[0.98] cursor-pointer ${reversaoClass || stateColors[state]} ${isExpanded ? 'ring-2 ring-blue-500/50 bg-zinc-900' : ''}`}>
                 {lead.flagged_reversao && (
-                    <div className="absolute -top-1 -right-1 px-2 py-0.5 bg-pink-500 text-white text-[10px] font-black rounded-bl-lg uppercase tracking-wider animate-pulse">
-                        🔥 IA pescou
+                    <div className="absolute -top-1 -right-1 px-2 py-0.5 bg-pink-500 text-white text-[10px] font-black rounded-bl-lg uppercase tracking-wider animate-pulse-glow">
+                        🔥 URGENTE: REVERSÃO
                     </div>
                 )}
-                {!lead.flagged_reversao && isJustArrived(lead) && (
+                {!lead.flagged_reversao && state === 'AGUARDANDO_VENDEDOR' && (
+                    <div className="absolute -top-1 -right-1 px-2 py-0.5 bg-red-600 text-white text-[10px] font-black rounded-bl-lg uppercase tracking-wider animate-pulse-glow">
+                        🚨 URGENTE: RESPONDA
+                    </div>
+                )}
+                {!lead.flagged_reversao && isJustArrived(lead) && state !== 'AGUARDANDO_VENDEDOR' && (
                     <div className="absolute -top-1 -right-1 px-2 py-0.5 bg-emerald-500 text-white text-[10px] font-black rounded-bl-lg uppercase tracking-wider animate-pulse">
                         ✨ acabou de chegar
                     </div>
                 )}
                 
-                {/* Linha 1: NOME GRANDE */}
                 <div className="flex justify-between items-start gap-4 mb-2">
-                    <h3 className="font-black text-white text-xl md:text-2xl truncate leading-tight flex-1">{lead.name || 'Sem nome'}</h3>
+                    <h3 className="font-black text-white text-xl md:text-2xl break-words leading-tight flex-1">{lead.name || 'Sem nome'}</h3>
                     {lead.ai_score != null && (
                         <div className={`px-2 py-1 rounded-lg font-black text-xs ${lead.ai_score >= 80 ? 'bg-red-600 text-white' : 'bg-zinc-800 text-gray-400'}`}>
                             {lead.ai_score}
@@ -861,7 +878,6 @@ function LeadCard({ lead, messages, isExpanded, onToggle, onArchive, consultantN
                     )}
                 </div>
 
-                {/* Linha 2: SLA + Tempo + Vendedor responsável */}
                 <div className="flex items-center gap-2 flex-wrap mb-4">
                     <span className={`text-[11px] px-2.5 py-1 rounded-md font-black uppercase tracking-tight shadow-sm ${sla.color}`}>
                         {sla.text}
@@ -880,19 +896,30 @@ function LeadCard({ lead, messages, isExpanded, onToggle, onArchive, consultantN
                     )}
                 </div>
 
-                {/* Linha 3: ÚLTIMA MENSAGEM DO CLIENTE */}
                 <div className="mb-3">
-                    {lastMsgText ? (
-                        <p className="text-sm md:text-base text-gray-200 italic line-clamp-2 leading-relaxed bg-black/20 p-3 rounded-xl border border-white/5">
+                    {showMask ? (
+                        <div className="p-4 bg-amber-950/20 border border-amber-900/30 rounded-xl">
+                            <div className="flex items-center gap-3 text-amber-200/50 mb-2">
+                                <PhoneOff className="w-4 h-4" />
+                                <span className="text-xs font-bold uppercase tracking-widest">Contato Mascarado</span>
+                            </div>
+                            <p className="text-sm text-amber-100/40 font-mono tracking-tighter">
+                                (**) *****-****
+                            </p>
+                            <p className="text-[10px] text-amber-500/60 mt-2 font-medium italic">
+                                Clique em capturar para liberar o WhatsApp
+                            </p>
+                        </div>
+                    ) : lastMsgText ? (
+                        <p className="text-sm md:text-base text-gray-200 italic leading-relaxed bg-black/20 p-3 rounded-xl border border-white/5 break-words">
                             <MessageCircle className="inline w-4 h-4 mr-2 text-blue-400" />
                             "{lastMsgText}"
                         </p>
                     ) : (
-                        <p className="text-xs text-gray-500 italic px-1">{lead.vehicle_interest || lead.source || 'Sem mensagens'}</p>
+                        <p className="text-xs text-gray-500 italic px-1 break-words">{lead.vehicle_interest || lead.source || 'Sem mensagens'}</p>
                     )}
                 </div>
 
-                {/* Linha 4: INDICADOR DE ESTADO */}
                 <div className="mb-4">
                     <div className={`text-[12px] font-bold flex items-center gap-2 ${state === 'AGUARDANDO_VENDEDOR' ? 'text-red-400' : 'text-gray-400'}`}>
                         <div className={`w-2 h-2 rounded-full ${state === 'AGUARDANDO_VENDEDOR' ? 'bg-red-500 animate-pulse' : 'bg-zinc-700'}`} />
@@ -900,7 +927,6 @@ function LeadCard({ lead, messages, isExpanded, onToggle, onArchive, consultantN
                     </div>
                 </div>
 
-                {/* Linha 5: CHIPS DE MENSAGENS PRONTAS */}
                 <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
                     <div className="flex gap-2">
                         {['welcome', 'financing', 'visit_schedule'].map(k => (
@@ -909,25 +935,72 @@ function LeadCard({ lead, messages, isExpanded, onToggle, onArchive, consultantN
                             </span>
                         ))}
                     </div>
-                    <div className="ml-auto pl-4">
-                        <div className="w-8 h-8 rounded-full bg-blue-600/10 flex items-center justify-center border border-blue-500/20">
-                            <span className="text-blue-400 text-xs font-black">+</span>
-                        </div>
-                    </div>
                 </div>
 
-                {/* DETALHES EXPANSÍVEIS (A.5) */}
                 {isExpanded && (
                     <div className="mt-6 pt-6 border-t border-zinc-800 animate-in fade-in slide-in-from-top-2 duration-300">
                         <div className="grid grid-cols-2 gap-3">
-                            <Link href={`/lead/${encodeURIComponent(lead.uid)}`} className="col-span-2 md:col-span-1 min-h-[56px] flex items-center justify-center bg-blue-600 hover:bg-blue-500 text-white rounded-2xl font-black text-lg transition-all active:scale-95 shadow-xl shadow-blue-900/20">
-                                ABRIR CONVERSA
-                            </Link>
-                            <button 
-                                onClick={onArchive}
-                                className="md:col-span-1 min-h-[56px] flex items-center justify-center bg-zinc-800 hover:bg-zinc-700 text-gray-300 rounded-2xl font-bold transition-all active:scale-95">
-                                ARQUIVAR
-                            </button>
+                            {isFishing ? (
+                                <button
+                                    onClick={async (e) => {
+                                        e.stopPropagation();
+                                        if (!consultantId) {
+                                            alert('Erro: ID do vendedor não identificado.');
+                                            return;
+                                        }
+                                        try {
+                                            const res = await fetch('/api/lead/start-atendimento', {
+                                                method: 'POST',
+                                                headers: { 'Content-Type': 'application/json' },
+                                                body: JSON.stringify({ 
+                                                    lead_id: lead.native_id, 
+                                                    lead_table: lead.table_name,
+                                                    consultant_id: consultantId
+                                                }),
+                                            });
+                                            const data = await res.json();
+                                            if (data.success) {
+                                                router.push(`/lead/${encodeURIComponent(lead.uid)}`);
+                                            } else {
+                                                alert(`Ops! ${data.error || 'Não foi possível capturar o lead.'}`);
+                                            }
+                                        } catch (err) {
+                                            console.error('Erro na captura:', err);
+                                        }
+                                    }}
+                                    className="col-span-2 min-h-[64px] bg-amber-500 hover:bg-amber-400 text-black font-black py-4 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-[0.98] shadow-lg shadow-amber-900/20"
+                                >
+                                    <Zap className="w-5 h-5 fill-current" /> CAPTURAR LEAD AGORA
+                                </button>
+                            ) : (
+                                <>
+                                    <button 
+                                        onClick={async (e) => {
+                                            e.stopPropagation();
+                                            const parsed = parseUid(lead.uid);
+                                            if (!parsed) return;
+                                            
+                                            // Automação Status V3: Iniciar Atendimento -> Status Attempt (Kanban)
+                                            await supabase.from(parsed.table).update({ 
+                                                status: 'attempt',
+                                                atendimento_iniciado_em: new Date().toISOString(),
+                                                atendimento_iniciado_por: consultantId,
+                                                ultima_interacao_humana: new Date().toISOString()
+                                            }).eq('id', parsed.nativeId);
+                                            
+                                            router.push(`/lead/${encodeURIComponent(lead.uid)}`);
+                                        }}
+                                        className="col-span-2 md:col-span-1 min-h-[56px] flex items-center justify-center bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-black text-lg transition-all active:scale-95 shadow-xl shadow-emerald-900/20"
+                                    >
+                                        INICIAR ATENDIMENTO
+                                    </button>
+                                    <button 
+                                        onClick={onArchive}
+                                        className="col-span-2 md:col-span-1 min-h-[56px] flex items-center justify-center bg-zinc-800 hover:bg-zinc-700 text-gray-300 rounded-2xl font-bold transition-all active:scale-95">
+                                        ARQUIVAR
+                                    </button>
+                                </>
+                            )}
                         </div>
                     </div>
                 )}
@@ -944,4 +1017,4 @@ function LeadCard({ lead, messages, isExpanded, onToggle, onArchive, consultantN
             `}</style>
         </li>
     );
-}
+});
