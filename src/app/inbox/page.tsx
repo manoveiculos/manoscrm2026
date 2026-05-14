@@ -42,6 +42,8 @@ interface InboxLead {
     atendimento_iniciado_em?: string | null;
     atendimento_iniciado_por?: string | null;
     flagged_reversao?: boolean | null;
+    ultima_interacao_humana?: string | null;
+    descarte_financeiro?: boolean | null;
 }
 
 interface LastMessage {
@@ -65,16 +67,29 @@ function ageMinutes(updatedAt: string | null, createdAt: string): number {
 }
 
 function bucketFor(lead: InboxLead): Bucket {
-    // 🔥 REVERSÃO BEM-SUCEDIDA tem prioridade máxima: cliente perdido respondeu
-    // msg da IA. Vendedor precisa abrir AGORA. Some quando vendedor inicia
-    // atendimento ou marca como vendido/perdido novamente.
+    // 🔥 REVERSÃO BEM-SUCEDIDA: cliente perdido respondeu msg da IA.
+    // Prioridade máxima — vendedor precisa abrir AGORA.
     if (lead.flagged_reversao) return 'reversao';
+
     const min = ageMinutes(lead.updated_at, lead.created_at);
     if (min > ZOMBIE_DAYS * 24 * 60) return 'zombie';
-    const score = lead.ai_score ?? 0;
-    if (min < URGENT_MINUTES || score >= URGENT_SCORE) return 'urgent';
-    if (min < ACTIVE_HOURS * 60 || score >= ACTIVE_SCORE) return 'active';
+
+    // URGENTE: lead novo do dia QUE NÃO foi tocado ainda (sem atendimento + sem interação humana).
+    // Leads em negociação JAMAIS são "urgentes" — eles estão na aba Atendimento (Kanban).
+    const semInteracao = !lead.ultima_interacao_humana && !lead.atendimento_iniciado_em;
+    const criadoHoje = new Date(lead.created_at).toDateString() === new Date().toDateString();
+    if (semInteracao && criadoHoje) return 'urgent';
+
+    // Em conversa: ainda dentro de 48h, vendedor mexeu mas não fechou
+    if (min < ACTIVE_HOURS * 60) return 'active';
     return 'cooling';
+}
+
+/** Lead "acabou de chegar": menos de 15min E sem interação humana. */
+function isJustArrived(lead: InboxLead): boolean {
+    if (lead.ultima_interacao_humana || lead.atendimento_iniciado_em) return false;
+    const ageMs = Date.now() - new Date(lead.created_at).getTime();
+    return ageMs < 15 * 60 * 1000;
 }
 
 /** Badge de SLA: tempo restante até estourar (em min) */
@@ -184,11 +199,15 @@ export default function InboxPage() {
 
         const query = supabase
             .from(sourceView)
-            .select('uid, table_name, native_id, name, phone, vehicle_interest, source, ai_score, ai_classification, status, updated_at, created_at, proxima_acao, first_contact_channel, assigned_consultant_id, atendimento_iniciado_em, atendimento_iniciado_por, flagged_reversao' + (viewMode === 'archived' ? ', archived_at' : ''))
+            .select('uid, table_name, native_id, name, phone, vehicle_interest, source, ai_score, ai_classification, status, updated_at, created_at, proxima_acao, first_contact_channel, assigned_consultant_id, atendimento_iniciado_em, atendimento_iniciado_por, flagged_reversao, ultima_interacao_humana, descarte_financeiro' + (viewMode === 'archived' ? ', archived_at' : ''))
             .limit(adminMode ? 500 : 200);
 
         // Filtra pelo consultor (Inbox individual). Admin NÃO filtra.
         if (cid && !adminMode) query.eq('assigned_consultant_id', cid);
+
+        // Inbox NÃO mostra leads descartados financeiramente (CPF ruim,
+        // crédito negado, score baixo). Esses vão direto pro arquivado.
+        if (viewMode === 'active') query.eq('descarte_financeiro', false);
 
         if (filter === 'today' && viewMode === 'active') {
             // Hoje = NOVOS leads de hoje, sem atendimento iniciado
@@ -820,6 +839,11 @@ function LeadCard({ lead, messages, isExpanded, onToggle, onArchive, consultantN
                 {lead.flagged_reversao && (
                     <div className="absolute -top-1 -right-1 px-2 py-0.5 bg-pink-500 text-white text-[10px] font-black rounded-bl-lg uppercase tracking-wider animate-pulse">
                         🔥 IA pescou
+                    </div>
+                )}
+                {!lead.flagged_reversao && isJustArrived(lead) && (
+                    <div className="absolute -top-1 -right-1 px-2 py-0.5 bg-emerald-500 text-white text-[10px] font-black rounded-bl-lg uppercase tracking-wider animate-pulse">
+                        ✨ acabou de chegar
                     </div>
                 )}
                 

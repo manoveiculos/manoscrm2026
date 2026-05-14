@@ -267,6 +267,21 @@ export default function LeadDetailPage() {
                         }
                         return;
                     }
+
+                    // Auto-INICIAR atendimento: se vendedor abriu lead que ainda
+                    // não foi tocado, marca como "em atendimento" automaticamente.
+                    // Lead sai do Inbox e vai pro Kanban — sem cliques extras.
+                    if (lead && !isAdminUser && cons?.id && !lead.atendimento_iniciado_em) {
+                        fetch('/api/lead/start-atendimento', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ lead_id: lead.id, lead_table: lead.table_name }),
+                        }).then(r => r.json()).then(data => {
+                            if (data?.success && data?.started_at && alive) {
+                                setLead(prev => prev ? { ...prev, atendimento_iniciado_em: data.started_at } : prev);
+                            }
+                        }).catch(e => console.warn('[LeadDetail] auto-start atendimento falhou:', e?.message));
+                    }
                 }
             } catch {}
 
