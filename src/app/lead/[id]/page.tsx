@@ -247,7 +247,8 @@ export default function LeadDetailPage() {
             // Resolve consultor logado + verifica permissão de acesso ao lead.
             // Vendedor não-admin só pode abrir lead atribuído a ele.
             try {
-                const { data: auth } = await supabase.auth.getUser();
+                const { data: sess } = await supabase.auth.getSession();
+                const auth = { user: sess?.session?.user || null };
                 if (auth?.user) {
                     const { data: cons } = await supabase
                         .from('consultants_manos_crm')

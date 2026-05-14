@@ -371,9 +371,13 @@ export default function InboxPage() {
 
         (async () => {
             try {
-                const { data: auth, error: authErr } = await supabase.auth.getUser();
-                if (authErr) console.error('[Inbox] auth error:', authErr.message);
-                if (!auth?.user) { router.push('/login'); return; }
+                // getSession() em vez de getUser() — não usa lock no localStorage
+                // (evita 'Lock broken by another request' quando outros hooks
+                // auth.getUser() rodam em paralelo).
+                const { data: sess } = await supabase.auth.getSession();
+                const authUser = sess?.session?.user || null;
+                if (!authUser) { router.push('/login'); return; }
+                const auth = { user: authUser };
 
                 const { data: cons, error: consErr } = await supabase
                     .from('consultants_manos_crm')

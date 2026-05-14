@@ -160,7 +160,8 @@ export default function AtendimentoKanbanPage() {
         const timeoutId = setTimeout(() => { if (alive) setLoading(false); }, 10000);
         (async () => {
             try {
-                const { data: auth } = await supabase.auth.getUser();
+                const { data: sess } = await supabase.auth.getSession();
+                const auth = { user: sess?.session?.user || null };
                 if (!auth?.user) { router.push('/login'); return; }
                 const { data: cons } = await supabase
                     .from('consultants_manos_crm')

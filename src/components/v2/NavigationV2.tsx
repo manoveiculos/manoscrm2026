@@ -96,13 +96,14 @@ export const NavigationV2 = () => {
 
     useEffect(() => {
         const getUserData = async () => {
-            const { data: { user } } = await supabase.auth.getUser();
+            const { data: { session } } = await supabase.auth.getSession();
+            const user = session?.user;
             if (user) {
                 setUser(user as any);
                 const { data: consultant } = await supabase
                     .from('consultants_manos_crm')
                     .select('role')
-                    .eq('auth_id', user.id)
+                    .or(`user_id.eq.${user.id},auth_id.eq.${user.id}`)
                     .maybeSingle();
 
                 if (consultant) {

@@ -35,12 +35,13 @@ export default function BlockingAlertModal() {
     useEffect(() => {
         let alive = true;
         async function init() {
-            const { data: auth } = await supabase.auth.getUser();
-            if (!auth?.user) return;
+            const { data: sess } = await supabase.auth.getSession();
+            const user = sess?.session?.user;
+            if (!user) return;
             const { data: cons } = await supabase
                 .from('consultants_manos_crm')
                 .select('id')
-                .eq('user_id', auth.user.id)
+                .or(`user_id.eq.${user.id},auth_id.eq.${user.id}`)
                 .maybeSingle();
             if (alive && cons?.id) setConsultantId(cons.id);
         }
