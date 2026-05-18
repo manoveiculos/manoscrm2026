@@ -35,15 +35,23 @@ export default function BlockingAlertModal() {
     useEffect(() => {
         let alive = true;
         async function init() {
-            const { data: sess } = await supabase.auth.getSession();
-            const user = sess?.session?.user;
-            if (!user) return;
-            const { data: cons } = await supabase
-                .from('consultants_manos_crm')
-                .select('id')
-                .or(`user_id.eq.${user.id},auth_id.eq.${user.id}`)
-                .maybeSingle();
-            if (alive && cons?.id) setConsultantId(cons.id);
+            try {
+                const { data: sess } = await supabase.auth.getSession();
+                const user = sess?.session?.user;
+                if (!user) return;
+                const { data: cons } = await supabase
+                    .from('consultants_manos_crm')
+                    .select('id')
+                    .or(`user_id.eq.${user.id},auth_id.eq.${user.id}`)
+                    .maybeSingle();
+                if (alive && cons?.id) setConsultantId(cons.id);
+            } catch (err: any) {
+                if (err?.name === 'AbortError' || err?.message?.includes('steal')) {
+                    console.warn('[BlockingAlertModal] Lock de autenticação abortado (esperado ao reiniciar HMR ou múltiplas abas).');
+                } else {
+                    console.error('[BlockingAlertModal] Erro de inicialização:', err);
+                }
+            }
         }
         init();
         return () => { alive = false; };

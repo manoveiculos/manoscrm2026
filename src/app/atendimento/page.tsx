@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, useCallback, DragEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
-import { Clock, AlertTriangle, MessageCircle, Trophy, X as XIcon, GripVertical } from 'lucide-react';
+import { Clock, AlertTriangle, MessageCircle, Trophy, X as XIcon, GripVertical, Flag, Archive } from 'lucide-react';
 
 interface KanbanLead {
     uid: string;
@@ -22,7 +22,7 @@ interface KanbanLead {
 
 interface LastMsg { text: string; direction: string; created_at: string; }
 
-type Column = 'qualificacao' | 'proposta' | 'test_drive' | 'fechamento';
+type Column = 'qualificacao' | 'proposta' | 'test_drive' | 'fechamento' | 'finalizado';
 
 const COLUMN_OF_STATUS: Record<string, Column> = {
     received: 'qualificacao',
@@ -36,6 +36,7 @@ const COLUMN_OF_STATUS: Record<string, Column> = {
     visited: 'test_drive',
     closing: 'fechamento',
     fechamento: 'fechamento',
+    pending_finish: 'finalizado',
 };
 
 const STATUS_OF_COLUMN: Record<Column, string> = {
@@ -43,6 +44,7 @@ const STATUS_OF_COLUMN: Record<Column, string> = {
     proposta: 'proposed',
     test_drive: 'scheduled',
     fechamento: 'fechamento',
+    finalizado: 'pending_finish',
 };
 
 const COLUMNS: Array<{
@@ -75,6 +77,11 @@ const COLUMNS: Array<{
       border: 'border-emerald-700/40',
       text: 'text-emerald-300',
       badge: 'bg-emerald-900/60 text-emerald-200' },
+    { key: 'finalizado',   label: 'Finalizado',   emoji: '🏁', desc: 'Escolha o desfecho',
+      gradient: 'from-zinc-900 to-zinc-950',
+      border: 'border-white/15',
+      text: 'text-white/90',
+      badge: 'bg-white/10 text-white/80' },
 ];
 
 function columnFor(lead: KanbanLead): Column {
@@ -105,12 +112,22 @@ export default function AtendimentoKanbanPage() {
     const [dragOverCol, setDragOverCol] = useState<Column | null>(null);
     const [busyMoves, setBusyMoves] = useState<Set<string>>(new Set());
 
+    // Quick Actions de Finalização (V8)
+    const [finishLead, setFinishLead] = useState<KanbanLead | null>(null);
+    const [finishType, setFinishType] = useState<'vendido' | 'perdido' | 'arquivar' | null>(null);
+    const [diagnostico, setDiagnostico] = useState('');
+    const [finishBusy, setFinishBusy] = useState(false);
+    const [confetti, setConfetti] = useState(false);
+    // Mantém leads "aguardando desfecho" na coluna Finalizado sem persistir no banco
+    const [pendingFinishUids, setPendingFinishUids] = useState<Set<string>>(new Set());
+
     const fetchLeads = useCallback(async (cid: string) => {
         const { data, error } = await supabase
             .from('leads_unified_active')
-            .select('uid, table_name, native_id, name, phone, vehicle_interest, status, ai_score, atendimento_iniciado_em, ultima_interacao_humana, flagged_reversao')
+            .select('uid, table_name, native_id, name, phone, vehicle_interest, status, ai_score, atendimento_iniciado_em, ultima_interacao_humana, flagged_reversao, archived_at')
             .eq('assigned_consultant_id', cid)
             .not('atendimento_iniciado_em', 'is', null)
+            .is('archived_at', null)
             .order('atendimento_iniciado_em', { ascending: false })
             .limit(200);
         if (error) console.error('[Kanban] leads erro:', error.message);
@@ -212,6 +229,14 @@ export default function AtendimentoKanbanPage() {
 
     const moveLead = useCallback(async (lead: KanbanLead, targetCol: Column) => {
         if (columnFor(lead) === targetCol) return;
+        // FINALIZADO: não persiste; segura o card local e abre o menu de desfecho
+        if (targetCol === 'finalizado') {
+            setPendingFinishUids(prev => { const s = new Set(prev); s.add(lead.uid); return s; });
+            setFinishLead(lead);
+            setFinishType(null);
+            setDiagnostico('');
+            return;
+        }
         const newStatus = STATUS_OF_COLUMN[targetCol];
         if (!newStatus) return;
         // Optimistic update
@@ -242,10 +267,80 @@ export default function AtendimentoKanbanPage() {
     }, [supabase, consultantId, fetchLeads]);
 
     const grouped = useMemo(() => {
-        const map: Record<Column, KanbanLead[]> = { qualificacao: [], proposta: [], test_drive: [], fechamento: [] };
-        for (const l of leads) map[columnFor(l)].push(l);
+        const map: Record<Column, KanbanLead[]> = { qualificacao: [], proposta: [], test_drive: [], fechamento: [], finalizado: [] };
+        for (const l of leads) {
+            if (pendingFinishUids.has(l.uid)) map.finalizado.push(l);
+            else map[columnFor(l)].push(l);
+        }
         return map;
-    }, [leads]);
+    }, [leads, pendingFinishUids]);
+
+    const closeFinishModal = useCallback(() => {
+        setFinishLead(null);
+        setFinishType(null);
+        setDiagnostico('');
+    }, []);
+
+    const cancelFinish = useCallback(() => {
+        // Devolve o card pra coluna original (se ainda existe no array de leads)
+        if (finishLead) {
+            setPendingFinishUids(prev => { const s = new Set(prev); s.delete(finishLead.uid); return s; });
+        }
+        closeFinishModal();
+    }, [finishLead, closeFinishModal]);
+
+    const submitFinish = useCallback(async () => {
+        if (!finishLead || !finishType) return;
+        if (finishType === 'perdido' && diagnostico.trim().length < 5) {
+            alert('Descreva o motivo da perda (mínimo 5 caracteres) para alimentar o agente de reversão.');
+            return;
+        }
+        setFinishBusy(true);
+        const lead = finishLead;
+        const realId: any = lead.table_name === 'leads_distribuicao_crm_26'
+            ? parseInt(lead.native_id, 10)
+            : lead.native_id;
+        const now = new Date().toISOString();
+        const updates: Record<string, any> = {
+            ultima_interacao_humana: now,
+        };
+        if (lead.table_name === 'leads_distribuicao_crm_26') updates.atualizado_em = now;
+        else updates.updated_at = now;
+
+        if (finishType === 'vendido') {
+            updates.status = 'vendido';
+            updates.won_at = now;
+        } else if (finishType === 'perdido') {
+            updates.status = 'perdido';
+            updates.diagnostico_atendimento = diagnostico.trim();
+            updates.motivo_perda = diagnostico.trim();
+        } else { // arquivar
+            updates.archived_at = now;
+            updates.archived_reason = 'manual_kanban';
+            updates.archived_by = consultantId;
+            // Pausa qualquer follow-up automático
+            updates.ai_silence_until = new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString();
+        }
+
+        try {
+            const { error } = await supabase.from(lead.table_name).update(updates).eq('id', realId);
+            if (error) throw error;
+
+            if (finishType === 'vendido') {
+                setConfetti(true);
+                setTimeout(() => setConfetti(false), 2200);
+            }
+
+            // Remove card otimisticamente do board
+            setLeads(prev => prev.filter(l => l.uid !== lead.uid));
+            setPendingFinishUids(prev => { const s = new Set(prev); s.delete(lead.uid); return s; });
+            closeFinishModal();
+        } catch (e: any) {
+            alert('Falha ao finalizar: ' + (e?.message || 'tente novamente'));
+        } finally {
+            setFinishBusy(false);
+        }
+    }, [finishLead, finishType, diagnostico, consultantId, supabase, closeFinishModal]);
 
     // ── Drag handlers ──────────────────────────────────────────────────────
     const onDragStart = (e: DragEvent, lead: KanbanLead) => {
@@ -301,7 +396,7 @@ export default function AtendimentoKanbanPage() {
                     </p>
                 </div>
             ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
                     {COLUMNS.map(col => {
                         const colLeads = grouped[col.key];
                         const isDragTarget = dragOverCol === col.key;
@@ -345,6 +440,7 @@ export default function AtendimentoKanbanPage() {
                                                     onDragStart={e => onDragStart(e, l)}
                                                     onDragEnd={onDragEnd}
                                                     className={`group relative rounded-xl bg-zinc-900/90 border ${
+                                                        col.key === 'finalizado' ? 'border-amber-300/60 ring-2 ring-amber-200/30 shadow-[0_0_30px_-5px_rgba(252,211,77,0.45)] animate-pulse' :
                                                         age.alert ? 'border-red-700/60 ring-1 ring-red-500/20' :
                                                         age.stale ? 'border-orange-700/60' : 'border-zinc-800'
                                                     } p-3 cursor-grab active:cursor-grabbing transition-all hover:bg-zinc-800/90 hover:border-zinc-700 ${
@@ -441,6 +537,136 @@ export default function AtendimentoKanbanPage() {
             <p className="text-[11px] text-zinc-500 italic mt-4 text-center md:hidden">
                 💡 No celular, arraste o cartão segurando-o até a próxima coluna.
             </p>
+
+            {/* Modal de Desfecho (V8) */}
+            {finishLead && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={() => !finishBusy && cancelFinish()}>
+                    <div
+                        className="w-full max-w-md rounded-2xl border border-white/10 bg-zinc-900/80 backdrop-blur-2xl shadow-[0_20px_60px_-10px_rgba(0,0,0,0.8)] p-6"
+                        onClick={e => e.stopPropagation()}
+                    >
+                        <div className="flex items-center justify-between mb-1">
+                            <h3 className="text-lg font-black text-white flex items-center gap-2">🏁 Finalizar atendimento</h3>
+                            <button onClick={cancelFinish} disabled={finishBusy} className="text-zinc-500 hover:text-white"><XIcon className="w-5 h-5" /></button>
+                        </div>
+                        <p className="text-xs text-zinc-400 mb-5 truncate">{finishLead.name || 'Sem nome'} · {finishLead.vehicle_interest || '—'}</p>
+
+                        <div className="grid grid-cols-3 gap-2 mb-5">
+                            <button
+                                onClick={() => setFinishType('vendido')}
+                                className={`py-3 rounded-xl text-xs font-black flex flex-col items-center gap-1 transition border ${
+                                    finishType === 'vendido'
+                                        ? 'bg-emerald-500 text-black border-emerald-300 shadow-[0_0_20px_-3px_rgba(16,185,129,0.7)]'
+                                        : 'bg-emerald-900/30 text-emerald-200 border-emerald-700/40 hover:bg-emerald-800/40'
+                                }`}
+                            >
+                                <Trophy className="w-5 h-5" /> VENDIDO
+                            </button>
+                            <button
+                                onClick={() => setFinishType('perdido')}
+                                className={`py-3 rounded-xl text-xs font-black flex flex-col items-center gap-1 transition border ${
+                                    finishType === 'perdido'
+                                        ? 'bg-red-500 text-white border-red-300 shadow-[0_0_20px_-3px_rgba(239,68,68,0.7)]'
+                                        : 'bg-red-900/30 text-red-200 border-red-700/40 hover:bg-red-800/40'
+                                }`}
+                            >
+                                <Flag className="w-5 h-5" /> PERDIDO
+                            </button>
+                            <button
+                                onClick={() => setFinishType('arquivar')}
+                                className={`py-3 rounded-xl text-xs font-black flex flex-col items-center gap-1 transition border ${
+                                    finishType === 'arquivar'
+                                        ? 'bg-zinc-300 text-black border-zinc-100'
+                                        : 'bg-zinc-800/60 text-zinc-300 border-zinc-700 hover:bg-zinc-700/60'
+                                }`}
+                            >
+                                <Archive className="w-5 h-5" /> ARQUIVAR
+                            </button>
+                        </div>
+
+                        {finishType === 'perdido' && (
+                            <div className="mb-5">
+                                <label className="block text-[11px] uppercase tracking-wider text-zinc-400 font-bold mb-2">
+                                    Motivo da perda <span className="text-red-400">*</span>
+                                </label>
+                                <textarea
+                                    value={diagnostico}
+                                    onChange={e => setDiagnostico(e.target.value)}
+                                    placeholder="Ex.: preço acima do orçamento, crédito reprovado, escolheu outro modelo..."
+                                    rows={3}
+                                    autoFocus
+                                    className="w-full rounded-lg bg-zinc-950/80 border border-zinc-700 text-sm text-white p-3 focus:outline-none focus:border-red-500/60"
+                                />
+                                <p className="text-[10px] text-zinc-500 mt-1">Esse diagnóstico alimenta o agente Karol e habilita tentativa de reversão.</p>
+                            </div>
+                        )}
+
+                        {finishType === 'arquivar' && (
+                            <p className="text-xs text-zinc-400 mb-5 leading-relaxed">
+                                O lead será arquivado e nenhuma automação enviará mais mensagens. Use para curiosos ou sem interesse real.
+                            </p>
+                        )}
+
+                        {finishType === 'vendido' && (
+                            <p className="text-xs text-emerald-300 mb-5 leading-relaxed">
+                                🎉 Vamos registrar a vitória! Detalhes financeiros podem ser preenchidos depois na ficha do lead.
+                            </p>
+                        )}
+
+                        <div className="flex gap-2">
+                            <button
+                                onClick={cancelFinish}
+                                disabled={finishBusy}
+                                className="flex-1 py-2.5 rounded-xl bg-zinc-800 text-zinc-300 hover:bg-zinc-700 text-sm font-bold disabled:opacity-50"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                onClick={submitFinish}
+                                disabled={finishBusy || !finishType}
+                                className="flex-1 py-2.5 rounded-xl bg-white text-black hover:bg-zinc-200 text-sm font-black disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                                {finishBusy ? 'Salvando...' : 'Confirmar'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Confete (V8) */}
+            {confetti && (
+                <div className="pointer-events-none fixed inset-0 z-[60] overflow-hidden">
+                    {Array.from({ length: 40 }).map((_, i) => {
+                        const left = Math.random() * 100;
+                        const delay = Math.random() * 0.4;
+                        const duration = 1.4 + Math.random() * 0.8;
+                        const colors = ['#10b981', '#fbbf24', '#3b82f6', '#ec4899', '#a78bfa'];
+                        const color = colors[i % colors.length];
+                        const rot = Math.random() * 360;
+                        return (
+                            <span
+                                key={i}
+                                style={{
+                                    position: 'absolute',
+                                    left: `${left}%`,
+                                    top: '-10px',
+                                    width: 8,
+                                    height: 14,
+                                    background: color,
+                                    transform: `rotate(${rot}deg)`,
+                                    animation: `manos-confetti ${duration}s ${delay}s ease-out forwards`,
+                                }}
+                            />
+                        );
+                    })}
+                    <style>{`
+                        @keyframes manos-confetti {
+                            0%   { transform: translateY(0) rotate(0deg); opacity: 1; }
+                            100% { transform: translateY(110vh) rotate(720deg); opacity: 0; }
+                        }
+                    `}</style>
+                </div>
+            )}
         </div>
     );
 }

@@ -105,8 +105,12 @@ export function useDailyQuiz(): UseDailyQuizReturn {
 
                 setNeedsQuiz(needs);
                 setCampaigns(fetchedCampaigns);
-            } catch (err) {
-                console.error('[useDailyQuiz] Erro de inicialização:', err);
+            } catch (err: any) {
+                if (err?.name === 'AbortError' || err?.message?.includes('steal')) {
+                    console.warn('[useDailyQuiz] Lock de autenticação abortado (esperado ao reiniciar HMR ou múltiplas abas).');
+                } else {
+                    console.error('[useDailyQuiz] Erro de inicialização:', err);
+                }
             } finally {
                 setIsLoading(false);
             }

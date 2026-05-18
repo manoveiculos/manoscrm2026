@@ -85,8 +85,8 @@ export function SniperPanel({ consultantId, onOpenLead, salesCount, salesGoal, i
             .sort((a, b) => {
                 const aStage = normalizeStatus(a.status);
                 const bStage = normalizeStatus(b.status);
-                const aRef = a.updated_at || a.created_at;
-                const bRef = b.updated_at || b.created_at;
+                const aRef = a.updated_at || a.created_at || '';
+                const bRef = b.updated_at || b.created_at || '';
                 const aExcess = (Date.now() - new Date(aRef).getTime()) / 3_600_000 - (STAGE_SLA_HOURS[aStage] || 999);
                 const bExcess = (Date.now() - new Date(bRef).getTime()) / 3_600_000 - (STAGE_SLA_HOURS[bStage] || 999);
                 return bExcess - aExcess;

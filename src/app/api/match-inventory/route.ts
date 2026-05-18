@@ -20,7 +20,7 @@ export async function POST(req: Request) {
 
         // Get current inventory to match
         const inventory = await dataService.getInventory();
-        const activeInventory = inventory.filter(i => i.status === 'in_stock' || !i.status);
+        const activeInventory = inventory.filter((i: any) => i.status === 'in_stock' || !i.status);
 
         if (activeInventory.length === 0) {
             return NextResponse.json({ matches: [], reasoning: "Nenhum veículo em estoque no momento." });
@@ -36,7 +36,7 @@ DADOS DO LEAD:
 - Resumo do Histórico: ${lead.resumo || 'Sem histórico detalhado'}
 
 ESTOQUE DISPONÍVEL (Top 20 veículos):
-${activeInventory.slice(0, 20).map(i => `- ${i.marca} ${i.modelo} (${i.ano}) - R$ ${i.preco}`).join('\n')}
+${activeInventory.slice(0, 20).map((i: any) => `- ${i.marca} ${i.modelo} (${i.ano}) - R$ ${i.preco}`).join('\n')}
 
 INSTRUÇÕES:
 1. Encontre até 2 veículos que mais se aproximam do que o cliente buscava ou que seriam um "upgrade" natural.

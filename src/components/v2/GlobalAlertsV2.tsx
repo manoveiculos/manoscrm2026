@@ -38,8 +38,12 @@ export const GlobalAlertsV2 = () => {
                         setAlerts(json.alerts);
                     }
                 }
-            } catch (error) {
-                console.error("Erro ao buscar alertas globais:", error);
+            } catch (error: any) {
+                if (error?.name === 'AbortError' || error?.message?.includes('steal')) {
+                    console.warn('[GlobalAlertsV2] Lock de autenticação abortado (esperado ao reiniciar HMR ou múltiplas abas).');
+                } else {
+                    console.error("Erro ao buscar alertas globais:", error);
+                }
             }
         }
 

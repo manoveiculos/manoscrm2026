@@ -94,9 +94,9 @@ export default function Dashboard() {
         // Som de Notificação V3:
         // Identifica se entrou algum lead NOVO na fila que não conhecíamos nesta sessão.
         if (queueLeads) {
-            const currentUids = new Set(queueLeads.map(l => l.uid));
+            const currentUids = new Set<string>(queueLeads.map((l: any) => l.uid as string));
             if (lastKnownLeads.size > 0) {
-                const hasNew = queueLeads.some(l => !lastKnownLeads.has(l.uid));
+                const hasNew = queueLeads.some((l: any) => !lastKnownLeads.has(l.uid));
                 if (hasNew && document.visibilityState === 'visible') {
                     const audio = new Audio('/ding.mp3');
                     audio.play().catch(() => {});
@@ -205,7 +205,7 @@ export default function Dashboard() {
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'interactions_manos_crm' }, fetchActivity)
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'sla_escalations' }, fetchActivity)
             .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'system_settings' }, fetchSettings)
-            .subscribe((status) => {
+            .subscribe((status: any) => {
                 setLive(status === 'SUBSCRIBED');
             });
 

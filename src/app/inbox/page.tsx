@@ -395,7 +395,11 @@ export default function InboxPage() {
 
                 await fetchLeads(cid, filter === 'archived' ? 'archived' : 'active', adminFlag);
             } catch (e: any) {
-                console.error('[Inbox] Erro fatal no useEffect:', e?.message || e);
+                if (e?.name === 'AbortError' || e?.message?.includes('steal')) {
+                    console.warn('[Inbox] Lock de autenticação abortado (esperado ao reiniciar HMR ou múltiplas abas).');
+                } else {
+                    console.error('[Inbox] Erro fatal no useEffect:', e?.message || e);
+                }
             } finally {
                 if (timeoutId) clearTimeout(timeoutId);
                 if (alive) setLoading(false);
@@ -725,6 +729,7 @@ interface SectionProps {
     router: any;
     consultantId: string | null;
     isFishing?: boolean;
+    isAdmin?: boolean;
 }
 
 function NextActionCard({ lead, lastMessages, consultantId }: {

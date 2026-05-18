@@ -117,7 +117,7 @@ export const NavigationV2 = () => {
         };
         getUserData();
 
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event: any, session: any) => {
             const currentUser = session?.user || null;
             if (currentUser) {
                 setUser(currentUser);
@@ -129,7 +129,7 @@ export const NavigationV2 = () => {
                         .select('role')
                         .eq('auth_id', currentUser.id)
                         .maybeSingle()
-                        .then(({ data }) => {
+                        .then(({ data }: any) => {
                             if (data) setRole(data.role);
                         });
                 }

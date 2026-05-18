@@ -138,8 +138,12 @@ function PipelineContent() {
                     }
                     setAuthReady(true); // Auth completo — libera loadLeads
                 }
-            } catch (err) {
-                console.error("Auth/Data init error:", err);
+            } catch (err: any) {
+                if (err?.name === 'AbortError' || err?.message?.includes('steal')) {
+                    console.warn('[Pipeline] Lock de autenticação abortado (esperado ao reiniciar HMR ou múltiplas abas).');
+                } else {
+                    console.error("Auth/Data init error:", err);
+                }
             }
         }
         initAuthAndData();
@@ -442,7 +446,7 @@ function PipelineContent() {
             filtered = filtered.filter(l => {
                 const score = Number(l.ai_score) || 0;
                 const isHot = score >= 70 || l.ai_classification === 'hot';
-                const lastTouch = new Date(l.updated_at || l.created_at).getTime();
+                const lastTouch = new Date(l.updated_at || l.created_at || '').getTime();
                 return isHot && lastTouch < cutoff;
             });
         }
@@ -497,7 +501,7 @@ function PipelineContent() {
             if (norm === 'vendido' || norm === 'perdido') return false;
             const score = Number(l.ai_score) || 0;
             const isHot = score >= 70 || l.ai_classification === 'hot';
-            const lastTouch = new Date(l.updated_at || l.created_at).getTime();
+            const lastTouch = new Date(l.updated_at || l.created_at || '').getTime();
             return isHot && lastTouch < cutoff;
         }).length;
         return { total: filteredLeads.length, elite, emergency, aiHoje };
@@ -515,7 +519,7 @@ function PipelineContent() {
         const red = leads.filter(l => {
             const norm = normalizeStatus(l.status);
             const score = Number(l.ai_score) || 0;
-            const age = now - new Date(l.updated_at || l.created_at).getTime();
+            const age = now - new Date(l.updated_at || l.created_at || '').getTime();
             return norm === 'perdido' && score >= 70 && age < D7;
         }).slice(0, 3);
 
@@ -523,7 +527,7 @@ function PipelineContent() {
         const orangeLeads = filteredLeads.filter(l => {
             const norm = normalizeStatus(l.status);
             if (['perdido', 'vendido'].includes(norm)) return false;
-            const age = now - new Date(l.updated_at || l.created_at).getTime();
+            const age = now - new Date(l.updated_at || l.created_at || '').getTime();
             return age > H24;
         });
 
@@ -531,7 +535,7 @@ function PipelineContent() {
         const yellow = filteredLeads.filter(l => {
             const norm = normalizeStatus(l.status);
             if (norm !== 'fechamento') return false;
-            const age = now - new Date(l.updated_at || l.created_at).getTime();
+            const age = now - new Date(l.updated_at || l.created_at || '').getTime();
             return age > H48;
         }).slice(0, 2);
 

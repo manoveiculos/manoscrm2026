@@ -31,7 +31,7 @@ export function useAIAlerts(): UseAIAlertsResult {
 
     // ── Resolve o ID do consultor logado ──────────────────────────────────────
     useEffect(() => {
-        supabase.auth.getSession().then(({ data: { session } }) => {
+        supabase.auth.getSession().then(({ data: { session } }: any) => {
             const user = session?.user;
             if (!user) {
                 setLoading(false);
@@ -43,10 +43,17 @@ export function useAIAlerts(): UseAIAlertsResult {
                 .select('id')
                 .or(`user_id.eq.${user.id},auth_id.eq.${user.id}`)
                 .maybeSingle()
-                .then(({ data }) => {
+                .then(({ data }: any) => {
                     if (data?.id) setConsultantId(data.id);
                     else setLoading(false);
                 });
+        }).catch((err: any) => {
+            if (err?.name === 'AbortError' || err?.message?.includes('steal')) {
+                console.warn('[useAIAlerts] Lock de autenticação abortado (esperado ao reiniciar HMR ou múltiplas abas).');
+            } else {
+                console.error('[useAIAlerts] Erro ao obter sessão:', err);
+            }
+            setLoading(false);
         });
     }, []);
 

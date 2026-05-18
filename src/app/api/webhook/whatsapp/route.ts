@@ -101,7 +101,7 @@ export async function POST(req: NextRequest) {
         );
 
         // 1. Busca o lead pela varredura unificada (V1, V2 e Compra)
-        const { data: leadMatch, error: leadError } = await supabase
+        const { data: leadMatchRaw, error: leadError } = await supabase
             .rpc('find_lead_by_phone', { p_phone: cleanPhone })
             .maybeSingle();
 
@@ -109,6 +109,7 @@ export async function POST(req: NextRequest) {
             console.error('Erro ao buscar lead unificado:', leadError);
         }
 
+        const leadMatch = leadMatchRaw as any;
         let leadId = leadMatch?.native_id;
         let leadTable = leadMatch?.table_name || 'leads_distribuicao_crm_26';
         let existingLead = leadMatch; // Alias para compatibilidade com código abaixo
@@ -146,17 +147,15 @@ export async function POST(req: NextRequest) {
                 .select('id, table_name')
                 .single();
             
-            leadId = newLead?.id;
-            leadTable = 'leads_distribuicao_crm_26';
-            // Re-alimenta o existingLead para as lógicas de status abaixo
-            existingLead = { ...newLead, native_id: newLead.id, table_name: 'leads_distribuicao_crm_26' };
-
-            if (insertLeadError) {
+            if (insertLeadError || !newLead) {
                 console.error('Erro ao criar lead:', insertLeadError);
-                throw insertLeadError;
+                throw insertLeadError || new Error('Falha ao criar lead');
             }
 
             leadId = newLead.id;
+            leadTable = 'leads_distribuicao_crm_26';
+            // Re-alimenta o existingLead para as lógicas de status abaixo
+            existingLead = { ...newLead, native_id: newLead.id, table_name: 'leads_distribuicao_crm_26' };
 
             // 🤖 AI SDR — primeiro contato automático em ~30s
             // Dispara só para leads NOVOS (existingLead == null), e só se nome

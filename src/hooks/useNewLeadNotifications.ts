@@ -52,7 +52,7 @@ export function useNewLeadNotifications(role?: string | null): UseNewLeadNotific
 
     // ── Resolve o ID do consultor logado ──────────────────────────────────
     useEffect(() => {
-        supabase.auth.getSession().then(({ data: { session } }) => {
+        supabase.auth.getSession().then(({ data: { session } }: any) => {
             const user = session?.user;
             if (!user) {
                 setLoading(false);
@@ -63,7 +63,7 @@ export function useNewLeadNotifications(role?: string | null): UseNewLeadNotific
                 .select('id')
                 .or(`user_id.eq.${user.id},auth_id.eq.${user.id}`)
                 .maybeSingle()
-                .then(({ data }) => {
+                .then(({ data }: any) => {
                     if (data?.id) {
                         setConsultantId(data.id);
                         const seen = getSeenState(data.id);
@@ -72,6 +72,13 @@ export function useNewLeadNotifications(role?: string | null): UseNewLeadNotific
                         setLoading(false);
                     }
                 });
+        }).catch((err: any) => {
+            if (err?.name === 'AbortError' || err?.message?.includes('steal')) {
+                console.warn('[useNewLeadNotifications] Lock de autenticação abortado (esperado ao reiniciar HMR ou múltiplas abas).');
+            } else {
+                console.error('[useNewLeadNotifications] Erro ao obter sessão:', err);
+            }
+            setLoading(false);
         });
     }, []);
 

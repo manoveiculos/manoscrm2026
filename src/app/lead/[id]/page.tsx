@@ -211,16 +211,33 @@ export default function LeadDetailPage() {
             setLead(lead);
             setSoldVehicle(lead?.vehicle_interest || '');
 
-            // Unificação V3: Busca na view unificada que contempla Arthur, Karol e Vendedor.
-            // O filtro por lead_uid suporta tanto IDs numéricos quanto UUIDs.
+            // Unificação V3.7: busca na view + cruza com telefone nas 3 tabelas para
+            // capturar mensagens vinculadas a IDs gêmeos (Arthur/Karol/Vendedor podem
+            // salvar sob lead_id ou lead_compra_id distintos para o mesmo número).
             const cutoff90d = new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString();
+            const phoneClean = (lead?.phone || '').replace(/\D/g, '');
+            const phoneSuffix = phoneClean.slice(-8);
+            const phoneIsMasked = !!lead?.phone && String(lead.phone).includes('*');
+
+            const uidSet = new Set<string>([String(leadId)]);
+            if (!phoneIsMasked && phoneSuffix.length >= 8) {
+                const [dist, manos, compra] = await Promise.all([
+                    supabase.from('leads_distribuicao_crm_26').select('id').ilike('telefone', `%${phoneSuffix}%`).limit(10),
+                    supabase.from('leads_manos_crm').select('id').ilike('phone', `%${phoneSuffix}%`).limit(10),
+                    supabase.from('leads_compra').select('id').ilike('telefone', `%${phoneSuffix}%`).limit(10),
+                ]);
+                (dist.data || []).forEach((r: any) => uidSet.add(String(r.id)));
+                (manos.data || []).forEach((r: any) => uidSet.add(String(r.id)));
+                (compra.data || []).forEach((r: any) => uidSet.add(String(r.id)));
+            }
+
             const { data: msgs, error: msgError } = await supabase
                 .from('unified_whatsapp_messages')
                 .select('id, direction, message_text, created_at, message_id')
-                .eq('lead_uid', String(leadId))
+                .in('lead_uid', Array.from(uidSet))
                 .gte('created_at', cutoff90d)
                 .order('created_at', { ascending: false })
-                .limit(100); // Aumentado limite para contexto completo
+                .limit(200);
             
             if (msgError) {
                 console.warn('[LeadDetail] Erro ao buscar mensagens:', msgError.message);

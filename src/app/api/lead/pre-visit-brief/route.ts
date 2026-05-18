@@ -59,7 +59,7 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: 'Lead não encontrado' }, { status: 404 });
         }
 
-        const lead = leadRes.data;
+        const lead = leadRes.data as any;
         const recentInteractions = (interactionsRes.data || [])
             .map(i => `[${i.type}] ${i.notes?.slice(0, 100)}`)
             .join('\n');

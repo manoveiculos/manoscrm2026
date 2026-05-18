@@ -78,22 +78,30 @@ export const ConsultantAlertModal = () => {
 
     useEffect(() => {
         const init = async () => {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (!user) return;
+            try {
+                const { data: { user } } = await supabase.auth.getUser();
+                if (!user) return;
 
-            const { data: cons } = await supabase
-                .from('consultants_manos_crm')
-                .select('id, name, role')
-                .eq('auth_id', user.id)
-                .maybeSingle();
+                const { data: cons } = await supabase
+                    .from('consultants_manos_crm')
+                    .select('id, name, role')
+                    .eq('auth_id', user.id)
+                    .maybeSingle();
 
-            if (!cons) return;
+                if (!cons) return;
 
-            // Admin não recebe pop-up forçado
-            if (cons.role === 'admin') return;
+                // Admin não recebe pop-up forçado
+                if (cons.role === 'admin') return;
 
-            setConsultant({ id: cons.id, name: cons.name });
-            await fetchAlerts(cons.id);
+                setConsultant({ id: cons.id, name: cons.name });
+                await fetchAlerts(cons.id);
+            } catch (err: any) {
+                if (err?.name === 'AbortError' || err?.message?.includes('steal')) {
+                    console.warn('[ConsultantAlertModal] Lock de autenticação abortado (esperado ao reiniciar HMR ou múltiplas abas).');
+                } else {
+                    console.error('[ConsultantAlertModal] Erro de inicialização:', err);
+                }
+            }
         };
 
         init();

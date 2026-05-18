@@ -5,7 +5,7 @@ import { Lead } from '@/lib/types';
 import { safeName, safePhone, safeClassification } from '@/lib/shared_utils/safeLead';
 import { SourceIcon } from './SourceIcon';
 import { MoveMenu } from './MoveMenu';
-import { formatPhoneBR, getStatusColor, getStatusLabel } from '../utils/helpers';
+import { formatPhoneBR, getStatusColor, getStatusLabel } from '@/lib/shared_utils/helpers';
 
 interface ListRowProps {
     lead: Lead;
@@ -63,7 +63,7 @@ export const ListRow = ({
                                 </span>
                             </div>
                             <span className="text-[9px] font-black text-white/10 uppercase tracking-widest hidden sm:block">
-                                {new Date(lead.created_at).toLocaleDateString('pt-BR')} às {new Date(lead.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                                {new Date(lead.created_at || '').toLocaleDateString('pt-BR')} às {new Date(lead.created_at || '').toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                             </span>
                         </div>
                     </div>
@@ -95,9 +95,9 @@ export const ListRow = ({
                             className={`w-full flex items-center justify-between gap-2 px-4 py-2.5 rounded-2xl border transition-all ${activeMoveMenu === lead.id ? 'bg-red-600/20 border-red-500/50 shadow-lg' : 'bg-white/5 border-white/5 hover:bg-white/10'}`}
                         >
                             <div className="flex items-center gap-2 overflow-hidden">
-                                <div className={`h-2 w-2 rounded-full shrink-0 ${getStatusColor(lead.status)} shadow-[0_0_8px_currentColor]`} />
+                                <div className={`h-2 w-2 rounded-full shrink-0 ${getStatusColor(lead.status || '')} shadow-[0_0_8px_currentColor]`} />
                                 <span className="text-[10px] font-black uppercase text-white/60 tracking-wider truncate">
-                                    {getStatusLabel(lead.status)}
+                                    {getStatusLabel(lead.status || '')}
                                 </span>
                             </div>
                             <ArrowRight size={10} className={`text-white/20 transition-transform shrink-0 ${activeMoveMenu === lead.id ? 'rotate-90 text-red-500' : 'group-hover/status:translate-x-0.5'}`} />
@@ -105,7 +105,7 @@ export const ListRow = ({
 
                         <MoveMenu
                             isOpen={activeMoveMenu === lead.id}
-                            currentStatus={lead.status}
+                            currentStatus={lead.status || 'new'}
                             onStatusChange={(newStatus) => handleStatusChange(lead.id, newStatus)}
                             onClose={() => setActiveMoveMenu(null)}
                         />

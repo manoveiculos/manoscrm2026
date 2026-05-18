@@ -193,7 +193,7 @@ function LeadsContent() {
             const matchesInterest = filterInterest === 'all' || lead.vehicle_interest === filterInterest;
             
             // Date Filter Logic
-            const leadDate = new Date(lead.created_at);
+            const leadDate = new Date(lead.created_at || '');
             const todayDate = new Date();
             todayDate.setHours(0, 0, 0, 0);
             const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
@@ -210,7 +210,7 @@ function LeadsContent() {
             const aiScore = Number(lead.ai_score);
             const currentScore = aiScore > 0 ? aiScore : (() => {
                 const now = new Date();
-                const createdAt = new Date(lead.created_at);
+                const createdAt = new Date(lead.created_at || '');
                 const tempoFunilH = Math.max(0, (now.getTime() - createdAt.getTime()) / (1000 * 60 * 60));
                 return calculateLeadScore({
                     status: normalizeStatus(lead.status),
@@ -230,11 +230,7 @@ function LeadsContent() {
                 true
             );
 
-            // ── REGRA DE ACESSO V5 (FILA DE PESCA) ──────────────────
-            // Um lead NUNCA aparece na aba Leads sem atendimento iniciado para consultores.
-            // Administradores veem TUDO sem restrição.
-            if (role !== 'admin' && !lead.atendimento_iniciado_em) return false;
-
+            // ── REGRA DE ACESSO (ABAS LEADS) ───────────────────────
             // Se não for admin, o consultor só pode ver leads atribuídos a ele.
             if (role !== 'admin') {
                 if (!consultantId) return false; // Fail closed se não identificado
@@ -246,7 +242,7 @@ function LeadsContent() {
 
             return matchesSearch && matchesConsultant && matchesStatus && matchesInterest && matchesOrigin && matchesScore && matchesDate;
         })
-        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        .sort((a, b) => new Date(b.created_at || '').getTime() - new Date(a.created_at || '').getTime());
 
     // ── Busca Semântica ──────────────────────────────────────
     const runSemanticSearch = async (q: string) => {
@@ -387,14 +383,14 @@ function LeadsContent() {
         }
     };
 
-    const interests = Array.from(new Set(leads.map(l => l.vehicle_interest).filter(Boolean)))
+    const interests = Array.from(new Set(leads.map(l => l.vehicle_interest).filter(Boolean) as string[]))
         .filter(interest => {
             const up = interest.toUpperCase();
             const genericIntents = ['COMPRA', 'VENDA', 'TROCA', 'DUVIDA', 'FALAR COM CONSULTOR', '---', 'INTERESSE'];
             return !genericIntents.some(g => up.includes(g)) && up.length > 2;
         })
         .sort();
-    const origins = Array.from(new Set(leads.map(l => l.source).filter(Boolean)));
+    const origins = Array.from(new Set(leads.map(l => l.source).filter(Boolean) as string[]));
 
     return (
         <div className="flex flex-col h-screen w-full bg-[#03060b] overflow-hidden text-white font-inter">

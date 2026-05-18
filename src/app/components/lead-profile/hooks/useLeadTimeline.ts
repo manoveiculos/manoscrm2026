@@ -61,45 +61,60 @@ export function useLeadTimeline(leadId: string | null, leadPhone?: string) {
           .order('created_at', { ascending: false })
           .limit(100);
         if (textData) {
-          textData.forEach(item => all.push(mapInteraction(item)));
+          textData.forEach((item: any) => all.push(mapInteraction(item)));
         }
       } else if (data) {
-        data.forEach(item => all.push(mapInteraction(item)));
+        data.forEach((item: any) => all.push(mapInteraction(item)));
       }
     } catch (e) { console.error('[Timeline] interactions error:', e); }
     })(),
 
     // ══════════════════════════════════════
-    // FONTE 2: whatsapp_messages (V2)
+    // FONTE 2: unified_whatsapp_messages (V3.7)
+    // Une mensagens de Arthur (entrada) + Vendedor (manual) + Karol (reversão)
+    // tipo do filtro: lead_uid TEXT, que é COALESCE(lead_id, lead_compra_id).
+    // Lookup amplo: pega cleanId + IDs relacionados via telefone nas 3 tabelas.
     // ══════════════════════════════════════
     (async () => {
     try {
-      let messages: any[] = [];
-      
-      // 2.1. Busca por ID numérico (BigInt na whatsapp_messages)
-      let numericIds: number[] = [];
-      if (!/^\d+$/.test(cleanId)) {
-        const { data: distLeads } = await supabase
-          .from('leads_distribuicao_crm_26')
-          .select('id')
-          .or(`telefone.ilike.%${phoneSuffix}%,id_meta.eq.${cleanId},lead_id.eq.${cleanId}`)
-          .limit(5);
-        if (distLeads) numericIds = distLeads.map(dl => dl.id);
+      const uids = new Set<string>([cleanId]);
+
+      // Cross-table phone lookup só roda quando o telefone NÃO está mascarado.
+      // Mask V3.7: "4799****12" — presença de '*' indica que veio da Fila Geral.
+      const phoneIsMasked = !!leadPhone && leadPhone.includes('*');
+      if (!phoneIsMasked && phoneSuffix.length >= 8) {
+        const [dist, manos, compra] = await Promise.all([
+          supabase.from('leads_distribuicao_crm_26').select('id').ilike('telefone', `%${phoneSuffix}%`).limit(10),
+          supabase.from('leads_manos_crm').select('id').ilike('phone', `%${phoneSuffix}%`).limit(10),
+          supabase.from('leads_compra').select('id').ilike('telefone', `%${phoneSuffix}%`).limit(10),
+        ]);
+        (dist.data || []).forEach((r: any) => uids.add(String(r.id)));
+        (manos.data || []).forEach((r: any) => uids.add(String(r.id)));
+        (compra.data || []).forEach((r: any) => uids.add(String(r.id)));
+      }
+
+      const { data, error } = await supabase
+        .from('unified_whatsapp_messages')
+        .select('id, created_at, direction, message_text, message_id, lead_uid, media_type, sender_name')
+        .in('lead_uid', Array.from(uids))
+        .order('created_at', { ascending: false })
+        .limit(500);
+
+      if (error) {
+        console.warn('[Timeline] unified_whatsapp_messages erro, fallback whatsapp_messages:', error.message);
+        const numericIds = Array.from(uids).filter(id => /^\d+$/.test(id)).map(id => parseInt(id, 10));
+        if (numericIds.length > 0) {
+          const fb = await supabase
+            .from('whatsapp_messages')
+            .select('*')
+            .in('lead_id', numericIds)
+            .order('created_at', { ascending: false })
+            .limit(500);
+          (fb.data || []).forEach((m: any) => all.push(mapWhatsAppMessage(m)));
+        }
       } else {
-        numericIds = [parseInt(cleanId)];
+        (data || []).forEach((m: any) => all.push(mapWhatsAppMessage(m)));
       }
-
-      if (numericIds.length > 0) {
-        const { data } = await supabase
-          .from('whatsapp_messages')
-          .select('*')
-          .in('lead_id', numericIds)
-          .order('created_at', { ascending: false })
-          .limit(300);
-        if (data) messages = data;
-      }
-
-      messages.forEach(msg => all.push(mapWhatsAppMessage(msg)));
     } catch (e) { console.error('[Timeline] whatsapp error:', e); }
     })(),
 
@@ -172,7 +187,7 @@ export function useLeadTimeline(leadId: string | null, leadPhone?: string) {
         .limit(50);
 
       if (data) {
-        data.forEach(track => {
+        data.forEach((track: any) => {
           const content = track.analysis || track.summary || track.notes || track.details || track.message || track.content || '';
           if (content && content.trim()) {
             all.push({
@@ -204,7 +219,7 @@ export function useLeadTimeline(leadId: string | null, leadPhone?: string) {
         .limit(100);
 
       if (data) {
-        data.forEach(fu => all.push(mapFollowUp(fu)));
+        data.forEach((fu: any) => all.push(mapFollowUp(fu)));
       }
     } catch (e) { console.error('[Timeline] follow_ups error:', e); }
     })(),
@@ -276,6 +291,18 @@ export function useLeadTimeline(leadId: string | null, leadPhone?: string) {
     return () => window.removeEventListener('update-lead-timeline', handler);
   }, [fetchTimeline]);
 
+  // Realtime: refetch quando uma nova mensagem entra na whatsapp_messages
+  useEffect(() => {
+    if (!leadId) return;
+    const channel = supabase
+      .channel(`lead-msgs-${leadId}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'whatsapp_messages' }, () => {
+        fetchTimeline();
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [leadId, fetchTimeline]);
+
   const filteredEvents = useMemo(() => {
     if (filter === 'all') return events;
     if (filter === 'whatsapp') return events.filter(e => e.type.startsWith('whatsapp'));
@@ -327,7 +354,12 @@ export function useLeadTimeline(leadId: string | null, leadPhone?: string) {
     return true;
   };
 
-  return { events: filteredEvents, allEvents: events, loading, filter, setFilter, addNote, refresh: fetchTimeline, totalCount: events.length };
+  const messageCount = useMemo(
+    () => events.filter(e => e.type === 'whatsapp_in' || e.type === 'whatsapp_out').length,
+    [events]
+  );
+
+  return { events: filteredEvents, allEvents: events, loading, filter, setFilter, addNote, refresh: fetchTimeline, totalCount: events.length, messageCount };
 }
 
 // ═══ HELPERS ═══

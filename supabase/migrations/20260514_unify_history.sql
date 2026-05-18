@@ -12,8 +12,8 @@ SELECT
     message_id,
     -- Converte qualquer ID para texto para facilitar o filtro unificado (UID)
     COALESCE(lead_id::text, lead_compra_id::text) as lead_uid,
-    media_type,
-    sender_name
+    NULL::text AS media_type,
+    NULL::text AS sender_name
 FROM whatsapp_messages;
 
 -- 2. Função para encontrar Lead por Telefone em qualquer tabela
@@ -33,27 +33,27 @@ BEGIN
     p_phone := regexp_replace(p_phone, '\D', '', 'g');
 
     -- Tenta na tabela principal (V2)
-    RETURN QUERY 
-    SELECT ('dist_' || id::text), 'leads_distribuicao_crm_26'::text, id::text, nome, assigned_consultant_id::text
-    FROM leads_distribuicao_crm_26 
-    WHERE telefone = p_phone OR telefone ILIKE '%' || RIGHT(p_phone, 8)
+    RETURN QUERY
+    SELECT ('dist_' || d.id::text), 'leads_distribuicao_crm_26'::text, d.id::text, d.nome::text, d.assigned_consultant_id::text
+    FROM leads_distribuicao_crm_26 d
+    WHERE d.telefone = p_phone OR d.telefone ILIKE '%' || RIGHT(p_phone, 8)
     LIMIT 1;
 
     -- Se não achou, tenta na legado (V1)
     IF NOT FOUND THEN
-        RETURN QUERY 
-        SELECT ('crm26_' || id::text), 'leads_manos_crm'::text, id::text, name, assigned_consultant_id::text
-        FROM leads_manos_crm 
-        WHERE phone = p_phone OR phone ILIKE '%' || RIGHT(p_phone, 8)
+        RETURN QUERY
+        SELECT ('crm26_' || m.id::text), 'leads_manos_crm'::text, m.id::text, m.name::text, m.assigned_consultant_id::text
+        FROM leads_manos_crm m
+        WHERE m.phone = p_phone OR m.phone ILIKE '%' || RIGHT(p_phone, 8)
         LIMIT 1;
     END IF;
 
     -- Se não achou, tenta na Compra
     IF NOT FOUND THEN
-        RETURN QUERY 
-        SELECT ('compra_' || id::text), 'leads_compra'::text, id::text, nome, assigned_consultant_id::text
-        FROM leads_compra 
-        WHERE telefone = p_phone OR telefone ILIKE '%' || RIGHT(p_phone, 8)
+        RETURN QUERY
+        SELECT ('compra_' || c.id::text), 'leads_compra'::text, c.id::text, c.nome::text, c.assigned_consultant_id::text
+        FROM leads_compra c
+        WHERE c.telefone = p_phone OR c.telefone ILIKE '%' || RIGHT(p_phone, 8)
         LIMIT 1;
     END IF;
 END;

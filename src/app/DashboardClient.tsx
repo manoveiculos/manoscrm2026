@@ -133,7 +133,7 @@ export default function DashboardClient({ metrics, userName, consultantId, aiIns
                 
                 if (allLeads) {
                     // PRIORIDADE 1: Match por ID exato (sempre prefira o exato)
-                    leadData = allLeads.find(l => leadId && (
+                    leadData = allLeads.find((l: any) => leadId && (
                         l.id === leadId || 
                         (l as any).lead_id === leadId
                     ));
@@ -141,13 +141,13 @@ export default function DashboardClient({ metrics, userName, consultantId, aiIns
                     // PRIORIDADE 2: Match por NOME (Âncora de segurança absoluta para Fabio vs Nathalya)
                     if (!leadData && leadName) {
                         const searchName = leadName.split(' ')[0].toLowerCase();
-                        leadData = allLeads.find(l => l.name && l.name.toLowerCase().includes(searchName));
+                        leadData = allLeads.find((l: any) => l.name && l.name.toLowerCase().includes(searchName));
                     }
 
                     // PRIORIDADE 3: Match por fragmento de ID (Apenas se o nome falhar)
                     // SEGURANÇA: Só aceita se for o INÍCIO do ID (evita Nathalya e Natasha no meio do UUID)
                     if (!leadData && leadId && leadId.length >= 3) {
-                        leadData = allLeads.find(l => 
+                        leadData = allLeads.find((l: any) => 
                             l.id.toString().startsWith(leadId) ||
                             ((l as any).lead_id && (l as any).lead_id.toString().startsWith(leadId))
                         );

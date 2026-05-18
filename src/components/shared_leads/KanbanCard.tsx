@@ -102,7 +102,7 @@ export const KanbanCard = ({
 
                         <MoveMenu
                             isOpen={activeMoveMenu === lead.id}
-                            currentStatus={lead.status}
+                            currentStatus={lead.status || 'new'}
                             onStatusChange={(newStatus) => handleStatusChange(lead.id, newStatus)}
                             onClose={() => setActiveMoveMenu(null)}
                         />

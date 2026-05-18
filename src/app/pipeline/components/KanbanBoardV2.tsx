@@ -40,7 +40,7 @@ export const KanbanBoardV2: React.FC<KanbanBoardV2Props> = ({
     const [columnWithMenuOpen, setColumnWithMenuOpen] = useState<string | null>(null);
     const [columnVisibleCount, setColumnVisibleCount] = useState<Record<string, number>>({});
 
-    const [activeTab, setActiveTab] = useState(PIPELINE_STAGES[0].id);
+    const [activeTab, setActiveTab] = useState<string>(PIPELINE_STAGES[0].id);
 
     const columns = PIPELINE_STAGES.map(s => ({
         id: s.id,

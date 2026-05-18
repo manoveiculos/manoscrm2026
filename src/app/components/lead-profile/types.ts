@@ -6,6 +6,8 @@ export interface Lead extends Partial<BaseLead> {
   phone: string;
   status: any; // Mantido any para compatibilidade com fluxos legados
   created_at: string;
+  interesse?: string;
+  troca?: string;
   // Campos estendidos específicos do V2
   last_proposal_json?: {
     titulo: string;

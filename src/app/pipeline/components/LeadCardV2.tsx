@@ -34,7 +34,7 @@ export const LeadCardV2: React.FC<LeadCardV2Props> = ({
 
     // Dynamic Score Logic
     const now = new Date();
-    const createdAt = new Date(lead.created_at);
+    const createdAt = new Date(lead.created_at || '');
     const diffMs = now.getTime() - createdAt.getTime();
     const diffHours = Math.floor(diffMs / (1000 * 3600));
     const diffDays = Math.floor(diffHours / 24);
@@ -131,10 +131,10 @@ export const LeadCardV2: React.FC<LeadCardV2Props> = ({
         if (['test_drive','proposed','negotiation','fechamento'].includes(s))  return 'fechamento';
         return '';
     }
-    const stageId   = normalizeToStageId(lead.status);
+    const stageId   = normalizeToStageId(lead.status || '');
     const slaHours  = STAGE_SLA_HOURS[stageId] ?? null;
     // usa updated_at como referência de quando entrou na etapa
-    const updatedAt = new Date(lead.updated_at || lead.created_at);
+    const updatedAt = new Date(lead.updated_at || lead.created_at || '');
     const hoursInStage = (now.getTime() - updatedAt.getTime()) / 3_600_000;
     const slaBreached = slaHours !== null && hoursInStage >= slaHours;
     const slaPct      = slaHours !== null ? Math.min(100, (hoursInStage / slaHours) * 100) : 0;

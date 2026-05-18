@@ -275,19 +275,38 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
             // No caso do GPT-4o-mini (2s), isso garante que o vendedor veja a "mágica" acontecendo
             const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
             
-            // Busca mensagens WhatsApp — lead_id em whatsapp_messages é bigint, só funciona com IDs numéricos
+            // Busca mensagens WhatsApp via view unificada (Arthur + Vendedor + Karol)
             const rawId = lead.id.toString();
             const cleanLeadId = rawId.replace(/^(main_|crm26_|dist_|lead_|crm25_|master_)/, '');
-            const isNumericId = /^\d+$/.test(cleanLeadId);
+            const phoneClean = (lead.phone || '').replace(/\D/g, '');
+            const phoneSuffix = phoneClean.slice(-8);
+            const phoneIsMasked = !!lead.phone && String(lead.phone).includes('*');
 
-            let messages: any[] = [];
-            if (isNumericId) {
-                const { data } = await supabase
-                    .from('whatsapp_messages')
-                    .select('*')
-                    .eq('lead_id', parseInt(cleanLeadId))
-                    .order('created_at', { ascending: true });
-                messages = data || [];
+            const uids = new Set<string>([cleanLeadId]);
+            if (!phoneIsMasked && phoneSuffix.length >= 8) {
+                const [dist, manos, compra] = await Promise.all([
+                    supabase.from('leads_distribuicao_crm_26').select('id').ilike('telefone', `%${phoneSuffix}%`).limit(10),
+                    supabase.from('leads_manos_crm').select('id').ilike('phone', `%${phoneSuffix}%`).limit(10),
+                    supabase.from('leads_compra').select('id').ilike('telefone', `%${phoneSuffix}%`).limit(10),
+                ]);
+                (dist.data || []).forEach((r: any) => uids.add(String(r.id)));
+                (manos.data || []).forEach((r: any) => uids.add(String(r.id)));
+                (compra.data || []).forEach((r: any) => uids.add(String(r.id)));
+            }
+
+            const { data: uMsgs } = await supabase
+                .from('unified_whatsapp_messages')
+                .select('id, created_at, direction, message_text, lead_uid')
+                .in('lead_uid', Array.from(uids))
+                .order('created_at', { ascending: true })
+                .limit(500);
+            const messages: any[] = uMsgs || [];
+
+            // Gate V3.7: análise da IA exige diálogo. Sem mensagens, não chama o endpoint.
+            if (messages.length === 0) {
+                console.warn('[IA] Nenhuma mensagem unificada encontrada — análise abortada.');
+                setLoadingStatus('idle');
+                return;
             }
 
             await sleep(800);
