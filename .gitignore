@@ -73,7 +73,8 @@ test-payload.json
 .vibe/
 .windsurf/
 .zencoder/
-skills/
+skills/*
+!skills/manos-crm/
 skills-lock.json
 tmp/
 sync_errors.log

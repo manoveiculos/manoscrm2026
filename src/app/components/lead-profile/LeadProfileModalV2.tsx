@@ -34,6 +34,14 @@ import {
     parsePrice 
 } from './utils';
 
+const cleanLeadIdHelper = (idStr: string | null | undefined): string => {
+    if (!idStr) return '';
+    const s = String(idStr);
+    const colonIdx = s.indexOf(':');
+    const rawId = colonIdx > 0 ? s.slice(colonIdx + 1) : s;
+    return rawId.replace(/^(main_|crm26_|dist_|lead_|crm25_|master_|compra_)/, '');
+};
+
 export interface LeadProfileModalV2Props {
     isOpen?: boolean;
     onClose: () => void;
@@ -190,7 +198,7 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
         if (!noteToSave.trim()) return;
         setIsSavingNote(true);
         try {
-            const cleanId = lead.id.toString().replace(/main_|crm26_|dist_|lead_|crm25_|master_/, '');
+            const cleanId = cleanLeadIdHelper(lead.id);
             
             // Determinar se o ID é UUID para selecionar a tabela correta (opcional, interactions_manos_crm aceita ambos)
             const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(cleanId);
@@ -198,7 +206,7 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
             const insertData: any = {
                 type: 'note',
                 notes: `[${userName}] ${noteToSave}`,
-                consultant_id: lead.assigned_consultant_id?.replace(/main_|crm26_|dist_|lead_|crm25_|master_/, ''),
+                consultant_id: cleanLeadIdHelper(lead.assigned_consultant_id),
                 created_at: new Date().toISOString()
             };
 
@@ -277,7 +285,7 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
             
             // Busca mensagens WhatsApp via view unificada (Arthur + Vendedor + Karol)
             const rawId = lead.id.toString();
-            const cleanLeadId = rawId.replace(/^(main_|crm26_|dist_|lead_|crm25_|master_)/, '');
+            const cleanLeadId = cleanLeadIdHelper(rawId);
             const phoneClean = (lead.phone || '').replace(/\D/g, '');
             const phoneSuffix = phoneClean.slice(-8);
             const phoneIsMasked = !!lead.phone && String(lead.phone).includes('*');
@@ -476,14 +484,14 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
         if (saved) {
             try {
                 // Registrar na timeline (Interação genérica de log)
-                const cleanId = lead.id.toString().replace(/^(main_|crm26_|dist_|lead_|crm25_|master_)/, '');
+                const cleanId = cleanLeadIdHelper(lead.id);
                 const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(cleanId);
                 
                 await supabase.from('interactions_manos_crm').insert({
                     [isUUID ? 'lead_id' : 'lead_id_v1']: cleanId,
                     type: 'note',
                     notes: `🔧 Campo "${field.toUpperCase()}" alterado para "${value}"`,
-                    consultant_id: lead.assigned_consultant_id?.replace(/^(main_|crm26_|dist_|lead_|crm25_|master_)/, ''),
+                    consultant_id: cleanLeadIdHelper(lead.assigned_consultant_id),
                     user_name: userName,
                     created_at: new Date().toISOString(),
                 });
@@ -502,7 +510,7 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
     // CORREÇÃO 5: ARSENAL — VINCULAR VEÍCULO
     // ══════════════════════════════════════
     async function handleVincularVeiculo(veiculo: any) {
-        const cleanId = lead.id.toString().replace(/^(main_|crm26_|dist_|lead_|crm25_)/, '');
+        const cleanId = cleanLeadIdHelper(lead.id);
         const nomeVeiculo = veiculo.marca_modelo || `${veiculo.marca} ${veiculo.modelo}` || '';
         const precoStr = veiculo.preco || '0';
         const precoNumerico = typeof precoStr === 'string' ? precoStr.replace(/\D/g, '') : precoStr.toString();
@@ -551,7 +559,7 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
             [isUUID ? 'lead_id' : 'lead_id_v1']: cleanId,
             type: 'vehicle_linked',
             notes: `🎯 Veículo vinculado: ${nomeVeiculo} (R$ ${precoStr})`,
-            consultant_id: lead.assigned_consultant_id?.replace(/^(main_|crm26_|dist_|lead_|crm25_)/, ''),
+            consultant_id: cleanLeadIdHelper(lead.assigned_consultant_id),
             user_name: userName,
             created_at: new Date().toISOString(),
         });

@@ -60,14 +60,22 @@ export function useLeadData(initialLead: Lead, setLeads: React.Dispatch<React.Se
                 reason    // motivo_perda
             );
 
-            const cleanId = initialLead.id.toString().replace(/main_|crm26_|dist_|lead_|crm25_|master_/, '');
+            const rawId = initialLead.id.toString();
+            const colonIdx = rawId.indexOf(':');
+            const nativeId = colonIdx > 0 ? rawId.slice(colonIdx + 1) : rawId;
+            const cleanId = nativeId.replace(/main_|crm26_|dist_|lead_|crm25_|master_|compra_/, '');
             const isNumeric = /^\d+$/.test(cleanId);
             
             if (cleanId) {
+                const rawConsId = initialLead.assigned_consultant_id ? initialLead.assigned_consultant_id.toString() : '';
+                const consColonIdx = rawConsId.indexOf(':');
+                const nativeConsId = consColonIdx > 0 ? rawConsId.slice(consColonIdx + 1) : rawConsId;
+                const cleanConsId = nativeConsId.replace(/main_|crm26_|dist_|lead_|crm25_|master_|compra_/, '') || null;
+
                 const interactionPayload: any = {
                     type: 'status_change',
                     notes: `[${userName || 'SISTEMA'}] Status alterado de ${oldStatus} para ${newStatusId} (via Sidebar)`,
-                    consultant_id: initialLead.assigned_consultant_id ? initialLead.assigned_consultant_id.toString().replace(/main_|crm26_|dist_|lead_|crm25_|master_/, '') : null,
+                    consultant_id: cleanConsId,
                     created_at: new Date().toISOString()
                 };
 

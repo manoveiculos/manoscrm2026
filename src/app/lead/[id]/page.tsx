@@ -63,6 +63,7 @@ interface Lead {
     ai_summary: string | null;
     created_at: string | null;
     atendimento_iniciado_em: string | null;
+    carro_troca?: string | null;
 }
 
 function formatLeadEntryDate(iso: string | null): { date: string; time: string; ago: string } | null {
@@ -83,7 +84,7 @@ function formatLeadEntryDate(iso: string | null): { date: string; time: string; 
 }
 
 interface Message {
-    id: number;
+    id: number | string;
     direction: string;
     message_text: string;
     created_at: string;
@@ -130,8 +131,10 @@ export default function LeadDetailPage() {
     const [submitting, setSubmitting] = useState(false);
     const [analyzing, setAnalyzing] = useState(false);
     const [consultantName, setConsultantName] = useState<string>('');
+    const [assignedConsultantName, setAssignedConsultantName] = useState<string>('');
     const [showConfetti, setShowConfetti] = useState(false);
     const [loadError, setLoadError] = useState<string | null>(null);
+    const [twinIds, setTwinIds] = useState<string[]>([]);
 
     const [showSold, setShowSold] = useState(false);
     const [showLost, setShowLost] = useState(false);
@@ -211,6 +214,72 @@ export default function LeadDetailPage() {
             setLead(lead);
             setSoldVehicle(lead?.vehicle_interest || '');
 
+            if (lead) {
+                // Buscar veículo de interesse real e carro_troca da tabela base
+                let realInterest = lead.vehicle_interest;
+                let realTroca = null;
+                try {
+                    if (lead.table_name === 'leads_distribuicao_crm_26') {
+                        const { data: bData } = await supabase
+                            .from('leads_distribuicao_crm_26')
+                            .select('interesse, carro_troca')
+                            .eq('id', parseInt(lead.id, 10))
+                            .maybeSingle();
+                        if (bData) {
+                            if (bData.interesse) realInterest = bData.interesse;
+                            if (bData.carro_troca) realTroca = bData.carro_troca;
+                        }
+                    } else if (lead.table_name === 'leads_manos_crm') {
+                        const { data: bData } = await supabase
+                            .from('leads_manos_crm')
+                            .select('vehicle_interest, carro_troca')
+                            .eq('id', lead.id)
+                            .maybeSingle();
+                        if (bData) {
+                            if (bData.vehicle_interest) realInterest = bData.vehicle_interest;
+                            if (bData.carro_troca) realTroca = bData.carro_troca;
+                        }
+                    } else if (lead.table_name === 'leads_compra') {
+                        const { data: bData } = await supabase
+                            .from('leads_compra')
+                            .select('veiculo_original, carro_troca')
+                            .eq('id', lead.id)
+                            .maybeSingle();
+                        if (bData) {
+                            if (bData.veiculo_original) realInterest = bData.veiculo_original;
+                            if (bData.carro_troca) realTroca = bData.carro_troca;
+                        }
+                    }
+                } catch (err) {
+                    console.warn('[LeadDetail] Erro ao buscar dados específicos do lead:', err);
+                }
+
+                if (alive) {
+                    setLead(prev => prev ? {
+                        ...prev,
+                        vehicle_interest: realInterest,
+                        carro_troca: realTroca
+                    } as any : null);
+                    setSoldVehicle(realInterest || '');
+                }
+
+                // Buscar nome do consultor atribuído
+                if (lead.assigned_consultant_id) {
+                    try {
+                        const { data: cData } = await supabase
+                            .from('consultants_manos_crm')
+                            .select('name')
+                            .eq('id', lead.assigned_consultant_id)
+                            .maybeSingle();
+                        if (alive && cData?.name) {
+                            setAssignedConsultantName(cData.name);
+                        }
+                    } catch (cErr) {
+                        console.warn('[LeadDetail] Erro ao buscar nome do consultor:', cErr);
+                    }
+                }
+            }
+
             // Unificação V3.7: busca na view + cruza com telefone nas 3 tabelas para
             // capturar mensagens vinculadas a IDs gêmeos (Arthur/Karol/Vendedor podem
             // salvar sob lead_id ou lead_compra_id distintos para o mesmo número).
@@ -230,6 +299,9 @@ export default function LeadDetailPage() {
                 (manos.data || []).forEach((r: any) => uidSet.add(String(r.id)));
                 (compra.data || []).forEach((r: any) => uidSet.add(String(r.id)));
             }
+            if (alive) {
+                setTwinIds(Array.from(uidSet));
+            }
 
             const { data: msgs, error: msgError } = await supabase
                 .from('unified_whatsapp_messages')
@@ -242,12 +314,85 @@ export default function LeadDetailPage() {
             if (msgError) {
                 console.warn('[LeadDetail] Erro ao buscar mensagens:', msgError.message);
             }
+
+            let allMsgs: any[] = [];
+            if (msgs) {
+                allMsgs = [...msgs];
+            }
+
+            // Busca complementar na concessionaria_mensagens (V1 - IA Lab)
+            try {
+                if (!phoneIsMasked && phoneSuffix.length >= 8) {
+                    // Tenta obter session_id pelo tracking_leads
+                    const { data: trackers } = await supabase
+                        .from('tracking_leads')
+                        .select('details')
+                        .ilike('whatsapp', `%${phoneSuffix}%`)
+                        .order('created_at', { ascending: false })
+                        .limit(1);
+
+                    let sessionId = trackers?.[0]?.details ? (trackers[0].details as any).session_id : null;
+
+                    // Fallback para dados_cliente
+                    if (!sessionId) {
+                        const { data: cli } = await supabase
+                            .from('dados_cliente')
+                            .select('sessionid')
+                            .ilike('telefone', `%${phoneSuffix}%`)
+                            .order('created_at', { ascending: false })
+                            .limit(1);
+                        if (cli?.[0]?.sessionid) sessionId = cli[0].sessionid;
+                    }
+
+                    if (sessionId) {
+                        const { data: cmMsgs } = await supabase
+                            .from('concessionaria_mensagens')
+                            .select('*')
+                            .eq('session_id', sessionId)
+                            .order('data', { ascending: false });
+
+                        if (cmMsgs) {
+                            const detectDirection = (msg: any) => {
+                                const dir = (msg.direction || msg.flow || msg.remetente || msg.message?.type || msg.type || '').toLowerCase();
+                                if (dir.includes('inbound') || dir.includes('received') || dir.includes('incoming') || dir === 'in' || dir === 'cliente' || dir === 'human') return 'inbound';
+                                if (dir.includes('outbound') || dir.includes('sent') || dir.includes('outgoing') || dir === 'out' || dir === 'vendedor' || dir === 'ai') return 'outbound';
+                                if (msg.from_me === true || msg.fromMe === true) return 'outbound';
+                                if (msg.from_me === false || msg.fromMe === false) return 'inbound';
+                                return 'inbound';
+                            };
+
+                            cmMsgs.forEach((msg: any) => {
+                                const dir = detectDirection(msg);
+                                const text = msg.message?.content || msg.message?.text || msg.message?.body || msg.message?.payload?.body || msg.message || '';
+                                if (typeof text === 'string' && text.trim()) {
+                                    let messageId = null;
+                                    if (msg.remetente === 'Arthur') messageId = 'ai_sdr_legacy';
+                                    else if (msg.remetente === 'Karol') messageId = 'ai_followup_legacy';
+                                    
+                                    allMsgs.push({
+                                        id: `cm_${msg.id || Math.random().toString(36).slice(2,8)}`,
+                                        direction: dir,
+                                        message_text: text,
+                                        created_at: msg.data || msg.created_at || new Date().toISOString(),
+                                        message_id: messageId
+                                    });
+                                }
+                            });
+                        }
+                    }
+                }
+            } catch (err) {
+                console.warn('[LeadDetail] Erro ao buscar concessionaria_mensagens:', err);
+            }
+
+            // Ordena as mensagens do mais antigo ao mais recente antes do dedup e render
+            allMsgs.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+
             // Dedup no client: rejeita msgs com mesmo texto + direção +
             // janela de 30s. Cobre histórico já duplicado no banco enquanto
             // sync-messages não é refeito.
-            const rawMsgs = (msgs || []).reverse();
             const seen = new Map<string, number>();
-            const deduped = rawMsgs.filter((m: any) => {
+            const deduped = allMsgs.filter((m: any) => {
                 const text = (m.message_text || '').trim();
                 if (!text) return false;
                 const key = `${m.direction}|${text}`;
@@ -322,6 +467,11 @@ export default function LeadDetailPage() {
                 (payload: any) => {
                     const m = payload.new;
                     if (m && m.message_text) {
+                        const mLeadId = String(m.lead_id || m.lead_compra_id || '');
+                        // Filtra para garantir que a mensagem pertence ao lead atual ou seus gêmeos
+                        const isMatch = twinIds.length > 0 ? twinIds.includes(mLeadId) : mLeadId === String(leadId);
+                        if (!isMatch) return;
+
                         setMessages(prev => {
                             // Evita duplicar se a msg já está na lista (vinda do load inicial)
                             if (prev.some(x => x.id === m.id)) return prev;
@@ -337,7 +487,7 @@ export default function LeadDetailPage() {
             )
             .subscribe();
         return () => { supabase.removeChannel(channel); };
-    }, [leadId, supabase]);
+    }, [leadId, twinIds, supabase]);
 
     async function handleSold() {
         if (!soldValue || !soldPayment) return;
@@ -509,13 +659,39 @@ export default function LeadDetailPage() {
             <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
                 {/* Esquerda — dados */}
                 <aside className="md:col-span-3 bg-zinc-900 rounded-lg p-3 md:p-4 min-w-0">
-                    <h2 className="text-xl font-bold text-white">{lead.name || 'Sem nome'}</h2>
+                    <h2 className="text-xl font-black text-white">{lead.name || 'Sem nome'}</h2>
                     <p className="text-sm text-gray-400 mt-1">{lead.phone || '—'}</p>
-                    <div className="mt-3 space-y-1 text-sm">
-                        <div><span className="text-gray-500">Interesse:</span> {lead.vehicle_interest || '—'}</div>
-                        <div><span className="text-gray-500">Origem:</span> {lead.source || '—'}</div>
-                        <div><span className="text-gray-500">Score IA:</span> {lead.ai_score ?? 0}</div>
-                        <div><span className="text-gray-500">Status:</span> {lead.status || 'novo'}</div>
+                    
+                    <div className="mt-4 space-y-2 text-sm bg-zinc-950/40 p-3 rounded-xl border border-zinc-800/40">
+                        <div>
+                            <span className="text-zinc-500 font-medium block text-[11px] uppercase tracking-wider mb-0.5">🚗 Veículo de Interesse</span>
+                            <span className="text-white font-semibold text-sm">{lead.vehicle_interest || '—'}</span>
+                        </div>
+                        {lead.carro_troca && lead.carro_troca !== '---' && (
+                            <div>
+                                <span className="text-zinc-500 font-medium block text-[11px] uppercase tracking-wider mb-0.5">🔄 Veículo de Troca</span>
+                                <span className="text-amber-400 font-semibold text-sm italic">{lead.carro_troca}</span>
+                            </div>
+                        )}
+                        <div>
+                            <span className="text-zinc-500 font-medium block text-[11px] uppercase tracking-wider mb-0.5">👤 Consultor Atendendo</span>
+                            <span className="text-blue-300 font-semibold text-sm">{assignedConsultantName || 'Pendente / Fila Geral'}</span>
+                        </div>
+                        <div className="pt-2 border-t border-zinc-800/60 grid grid-cols-2 gap-2 text-xs">
+                            <div>
+                                <span className="text-zinc-500 block">Origem</span>
+                                <span className="text-zinc-300 font-medium">{lead.source || '—'}</span>
+                            </div>
+                            <div>
+                                <span className="text-zinc-500 block">Score IA</span>
+                                <span className={`font-black ${lead.ai_score && lead.ai_score >= 80 ? 'text-red-400' : 'text-zinc-300'}`}>{lead.ai_score ?? 0}</span>
+                            </div>
+                        </div>
+                        <div className="pt-2 border-t border-zinc-800/60">
+                            <span className="text-zinc-500 block text-[11px] uppercase tracking-wider mb-0.5">Status</span>
+                            <span className="text-zinc-300 uppercase text-xs font-black bg-zinc-800 px-2 py-0.5 rounded inline-block">{lead.status || 'novo'}</span>
+                        </div>
+                    </div>
                         {(() => {
                             const entry = formatLeadEntryDate(lead.created_at);
                             return entry ? (
@@ -530,7 +706,6 @@ export default function LeadDetailPage() {
                                 </div>
                             ) : null;
                         })()}
-                    </div>
 
                     {lead.proxima_acao && (
                         <div className="mt-4 p-3 bg-blue-900/30 border border-blue-800 rounded text-sm">
@@ -701,7 +876,10 @@ export default function LeadDetailPage() {
                                         return;
                                     }
                                     if (!res.ok || !data.success) throw new Error(data.error || 'falha');
-                                    setLead(prev => prev ? { ...prev, atendimento_iniciado_em: data.started_at || new Date().toISOString() } : prev);
+                                    setLead(prev => prev ? { ...prev, atendimento_iniciado_em: data.started_at || new Date().toISOString(), assigned_consultant_id: data.consultant_id } : prev);
+                                    if (data.consultant_name) {
+                                        setAssignedConsultantName(data.consultant_name);
+                                    }
                                 } catch (e: any) {
                                     alert('Erro: ' + (e?.message || 'tente de novo'));
                                 }

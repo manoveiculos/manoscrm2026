@@ -34,6 +34,7 @@ export async function POST(req: NextRequest) {
         }
         let numericId: number | null = null;
         let uuidId: string | null = null;
+        let compraId: string | null = null;
         let leadFound = null;
         let leadType: 'main' | 'crm26' | 'compra' = 'crm26';
 
@@ -76,8 +77,60 @@ export async function POST(req: NextRequest) {
         const phoneVariants = getPhoneVariants(cleanPhone);
         console.log(`[Sync API] Phone Variants p/ ${cleanPhone}:`, phoneVariants);
 
-        // 1. Resolver o ID do lead - Tentar leads_master (UUID) primeiro
+        // 1. Resolver o ID do lead - Suporta o formato de UID composto (ex: leads_distribuicao_crm_26:1859)
+        let parsedTable: string | null = null;
+        let parsedNativeId: string | null = null;
+        
         if (leadId) {
+            const decoded = decodeURIComponent(leadId);
+            const colonIdx = decoded.indexOf(':');
+            if (colonIdx > 0) {
+                parsedTable = decoded.slice(0, colonIdx);
+                parsedNativeId = decoded.slice(colonIdx + 1);
+            }
+        }
+
+        if (parsedTable && parsedNativeId) {
+            if (parsedTable === 'leads_distribuicao_crm_26') {
+                const numeric = parseInt(parsedNativeId);
+                if (!isNaN(numeric)) {
+                    const { data: lead26 } = await supabaseAdmin.from('leads_distribuicao_crm_26').select('*').eq('id', numeric).maybeSingle();
+                    if (lead26) {
+                        numericId = lead26.id;
+                        leadFound = lead26;
+                        leadType = 'crm26';
+                        console.log(`[Sync API] Lead resolvido via UID (leads26): ${leadFound.nome}`);
+                    }
+                }
+            } else if (parsedTable === 'leads_compra') {
+                const { data: leadCompra } = await supabaseAdmin.from('leads_compra').select('*').eq('id', parsedNativeId).maybeSingle();
+                if (leadCompra) {
+                    compraId = leadCompra.id;
+                    leadFound = leadCompra;
+                    leadType = 'compra';
+                    console.log(`[Sync API] Lead resolvido via UID (compra): ${leadFound.nome}`);
+                }
+            } else if (parsedTable === 'leads_manos_crm' || parsedTable === 'leads_master') {
+                const { data: leadMaster } = await supabaseAdmin.from('leads_master').select('*').eq('id', parsedNativeId).maybeSingle();
+                if (leadMaster) {
+                    uuidId = leadMaster.id;
+                    leadFound = { ...leadMaster, source_table: 'leads_master' };
+                    leadType = 'main';
+                    console.log(`[Sync API] Lead resolvido via UID (master): ${leadFound.name}`);
+                } else {
+                    const { data: leadMain } = await supabaseAdmin.from('leads_manos_crm').select('*').eq('id', parsedNativeId).maybeSingle();
+                    if (leadMain) {
+                        uuidId = leadMain.id;
+                        leadFound = { ...leadMain, source_table: 'leads_manos_crm' };
+                        leadType = 'main';
+                        console.log(`[Sync API] Lead resolvido via UID (main): ${leadFound.name}`);
+                    }
+                }
+            }
+        }
+
+        // Fallback: Se não resolveu via UID composto, tentar a resolução por prefixo legado ou UUID direto
+        if (!uuidId && !numericId && !compraId && leadId) {
             const cleanId = leadId.replace(/^(main_|dist_|crm26_|dist_|lead_|crm25_|master_)/, '');
             const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
             
@@ -101,14 +154,13 @@ export async function POST(req: NextRequest) {
         }
 
         // 2. Se não encontrou por ID, tentar por telefone em leads_master e leads_manos_crm
-        if (!uuidId && cleanPhone) {
+        if (!uuidId && !numericId && !compraId && cleanPhone) {
             const orConditions = phoneVariants.map(v => `phone.ilike.%${v}%`).join(',');
             
             // Tenta leads_master por telefone
             const { data: leadsMaster, error: errMaster } = await supabaseAdmin.from('leads_master').select('*').or(orConditions).order('created_at', { ascending: false }).limit(3);
             
             if (leadsMaster && leadsMaster.length > 0) {
-                // Filtro extra em JS para garantir proximidade
                 const bestMatch = leadsMaster.find(l => {
                     const lClean = (l.phone || '').replace(/\D/g, '');
                     return lClean.includes(cleanPhone.slice(-8)) || cleanPhone.includes(lClean.slice(-8));
@@ -138,8 +190,8 @@ export async function POST(req: NextRequest) {
             }
         }
 
-        // 3. Se não encontrou UUID, tentar leads_distribuicao_crm_26 (BigInt)
-        if (!uuidId) {
+        // 3. Se não encontrou por ID nem por telefone principal, tentar leads_distribuicao_crm_26 (BigInt)
+        if (!uuidId && !numericId && !compraId) {
             if (leadId?.startsWith('crm26_') || /^\d+$/.test(leadId || '')) {
                 const cleanId = (leadId || '').replace('crm26_', '');
                 if (/^\d+$/.test(cleanId)) {
@@ -171,8 +223,7 @@ export async function POST(req: NextRequest) {
         }
 
         // 3.5. TENTAR em leads_compra
-        let compraId: string | null = null;
-        if (!uuidId && !numericId) {
+        if (!uuidId && !numericId && !compraId) {
             if (leadId?.startsWith('compra_')) {
                 const cleanId = (leadId || '').replace('compra_', '');
                 const { data: leadCompra } = await supabaseAdmin.from('leads_compra').select('*').eq('id', cleanId).maybeSingle();
@@ -220,9 +271,12 @@ export async function POST(req: NextRequest) {
         console.log(`[Sync API] Sincronizando ${messages.length} mensagens para lead (${leadType}): ${uuidId || numericId || compraId}`);
 
         // 2. Preparar registros para inserção (Deduplicação Inteligente)
-        if (leadType === 'crm26' || leadType === 'compra') {
+        if (leadType === 'crm26' || leadType === 'compra' || leadType === 'main') {
+            const colName = leadType === 'compra' ? 'lead_compra_id' : 'lead_id';
+            const colVal = leadType === 'compra' ? compraId : (leadType === 'crm26' ? String(numericId) : uuidId);
+
             const messagesToInsert = messages.map((m: any) => ({
-                [leadType === 'crm26' ? 'lead_id' : 'lead_compra_id']: leadType === 'crm26' ? numericId : compraId,
+                [colName]: colVal,
                 message_text: m.text,
                 direction: m.direction,
                 message_id: m.id || m.messageId, // Tenta capturar o ID único do WhatsApp
@@ -230,11 +284,10 @@ export async function POST(req: NextRequest) {
             }));
 
             // Deduplicação por ID de mensagem ou Conteúdo+Direção+Recentidade
-            const colName = leadType === 'crm26' ? 'lead_id' : 'lead_compra_id';
             const { data: existingMsgs } = await supabaseAdmin
                 .from('whatsapp_messages')
                 .select('message_text, direction, message_id')
-                .eq(colName, leadType === 'crm26' ? numericId : compraId)
+                .eq(colName, colVal)
                 .order('created_at', { ascending: false })
                 .limit(messagesToInsert.length + 100);
 
@@ -254,9 +307,14 @@ export async function POST(req: NextRequest) {
                 });
             });
 
+            const duplicatesFiltered = messagesToInsert.length - filteredMessages.length;
+            if (duplicatesFiltered > 0) {
+                console.info(`[Sync-Deduplication] ${duplicatesFiltered} mensagens duplicadas filtradas para o lead ${colVal}`);
+            }
+
             if (filteredMessages.length > 0) {
                 await supabaseAdmin.from('whatsapp_messages').insert(filteredMessages);
-                console.log(`[Sync API] Inseridas ${filteredMessages.length} novas msgs p/ lead ${leadType === 'crm26' ? numericId : compraId}`);
+                console.log(`[Sync API] Inseridas ${filteredMessages.length} novas msgs p/ lead ${colVal}`);
                 
                 // V3: Atualiza timestamp de atividade manual e BOIA (atualizado_em)
                 const now = new Date().toISOString();

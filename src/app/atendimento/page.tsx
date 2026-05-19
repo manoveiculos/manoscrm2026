@@ -18,6 +18,7 @@ interface KanbanLead {
     atendimento_iniciado_em: string | null;
     ultima_interacao_humana: string | null;
     flagged_reversao: boolean | null;
+    carro_troca?: string | null;
 }
 
 interface LastMsg { text: string; direction: string; created_at: string; }
@@ -132,6 +133,50 @@ export default function AtendimentoKanbanPage() {
             .limit(200);
         if (error) console.error('[Kanban] leads erro:', error.message);
         const list = (data as KanbanLead[]) || [];
+        
+        // Buscar carro_troca das tabelas base para evitar recriar views no Postgres
+        try {
+            const manosIds = list.filter(l => l.table_name === 'leads_manos_crm').map(l => l.native_id);
+            const distIds = list.filter(l => l.table_name === 'leads_distribuicao_crm_26').map(l => parseInt(l.native_id, 10)).filter(id => !isNaN(id));
+            
+            const promises: Promise<any>[] = [];
+            if (manosIds.length > 0) {
+                promises.push(supabase.from('leads_manos_crm').select('id, carro_troca').in('id', manosIds));
+            }
+            if (distIds.length > 0) {
+                promises.push(supabase.from('leads_distribuicao_crm_26').select('id, carro_troca').in('id', distIds));
+            }
+            
+            if (promises.length > 0) {
+                const results = await Promise.all(promises);
+                const trocaMap = new Map<string, string>(); // key: "table:id"
+                
+                let idx = 0;
+                if (manosIds.length > 0) {
+                    const res = results[idx++];
+                    if (res.data) {
+                        res.data.forEach((item: any) => {
+                            if (item.carro_troca) trocaMap.set(`leads_manos_crm:${item.id}`, item.carro_troca);
+                        });
+                    }
+                }
+                if (distIds.length > 0) {
+                    const res = results[idx++];
+                    if (res.data) {
+                        res.data.forEach((item: any) => {
+                            if (item.carro_troca) trocaMap.set(`leads_distribuicao_crm_26:${item.id}`, item.carro_troca);
+                        });
+                    }
+                }
+                
+                list.forEach(l => {
+                    l.carro_troca = trocaMap.get(`${l.table_name}:${l.native_id}`) || null;
+                });
+            }
+        } catch (fetchTrocaErr) {
+            console.error('[Kanban] erro ao buscar carro_troca:', fetchTrocaErr);
+        }
+
         setLeads(list);
         return list;
     }, [supabase]);
@@ -471,10 +516,19 @@ export default function AtendimentoKanbanPage() {
                                                         )}
                                                     </div>
 
-                                                    {/* Veículo */}
-                                                    <p className="text-[11px] text-zinc-400 truncate mb-2">
-                                                        🚗 {l.vehicle_interest || '—'}
-                                                    </p>
+                                                    {/* Veículos: Interesse + Troca */}
+                                                    <div className="text-[11px] text-zinc-400 mb-2 space-y-0.5">
+                                                        <div className="flex items-center gap-1 truncate" title={`Interesse: ${l.vehicle_interest || '—'}`}>
+                                                            <span>🚗</span>
+                                                            <span className="truncate">{l.vehicle_interest || '—'}</span>
+                                                        </div>
+                                                        {l.carro_troca && l.carro_troca !== '---' && (
+                                                            <div className="flex items-center gap-1 text-[10px] text-zinc-500 truncate" title={`Troca: ${l.carro_troca}`}>
+                                                                <span>🔄 Troca:</span>
+                                                                <span className="truncate italic font-medium text-zinc-400">{l.carro_troca}</span>
+                                                            </div>
+                                                        )}
+                                                    </div>
 
                                                     {/* Última mensagem */}
                                                     {lastMsg && lastMsg.text && (
@@ -549,7 +603,10 @@ export default function AtendimentoKanbanPage() {
                             <h3 className="text-lg font-black text-white flex items-center gap-2">🏁 Finalizar atendimento</h3>
                             <button onClick={cancelFinish} disabled={finishBusy} className="text-zinc-500 hover:text-white"><XIcon className="w-5 h-5" /></button>
                         </div>
-                        <p className="text-xs text-zinc-400 mb-5 truncate">{finishLead.name || 'Sem nome'} · {finishLead.vehicle_interest || '—'}</p>
+                        <p className="text-xs text-zinc-400 mb-5 truncate">
+                            {finishLead.name || 'Sem nome'} · {finishLead.vehicle_interest || '—'}
+                            {finishLead.carro_troca && finishLead.carro_troca !== '---' && ` (Troca: ${finishLead.carro_troca})`}
+                        </p>
 
                         <div className="grid grid-cols-3 gap-2 mb-5">
                             <button

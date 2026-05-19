@@ -20,7 +20,10 @@ export function useLeadFollowUp(lead: any, activeTab: string, userName: string) 
 
     const cleanUUID = (id: string | null | undefined): string | null => {
         if (!id) return null;
-        const cleaned = id.toString().replace(/main_|crm26_|dist_|lead_|crm25_|master_/, '');
+        const s = id.toString();
+        const colonIdx = s.indexOf(':');
+        const rawId = colonIdx > 0 ? s.slice(colonIdx + 1) : s;
+        const cleaned = rawId.replace(/main_|crm26_|dist_|lead_|crm25_|master_|compra_/, '');
         if (/^\d+$/.test(cleaned)) return cleaned;
         const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
         return uuidRegex.test(cleaned) ? cleaned : null;
@@ -29,7 +32,9 @@ export function useLeadFollowUp(lead: any, activeTab: string, userName: string) 
     const fetchFollowUps = useCallback(async () => {
         if (!lead?.id) return;
         setLoadingFollowUps(true);
-        const cleanId = lead.id.replace(/main_|crm26_|dist_|master_/, '');
+        const colonIdx = lead.id.indexOf(':');
+        const rawId = colonIdx > 0 ? lead.id.slice(colonIdx + 1) : lead.id;
+        const cleanId = rawId.replace(/main_|crm26_|dist_|master_|compra_/, '');
 
         try {
             await leadService.followUp.markMissedFollowUps(undefined, cleanId);
@@ -55,7 +60,9 @@ export function useLeadFollowUp(lead: any, activeTab: string, userName: string) 
         if (!followUpForm.scheduled_at) return;
         setLoadingFollowUps(true);
         try {
-            const cleanId = lead.id.replace(/main_|crm26_|dist_|master_/, '');
+            const colonIdx = lead.id.indexOf(':');
+            const rawId = colonIdx > 0 ? lead.id.slice(colonIdx + 1) : lead.id;
+            const cleanId = rawId.replace(/main_|crm26_|dist_|master_|compra_/, '');
             
             // Ajuste de Fuso Horário (Brasília -03:00)
             const scheduledAtWithTimezone = followUpForm.scheduled_at.includes('T') && !followUpForm.scheduled_at.includes('-') 

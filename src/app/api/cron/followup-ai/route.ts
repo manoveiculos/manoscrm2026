@@ -4,6 +4,7 @@ import { OpenAI } from 'openai';
 import { sendWhatsApp, isSenderConfigured } from '@/lib/services/whatsappSender';
 import { withHeartbeat } from '@/lib/services/cronHeartbeat';
 import { findMatch, getRecentForPrompt, formatVehicle, getInventory, AltimusVehicle } from '@/lib/services/altimusInventory';
+import { detectClosingIntent, closingMessageFor, lossReasonFor, IntentMessage } from '@/lib/services/conversationIntent';
 
 export const maxDuration = 120;
 
@@ -129,22 +130,36 @@ async function readChatHistory(
     admin: ReturnType<typeof createClient>,
     leadId: string | number,
     limit = 10
-): Promise<string> {
+): Promise<{ text: string; raw: IntentMessage[] }> {
     const leadIdParam: any = typeof leadId === 'number' ? leadId : (/^\d+$/.test(String(leadId)) ? parseInt(String(leadId), 10) : leadId);
-    const { data: msgs } = await admin
-        .from('whatsapp_messages')
+    // Tenta primeiro a view unificada (Arthur+Karol+Vendedor). Fallback p/ tabela base.
+    let msgs: any[] | null = null;
+    const uni = await admin
+        .from('unified_whatsapp_messages')
         .select('direction, message_text, created_at')
-        .eq('lead_id', leadIdParam)
+        .eq('lead_uid', String(leadIdParam))
         .order('created_at', { ascending: false })
         .limit(limit);
+    if (uni.data && uni.data.length > 0) msgs = uni.data;
+    if (!msgs) {
+        const fb = await admin
+            .from('whatsapp_messages')
+            .select('direction, message_text, created_at')
+            .eq('lead_id', leadIdParam)
+            .order('created_at', { ascending: false })
+            .limit(limit);
+        msgs = fb.data || [];
+    }
 
-    if (!msgs || msgs.length === 0) return '';
+    if (!msgs || msgs.length === 0) return { text: '', raw: [] };
 
-    return [...msgs].reverse().map(m => {
+    const text = [...msgs].reverse().map(m => {
         const who = m.direction === 'inbound' ? 'CLIENTE' : 'NÓS';
-        const text = (m.message_text || '').slice(0, 200).replace(/\s+/g, ' ').trim();
-        return text ? `${who}: ${text}` : null;
+        const t = (m.message_text || '').slice(0, 200).replace(/\s+/g, ' ').trim();
+        return t ? `${who}: ${t}` : null;
     }).filter(Boolean).join('\n');
+
+    return { text, raw: msgs as IntentMessage[] };
 }
 
 async function fetchEligibleLeads(admin: ReturnType<typeof createClient>): Promise<LeadReversao[]> {
@@ -277,7 +292,25 @@ async function runReversaoAgent() {
     candidates = leads.length;
     log.push(`🎯 ${candidates} leads elegíveis pra reversão`);
 
+    // Anti-ban WhatsApp: NUNCA dispara em rajada.
+    // - MAX_PER_RUN limita o burst por execução do cron.
+    // - SEND_GAP_MS garante ≥60s entre cada envio dentro da mesma execução.
+    // Com 1 execução/minuto via EasyCron + MAX_PER_RUN=1, o pace é 60s/msg.
+    // Se elevar MAX_PER_RUN, o gap interno protege contra concentração.
+    const MAX_PER_RUN = parseInt(process.env.REVERSAO_MAX_PER_RUN || '1', 10);
+    const SEND_GAP_MS = parseInt(process.env.REVERSAO_SEND_GAP_MS || '60000', 10);
+    const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
+
+    let attemptedSends = 0;
     for (const lead of leads) {
+        if (attemptedSends >= MAX_PER_RUN) {
+            log.push(`⏸️ Anti-ban: limite ${MAX_PER_RUN}/run atingido. Restantes (${leads.length - attemptedSends}) ficam pra próxima execução.`);
+            break;
+        }
+        if (attemptedSends > 0) {
+            log.push(`⏱️ Aguardando ${SEND_GAP_MS / 1000}s antes do próximo envio (anti-ban)`);
+            await sleep(SEND_GAP_MS);
+        }
         try {
             if (!lead.phone) { skipped++; continue; }
 
@@ -285,8 +318,82 @@ async function runReversaoAgent() {
             const strategy = strategyFor(lead.motivo_perda_estruturado);
             const attemptNumber = lead.reversao_attempt_count + 1;
 
-            // Lê histórico
-            const history = await readChatHistory(admin, lead.id, 10);
+            // Lê histórico (texto pro prompt + estrutura crua pro analisador semântico)
+            const { text: history, raw: rawHistory } = await readChatHistory(admin, lead.id, 20);
+
+            // ── Análise Semântica Pré-Disparo (anti-agressividade) ─────────
+            // Se cliente já comprou / pediu pra parar / não tem interesse,
+            // NÃO oferece estoque. Manda mensagem educada de encerramento,
+            // marca o lead como aguardando fechamento humano e sobe pro Inbox
+            // do vendedor com badge.
+            const intentResult = detectClosingIntent(rawHistory);
+            if (intentResult.intent) {
+                const closingMsg = closingMessageFor(intentResult.intent, firstName);
+                let closingSendOk = false;
+                if (isSenderConfigured()) {
+                    attemptedSends++; // conta no throttle anti-ban
+                    const r = await sendWhatsApp({
+                        toPhone: lead.phone,
+                        message: closingMsg,
+                        kind: 'ai_followup',
+                        leadId: String(lead.id),
+                    });
+                    closingSendOk = r.ok;
+                }
+                // Grava a mensagem de encerramento (se enviada) + audit
+                if (closingSendOk) {
+                    await admin.from('whatsapp_messages').insert({
+                        lead_id: lead.id,
+                        direction: 'outbound',
+                        message_text: closingMsg,
+                        message_id: `ai_closure_${Date.now()}`,
+                    }).then(null, () => {});
+                }
+                // Atualiza lead: motivo estruturado + bloqueia futura reversão.
+                // Mantém atendimento_iniciado_em=null para reaparecer na Inbox
+                // como prioridade pro vendedor finalizar manualmente (badge).
+                const updates: Record<string, any> = {
+                    motivo_perda_estruturado: lossReasonFor(intentResult.intent),
+                    diagnostico_atendimento: `[IA-AUTO] Cliente ${intentResult.intent}: "${intentResult.fromMessage.slice(0, 200)}"`,
+                    respondeu_follow_up: true,
+                    flagged_reversao: true,                  // sobe pro topo do Inbox
+                    reversao_attempt_count: 99,              // trava a fila (>=3 já não roda)
+                    reversao_last_attempt_at: new Date().toISOString(),
+                    ai_silence_until: new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString(),
+                };
+                if (lead.table === 'leads_distribuicao_crm_26') updates.atualizado_em = new Date().toISOString();
+                else updates.updated_at = new Date().toISOString();
+                const realIdClose = lead.table === 'leads_distribuicao_crm_26' ? lead.id : String(lead.id);
+                await admin.from(lead.table).update(updates).eq('id', realIdClose).then(null, () => {});
+
+                // Audit trail
+                const isUUIDClose = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(String(lead.id));
+                await admin.from('interactions_manos_crm').insert({
+                    [isUUIDClose ? 'lead_id' : 'lead_id_v1']: String(lead.id),
+                    type: 'ai_intent_detected',
+                    notes: `🛑 INTENT=${intentResult.intent} (match: "${intentResult.matchedText}") — Karol parou. Vendedor precisa finalizar.`,
+                    user_name: 'IA Reversão',
+                    created_at: new Date().toISOString(),
+                }).then(null, () => {});
+
+                // Notifica vendedor pra fechar manualmente
+                if (lead.assigned_consultant_id) {
+                    try {
+                        const { notifyConsultant } = await import('@/lib/services/consultantNotifier');
+                        await notifyConsultant({
+                            consultantId: lead.assigned_consultant_id,
+                            leadId: String(lead.id),
+                            level: 2,
+                            title: `🛑 ${lead.name || 'Cliente'}: ${intentResult.intent === 'comprou_outro' ? 'já comprou outro carro' : intentResult.intent === 'pediu_pra_parar' ? 'pediu pra parar' : 'sem interesse'}`,
+                            message: `Karol detectou e encerrou educadamente. Abra e finalize: "${intentResult.fromMessage.slice(0, 140)}"`,
+                        });
+                    } catch { /* notifier falhou — segue */ }
+                }
+
+                log.push(`🛑 ${lead.name} → INTENT=${intentResult.intent} (${intentResult.matchedText}) — encerramento ${closingSendOk ? 'enviado' : 'gravado sem envio'}`);
+                skipped++;
+                continue;
+            }
 
             // Sem nada de contexto + sem diagnóstico → cobra vendedor antes de mandar
             const semContexto = !history && !lead.diagnostico_atendimento;
@@ -379,6 +486,7 @@ Gere a mensagem de reversão usando a estratégia ${strategy}. Resposta em JSON:
             // Envia
             let sendResult: { ok: boolean; provider: string; error?: string } = { ok: false, provider: 'none' };
             if (isSenderConfigured()) {
+                attemptedSends++; // conta a tentativa antes do envio pro throttle ser estrito
                 sendResult = await sendWhatsApp({
                     toPhone: lead.phone,
                     message: msg,

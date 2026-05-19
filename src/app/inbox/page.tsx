@@ -44,6 +44,7 @@ interface InboxLead {
     flagged_reversao?: boolean | null;
     ultima_interacao_humana?: string | null;
     descarte_financeiro?: boolean | null;
+    diagnostico_atendimento?: string | null;
 }
 
 interface LastMessage {
@@ -202,7 +203,7 @@ export default function InboxPage() {
 
         const query = supabase
             .from(sourceView)
-            .select('uid, table_name, native_id, name, phone, vehicle_interest, source, ai_score, ai_classification, status, updated_at, created_at, proxima_acao, first_contact_channel, assigned_consultant_id, atendimento_iniciado_em, atendimento_iniciado_por, flagged_reversao, ultima_interacao_humana, descarte_financeiro' + (viewMode === 'archived' ? ', archived_at' : ''))
+            .select('uid, table_name, native_id, name, phone, vehicle_interest, source, ai_score, ai_classification, status, updated_at, created_at, proxima_acao, first_contact_channel, assigned_consultant_id, atendimento_iniciado_em, atendimento_iniciado_por, flagged_reversao, ultima_interacao_humana, descarte_financeiro, diagnostico_atendimento' + (viewMode === 'archived' ? ', archived_at' : ''))
             .limit(adminMode ? 300 : 100);
 
         // FILA DE PESCA (V5): Vendedor vê seus leads OU QUALQUER lead sem atendimento iniciado.
@@ -238,6 +239,74 @@ export default function InboxPage() {
             return l.atendimento_iniciado_por === cid;
         });
         const next = (data as InboxLead[]) || [];
+
+        // Buscar veículo_interesse real e carro_troca das tabelas base para evitar recriar views
+        try {
+            const crm26Ids = next.filter(l => l.table_name === 'leads_distribuicao_crm_26').map(l => parseInt(l.native_id, 10)).filter(id => !isNaN(id));
+            const manosIds = next.filter(l => l.table_name === 'leads_manos_crm').map(l => l.native_id);
+            const compraIds = next.filter(l => l.table_name === 'leads_compra').map(l => l.native_id);
+            
+            const promises: Promise<any>[] = [];
+            if (crm26Ids.length > 0) {
+                promises.push(supabase.from('leads_distribuicao_crm_26').select('id, interesse, carro_troca').in('id', crm26Ids));
+            }
+            if (manosIds.length > 0) {
+                promises.push(supabase.from('leads_manos_crm').select('id, vehicle_interest, carro_troca').in('id', manosIds));
+            }
+            if (compraIds.length > 0) {
+                promises.push(supabase.from('leads_compra').select('id, veiculo_original, carro_troca').in('id', compraIds));
+            }
+            
+            if (promises.length > 0) {
+                const results = await Promise.all(promises);
+                const infoMap = new Map<string, { interest: string | null, troca: string | null }>();
+                
+                let idx = 0;
+                if (crm26Ids.length > 0) {
+                    const res = results[idx++];
+                    if (res.data) {
+                        res.data.forEach((item: any) => {
+                            infoMap.set(`leads_distribuicao_crm_26:${item.id}`, {
+                                interest: item.interesse || null,
+                                troca: item.carro_troca || null
+                            });
+                        });
+                    }
+                }
+                if (manosIds.length > 0) {
+                    const res = results[idx++];
+                    if (res.data) {
+                        res.data.forEach((item: any) => {
+                            infoMap.set(`leads_manos_crm:${item.id}`, {
+                                interest: item.vehicle_interest || null,
+                                troca: item.carro_troca || null
+                            });
+                        });
+                    }
+                }
+                if (compraIds.length > 0) {
+                    const res = results[idx++];
+                    if (res.data) {
+                        res.data.forEach((item: any) => {
+                            infoMap.set(`leads_compra:${item.id}`, {
+                                interest: item.veiculo_original || null,
+                                troca: item.carro_troca || null
+                            });
+                        });
+                    }
+                }
+                
+                next.forEach(l => {
+                    const info = infoMap.get(`${l.table_name}:${l.native_id}`);
+                    if (info) {
+                        if (info.interest) l.vehicle_interest = info.interest;
+                        (l as any).carro_troca = info.troca;
+                    }
+                });
+            }
+        } catch (fetchInfoErr) {
+            console.error('[Inbox] erro ao buscar info especifica dos leads:', fetchInfoErr);
+        }
 
         knownIdsRef.current = new Set(next.map(l => l.uid));
         if (!initialLoadDoneRef.current) {
@@ -346,6 +415,14 @@ export default function InboxPage() {
             console.error('Erro ao arquivar lead:', err);
         }
     };
+
+    const handleCaptureSuccess = useCallback((uid: string) => {
+        setLeads(prev => prev.map(l => l.uid === uid ? { 
+            ...l, 
+            atendimento_iniciado_em: new Date().toISOString(), 
+            assigned_consultant_id: consultantId 
+        } : l));
+    }, [consultantId]);
 
     useEffect(() => {
         let alive = true;
@@ -458,36 +535,55 @@ export default function InboxPage() {
     }, [supabase, consultantId, fetchLeads, filter]);
 
     const groups = useMemo(() => {
-        const todayStr = new Date().toDateString();
-        const buckets: Record<Bucket | 'pending', InboxLead[]> = { 
-            fishing: [],
-            reversao: [], 
-            urgent: [], 
-            active: [], 
-            cooling: [], 
-            zombie: [],
-            pending: []
+        const buckets = { 
+            fishing: [] as InboxLead[],
+            reversao: [] as InboxLead[], 
+            waitingReply: [] as InboxLead[], 
+            inConversation: [] as InboxLead[], 
+            cooling: [] as InboxLead[], 
+            zombie: [] as InboxLead[]
         };
 
         for (const lead of leads) {
-            const b = bucketFor(lead);
-            const isToday = new Date(lead.created_at).toDateString() === todayStr;
-            const semAtendimento = !lead.atendimento_iniciado_em;
+            // 1. Fila de pesca: sem atendimento iniciado
+            if (!lead.atendimento_iniciado_em) {
+                buckets.fishing.push(lead);
+                continue;
+            }
 
-            if (b === 'fishing') buckets.fishing.push(lead);
-            else if (b === 'reversao') buckets.reversao.push(lead);
-            else if (semAtendimento && !isToday) buckets.pending.push(lead);
-            else if (semAtendimento && isToday) buckets.urgent.push(lead);
-            else buckets[b].push(lead);
+            // 2. Zumbis: mais de 15 dias sem ação
+            const ageMin = ageMinutes(lead.updated_at, lead.created_at);
+            if (ageMin > ZOMBIE_DAYS * 24 * 60) {
+                buckets.zombie.push(lead);
+                continue;
+            }
+
+            // 3. Reversão: prioridade máxima
+            if (lead.flagged_reversao) {
+                buckets.reversao.push(lead);
+                continue;
+            }
+
+            // Descobrir estado da conversa
+            const msgs = lastMessages.get(lead.uid);
+            const state = getLeadState(lead, msgs?.inbound, msgs?.outbound);
+
+            if (state === 'AGUARDANDO_VENDEDOR') {
+                buckets.waitingReply.push(lead);
+            } else if (ageMin > 48 * 60) {
+                buckets.cooling.push(lead);
+            } else {
+                buckets.inConversation.push(lead);
+            }
         }
 
         return buckets;
-    }, [leads]);
+    }, [leads, lastMessages]);
 
     const counts = {
         reversao: groups.reversao.length,
-        urgent: groups.urgent.length,
-        active: groups.active.length,
+        waitingReply: groups.waitingReply.length,
+        inConversation: groups.inConversation.length,
         cooling: groups.cooling.length,
         zombie: groups.zombie.length,
     };
@@ -568,11 +664,11 @@ export default function InboxPage() {
 
             {filter !== 'archived' && (
                 <div className="flex items-center gap-3 mb-5 text-xs text-gray-400">
-                    <span>🔥 <strong className="text-red-400">{counts.urgent}</strong> urgentes</span>
-                    <span>🌡️ <strong className="text-orange-300">{counts.active}</strong> em conversa</span>
-                    <span>❄️ <strong className="text-blue-300">{counts.cooling}</strong> esfriando</span>
+                    <span>🔥 <strong className="text-red-400">{counts.waitingReply}</strong> responder cliente</span>
+                    <span>💬 <strong className="text-blue-300">{counts.inConversation}</strong> em conversa</span>
+                    <span>❄️ <strong className="text-zinc-500">{counts.cooling}</strong> frios</span>
                     {filter === 'all' && counts.zombie > 0 && (
-                        <span>🪦 <strong className="text-zinc-500">{counts.zombie}</strong> zumbis (mais de {ZOMBIE_DAYS}d)</span>
+                        <span>🪦 <strong className="text-zinc-500">{counts.zombie}</strong> zumbis</span>
                     )}
                 </div>
             )}
@@ -611,7 +707,7 @@ export default function InboxPage() {
                         ))}
                     </ul>
                 )
-            ) : (groups.fishing.length + counts.urgent + counts.active + counts.cooling + counts.zombie === 0) ? (
+            ) : (groups.fishing.length + counts.waitingReply + counts.inConversation + counts.cooling + counts.zombie === 0) ? (
                 <div className="text-gray-400 text-center py-12">
                     <p className="text-lg">Nada na fila.</p>
                     <p className="text-sm mt-1">Boa hora pra prospectar.</p>
@@ -632,6 +728,7 @@ export default function InboxPage() {
                                 expandedUid={expandedUid}
                                 onToggle={setExpandedUid}
                                 onArchive={handleArchive}
+                                onCaptureSuccess={handleCaptureSuccess}
                                 consultantsMap={consultantsMap}
                                 supabase={supabase}
                                 router={router}
@@ -642,7 +739,7 @@ export default function InboxPage() {
                         )}
 
                         <NextActionCard
-                            lead={groups.reversao[0] || groups.urgent[0] || groups.active[0] || null}
+                            lead={groups.reversao[0] || groups.waitingReply[0] || groups.inConversation[0] || null}
                             lastMessages={lastMessages}
                             consultantId={consultantId}
                         />
@@ -650,7 +747,7 @@ export default function InboxPage() {
                         {groups.reversao.length > 0 && (
                             <Section
                                 title="🔥 REVERSÃO BEM-SUCEDIDA"
-                                subtitle="Cliente perdido respondeu — feche AGORA"
+                                subtitle="Cliente perdido respondeu — prioridade máxima"
                                 icon={<Flame className="w-5 h-5 text-pink-400 animate-pulse" />}
                                 accent="border-pink-500 ring-2 ring-pink-500/30 shadow-lg shadow-pink-500/20"
                                 leads={groups.reversao}
@@ -666,26 +763,82 @@ export default function InboxPage() {
                                 isAdmin={isAdmin}
                             />
                         )}
-                        <Section title="Hoje" subtitle="Chegaram agora" icon={<Flame className="w-5 h-5 text-red-500 animate-pulse" />} accent="border-red-600 ring-2 red-500/20 shadow-lg shadow-red-600/20"
-                            leads={groups.urgent} lastMessages={lastMessages} emptyText="Nenhum lead novo hoje." expandedUid={expandedUid} onToggle={setExpandedUid} onArchive={handleArchive} consultantsMap={consultantsMap}
-                            supabase={supabase} router={router} consultantId={consultantId} />
-                        
-                        {(groups as any).pending.length > 0 && (
-                            <Section title="Pendências" subtitle="Leads de dias anteriores sem resposta" icon={<AlertTriangle className="w-5 h-5 text-amber-500" />} accent="border-amber-600"
-                                leads={(groups as any).pending} lastMessages={lastMessages} emptyText="" expandedUid={expandedUid} onToggle={setExpandedUid} onArchive={handleArchive} consultantsMap={consultantsMap}
-                                supabase={supabase} router={router} consultantId={consultantId} />
+
+                        {groups.waitingReply.length > 0 && (
+                            <Section
+                                title="🔥 Responder Cliente"
+                                subtitle="Clientes aguardando seu retorno"
+                                icon={<Flame className="w-5 h-5 text-red-500 animate-pulse" />}
+                                accent="border-red-600 ring-2 ring-red-500/20 shadow-lg shadow-red-600/20"
+                                leads={groups.waitingReply}
+                                lastMessages={lastMessages}
+                                emptyText=""
+                                expandedUid={expandedUid}
+                                onToggle={setExpandedUid}
+                                onArchive={handleArchive}
+                                consultantsMap={consultantsMap}
+                                supabase={supabase}
+                                router={router}
+                                consultantId={consultantId}
+                            />
                         )}
 
-                        <Section title="Em atendimento" subtitle="Conversas ativas" icon={<Thermometer className="w-5 h-5 text-orange-400" />} accent="border-zinc-700"
-                            leads={groups.active} lastMessages={lastMessages} emptyText="Nenhuma conversa ativa." expandedUid={expandedUid} onToggle={setExpandedUid} onArchive={handleArchive} consultantsMap={consultantsMap}
-                            supabase={supabase} router={router} consultantId={consultantId} />
-                        
-                        <Section title="Aguardando" subtitle="Sem resposta há 48h+" icon={<Clock className="w-5 h-5 text-blue-400" />} accent="border-blue-900"
-                            leads={groups.cooling} lastMessages={lastMessages} emptyText="" expandedUid={expandedUid} onToggle={setExpandedUid} onArchive={handleArchive} consultantsMap={consultantsMap}
-                            supabase={supabase} router={router} consultantId={consultantId} />
+                        {groups.inConversation.length > 0 && (
+                            <Section
+                                title="💬 Em Atendimento"
+                                subtitle="Conversas em andamento"
+                                icon={<Thermometer className="w-5 h-5 text-orange-400" />}
+                                accent="border-orange-500"
+                                leads={groups.inConversation}
+                                lastMessages={lastMessages}
+                                emptyText="Nenhuma conversa ativa."
+                                expandedUid={expandedUid}
+                                onToggle={setExpandedUid}
+                                onArchive={handleArchive}
+                                consultantsMap={consultantsMap}
+                                supabase={supabase}
+                                router={router}
+                                consultantId={consultantId}
+                            />
+                        )}
+
+                        {groups.cooling.length > 0 && (
+                            <Section
+                                title="❄️ Leads Frios"
+                                subtitle="Sem interações recentes há mais de 48h"
+                                icon={<Clock className="w-5 h-5 text-blue-400" />}
+                                accent="border-blue-900"
+                                leads={groups.cooling}
+                                lastMessages={lastMessages}
+                                emptyText=""
+                                expandedUid={expandedUid}
+                                onToggle={setExpandedUid}
+                                onArchive={handleArchive}
+                                consultantsMap={consultantsMap}
+                                supabase={supabase}
+                                router={router}
+                                consultantId={consultantId}
+                            />
+                        )}
+
                         {filter === 'all' && groups.zombie.length > 0 && (
-                            <Section title="Zumbis" subtitle={`Mais de ${ZOMBIE_DAYS}d`} icon={<AlertTriangle className="w-5 h-5 text-zinc-500" />} accent="border-zinc-800 opacity-60"
-                                leads={groups.zombie} lastMessages={lastMessages} emptyText="" expandedUid={expandedUid} onToggle={setExpandedUid} onArchive={handleArchive} consultantsMap={consultantsMap} supabase={supabase} router={router} consultantId={consultantId} />
+                            <Section
+                                title="🪦 Zumbis"
+                                subtitle={`Sem atividade há mais de ${ZOMBIE_DAYS} dias`}
+                                icon={<AlertTriangle className="w-5 h-5 text-zinc-500" />}
+                                accent="border-zinc-800 opacity-60"
+                                leads={groups.zombie}
+                                lastMessages={lastMessages}
+                                emptyText=""
+                                expandedUid={expandedUid}
+                                onToggle={setExpandedUid}
+                                onArchive={handleArchive}
+                                consultantsMap={consultantsMap}
+                                supabase={supabase}
+                                router={router}
+                                consultantId={consultantId}
+                                isAdmin={isAdmin}
+                            />
                         )}
                     </div>
                 </PTR>
@@ -724,6 +877,7 @@ interface SectionProps {
     expandedUid: string | null;
     onToggle: (uid: string | null) => void;
     onArchive: (uid: string, e: React.MouseEvent) => void;
+    onCaptureSuccess?: (uid: string) => void;
     consultantsMap?: Map<string, string>;
     supabase: any;
     router: any;
@@ -799,7 +953,7 @@ function NextActionCard({ lead, lastMessages, consultantId }: {
     );
 }
 
-const Section = memo(function Section({ title, subtitle, icon, accent, leads, lastMessages, emptyText, expandedUid, onToggle, onArchive, consultantsMap, supabase, router, consultantId, isAdmin, isFishing }: SectionProps) {
+const Section = memo(function Section({ title, subtitle, icon, accent, leads, lastMessages, emptyText, expandedUid, onToggle, onArchive, onCaptureSuccess, consultantsMap, supabase, router, consultantId, isAdmin, isFishing }: SectionProps) {
     return (
         <section>
             <div className={`flex items-center gap-3 mb-4 pl-3 border-l-4 ${accent}`}>
@@ -821,6 +975,7 @@ const Section = memo(function Section({ title, subtitle, icon, accent, leads, la
                             isExpanded={expandedUid === lead.uid}
                             onToggle={() => onToggle(expandedUid === lead.uid ? null : lead.uid)}
                             onArchive={(e) => onArchive(lead.uid, e)}
+                            onCaptureSuccess={onCaptureSuccess}
                             consultantName={lead.assigned_consultant_id ? consultantsMap?.get(lead.assigned_consultant_id) : undefined}
                             supabase={supabase}
                             router={router}
@@ -835,7 +990,7 @@ const Section = memo(function Section({ title, subtitle, icon, accent, leads, la
     );
 });
 
-const LeadCard = memo(function LeadCard({ lead, messages, isExpanded, onToggle, onArchive, consultantName, supabase, router, consultantId, isAdmin, isFishing }: { lead: InboxLead; messages?: { inbound?: LastMessage, outbound?: LastMessage }; isExpanded: boolean; onToggle: () => void; onArchive: (e: React.MouseEvent) => void; consultantName?: string; supabase: any; router: any; consultantId: string | null; isAdmin?: boolean; isFishing?: boolean }) {
+const LeadCard = memo(function LeadCard({ lead, messages, isExpanded, onToggle, onArchive, onCaptureSuccess, consultantName, supabase, router, consultantId, isAdmin, isFishing }: { lead: InboxLead; messages?: { inbound?: LastMessage, outbound?: LastMessage }; isExpanded: boolean; onToggle: () => void; onArchive: (e: React.MouseEvent) => void; onCaptureSuccess?: (uid: string) => void; consultantName?: string; supabase: any; router: any; consultantId: string | null; isAdmin?: boolean; isFishing?: boolean }) {
     const sla = slaInfo(lead);
     const state = getLeadState(lead, messages?.inbound, messages?.outbound);
     const showMask = isFishing && !isAdmin;
@@ -847,7 +1002,23 @@ const LeadCard = memo(function LeadCard({ lead, messages, isExpanded, onToggle, 
         NUNCA_TOCADO: 'border-orange-500 bg-orange-950/5 ring-1 ring-orange-500/20',
     };
 
-    const reversaoClass = lead.flagged_reversao
+    // Intent flag: lead marcado pela IA como "já comprou" / "pediu pra parar" / etc.
+    // Sinal: diagnostico_atendimento começa com "[IA-AUTO]" ou "[INBOUND-AUTO]".
+    const intentMatch = (() => {
+        const d = lead.diagnostico_atendimento || '';
+        const m = d.match(/^\[(?:IA-AUTO|INBOUND-AUTO)\]\s+Cliente\s+(comprou_outro|sem_interesse|pediu_pra_parar|reclamacao_spam)/i);
+        return m ? (m[1].toLowerCase() as 'comprou_outro' | 'sem_interesse' | 'pediu_pra_parar' | 'reclamacao_spam') : null;
+    })();
+    const intentLabel: Record<string, string> = {
+        comprou_outro:   '🛑 CLIENTE INFORMOU QUE JÁ COMPROU',
+        sem_interesse:   '🛑 CLIENTE SEM INTERESSE',
+        pediu_pra_parar: '🛑 CLIENTE PEDIU PRA PARAR',
+        reclamacao_spam: '🛑 RECLAMAÇÃO DE SPAM',
+    };
+
+    const reversaoClass = intentMatch
+        ? 'border-amber-400 ring-2 ring-amber-400/50 shadow-[0_0_22px_rgba(251,191,36,0.45)]'
+        : lead.flagged_reversao
         ? 'border-pink-500 ring-2 ring-pink-500/40 shadow-[0_0_20px_rgba(236,72,153,0.35)] animate-pulse-soft'
         : '';
 
@@ -858,12 +1029,17 @@ const LeadCard = memo(function LeadCard({ lead, messages, isExpanded, onToggle, 
             <div
                 onClick={onToggle}
                 className={`block border rounded-2xl p-5 transition-all duration-300 relative overflow-hidden active:scale-[0.98] cursor-pointer ${reversaoClass || stateColors[state]} ${isExpanded ? 'ring-2 ring-blue-500/50 bg-zinc-900' : ''}`}>
-                {lead.flagged_reversao && (
+                {intentMatch && (
+                    <div className="absolute -top-1 -right-1 px-2 py-0.5 bg-amber-400 text-black text-[10px] font-black rounded-bl-lg uppercase tracking-wider">
+                        {intentLabel[intentMatch]}
+                    </div>
+                )}
+                {!intentMatch && lead.flagged_reversao && (
                     <div className="absolute -top-1 -right-1 px-2 py-0.5 bg-pink-500 text-white text-[10px] font-black rounded-bl-lg uppercase tracking-wider animate-pulse-glow">
                         🔥 URGENTE: REVERSÃO
                     </div>
                 )}
-                {!lead.flagged_reversao && state === 'AGUARDANDO_VENDEDOR' && (
+                {!intentMatch && !lead.flagged_reversao && state === 'AGUARDANDO_VENDEDOR' && (
                     <div className="absolute -top-1 -right-1 px-2 py-0.5 bg-red-600 text-white text-[10px] font-black rounded-bl-lg uppercase tracking-wider animate-pulse-glow">
                         🚨 URGENTE: RESPONDA
                     </div>
@@ -911,17 +1087,41 @@ const LeadCard = memo(function LeadCard({ lead, messages, isExpanded, onToggle, 
                             <p className="text-sm text-amber-100/40 font-mono tracking-tighter">
                                 (**) *****-****
                             </p>
+                            {lead.vehicle_interest && (
+                                <div className="mt-2 text-xs text-amber-500/80 font-semibold flex items-center gap-1">
+                                    <span>🚗 Interesse:</span>
+                                    <span>{lead.vehicle_interest}</span>
+                                </div>
+                            )}
                             <p className="text-[10px] text-amber-500/60 mt-2 font-medium italic">
                                 Clique em capturar para liberar o WhatsApp
                             </p>
                         </div>
-                    ) : lastMsgText ? (
-                        <p className="text-sm md:text-base text-gray-200 italic leading-relaxed bg-black/20 p-3 rounded-xl border border-white/5 break-words">
-                            <MessageCircle className="inline w-4 h-4 mr-2 text-blue-400" />
-                            "{lastMsgText}"
-                        </p>
                     ) : (
-                        <p className="text-xs text-gray-500 italic px-1 break-words">{lead.vehicle_interest || lead.source || 'Sem mensagens'}</p>
+                        <div className="space-y-2">
+                            {/* Veículos: Interesse + Troca */}
+                            <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-zinc-400 bg-zinc-800/20 p-2 rounded-xl border border-zinc-800/40">
+                                <div className="flex items-center gap-1.5 min-w-0 max-w-full">
+                                    <span className="text-zinc-500">🚗 Interesse:</span>
+                                    <span className="font-semibold text-zinc-200 truncate">{lead.vehicle_interest || 'Não informado'}</span>
+                                </div>
+                                {(lead as any).carro_troca && (lead as any).carro_troca !== '---' && (
+                                    <div className="flex items-center gap-1.5 min-w-0 max-w-full">
+                                        <span className="text-zinc-500">🔄 Troca:</span>
+                                        <span className="font-semibold text-amber-400 truncate italic">{(lead as any).carro_troca}</span>
+                                    </div>
+                                )}
+                            </div>
+
+                            {lastMsgText ? (
+                                <p className="text-sm md:text-base text-gray-200 italic leading-relaxed bg-black/20 p-3 rounded-xl border border-white/5 break-words">
+                                    <MessageCircle className="inline w-4 h-4 mr-2 text-blue-400 shrink-0 font-normal" />
+                                    "{lastMsgText}"
+                                </p>
+                            ) : (
+                                <p className="text-xs text-gray-500 italic px-1 break-words">Sem mensagens recentes · Origem: {lead.source || '—'}</p>
+                            )}
+                        </div>
                     )}
                 </div>
 
@@ -965,6 +1165,7 @@ const LeadCard = memo(function LeadCard({ lead, messages, isExpanded, onToggle, 
                                             });
                                             const data = await res.json();
                                             if (data.success) {
+                                                if (onCaptureSuccess) onCaptureSuccess(lead.uid);
                                                 router.push(`/lead/${encodeURIComponent(lead.uid)}`);
                                             } else {
                                                 alert(`Ops! ${data.error || 'Não foi possível capturar o lead.'}`);

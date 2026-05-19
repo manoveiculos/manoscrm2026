@@ -26,7 +26,9 @@ export function useLeadTimeline(leadId: string | null, leadPhone?: string) {
     setLoading(true);
     const all: TimelineEvent[] = [];
 
-    const cleanId = leadId.replace(/^(main_|crm26_|dist_|lead_|crm25_|master_)/, '');
+    const colonIdx = leadId.indexOf(':');
+    const rawId = colonIdx > 0 ? leadId.slice(colonIdx + 1) : leadId;
+    const cleanId = rawId.replace(/^(main_|crm26_|dist_|lead_|crm25_|master_|compra_)/, '');
     const phoneClean = (leadPhone || '').replace(/\D/g, '');
     const phoneSuffix = phoneClean.slice(-8);
 
@@ -312,7 +314,9 @@ export function useLeadTimeline(leadId: string | null, leadPhone?: string) {
 
   const addNote = async (text: string, userName: string): Promise<boolean> => {
     if (!leadId || !text.trim()) return false;
-    const cleanId = leadId.replace(/^(main_|crm26_|dist_|lead_|crm25_|master_)/, '');
+    const colonIdx = leadId.indexOf(':');
+    const rawId = colonIdx > 0 ? leadId.slice(colonIdx + 1) : leadId;
+    const cleanId = rawId.replace(/^(main_|crm26_|dist_|lead_|crm25_|master_|compra_)/, '');
     const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(cleanId);
 
     const insertData: any = {

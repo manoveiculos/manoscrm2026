@@ -3,6 +3,7 @@ import { createServerClient } from '@supabase/ssr';
 import { pickNextConsultant } from '@/lib/services/consultantService';
 import { scheduleFirstContact } from '@/lib/services/aiSdrService';
 import { notifyLeadArrival } from '@/lib/services/vendorNotifyService';
+import { detectClosingIntent, lossReasonFor } from '@/lib/services/conversationIntent';
 
 // Handler para Verificação do Webhook (GET)
 export async function GET(req: NextRequest) {
@@ -223,6 +224,20 @@ export async function POST(req: NextRequest) {
                 updates.status = 'attempt';
             }
 
+            // ── Detecção de desfecho na própria msg que acabou de chegar ──
+            // Se cliente disse "já comprei" / "pode parar" / etc, flagga o lead
+            // pra Karol nunca mais tentar reversão e sobe pro Inbox com badge.
+            const intentNow = detectClosingIntent([
+                { direction: 'inbound', message_text: messageText, created_at: now }
+            ]);
+            if (intentNow.intent) {
+                updates.motivo_perda_estruturado = lossReasonFor(intentNow.intent);
+                updates.flagged_reversao = true;
+                updates.reversao_attempt_count = 99;
+                updates.ai_silence_until = new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString();
+                updates.diagnostico_atendimento = `[INBOUND-AUTO] Cliente ${intentNow.intent}: "${intentNow.fromMessage.slice(0, 200)}"`;
+            }
+
             await supabase
                 .from(leadTable)
                 .update(updates)
@@ -255,17 +270,16 @@ export async function POST(req: NextRequest) {
         }
 
         // 3. Salva a mensagem no histórico unificado
-        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(String(leadId));
         const msgPayload: any = {
             direction: 'inbound',
             message_text: messageText,
             message_id: messageId || `in_${Date.now()}`
         };
 
-        if (isUUID) {
+        if (leadTable === 'leads_compra') {
             msgPayload.lead_compra_id = leadId;
         } else {
-            msgPayload.lead_id = leadId;
+            msgPayload.lead_id = String(leadId);
         }
 
         const { error: msgInsertError } = await supabase
@@ -273,22 +287,26 @@ export async function POST(req: NextRequest) {
             .insert(msgPayload);
 
         if (msgInsertError) {
-            // Pode falhar se a tabela não tiver sido criada ainda. Vamos logar e seguir, 
-            // ou atualizar o resumo do lead como fallback.
             console.warn('Erro ao inserir em whatsapp_messages (A tabela existe?):', msgInsertError.message);
 
-            // Fallback: Append no resumo do lead temporariamente
-            const { data: currentInfo } = await supabase
-                .from('leads_distribuicao_crm_26')
-                .select('resumo')
-                .eq('id', leadId)
-                .single();
+            // Fallback: Append no resumo do lead temporariamente se a tabela suportar resumo
+            try {
+                if (leadTable !== 'leads_manos_crm') {
+                    const { data: currentInfo } = await supabase
+                        .from(leadTable)
+                        .select('resumo')
+                        .eq('id', leadId)
+                        .single();
 
-            const appendedResumo = `[NOVA MENSAGEM WA]: ${messageText}\n\n${currentInfo?.resumo || ''}`;
-            await supabase
-                .from('leads_distribuicao_crm_26')
-                .update({ resumo: appendedResumo })
-                .eq('id', leadId);
+                    const appendedResumo = `[NOVA MENSAGEM WA]: ${messageText}\n\n${(currentInfo as any)?.resumo || ''}`;
+                    await supabase
+                        .from(leadTable)
+                        .update({ resumo: appendedResumo })
+                        .eq('id', leadId);
+                }
+            } catch (errFallback) {
+                console.error('Erro no fallback de resumo:', errFallback);
+            }
         }
 
         // Dispara a reanálise de IA em background (Fire and Forget) para não prender o Meta Webhook

@@ -103,6 +103,11 @@ export async function POST(req: NextRequest) {
         // que não foi seguida na prática.
         updates.assigned_consultant_id = consultant.id;
 
+        // Sincroniza o nome do vendedor na coluna de texto 'vendedor' para evitar inconsistência de dados
+        if (table === 'leads_distribuicao_crm_26' || table === 'leads_manos_crm' || table === 'leads_master') {
+            updates.vendedor = consultant.name;
+        }
+
         const { error } = await admin.from(table).update(updates).eq('id', realId);
         if (error) {
             console.error('[start-atendimento] update erro:', error);
