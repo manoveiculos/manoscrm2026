@@ -19,6 +19,7 @@ const ALTIMUS_URL = process.env.ALTIMUS_XML_URL ||
 const CACHE_TTL_MS = 30 * 60 * 1000; // 30min
 
 export interface AltimusVehicle {
+    id_externo?: string;
     marca: string;
     modelo: string;
     versao?: string;
@@ -195,6 +196,7 @@ function parseAltimusXml(xml: string): AltimusVehicle[] {
         }
 
         out.push({
+            id_externo: idInterno || undefined,
             marca,
             modelo,
             versao,

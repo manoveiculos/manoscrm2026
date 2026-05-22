@@ -158,299 +158,64 @@ export default function LeadDetailPage() {
     useEffect(() => {
         let alive = true;
         async function load() {
-            // Lê da view unificada — funciona para qualquer tabela origem
-            // Se a view não tiver alguma coluna nova (caso após migration falha),
-            // tentamos primeiro com ai_summary e fazemos retry sem ele.
-            const COLS_FULL = 'uid, table_name, native_id, name, phone, vehicle_interest, source, ai_score, ai_classification, status, proxima_acao, assigned_consultant_id, ai_summary, created_at, atendimento_iniciado_em';
-            const COLS_FALLBACK = 'uid, table_name, native_id, name, phone, vehicle_interest, source, ai_score, ai_classification, status, proxima_acao, assigned_consultant_id, created_at';
+            setLoading(true);
+            setLoadError(null);
+            try {
+                const res = await fetch(`/api/lead/get-unified?uid=${encodeURIComponent(rawId)}`);
+                const data = await res.json();
 
-            let l: any = null;
-            let queryError: string | null = null;
-            const tryQuery = async (cols: string) =>
-                supabase.from('leads_unified')
-                    .select(cols)
-                    .eq('table_name', leadTable)
-                    .eq('native_id', leadId)
-                    .maybeSingle();
+                if (!alive) return;
 
-            const r1 = await tryQuery(COLS_FULL);
-            if (r1.error) {
-                console.warn('[LeadDetail] view sem ai_summary, tentando fallback:', r1.error.message);
-                const r2 = await tryQuery(COLS_FALLBACK);
-                if (r2.error) {
-                    queryError = r2.error.message;
-                } else {
-                    l = r2.data;
-                }
-            } else {
-                l = r1.data;
-            }
-
-            if (!alive) return;
-            if (queryError) {
-                setLoadError(`Erro ao buscar lead: ${queryError}`);
-                setLoading(false);
-                return;
-            }
-
-            const lead: Lead | null = l ? {
-                id: l.native_id,
-                table_name: l.table_name,
-                name: l.name,
-                phone: l.phone,
-                vehicle_interest: l.vehicle_interest,
-                source: l.source,
-                ai_score: l.ai_score,
-                ai_classification: l.ai_classification,
-                status: l.status,
-                proxima_acao: l.proxima_acao,
-                last_scripts_json: null,
-                valor_investimento: null,
-                assigned_consultant_id: l.assigned_consultant_id,
-                ai_summary: l.ai_summary ?? null,
-                created_at: l.created_at ?? null,
-                atendimento_iniciado_em: l.atendimento_iniciado_em ?? null,
-            } : null;
-            setLead(lead);
-            setSoldVehicle(lead?.vehicle_interest || '');
-
-            if (lead) {
-                // Buscar veículo de interesse real e carro_troca da tabela base
-                let realInterest = lead.vehicle_interest;
-                let realTroca = null;
-                try {
-                    if (lead.table_name === 'leads_distribuicao_crm_26') {
-                        const { data: bData } = await supabase
-                            .from('leads_distribuicao_crm_26')
-                            .select('interesse, carro_troca')
-                            .eq('id', parseInt(lead.id, 10))
-                            .maybeSingle();
-                        if (bData) {
-                            if (bData.interesse) realInterest = bData.interesse;
-                            if (bData.carro_troca) realTroca = bData.carro_troca;
-                        }
-                    } else if (lead.table_name === 'leads_manos_crm') {
-                        const { data: bData } = await supabase
-                            .from('leads_manos_crm')
-                            .select('vehicle_interest, carro_troca')
-                            .eq('id', lead.id)
-                            .maybeSingle();
-                        if (bData) {
-                            if (bData.vehicle_interest) realInterest = bData.vehicle_interest;
-                            if (bData.carro_troca) realTroca = bData.carro_troca;
-                        }
-                    } else if (lead.table_name === 'leads_compra') {
-                        const { data: bData } = await supabase
-                            .from('leads_compra')
-                            .select('veiculo_original, carro_troca')
-                            .eq('id', lead.id)
-                            .maybeSingle();
-                        if (bData) {
-                            if (bData.veiculo_original) realInterest = bData.veiculo_original;
-                            if (bData.carro_troca) realTroca = bData.carro_troca;
-                        }
+                if (!res.ok || !data.success) {
+                    if (data.forbidden) {
+                        setLoadError(data.error || 'Acesso negado.');
+                        setLead(null);
+                    } else {
+                        setLoadError(data.error || 'Erro ao carregar dados do lead.');
                     }
-                } catch (err) {
-                    console.warn('[LeadDetail] Erro ao buscar dados específicos do lead:', err);
+                    setLoading(false);
+                    return;
                 }
 
+                const loadedLead = data.lead;
+                setLead(loadedLead);
+                setSoldVehicle(loadedLead?.vehicle_interest || '');
+                setAssignedConsultantName(data.assignedConsultantName || '');
+                setTwinIds(data.twinIds || [String(loadedLead.id)]);
+                setMessages(data.messages || []);
+                setConsultantName(data.consultant?.name || '');
+
+                // Auto-INICIAR atendimento: se vendedor não-admin abriu lead que ainda
+                // não foi tocado, marca como "em atendimento" automaticamente.
+                const isAdminUser = data.consultant?.isAdmin;
+                if (loadedLead && !isAdminUser && data.consultant?.id && !loadedLead.atendimento_iniciado_em) {
+                    fetch('/api/lead/start-atendimento', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ lead_id: loadedLead.id, lead_table: loadedLead.table_name }),
+                    }).then(r => r.json()).then(startData => {
+                        if (startData?.success && startData?.started_at && alive) {
+                            setLead(prev => prev ? { ...prev, atendimento_iniciado_em: startData.started_at } : prev);
+                        }
+                    }).catch(e => console.warn('[LeadDetail] auto-start atendimento falhou:', e?.message));
+                }
+
+            } catch (err: any) {
+                console.error('[LeadDetail] Erro no fetch unificado:', err);
                 if (alive) {
-                    setLead(prev => prev ? {
-                        ...prev,
-                        vehicle_interest: realInterest,
-                        carro_troca: realTroca
-                    } as any : null);
-                    setSoldVehicle(realInterest || '');
+                    setLoadError('Erro ao conectar ao servidor para carregar o lead.');
                 }
-
-                // Buscar nome do consultor atribuído
-                if (lead.assigned_consultant_id) {
-                    try {
-                        const { data: cData } = await supabase
-                            .from('consultants_manos_crm')
-                            .select('name')
-                            .eq('id', lead.assigned_consultant_id)
-                            .maybeSingle();
-                        if (alive && cData?.name) {
-                            setAssignedConsultantName(cData.name);
-                        }
-                    } catch (cErr) {
-                        console.warn('[LeadDetail] Erro ao buscar nome do consultor:', cErr);
-                    }
+            } finally {
+                if (alive) {
+                    setLoading(false);
                 }
             }
-
-            // Unificação V3.7: busca na view + cruza com telefone nas 3 tabelas para
-            // capturar mensagens vinculadas a IDs gêmeos (Arthur/Karol/Vendedor podem
-            // salvar sob lead_id ou lead_compra_id distintos para o mesmo número).
-            const cutoff90d = new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString();
-            const phoneClean = (lead?.phone || '').replace(/\D/g, '');
-            const phoneSuffix = phoneClean.slice(-8);
-            const phoneIsMasked = !!lead?.phone && String(lead.phone).includes('*');
-
-            const uidSet = new Set<string>([String(leadId)]);
-            if (!phoneIsMasked && phoneSuffix.length >= 8) {
-                const [dist, manos, compra] = await Promise.all([
-                    supabase.from('leads_distribuicao_crm_26').select('id').ilike('telefone', `%${phoneSuffix}%`).limit(10),
-                    supabase.from('leads_manos_crm').select('id').ilike('phone', `%${phoneSuffix}%`).limit(10),
-                    supabase.from('leads_compra').select('id').ilike('telefone', `%${phoneSuffix}%`).limit(10),
-                ]);
-                (dist.data || []).forEach((r: any) => uidSet.add(String(r.id)));
-                (manos.data || []).forEach((r: any) => uidSet.add(String(r.id)));
-                (compra.data || []).forEach((r: any) => uidSet.add(String(r.id)));
-            }
-            if (alive) {
-                setTwinIds(Array.from(uidSet));
-            }
-
-            const { data: msgs, error: msgError } = await supabase
-                .from('unified_whatsapp_messages')
-                .select('id, direction, message_text, created_at, message_id')
-                .in('lead_uid', Array.from(uidSet))
-                .gte('created_at', cutoff90d)
-                .order('created_at', { ascending: false })
-                .limit(200);
-            
-            if (msgError) {
-                console.warn('[LeadDetail] Erro ao buscar mensagens:', msgError.message);
-            }
-
-            let allMsgs: any[] = [];
-            if (msgs) {
-                allMsgs = [...msgs];
-            }
-
-            // Busca complementar na concessionaria_mensagens (V1 - IA Lab)
-            try {
-                if (!phoneIsMasked && phoneSuffix.length >= 8) {
-                    // Tenta obter session_id pelo tracking_leads
-                    const { data: trackers } = await supabase
-                        .from('tracking_leads')
-                        .select('details')
-                        .ilike('whatsapp', `%${phoneSuffix}%`)
-                        .order('created_at', { ascending: false })
-                        .limit(1);
-
-                    let sessionId = trackers?.[0]?.details ? (trackers[0].details as any).session_id : null;
-
-                    // Fallback para dados_cliente
-                    if (!sessionId) {
-                        const { data: cli } = await supabase
-                            .from('dados_cliente')
-                            .select('sessionid')
-                            .ilike('telefone', `%${phoneSuffix}%`)
-                            .order('created_at', { ascending: false })
-                            .limit(1);
-                        if (cli?.[0]?.sessionid) sessionId = cli[0].sessionid;
-                    }
-
-                    if (sessionId) {
-                        const { data: cmMsgs } = await supabase
-                            .from('concessionaria_mensagens')
-                            .select('*')
-                            .eq('session_id', sessionId)
-                            .order('data', { ascending: false });
-
-                        if (cmMsgs) {
-                            const detectDirection = (msg: any) => {
-                                const dir = (msg.direction || msg.flow || msg.remetente || msg.message?.type || msg.type || '').toLowerCase();
-                                if (dir.includes('inbound') || dir.includes('received') || dir.includes('incoming') || dir === 'in' || dir === 'cliente' || dir === 'human') return 'inbound';
-                                if (dir.includes('outbound') || dir.includes('sent') || dir.includes('outgoing') || dir === 'out' || dir === 'vendedor' || dir === 'ai') return 'outbound';
-                                if (msg.from_me === true || msg.fromMe === true) return 'outbound';
-                                if (msg.from_me === false || msg.fromMe === false) return 'inbound';
-                                return 'inbound';
-                            };
-
-                            cmMsgs.forEach((msg: any) => {
-                                const dir = detectDirection(msg);
-                                const text = msg.message?.content || msg.message?.text || msg.message?.body || msg.message?.payload?.body || msg.message || '';
-                                if (typeof text === 'string' && text.trim()) {
-                                    let messageId = null;
-                                    if (msg.remetente === 'Arthur') messageId = 'ai_sdr_legacy';
-                                    else if (msg.remetente === 'Karol') messageId = 'ai_followup_legacy';
-                                    
-                                    allMsgs.push({
-                                        id: `cm_${msg.id || Math.random().toString(36).slice(2,8)}`,
-                                        direction: dir,
-                                        message_text: text,
-                                        created_at: msg.data || msg.created_at || new Date().toISOString(),
-                                        message_id: messageId
-                                    });
-                                }
-                            });
-                        }
-                    }
-                }
-            } catch (err) {
-                console.warn('[LeadDetail] Erro ao buscar concessionaria_mensagens:', err);
-            }
-
-            // Ordena as mensagens do mais antigo ao mais recente antes do dedup e render
-            allMsgs.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-
-            // Dedup no client: rejeita msgs com mesmo texto + direção +
-            // janela de 30s. Cobre histórico já duplicado no banco enquanto
-            // sync-messages não é refeito.
-            const seen = new Map<string, number>();
-            const deduped = allMsgs.filter((m: any) => {
-                const text = (m.message_text || '').trim();
-                if (!text) return false;
-                const key = `${m.direction}|${text}`;
-                const ts = new Date(m.created_at).getTime();
-                const lastTs = seen.get(key);
-                if (lastTs && Math.abs(ts - lastTs) < 30_000) return false;
-                seen.set(key, ts);
-                return true;
-            });
-            if (alive) setMessages(deduped);
-
-            // Resolve consultor logado + verifica permissão de acesso ao lead.
-            // Vendedor não-admin só pode abrir lead atribuído a ele.
-            try {
-                const { data: sess } = await supabase.auth.getSession();
-                const auth = { user: sess?.session?.user || null };
-                if (auth?.user) {
-                    const { data: cons } = await supabase
-                        .from('consultants_manos_crm')
-                        .select('id, name, role')
-                        .or(`user_id.eq.${auth.user.id},auth_id.eq.${auth.user.id}`)
-                        .maybeSingle();
-                    if (alive && cons?.name) setConsultantName(cons.name);
-                    // Guard: vendedor não-admin tentando acessar lead de outro
-                    const isAdminUser = (cons as any)?.role === 'admin'
-                        || auth.user.email === 'alexandre_gorges@hotmail.com';
-                    if (!isAdminUser && lead && lead.assigned_consultant_id
-                        && cons?.id && lead.assigned_consultant_id !== cons.id) {
-                        if (alive) {
-                            setLoadError('Você não tem permissão pra acessar este lead. Ele está atribuído a outro vendedor.');
-                            setLead(null);
-                            setLoading(false);
-                        }
-                        return;
-                    }
-
-                    // Auto-INICIAR atendimento: se vendedor abriu lead que ainda
-                    // não foi tocado, marca como "em atendimento" automaticamente.
-                    // Lead sai do Inbox e vai pro Kanban — sem cliques extras.
-                    if (lead && !isAdminUser && cons?.id && !lead.atendimento_iniciado_em) {
-                        fetch('/api/lead/start-atendimento', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ lead_id: lead.id, lead_table: lead.table_name }),
-                        }).then(r => r.json()).then(data => {
-                            if (data?.success && data?.started_at && alive) {
-                                setLead(prev => prev ? { ...prev, atendimento_iniciado_em: data.started_at } : prev);
-                            }
-                        }).catch(e => console.warn('[LeadDetail] auto-start atendimento falhou:', e?.message));
-                    }
-                }
-            } catch {}
-
-            setLoading(false);
         }
-        if (leadId) load();
+        if (rawId) {
+            load();
+        }
         return () => { alive = false; };
-    }, [leadId, leadTable, supabase]);
+    }, [rawId]);
 
     // Realtime: nova msg em whatsapp_messages do lead atual aparece automático
     useEffect(() => {

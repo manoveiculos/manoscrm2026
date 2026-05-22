@@ -1,54 +1,86 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { openai } from '@/lib/aiProviders';
 import { createClient } from '@/lib/supabase/admin';
+import { openai } from '@/lib/aiProviders';
+import { logAiCall } from '@/lib/services/observability';
 
-const supabaseAdmin = createClient();
-
-// POST /api/ai/semantic-search
-// body: { query: string, limit?: number, threshold?: number }
-export async function POST(req: NextRequest) {
+export async function GET(req: NextRequest) {
     try {
-        const { query, limit = 20, threshold = 0.2 } = await req.json();
+        const { searchParams } = new URL(req.url);
+        const query = searchParams.get('query') || '';
+        const limitStr = searchParams.get('limit') || '5';
+        const thresholdStr = searchParams.get('threshold') || '0.25';
 
-        if (!query?.trim()) {
-            return NextResponse.json({ error: 'Query obrigatória' }, { status: 400 });
+        if (!query) {
+            return NextResponse.json({ success: false, error: 'O parâmetro query é obrigatório' }, { status: 400 });
         }
 
-        // Gera embedding da query
-        const embRes = await openai.embeddings.create({
-            model: 'text-embedding-3-small',
-            input: query.trim(),
-        });
-        const queryEmbedding = embRes.data[0].embedding;
+        const limit = parseInt(limitStr, 10);
+        const threshold = parseFloat(thresholdStr);
 
-        // Busca por similaridade via função SQL match_leads_semantic
-        const { data, error } = await supabaseAdmin.rpc('match_leads_semantic', {
+        console.log(`[SemanticSearch] Buscando por: "${query}" (limit=${limit}, threshold=${threshold})...`);
+
+        const startTime = performance.now();
+        let queryEmbedding: number[] | null = null;
+        let embeddingResponse: any = null;
+
+        try {
+            // 1. Gera o embedding da query usando a OpenAI
+            embeddingResponse = await openai.embeddings.create({
+                model: 'text-embedding-3-small',
+                input: query,
+            });
+            queryEmbedding = embeddingResponse.data?.[0]?.embedding;
+        } catch (embError: any) {
+            const latencyMs = Math.round(performance.now() - startTime);
+            logAiCall({
+                model: 'text-embedding-3-small',
+                latencyMs,
+                callerApi: 'semantic-search',
+                status: 'error',
+                errorMessage: embError?.message || 'Erro ao gerar embedding'
+            });
+            throw embError;
+        }
+
+        const latencyMs = Math.round(performance.now() - startTime);
+        const promptTokens = embeddingResponse?.usage?.prompt_tokens || 0;
+        const totalTokens = embeddingResponse?.usage?.total_tokens || promptTokens;
+
+        logAiCall({
+            model: 'text-embedding-3-small',
+            promptTokens,
+            completionTokens: 0,
+            totalTokens,
+            latencyMs,
+            callerApi: 'semantic-search',
+            status: 'success'
+        });
+
+        if (!queryEmbedding) {
+            throw new Error('Falha ao gerar o embedding da busca.');
+        }
+
+        // 2. Chama a RPC match_estoque no Supabase
+        const admin = createClient();
+        const { data: matches, error: rpcError } = await admin.rpc('match_estoque', {
             query_embedding: queryEmbedding,
             match_threshold: threshold,
-            match_count: limit,
+            match_count: limit
         });
 
-        if (error) {
-            // Se a função não existir ainda, retorna lista vazia com flag
-            if (error.message.includes('match_leads_semantic')) {
-                return NextResponse.json({ success: true, results: [], needs_indexing: true });
-            }
-            throw error;
+        if (rpcError) {
+            console.error('[SemanticSearch] Erro ao executar RPC match_estoque:', rpcError);
+            return NextResponse.json({ success: false, error: rpcError.message }, { status: 500 });
         }
-
-        // Verifica se há leads sem embedding (precisa indexar)
-        const { count } = await supabaseAdmin
-            .from('leads_master')
-            .select('id', { count: 'exact', head: true })
-            .is('embedding', null);
 
         return NextResponse.json({
             success: true,
-            results: data || [],        // [{ id: uuid, similarity: float }]
-            unindexed_count: count ?? 0,
+            query,
+            results: matches || []
         });
-    } catch (err: any) {
-        console.error('[semantic-search]', err);
-        return NextResponse.json({ error: err.message }, { status: 500 });
+    } catch (e: any) {
+        console.error('[SemanticSearch] Critical error:', e);
+        return NextResponse.json({ success: false, error: e?.message || 'Internal Server Error' }, { status: 500 });
     }
 }
+
