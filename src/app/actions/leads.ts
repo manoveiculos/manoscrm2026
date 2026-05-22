@@ -45,16 +45,22 @@ export async function updateLeadStatusAction(
         targetStatus = 'lost_redistributed' as any;
 
         try {
+            const selectCols = table === 'leads_distribuicao_crm_26' 
+                ? 'id, dados_brutos, assigned_consultant_id, vendedor, consultants(name)'
+                : 'id, dados_brutos, assigned_consultant_id, consultants(name), primeiro_vendedor';
+
             const { data: currentLead } = await adminClient
                 .from(table)
-                .select('id, dados_brutos, assigned_consultant_id, vendedor, consultants(name)')
+                .select(selectCols)
                 .eq('id', realId)
                 .single();
 
+            const previousVendedor = currentLead?.vendedor || (currentLead as any)?.primeiro_vendedor;
+            
             const meta = {
                 ...(currentLead?.dados_brutos || {}),
-                previous_consultant_id: currentLead?.assigned_consultant_id || currentLead?.vendedor,
-                previous_consultant_name: (currentLead?.consultants as any)?.[0]?.name || currentLead?.vendedor || 'Desconhecido',
+                previous_consultant_id: currentLead?.assigned_consultant_id || previousVendedor,
+                previous_consultant_name: (currentLead?.consultants as any)?.[0]?.name || previousVendedor || 'Desconhecido',
                 lost_at: new Date().toISOString(),
                 redistribution_eligible_at: new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString(),
                 motivo_perda: motivo_perda || 'Não especificado'

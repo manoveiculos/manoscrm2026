@@ -141,6 +141,14 @@ export const LEGACY_STATUS_MAP: Record<string, string> = {
   'lost_redistributed': 'perdido',
 };
 
+// Gera dinamicamente a lista de todos os status (legados e novos) que representam o pipeline ativo (NÃO vendido e NÃO perdido)
+export const ACTIVE_STATUS_LIST = [
+  ...PIPELINE_STAGES.map(s => s.id),
+  ...Object.entries(LEGACY_STATUS_MAP)
+    .filter(([_, normalized]) => normalized !== 'vendido' && normalized !== 'perdido')
+    .map(([legacy]) => legacy)
+];
+
 // Função helper para normalizar qualquer status
 export function normalizeStatus(rawStatus: any): string {
   if (!rawStatus || typeof rawStatus !== 'string') return 'entrada';

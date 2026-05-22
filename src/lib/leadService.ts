@@ -1,6 +1,7 @@
 import { SupabaseClient } from '@supabase/supabase-js';
 import { supabase as defaultSupabase } from './supabase';
 import { Lead, LeadStatus, AIClassification } from './types';
+import { ACTIVE_STATUS_LIST } from '@/constants/status';
 
 // ============ Cache ============
 const _cache = new Map<string, { data: any, expiry: number }>();
@@ -75,7 +76,7 @@ export const leadService = {
         // Colunas lean para pipeline (evita select('*') com 50+ colunas)
         // Colunas que EXISTEM na VIEW 'leads' (fix_view_include_master.sql)
         // Não incluir: plataforma_meta, consultant_name, primeiro_vendedor, churn_probability, next_step, cidade
-        const LEAN_COLS = 'id,name,phone,email,source,origem,status,ai_score,ai_classification,ai_summary,vehicle_interest,assigned_consultant_id,created_at,updated_at,vendedor,proxima_acao,valor_investimento,observacoes,carro_troca,region,source_table';
+        const LEAN_COLS = 'id,name,phone,email,source,origem,status,ai_score,ai_classification,ai_summary,vehicle_interest,assigned_consultant_id,created_at,updated_at,proxima_acao,valor_investimento,observacoes,carro_troca,region,source_table';
 
         try {
             const client = this.getClient(supabase);
@@ -99,12 +100,8 @@ export const leadService = {
                 }
 
                 if (pipelineOnly) {
-                    q = q.in('status', [
-                        'new', 'received', 'entrada', 'novo',
-                        'attempt', 'contacted', 'triagem',
-                        'confirmed', 'scheduled', 'visited', 'ataque',
-                        'test_drive', 'proposed', 'negotiation', 'fechamento'
-                    ]);
+                    // Filter in ALL valid active statuses (including legacy)
+                    q = q.in('status', ACTIVE_STATUS_LIST);
                 } else if (status && status !== 'all') {
                     q = q.eq('status', status);
                 }
@@ -366,7 +363,7 @@ export const leadService = {
         // carro_troca, ai_summary, etc). Sem cache — sempre lê fresco da VIEW.
         const { data, error } = await client
             .from('leads')
-            .select('id, name, phone, email, source, origem, status, ai_score, ai_classification, ai_summary, vehicle_interest, assigned_consultant_id, created_at, updated_at, vendedor, proxima_acao, valor_investimento, observacoes, carro_troca, region, source_table, ai_reason')
+            .select('id, name, phone, email, source, origem, status, ai_score, ai_classification, ai_summary, vehicle_interest, assigned_consultant_id, created_at, updated_at, proxima_acao, valor_investimento, observacoes, carro_troca, region, source_table, ai_reason')
             .eq('id', leadId)
             .maybeSingle();
 

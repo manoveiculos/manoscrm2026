@@ -79,7 +79,7 @@ export const ListRow = ({
                 {/* Seção de Consultor */}
                 <div className="hidden lg:block w-40 shrink-0">
                     <div className="flex flex-col">
-                        <span className="text-sm font-bold text-white/70 uppercase">{lead.consultants_manos_crm?.name?.split(' ')[0] || 'Aguardando'}</span>
+                        <span className="text-sm font-bold text-white/70 uppercase">{lead.consultants_manos_crm?.name?.split(' ')[0] || lead.consultant_name?.split(' ')[0] || lead.vendedor?.split(' ')[0] || lead.primeiro_vendedor?.split(' ')[0] || 'Aguardando'}</span>
                         <span className="text-[8px] text-white/10 uppercase font-black tracking-[0.2em] mt-1">Responsável</span>
                     </div>
                 </div>
