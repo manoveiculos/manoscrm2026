@@ -211,6 +211,11 @@ export default function InboxPage() {
             query.or(`assigned_consultant_id.eq.${cid},atendimento_iniciado_em.is.null`);
         }
 
+        // ADMIN: mostra apenas leads SEM vendedor designado (fila livre, sem dono)
+        if (adminMode && viewMode === 'active') {
+            query.is('assigned_consultant_id', null);
+        }
+
         if (viewMode === 'active') query.eq('descarte_financeiro', false);
 
         if (filter === 'today' && viewMode === 'active') {
@@ -233,6 +238,7 @@ export default function InboxPage() {
             console.error('[Inbox] fetchLeads erro:', leadsErr.message, leadsErr.details);
         }
 
+        // Para admin: já filtrado no banco (sem vendedor). Para vendedores: filtra pela ownership.
         const data = adminMode ? (rawData || []) : (rawData || []).filter((l: any) => {
             if (l.flagged_reversao) return true;
             if (!l.atendimento_iniciado_em || !l.atendimento_iniciado_por) return true;

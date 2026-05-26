@@ -58,7 +58,7 @@ Fico no aguardo!`;
 
   return (
     <div 
-      className="fixed inset-0 bg-black/60 backdrop-blur-xs z-[100] flex justify-end"
+      className="fixed top-[120px] left-0 right-0 bottom-0 bg-black/60 backdrop-blur-xs z-[100] flex justify-end"
       onClick={onClose}
     >
       <div 

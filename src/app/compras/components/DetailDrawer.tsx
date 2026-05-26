@@ -50,7 +50,7 @@ export const DetailDrawer: React.FC<DetailDrawerProps> = ({ isOpen, onClose, opp
   const formattedAsk = opp.ask_price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
 
   return (
-    <div className="fixed inset-0 z-45 flex justify-end bg-black/60 backdrop-blur-sm">
+    <div className="fixed top-[120px] left-0 right-0 bottom-0 z-45 flex justify-end bg-black/60 backdrop-blur-sm">
       <div 
         onClick={onClose} 
         className="absolute inset-0 cursor-pointer"
