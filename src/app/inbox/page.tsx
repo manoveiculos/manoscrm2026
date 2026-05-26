@@ -416,6 +416,40 @@ export default function InboxPage() {
         }
     };
 
+    const handleCleanupStale = async () => {
+        const days = 5;
+        const fishingCount = groups.fishing.filter(l => {
+            const ageMs = Date.now() - new Date(l.created_at).getTime();
+            return ageMs > days * 24 * 60 * 60 * 1000;
+        }).length;
+
+        const ok = confirm(
+            `⚠️ Limpeza do Inbox\n\n` +
+            `Isso vai arquivar TODOS os leads da fila de pesca com mais de ${days} dias sem atendimento.\n\n` +
+            `Estimativa local: ${fishingCount} lead(s) visíveis afetados.\n\n` +
+            `Confirma a limpeza?`
+        );
+        if (!ok) return;
+
+        try {
+            const res = await fetch('/api/lead/cleanup-stale', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ days }),
+            });
+            const result = await res.json();
+            if (res.ok) {
+                alert(`✅ Limpeza concluída!\n${result.archived} lead(s) arquivados com mais de ${days} dias sem atendimento.`);
+                fetchLeads(consultantId, 'active', isAdmin);
+            } else {
+                alert('Erro na limpeza: ' + result.error);
+            }
+        } catch (err) {
+            console.error('[Inbox] cleanup-stale erro:', err);
+            alert('Erro ao executar a limpeza.');
+        }
+    };
+
     const handleCaptureSuccess = useCallback((uid: string) => {
         setLeads(prev => prev.map(l => l.uid === uid ? { 
             ...l, 
@@ -648,6 +682,15 @@ export default function InboxPage() {
                     <span className={`w-2 h-2 rounded-full ${live ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-gray-600'}`} />
                 </div>
                 <div className="flex gap-2 overflow-x-auto no-scrollbar">
+                    {isAdmin && (
+                        <button
+                            onClick={handleCleanupStale}
+                            title="Arquivar leads sem atendimento há mais de 5 dias"
+                            className="min-h-[44px] px-3 py-2 rounded-xl border font-bold transition-all active:scale-95 whitespace-nowrap bg-red-950/60 border-red-800 text-red-400 hover:bg-red-900/80 hover:text-red-300 text-xs"
+                        >
+                            🗑️ Limpar +5d
+                        </button>
+                    )}
                     {([
                         ['priority', 'Foco'],
                         ['today', 'Hoje'],
