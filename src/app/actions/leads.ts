@@ -55,12 +55,13 @@ export async function updateLeadStatusAction(
                 .eq('id', realId)
                 .single();
 
-            const previousVendedor = currentLead?.vendedor || (currentLead as any)?.primeiro_vendedor;
+            const leadData = currentLead as any;
+            const previousVendedor = leadData?.vendedor || leadData?.primeiro_vendedor;
             
             const meta = {
-                ...(currentLead?.dados_brutos || {}),
-                previous_consultant_id: currentLead?.assigned_consultant_id || previousVendedor,
-                previous_consultant_name: (currentLead?.consultants as any)?.[0]?.name || previousVendedor || 'Desconhecido',
+                ...(leadData?.dados_brutos || {}),
+                previous_consultant_id: leadData?.assigned_consultant_id || previousVendedor,
+                previous_consultant_name: leadData?.consultants?.[0]?.name || previousVendedor || 'Desconhecido',
                 lost_at: new Date().toISOString(),
                 redistribution_eligible_at: new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString(),
                 motivo_perda: motivo_perda || 'Não especificado'
