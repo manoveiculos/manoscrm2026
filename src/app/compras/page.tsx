@@ -84,8 +84,8 @@ function ComprasContent() {
   const allowedTabIds = role === 'admin'
     ? ['radar', 'calculator', 'facebook', 'alerts', 'import', 'admin']
     : (userEmail?.toLowerCase() === 'hgledra@hotmail.com'
-        ? ['radar', 'calculator', 'facebook']
-        : ['radar', 'calculator']);
+        ? ['radar', 'calculator', 'facebook', 'alerts']
+        : ['radar', 'calculator', 'alerts']);
 
   // Força vendedor a ficar apenas nas abas permitidas
   useEffect(() => {
