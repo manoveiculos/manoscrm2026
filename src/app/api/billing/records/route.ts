@@ -23,7 +23,7 @@ export async function POST(req: Request) {
   try {
     const record = await req.json();
     if (!record.id) {
-      record.id = `rec-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      record.id = `rec-${crypto.randomUUID()}`;
     }
 
     const supabase = createAdminClient();

@@ -868,8 +868,8 @@ export default function BillingPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-800/40">
-                    {queueStatus.queueList.map((item: any) => (
-                      <tr key={item.id} className="hover:bg-zinc-800/10 transition-colors">
+                    {queueStatus.queueList.map((item: any, idx: number) => (
+                      <tr key={`${item.id}-${idx}`} className="hover:bg-zinc-800/10 transition-colors">
                         <td className="p-3 font-mono font-bold text-zinc-500">{item.addedAt}</td>
                         <td className="p-3 font-bold text-white uppercase">{item.nome}</td>
                         <td className="p-3 font-mono text-zinc-400">{item.telefone}</td>

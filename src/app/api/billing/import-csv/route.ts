@@ -26,7 +26,7 @@ export async function POST(req: Request) {
     const currentList = currentRecords || [];
 
     const parsedInserts = records.map((rec: any, idx: number) => {
-      const id = rec.id || `csv-${Date.now()}-${idx}-${Math.floor(Math.random() * 1000)}`;
+      const id = rec.id || `csv-${Date.now()}-${idx}-${crypto.randomUUID().slice(0, 8)}`;
       return {
         id,
         clienteFornecedor: rec.clienteFornecedor || 'Consumidor Final',

@@ -251,7 +251,7 @@ export async function processNextQueueItem() {
       queue.shift(); // Remove from queue
 
       const logEntry: WebhookLog = {
-        id: `log-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        id: `log-${crypto.randomUUID()}`,
         timestamp: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
         nome: item.nome,
         telefone: item.telefone,
@@ -286,7 +286,7 @@ export async function processNextQueueItem() {
       setLastDispatchTime(`${new Date().toLocaleTimeString('pt-BR')} (Webhook enviado, verificando em 1m: ${item.nome})`);
 
       // Cria log inicial PENDENTE na memória (será atualizado após 1 minuto)
-      const pendingLogId = `log-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      const pendingLogId = `log-${crypto.randomUUID()}`;
       addWebhookLog({
         id: pendingLogId,
         timestamp: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
@@ -351,7 +351,7 @@ export async function processNextQueueItem() {
       queue.shift();
 
       const logEntry: WebhookLog = {
-        id: `log-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        id: `log-${crypto.randomUUID()}`,
         timestamp: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
         nome: item.nome,
         telefone: item.telefone,
@@ -370,7 +370,7 @@ export async function processNextQueueItem() {
     queue.shift();
 
     const logEntry: WebhookLog = {
-      id: `log-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      id: `log-${crypto.randomUUID()}`,
       timestamp: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
       nome: item.nome,
       telefone: item.telefone,

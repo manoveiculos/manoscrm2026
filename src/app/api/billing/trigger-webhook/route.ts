@@ -30,7 +30,7 @@ export async function POST(req: Request) {
 
       if (match && match.length > 0) {
         addWebhookLog({
-          id: `log-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+          id: `log-${crypto.randomUUID()}`,
           timestamp: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
           nome,
           telefone,
@@ -52,7 +52,7 @@ export async function POST(req: Request) {
     }
 
     const logEntry: any = {
-      id: `log-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      id: `log-${crypto.randomUUID()}`,
       timestamp: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
       nome,
       telefone,

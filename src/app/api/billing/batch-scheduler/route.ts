@@ -171,7 +171,7 @@ export async function POST(req: Request) {
 
 
         billingQueue.push({
-          id: `q-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+          id: `q-${crypto.randomUUID()}`,
           recordId: rec.id,
           nome: rec.clienteFornecedor,
           telefone: rec.telefone,

@@ -378,7 +378,7 @@ export async function importCsvRecords(newRecords: Omit<BillingRecord, 'id' | 's
     
     return {
       ...rec,
-      id: `csv-${Date.now()}-${idx}-${Math.floor(Math.random() * 1000)}`,
+      id: `csv-${Date.now()}-${idx}-${crypto.randomUUID().slice(0, 8)}`,
       status,
       observacoes: 'Importado de planilha CSV.'
     };

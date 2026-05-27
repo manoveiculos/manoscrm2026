@@ -13,7 +13,7 @@ export async function POST(req: Request) {
 
     // Append to memory webhook log history
     addWebhookLog({
-      id: `confirm-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      id: `confirm-${crypto.randomUUID()}`,
       timestamp: timestampBr,
       nome: `${cliente || 'WhatsApp'} (${status === 'ERRO' ? 'Erro' : 'Entregue'})`,
       telefone: telefone || '',
