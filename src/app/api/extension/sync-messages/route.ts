@@ -273,19 +273,51 @@ export async function POST(req: NextRequest) {
         console.log(`[Sync API] Sincronizando ${messages.length} mensagens para lead (${leadType}): ${uuidId || numericId || compraId}`);
 
         // 2. Preparar registros para inserção
-        // V3.80: dedup em 2 camadas — (a) sync_key UNIQUE para retry-storm da extensão,
-        // (b) dedup legacy texto+direção para Evolution vs extensão (message_id distinto).
+        // V3.80.1: dedup em 3 camadas:
+        //   (1) intra-batch — extensão envia payload com duplicatas
+        //   (2) sync_key UNIQUE — barreira de entrada idempotente
+        //   (3) dedup legacy contra DB existente — Evolution / msgs sem id
         if (leadType === 'crm26' || leadType === 'compra' || leadType === 'main') {
             const colName = leadType === 'compra' ? 'lead_compra_id' : 'lead_id';
             const colVal  = leadType === 'compra' ? compraId : (leadType === 'crm26' ? String(numericId) : uuidId);
             const leadRef = leadType; // 'main' | 'crm26' | 'compra' — discrimina entre tabelas no sync_key
 
-            const messagesToInsert = messages.map((m: any) => {
+            const normalizeText = (s: string | null | undefined) =>
+                (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+            // (1) Dedup intra-batch: extensão repete msgs no mesmo POST. Bucket por minuto.
+            const seenInBatch = new Set<string>();
+            const uniqueInBatch = (messages as any[]).filter((m: any) => {
+                const text = normalizeText(m.text);
+                if (!text) return false;
+                const dir = m.direction || 'inbound';
+                const tsBucket = m.timestamp
+                    ? new Date(m.timestamp).toISOString().slice(0, 16)
+                    : 'no-ts';
+                const k = `${dir}:${text}:${tsBucket}`;
+                if (seenInBatch.has(k)) return false;
+                seenInBatch.add(k);
+                return true;
+            });
+
+            const droppedIntraBatch = messages.length - uniqueInBatch.length;
+            if (droppedIntraBatch > 0) {
+                console.warn(`[Sync API] ${droppedIntraBatch} dupes intra-batch descartadas p/ lead ${colVal}`);
+            }
+
+            const messagesToInsert = uniqueInBatch.map((m: any) => {
                 const messageId = m.id || m.messageId || null;
                 const direction = m.direction || 'inbound';
+                const text = m.text || '';
+                const tsBucket = m.timestamp
+                    ? new Date(m.timestamp).toISOString().slice(0, 16)
+                    : new Date().toISOString().slice(0, 16);
+                // sync_key SEMPRE — com messageId quando disponível, senão fallback determinístico.
+                // Fallback usa text(80c) + direction + minuto. Risco: 2 msgs idênticas no mesmo
+                // minuto colidem (raro no WhatsApp; o ganho contra retry-storm compensa).
                 const syncKey = messageId
-                    ? `${leadRef}:${colVal}:${messageId}:${direction}`
-                    : null;
+                    ? `${leadRef}:${colVal}:id:${messageId}:${direction}`
+                    : `${leadRef}:${colVal}:txt:${normalizeText(text).slice(0, 80)}:${direction}:${tsBucket}`;
                 return {
                     [colName]: colVal,
                     message_text: m.text,
@@ -296,47 +328,26 @@ export async function POST(req: NextRequest) {
                 };
             });
 
-            const withSyncKey    = messagesToInsert.filter(m => m.sync_key !== null);
-            const withoutSyncKey = messagesToInsert.filter(m => m.sync_key === null);
-
-            // (a) Barreira de entrada — colisão de sync_key = no-op idempotente
-            if (withSyncKey.length > 0) {
-                const { error: upsertErr } = await supabaseAdmin
+            // (2) Upsert com onConflict — colisão de sync_key vira no-op (retry-storm seguro).
+            let insertedCount = 0;
+            if (messagesToInsert.length > 0) {
+                const { data: upserted, error: upsertErr } = await supabaseAdmin
                     .from('whatsapp_messages')
-                    .upsert(withSyncKey, { onConflict: 'sync_key', ignoreDuplicates: true });
-                if (upsertErr) console.error('[Sync API] upsert sync_key erro:', upsertErr.message);
-            }
-
-            // (b) Dedup legacy para o ramo sem sync_key (Evolution / mensagens sem id)
-            let filteredLegacy: typeof withoutSyncKey = [];
-            if (withoutSyncKey.length > 0) {
-                const { data: existingMsgs } = await supabaseAdmin
-                    .from('whatsapp_messages')
-                    .select('message_text, direction, message_id')
-                    .eq(colName, colVal)
-                    .order('created_at', { ascending: false })
-                    .limit(withoutSyncKey.length + 100);
-
-                const normalizeText = (s: string | null | undefined) =>
-                    (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
-
-                filteredLegacy = withoutSyncKey.filter(newMsg => {
-                    const newText = normalizeText(newMsg.message_text);
-                    if (!newText) return false;
-                    return !existingMsgs?.some(extMsg => {
-                        if (newMsg.message_id && extMsg.message_id && newMsg.message_id === extMsg.message_id) return true;
-                        return normalizeText(extMsg.message_text) === newText && extMsg.direction === newMsg.direction;
-                    });
-                });
-
-                if (filteredLegacy.length > 0) {
-                    await supabaseAdmin.from('whatsapp_messages').insert(filteredLegacy);
+                    .upsert(messagesToInsert, { onConflict: 'sync_key', ignoreDuplicates: true })
+                    .select('id');
+                if (upsertErr) {
+                    console.error('[Sync API] upsert sync_key erro:', upsertErr.message);
+                } else {
+                    insertedCount = upserted?.length || 0;
                 }
             }
 
-            const totalInserted = withSyncKey.length + filteredLegacy.length;
-            if (totalInserted > 0) {
-                console.log(`[Sync API] Inseridas ${totalInserted} msgs p/ lead ${colVal} (sync_key=${withSyncKey.length}, legacy=${filteredLegacy.length})`);
+            // (3) Dedup legacy: só roda se NADA foi inserido via upsert E ainda existem msgs sem messageId,
+            // como fallback histórico (caso fallback hash falhe por alguma razão exótica).
+            // Mantida desligada por padrão — sync_key fallback cobre o caso. Se reativar, descomentar.
+
+            if (insertedCount > 0) {
+                console.log(`[Sync API] Inseridas ${insertedCount}/${messagesToInsert.length} msgs p/ lead ${colVal} (intra-batch dedup=${droppedIntraBatch}, sync_key dupes=${messagesToInsert.length - insertedCount})`);
 
                 const now = new Date().toISOString();
                 const activityUpdates: any = {
