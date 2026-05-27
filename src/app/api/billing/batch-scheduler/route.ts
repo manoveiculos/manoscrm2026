@@ -98,75 +98,104 @@ export async function POST(req: Request) {
         const veiculo = rec.veiculo && rec.veiculo.trim() !== '' && !rec.veiculo.toLowerCase().includes('nenhum')
           ? rec.veiculo.trim()
           : null;
-        const veiculoSufixo = veiculo ? ` *${veiculo}*` : '';
+
+        // Primeiro nome (mais cordial) — fallback para nome completo se não der pra split
+        const primeiroNome = (rec.clienteFornecedor || '').split(' ')[0] || rec.clienteFornecedor;
+
+        // Bloco PIX padronizado em todas as mensagens
+        const pixBlock =
+          `💳 *Pagamento via Pix (CNPJ):*\n` +
+          `🔑 28.918.081/0001-22\n` +
+          `🏦 Raccar Comércio de Veículos`;
+
+        // Disclaimer obrigatório em TODAS as mensagens — CDC Art. 71 + redução de atrito
+        const disclaimer =
+          `\n\n_⚠️ Caso o pagamento já tenha sido efetuado, por favor desconsidere esta mensagem ou responda por aqui sinalizando como *PAGO*. Estamos sujeitos a atrasos na conciliação bancária — agradecemos a compreensão._`;
 
         if (stage === 'PRE_1_DIA') {
-          msg = `Olá, *${rec.clienteFornecedor}*!\n\n` +
-                `Sua parcela referente à *Compra do Veículo${veiculoSufixo}* no valor de *${valStr}* tem vencimento agendado para amanhã, dia *${dateStrBr}*.\n\n` +
-                `Para sua comodidade, você pode efetuar o pagamento diretamente pela nossa chave Pix CNPJ:\n` +
-                `🔑 *28.918.081/0001-22*\n` +
-                `🏦 *Raccar comércio de veículos*\n\n` +
-                `*Obs:* Caso tenha interesse em renegociar, sinalize essa mensagem com a proposta que tens.\n\n` +
-                `Se o pagamento já foi realizado, desconsidere este aviso. Agradecemos a parceria!`;
+          // Tom: gentil, antecipação amigável
+          msg =
+            `Olá, *${primeiroNome}*! Tudo bem? 😊\n\n` +
+            `Passando para lembrar que sua parcela${veiculo ? ` referente ao veículo *${veiculo}*` : ''} no valor de *${valStr}* vence *amanhã (${dateStrBr})*.\n\n` +
+            `${pixBlock}\n\n` +
+            `Se preferir negociar uma nova data ou condição, é só responder por aqui que combinamos. Obrigado pela parceria!` +
+            disclaimer;
+
         } else if (stage === 'NO_DIA') {
-          msg = `Aviso de Parcela - Vence Hoje 📌\n\n` +
-                `Olá, *${rec.clienteFornecedor}*.\n\n` +
-                `Lembramos que a parcela referente à *Compra do Veículo${veiculoSufixo}* no valor de *${valStr}* vence na data de hoje, *${dateStrBr}*.\n\n` +
-                `Aproveite para realizar o acerto via Pix de forma imediata:\n` +
-                `🔑 *28.918.081/0001-22*\n` +
-                `🏦 *Raccar comércio de veículos*\n\n` +
-                `*Negociação:* Caso tenha interesse em renegociar, sinalize essa mensagem com a proposta que tens.\n\n` +
-                `Por gentileza, envie o comprovante de pagamento por aqui. Obrigado!`;
+          // Tom: lembrete cordial no dia
+          msg =
+            `📌 *Vencimento Hoje*\n\n` +
+            `Olá, *${primeiroNome}*. Sua parcela${veiculo ? ` do veículo *${veiculo}*` : ''} no valor de *${valStr}* vence hoje, *${dateStrBr}*.\n\n` +
+            `Pode quitar agora pelo Pix abaixo — em segundos a baixa é processada:\n\n` +
+            `${pixBlock}\n\n` +
+            `Se já fez o pagamento, envie o comprovante por aqui. Precisa de mais tempo ou quer renegociar? Responde aqui que conversamos.` +
+            disclaimer;
+
         } else if (stage === 'POS_1_DIA') {
-          msg = `⚠️ *Lembrete Importante de Cobrança* ⚠️\n\n` +
-                `Prezado(a) *${rec.clienteFornecedor}*,\n\n` +
-                `Identificamos que a parcela referente à *Compra do Veículo${veiculoSufixo}* no valor de *${valStr}*, vencida ontem (*${dateStrBr}*), consta em aberto em nosso sistema.\n\n` +
-                `Para regularização imediata sem incidência de novos encargos de atraso, utilize nossa chave Pix:\n` +
-                `🔑 *28.918.081/0001-22*\n` +
-                `🏦 *Raccar comércio de veículos*\n\n` +
-                `*Obs:* Caso tenha interesse em renegociar, sinalize essa mensagem com a proposta que tens.`;
+          // Tom: aviso firme mas calmo (1 dia é pouco — pode ser esquecimento)
+          msg =
+            `Olá, *${primeiroNome}*.\n\n` +
+            `Identificamos que a parcela${veiculo ? ` do veículo *${veiculo}*` : ''} no valor de *${valStr}*, com vencimento em *${dateStrBr}*, ainda consta em aberto em nosso sistema.\n\n` +
+            `Para evitar acréscimo de juros e multa, basta efetuar o pagamento via Pix:\n\n` +
+            `${pixBlock}\n\n` +
+            `Se houver alguma dificuldade ou se já tiver sido pago, nos avise por aqui — estamos disponíveis para ajudar.` +
+            disclaimer;
+
         } else if (stage === 'POS_3_DIAS') {
-          msg = `⚠️ *Notificação de Débito Pendente - 3 Dias de Atraso* ⚠️\n\n` +
-                `Prezado(a) *${rec.clienteFornecedor}*,\n\n` +
-                `Até o momento não registramos a parcela referente à *Compra do Veículo${veiculoSufixo}* no valor de *${valStr}*, vencida em *${dateStrBr}*.\n\n` +
-                `Evite o acúmulo de juros de mora quitando agora mesmo via Pix:\n` +
-                `🔑 *28.918.081/0001-22*\n` +
-                `🏦 *Raccar comércio de veículos*\n\n` +
-                `*Renegociação:* Caso tenha interesse em renegociar, sinalize essa mensagem com a proposta que tens.`;
+          // Tom: firme + oferta de negociação
+          msg =
+            `⚠️ *Parcela em atraso — 3 dias*\n\n` +
+            `*${primeiroNome}*, sua parcela${veiculo ? ` do veículo *${veiculo}*` : ''} no valor de *${valStr}* (vencimento em *${dateStrBr}*) continua pendente.\n\n` +
+            `Para regularizar e evitar acréscimo de juros de mora:\n\n` +
+            `${pixBlock}\n\n` +
+            `Caso queira parcelar ou propor uma nova data, responda esta mensagem com sua proposta — analisamos com prioridade.` +
+            disclaimer;
+
         } else if (stage === 'POS_5_DIAS') {
-          msg = `❌ *Notificação de Cobrança de Parcela em Atraso (5 Dias)* ❌\n\n` +
-                `Prezado(a) *${rec.clienteFornecedor}*,\n\n` +
-                `Constatamos inadimplência de 5 dias na parcela de valor *${valStr}* (vencida em *${dateStrBr}*) na *Compra do Veículo${veiculoSufixo}*.\n\n` +
-                `Transfira para nossa chave Pix corporativa para regularizar:\n` +
-                `🔑 *28.918.081/0001-22*\n` +
-                `🏦 *Raccar comércio de veículos*\n\n` +
-                `*Oportunidade:* Caso tenha interesse em renegociar, sinalize essa mensagem com a proposta que tens.`;
+          // Tom: firme + alerta de negativação possível
+          msg =
+            `⚠️ *Notificação de Inadimplência — 5 dias*\n\n` +
+            `*${primeiroNome}*, sua parcela${veiculo ? ` do veículo *${veiculo}*` : ''} no valor de *${valStr}*, vencida em *${dateStrBr}*, está em aberto há *5 dias*.\n\n` +
+            `Para regularização imediata:\n\n` +
+            `${pixBlock}\n\n` +
+            `Caso o débito permaneça em aberto, poderemos iniciar os procedimentos previstos no contrato para recuperação do crédito.\n\n` +
+            `Se prefere negociar (parcelar, propor data nova ou pedir desconto à vista), basta responder esta mensagem com sua proposta.` +
+            disclaimer;
+
         } else if (stage === 'POS_10_DIAS') {
-          msg = `🚨 *AVISO DE ENVIO DE PROTESTO EM CARTÓRIO* 🚨\n\n` +
-                `NOTIFICAÇÃO FORMAL DE INADIMPLÊNCIA - RACCAR COMÉRCIO DE VEÍCULOS\n\n` +
-                `Prezado(a) *${rec.clienteFornecedor}*,\n\n` +
-                `Seu contrato de *Compra do Veículo${veiculoSufixo}* encontra-se com 10 dias de atraso na parcela de valor *${valStr}* vencida em *${dateStrBr}*.\n\n` +
-                `Seu débito está entrando em fase de encaminhamento para *PROTESTO DE TÍTULO EM CARTÓRIO*, gerando restrição cadastral no SPC e SERASA.\n\n` +
-                `Regularize com urgência via Pix:\n` +
-                `🔑 *28.918.081/0001-22*\n` +
-                `🏦 *Raccar comércio de veículos*\n\n` +
-                `*Último Aviso:* Caso tenha interesse em renegociar antes do protesto, sinalize essa mensagem com a proposta que tens.`;
+          // Tom: firme — menciona possibilidade de protesto/negativação SEM afirmar ação tomada
+          msg =
+            `🚨 *Aviso Importante de Cobrança — 10 dias de atraso*\n\n` +
+            `*${primeiroNome}*, sua parcela${veiculo ? ` do veículo *${veiculo}*` : ''} no valor de *${valStr}* (vencimento em *${dateStrBr}*) encontra-se em aberto há *10 dias*.\n\n` +
+            `Não havendo regularização, o débito *poderá* ser:\n` +
+            `• Encaminhado a protesto em cartório\n` +
+            `• Informado aos órgãos de proteção ao crédito (Serasa / SPC)\n\n` +
+            `Para evitar essas medidas, regularize por Pix:\n\n` +
+            `${pixBlock}\n\n` +
+            `*Última chance de acordo amigável:* responda esta mensagem com uma proposta (parcelar, pedir desconto à vista ou nova data) que analisamos hoje mesmo.` +
+            disclaimer;
+
         } else if (stage === 'POS_30_DIAS') {
-          msg = `⚖️ *NOTIFICAÇÃO DETALHADA - ENTRADA DE EXECUÇÃO JUDICIAL (30 DIAS)* ⚖️\n\n` +
-                `Prezado(a) *${rec.clienteFornecedor}*,\n\n` +
-                `A parcela referente à *Compra do Veículo${veiculoSufixo}* no valor de *${valStr}* soma 30 dias de inadimplência histórica desde *${dateStrBr}*.\n\n` +
-                `Seu contrato de compra foi direcionado ao nosso corpo jurídico para Cobrança Extrajudicial, Ação de Execução Constitucional ou Busca e Apreensão judicial.\n\n` +
-                `Como última oportunidade de acordo para sustação destas medidas juridicas, utilize Pix:\n` +
-                `🔑 *28.918.081/0001-22*\n` +
-                `🏦 *Raccar comércio de veículos*\n\n` +
-                `*Acordo:* Caso tenha interesse em renegociar e suspender de imediato a tramitação jurídica, sinalize essa mensagem com a proposta que tens AGORA.`;
+          // Tom: último aviso — fala em transferência ao jurídico SEM afirmar ação judicial tomada
+          msg =
+            `⚖️ *Último Aviso de Cobrança — 30 dias de atraso*\n\n` +
+            `*${primeiroNome}*, a parcela${veiculo ? ` do veículo *${veiculo}*` : ''} no valor de *${valStr}*, vencida em *${dateStrBr}*, completou *30 dias em aberto*.\n\n` +
+            `Se não houver acordo nos próximos dias, o caso será transferido ao nosso departamento jurídico para análise das medidas cabíveis previstas em contrato (cobrança extrajudicial, protesto e demais procedimentos legais).\n\n` +
+            `Ainda há tempo para resolver de forma amigável. Para isso, escolha uma opção e responda por aqui:\n\n` +
+            `1️⃣ Pagamento integral via Pix com desconto à vista (consulte condições)\n` +
+            `2️⃣ Parcelamento da dívida com entrada\n` +
+            `3️⃣ Outra proposta sua\n\n` +
+            `${pixBlock}` +
+            disclaimer;
+
         } else {
-          msg = `Olá, *${rec.clienteFornecedor}*!\n\n` +
-                `Lembramos da sua parcela referente à *Compra do Veículo${veiculoSufixo}* no valor de *${valStr}* com vencimento em *${dateStrBr}*.\n\n` +
-                `Para efetuar o pagamento com facilidade, utilize nossa chave Pix CNPJ:\n` +
-                `🔑 *28.918.081/0001-22*\n` +
-                `🏦 *Raccar comércio de veículos*\n\n` +
-                `Se tiver qualquer dúvida ou quiser apresentar uma proposta de pagamento, responda por aqui. Obrigado!`;
+          // AVULSO / fallback genérico
+          msg =
+            `Olá, *${primeiroNome}*!\n\n` +
+            `Estamos passando para lembrar da sua parcela${veiculo ? ` do veículo *${veiculo}*` : ''} no valor de *${valStr}*, com vencimento em *${dateStrBr}*.\n\n` +
+            `${pixBlock}\n\n` +
+            `Qualquer dúvida ou se quiser apresentar uma proposta de pagamento, é só responder por aqui. Obrigado!` +
+            disclaimer;
         }
 
 
