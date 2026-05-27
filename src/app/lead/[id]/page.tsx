@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
-import { Trophy, X, CalendarPlus, ArrowLeft, MessageSquare, Activity, Archive, PlayCircle } from 'lucide-react';
+import { Trophy, X, CalendarPlus, ArrowLeft, MessageSquare, Activity, Archive, PlayCircle, Send } from 'lucide-react';
 import { parseUid } from '@/lib/services/unifiedLead';
 import CannedResponses, { CannedContext } from '@/components/CannedResponses';
 import FollowupHistory from '@/components/FollowupHistory';
@@ -141,6 +141,11 @@ export default function LeadDetailPage() {
     const [showSchedule, setShowSchedule] = useState(false);
     const [showArchive, setShowArchive] = useState(false);
     const [archiveReason, setArchiveReason] = useState(ARCHIVE_REASONS[0].v);
+    
+    // Transferência
+    const [showTransfer, setShowTransfer] = useState(false);
+    const [activeConsultants, setActiveConsultants] = useState<any[]>([]);
+    const [targetConsultantId, setTargetConsultantId] = useState('');
 
     // Sold
     const [soldValue, setSoldValue] = useState('');
@@ -253,6 +258,52 @@ export default function LeadDetailPage() {
             .subscribe();
         return () => { supabase.removeChannel(channel); };
     }, [leadId, twinIds, supabase]);
+
+    useEffect(() => {
+        if (!showTransfer) return;
+        async function fetchConsultants() {
+            try {
+                const { data, error } = await supabase
+                    .from('consultants_manos_crm')
+                    .select('id, name')
+                    .eq('is_active', true)
+                    .order('name');
+                if (!error && data) {
+                    setActiveConsultants(data);
+                }
+            } catch (err) {
+                console.error('[LeadDetail] Erro ao carregar consultores:', err);
+            }
+        }
+        fetchConsultants();
+    }, [showTransfer, supabase]);
+
+    async function handleTransfer() {
+        if (!targetConsultantId) return;
+        setSubmitting(true);
+        try {
+            const res = await fetch('/api/lead/transfer', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    lead_id: leadId,
+                    lead_table: leadTable,
+                    target_consultant_id: targetConsultantId,
+                }),
+            });
+            const data = await res.json();
+            if (res.ok && data.success) {
+                setShowTransfer(false);
+                router.push('/atendimento');
+            } else {
+                alert('Erro ao encaminhar lead: ' + (data.error || 'tente novamente'));
+            }
+        } catch (e: any) {
+            alert('Erro de conexão: ' + (e?.message || 'tente novamente'));
+        } finally {
+            setSubmitting(false);
+        }
+    }
 
     async function handleSold() {
         if (!soldValue || !soldPayment) return;
@@ -702,6 +753,17 @@ export default function LeadDetailPage() {
                         </div>
                         <span className="text-xs font-normal opacity-80">Não fecha hoje — vou voltar depois</span>
                     </button>
+
+                    <button
+                        onClick={() => setShowTransfer(true)}
+                        title="Enviar este lead para outro vendedor ou consultor continuar o atendimento."
+                        className="w-full bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 active:scale-[0.98] transition text-white py-5 rounded-xl font-bold text-xl flex flex-col items-center justify-center gap-1 shadow-lg"
+                    >
+                        <div className="flex items-center gap-2">
+                            <Send className="w-6 h-6" /> ENCAMINHAR LEAD
+                        </div>
+                        <span className="text-xs font-normal opacity-80">Enviar para outro consultor</span>
+                    </button>
                     {lead.phone && (
                         <a
                             href={`https://wa.me/${lead.phone.replace(/\D/g, '')}`}
@@ -807,6 +869,33 @@ export default function LeadDetailPage() {
                         className="w-full bg-zinc-700 hover:bg-zinc-600 disabled:bg-gray-800 text-white py-3 rounded font-bold flex items-center justify-center gap-2">
                         <Archive className="w-4 h-4" />
                         {submitting ? 'Arquivando…' : 'CONFIRMAR ARQUIVAMENTO'}
+                    </button>
+                </Modal>
+            )}
+
+            {showTransfer && (
+                <Modal title="Encaminhar para outro Consultor" onClose={() => setShowTransfer(false)}>
+                    <p className="text-sm text-gray-400 mb-3">
+                        Selecione qual consultor/vendedor passará a ser o responsável pelo atendimento deste lead:
+                    </p>
+                    <label className="block text-sm text-gray-300 mb-1">Novo Consultor Responsável *</label>
+                    <select
+                        value={targetConsultantId}
+                        onChange={e => setTargetConsultantId(e.target.value)}
+                        className="w-full p-2 rounded bg-zinc-800 text-white mb-4 border border-zinc-700 text-sm"
+                    >
+                        <option value="">Selecione um consultor...</option>
+                        {activeConsultants.map(c => (
+                            <option key={c.id} value={c.id}>{c.name}</option>
+                        ))}
+                    </select>
+                    <button
+                        disabled={submitting || !targetConsultantId}
+                        onClick={handleTransfer}
+                        className="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 text-white py-3 rounded font-bold transition flex items-center justify-center gap-2"
+                    >
+                        <Send className="w-4 h-4" />
+                        {submitting ? 'Encaminhando…' : 'ENCAMINHAR LEAD'}
                     </button>
                 </Modal>
             )}
