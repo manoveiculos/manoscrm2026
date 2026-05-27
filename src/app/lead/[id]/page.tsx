@@ -263,20 +263,19 @@ export default function LeadDetailPage() {
         if (!showTransfer) return;
         async function fetchConsultants() {
             try {
-                const { data, error } = await supabase
-                    .from('consultants_manos_crm')
-                    .select('id, name')
-                    .eq('is_active', true)
-                    .order('name');
-                if (!error && data) {
-                    setActiveConsultants(data);
+                const res = await fetch('/api/lead/consultants');
+                const data = await res.json();
+                if (res.ok && data.success) {
+                    setActiveConsultants(data.consultants || []);
+                } else {
+                    console.error('[LeadDetail] Erro ao carregar consultores:', data.error);
                 }
             } catch (err) {
-                console.error('[LeadDetail] Erro ao carregar consultores:', err);
+                console.error('[LeadDetail] Erro de rede ao carregar consultores:', err);
             }
         }
         fetchConsultants();
-    }, [showTransfer, supabase]);
+    }, [showTransfer]);
 
     async function handleTransfer() {
         if (!targetConsultantId) return;

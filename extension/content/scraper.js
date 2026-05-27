@@ -55,11 +55,11 @@ const Scraper = {
             }
 
             // 5. Brute force header spans
-            if (hdr) { 
-                for (const s of hdr.querySelectorAll('span,div')) { 
-                    const t=(s.innerText||'').replace(/\D/g,''); 
-                    if(t.length>=10 && t.length<=14 && this._isValid(t)) return this._norm(t); 
-                } 
+            if (hdr) {
+                for (const s of hdr.querySelectorAll('span,div')) {
+                    const t=(s.innerText||'').replace(/\D/g,'');
+                    if(t.length>=10 && t.length<=14 && this._isValid(t)) return this._norm(t);
+                }
             }
 
             // 6. Global scan #main data-id (Último recurso)
@@ -189,44 +189,104 @@ const Scraper = {
     },
 
     extractMessages() {
-        const msgs = [];
-        document.querySelectorAll('.message-in,.message-out,[data-testid="msg-container"],div[data-id^="true_"],div[data-id^="false_"]').forEach(n => {
-            try {
-                const did = n.getAttribute('data-id') || n.querySelector('[data-id]')?.getAttribute('data-id') || n.closest('[data-id]')?.getAttribute('data-id') || '';
-                if(did&&!did.includes('_')) return;
-                const isOut = n.classList.contains('message-out')||n.closest('.message-out')||(did&&did.startsWith('true_'));
-                let txt=''; const tn=n.querySelector('.selectable-text,span.copyable-text');
-                if(tn) txt=tn.innerText||'';
-                else { const ps=[]; n.querySelectorAll('span').forEach(s=>{const t=s.innerText?.trim();if(t&&t.length>0&&!/^\d{1,2}:\d{2}/.test(t))ps.push(t);}); txt=ps.join(' '); }
-                if(!txt?.trim()){const l=n.querySelector('[aria-label]');if(l)txt=`[Mídia: ${l.getAttribute('aria-label')}]`;}
-                txt=txt?.trim();
-                
-                const msgId = did || null;
-                const msgTimestamp = this.extractTimestamp(n) || new Date().toISOString();
-                const rawId = msgId || `${txt}|${isOut?'O':'I'}`;
+        // V3.80.2: dedup HARD por data-id. Seletor único focado em containers reais
+        // (data-id = "true_<jid>_<msgId>" outbound | "false_<jid>_<msgId>" inbound).
+        // Antes combinava .message-in/.message-out/[data-testid="msg-container"] +
+        // div[data-id^=...] → mesmo nó capturado N vezes via closest/querySelector.
+        // Gerava 2-3 duplicatas por msg.
+        const msgs = new Map();
 
-                if(txt&&txt.length>0) msgs.push({
-                    id: msgId,
-                    text:txt.replace(/[\u0000-\u001F]/g,'').replace(/\s+/g,' '),
-                    direction:isOut?'outbound':'inbound',
-                    timestamp:msgTimestamp,
-                    _rawId:rawId
+        document.querySelectorAll('div[data-id^="true_"], div[data-id^="false_"]').forEach(n => {
+            try {
+                const did = n.getAttribute('data-id');
+                if (!did || !did.includes('_')) return;
+                if (msgs.has(did)) return;
+
+                const isOut = did.startsWith('true_');
+
+                let txt = '';
+                const tn = n.querySelector('.selectable-text, span.copyable-text');
+                if (tn) txt = tn.innerText || '';
+                else {
+                    const ps = [];
+                    n.querySelectorAll('span').forEach(s => {
+                        const t = s.innerText?.trim();
+                        if (t && t.length > 0 && !/^\d{1,2}:\d{2}/.test(t)) ps.push(t);
+                    });
+                    txt = ps.join(' ');
+                }
+                if (!txt?.trim()) {
+                    const l = n.querySelector('[aria-label]');
+                    if (l) txt = `[Mídia: ${l.getAttribute('aria-label')}]`;
+                }
+                txt = txt?.trim();
+                if (!txt || txt.length === 0) return;
+
+                msgs.set(did, {
+                    id: did,
+                    text: txt.replace(/[ -]/g, '').replace(/\s+/g, ' '),
+                    direction: isOut ? 'outbound' : 'inbound',
+                    timestamp: this.extractTimestamp(n) || new Date().toISOString(),
                 });
-            } catch(e){}
+            } catch (e) { /* ignora msg corrompida */ }
         });
-        if(!msgs.length){const m=document.querySelector('#main');if(m)m.querySelectorAll('span.copyable-text,.selectable-text span').forEach(s=>{const t=s.innerText?.trim();if(t&&t.length>2)msgs.push({id:null,text:t,direction:'inbound',timestamp:new Date().toISOString(),_rawId:`${t}|I`});});}
-        return msgs;
+
+        // Fallback emergencial: nenhum data-id encontrado (DOM legacy ou bug WA)
+        if (msgs.size === 0) {
+            const main = document.querySelector('#main');
+            if (main) {
+                let synth = 0;
+                main.querySelectorAll('span.copyable-text, .selectable-text span').forEach(s => {
+                    const t = s.innerText?.trim();
+                    if (t && t.length > 2) {
+                        msgs.set(`fallback_${synth++}_${t.slice(0, 24)}`, {
+                            id: null,
+                            text: t,
+                            direction: 'inbound',
+                            timestamp: new Date().toISOString(),
+                        });
+                    }
+                });
+            }
+        }
+
+        // Ordenação cronológica ASC — IA precisa contexto na ordem certa
+        return Array.from(msgs.values()).sort((a, b) => {
+            return new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
+        });
     },
 
-    async getFullMessages(maxScrolls=25) {
-        const map=new Map();
-        const sc=document.querySelector('#main .copyable-area')?.parentElement||document.querySelector('[data-testid="conversation-panel-messages"]')?.closest('div[tabindex]')||Array.from(document.querySelectorAll('#main div')).find(el=>{const s=getComputedStyle(el);return s.overflowY==='scroll'||s.overflowY==='auto';});
-        if(!sc) return this.extractMessages();
-        const merge=()=>this.extractMessages().forEach(m=>map.set(m._rawId,m));
-        merge(); let lh=sc.scrollHeight;
-        for(let i=0;i<maxScrolls;i++){sc.scrollTop=0;await new Promise(r=>setTimeout(r,1200));merge();const nh=sc.scrollHeight;if(nh===lh)break;lh=nh;}
-        sc.scrollTop=sc.scrollHeight;
-        const f=this.extractMessages();
-        return f.length>map.size?f:Array.from(map.values()).map(m=>{delete m._rawId;return m;});
+    async getFullMessages(maxScrolls = 25) {
+        // Map por data-id mantém dedup entre scrolls. No final sort por timestamp.
+        // (scroll-up insere msgs antigas DEPOIS no Map → sem sort sairiam fora de ordem).
+        const merged = new Map();
+        const sc = document.querySelector('#main .copyable-area')?.parentElement
+            || document.querySelector('[data-testid="conversation-panel-messages"]')?.closest('div[tabindex]')
+            || Array.from(document.querySelectorAll('#main div')).find(el => {
+                const s = getComputedStyle(el);
+                return s.overflowY === 'scroll' || s.overflowY === 'auto';
+            });
+        if (!sc) return this.extractMessages();
+
+        const merge = () => this.extractMessages().forEach(m => {
+            const key = m.id || `text:${m.direction}:${m.text}`;
+            if (!merged.has(key)) merged.set(key, m);
+        });
+
+        merge();
+        let lh = sc.scrollHeight;
+        for (let i = 0; i < maxScrolls; i++) {
+            sc.scrollTop = 0;
+            await new Promise(r => setTimeout(r, 1200));
+            merge();
+            const nh = sc.scrollHeight;
+            if (nh === lh) break;
+            lh = nh;
+        }
+        sc.scrollTop = sc.scrollHeight;
+
+        return Array.from(merged.values()).sort((a, b) => {
+            return new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
+        });
     }
 };
