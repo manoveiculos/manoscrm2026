@@ -445,6 +445,14 @@ export default function BillingPage() {
     return isAdmin || isCamila || isAlexandre;
   }, [user, userRole]);
 
+  // Permissão para "Apagar Banco" — Camila NÃO tem
+  const canDeleteDatabase = useMemo(() => {
+    if (!user) return false;
+    const isAdmin = userRole === 'admin';
+    const isAlexandre = user.email === 'alexandre_gorges@hotmail.com';
+    return isAdmin || isAlexandre;
+  }, [user, userRole]);
+
   if (authLoading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh] w-full">
@@ -504,18 +512,22 @@ export default function BillingPage() {
             Faturamento Manual
           </button>
 
-          {/* Botão de Apagar Banco — separado visualmente, perigoso */}
-          <div className="w-px h-6 bg-zinc-800 mx-1" />
-          <button
-            id="btn-apagar-banco"
-            onClick={handleResetProduction}
-            disabled={loading}
-            className="px-4 py-2 bg-red-500/8 hover:bg-red-500/15 border border-red-500/20 hover:border-red-500/40 rounded-xl text-xs font-black text-red-400 hover:text-red-300 transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-40"
-            title="Apaga TODOS os dados de cobrança no Supabase (records, lembretes, WhatsApp, acordos, jurídico, análises IA). Use para começar com cobranças reais do zero."
-          >
-            <Bomb className="w-3.5 h-3.5" />
-            Apagar Banco de Dados
-          </button>
+          {/* Botão de Apagar Banco — só Admin/Alexandre (Camila não vê) */}
+          {canDeleteDatabase && (
+            <>
+              <div className="w-px h-6 bg-zinc-800 mx-1" />
+              <button
+                id="btn-apagar-banco"
+                onClick={handleResetProduction}
+                disabled={loading}
+                className="px-4 py-2 bg-red-500/8 hover:bg-red-500/15 border border-red-500/20 hover:border-red-500/40 rounded-xl text-xs font-black text-red-400 hover:text-red-300 transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-40"
+                title="Apaga TODOS os dados de cobrança no Supabase (records, lembretes, WhatsApp, acordos, jurídico, análises IA). Use para começar com cobranças reais do zero."
+              >
+                <Bomb className="w-3.5 h-3.5" />
+                Apagar Banco de Dados
+              </button>
+            </>
+          )}
         </div>
       </div>
 

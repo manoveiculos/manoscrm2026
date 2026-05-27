@@ -46,6 +46,7 @@ const NAV_ITEMS: NavItem[] = [
     { label: 'Atendimento', icon: PlayCircle, href: '/atendimento' },
     { label: 'Leads', icon: LayoutDashboard, href: '/leads' },
     { label: 'Compras', icon: Radar, href: '/compras' },
+    { label: 'Cobrança', icon: DollarSign, href: '/admin/cobranca', adminOnly: true },
     { label: 'Pipeline', icon: KanbanSquare, href: '/pipeline', adminOnly: true },
     { label: 'Dashboard', icon: BarChart3, href: '/', adminOnly: true },
     { label: 'Conversão', icon: BarChart3, href: '/admin/conversion', adminOnly: true },
@@ -191,7 +192,21 @@ export const NavigationV2 = () => {
                 )}
                 {NAV_ITEMS.filter(item => {
                     const isAdmin = role === 'admin';
-                    if (item.adminOnly && !isAdmin) return false;
+                    const isCamila = user?.email === 'camila.renatta@hotmail.com';
+                    const isAlexandre = user?.email === 'alexandre_gorges@hotmail.com';
+
+                    // Camila tem acesso EXCLUSIVO à Cobrança — esconde tudo o mais
+                    if (isCamila && !isAdmin && !isAlexandre) {
+                        return item.href === '/admin/cobranca';
+                    }
+
+                    if (item.adminOnly) {
+                        if (item.href === '/admin/cobranca') {
+                            if (!isAdmin && !isCamila && !isAlexandre) return false;
+                        } else {
+                            if (!isAdmin && !isAlexandre) return false;
+                        }
+                    }
                     return true;
                 }).map((item) => {
                     const isActive = pathname.startsWith(item.href);
