@@ -4,6 +4,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyExtensionToken } from '@/lib/extensionAuth';
 import { runEliteCloser } from '@/lib/services/ai-closer-service';
 
+export const maxDuration = 30;
+
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
@@ -270,59 +272,78 @@ export async function POST(req: NextRequest) {
 
         console.log(`[Sync API] Sincronizando ${messages.length} mensagens para lead (${leadType}): ${uuidId || numericId || compraId}`);
 
-        // 2. Preparar registros para inserção (Deduplicação Inteligente)
+        // 2. Preparar registros para inserção
+        // V3.80: dedup em 2 camadas — (a) sync_key UNIQUE para retry-storm da extensão,
+        // (b) dedup legacy texto+direção para Evolution vs extensão (message_id distinto).
         if (leadType === 'crm26' || leadType === 'compra' || leadType === 'main') {
             const colName = leadType === 'compra' ? 'lead_compra_id' : 'lead_id';
-            const colVal = leadType === 'compra' ? compraId : (leadType === 'crm26' ? String(numericId) : uuidId);
+            const colVal  = leadType === 'compra' ? compraId : (leadType === 'crm26' ? String(numericId) : uuidId);
+            const leadRef = leadType; // 'main' | 'crm26' | 'compra' — discrimina entre tabelas no sync_key
 
-            const messagesToInsert = messages.map((m: any) => ({
-                [colName]: colVal,
-                message_text: m.text,
-                direction: m.direction,
-                message_id: m.id || m.messageId, // Tenta capturar o ID único do WhatsApp
-                created_at: m.timestamp || new Date().toISOString()
-            }));
-
-            // Deduplicação por ID de mensagem ou Conteúdo+Direção+Recentidade
-            const { data: existingMsgs } = await supabaseAdmin
-                .from('whatsapp_messages')
-                .select('message_text, direction, message_id')
-                .eq(colName, colVal)
-                .order('created_at', { ascending: false })
-                .limit(messagesToInsert.length + 100);
-
-            // Dedup robusta: rejeita se MATCH por message_id OU por
-            // (texto + direção) — Evolution e extensão usam IDs diferentes
-            // pra mesma msg, então só comparar message_id deixava duplicar.
-            const normalizeText = (s: string | null | undefined) => (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
-            const filteredMessages = messagesToInsert.filter(newMsg => {
-                const newText = normalizeText(newMsg.message_text);
-                if (!newText) return false;
-                return !existingMsgs?.some(extMsg => {
-                    // Match por message_id (quando ambos têm)
-                    if (newMsg.message_id && extMsg.message_id && newMsg.message_id === extMsg.message_id) return true;
-                    // Match por texto + direção (cobre Evolution vs extensão)
-                    return normalizeText(extMsg.message_text) === newText
-                        && extMsg.direction === newMsg.direction;
-                });
+            const messagesToInsert = messages.map((m: any) => {
+                const messageId = m.id || m.messageId || null;
+                const direction = m.direction || 'inbound';
+                const syncKey = messageId
+                    ? `${leadRef}:${colVal}:${messageId}:${direction}`
+                    : null;
+                return {
+                    [colName]: colVal,
+                    message_text: m.text,
+                    direction,
+                    message_id: messageId,
+                    sync_key: syncKey,
+                    created_at: m.timestamp || new Date().toISOString(),
+                };
             });
 
-            const duplicatesFiltered = messagesToInsert.length - filteredMessages.length;
-            if (duplicatesFiltered > 0) {
-                console.info(`[Sync-Deduplication] ${duplicatesFiltered} mensagens duplicadas filtradas para o lead ${colVal}`);
+            const withSyncKey    = messagesToInsert.filter(m => m.sync_key !== null);
+            const withoutSyncKey = messagesToInsert.filter(m => m.sync_key === null);
+
+            // (a) Barreira de entrada — colisão de sync_key = no-op idempotente
+            if (withSyncKey.length > 0) {
+                const { error: upsertErr } = await supabaseAdmin
+                    .from('whatsapp_messages')
+                    .upsert(withSyncKey, { onConflict: 'sync_key', ignoreDuplicates: true });
+                if (upsertErr) console.error('[Sync API] upsert sync_key erro:', upsertErr.message);
             }
 
-            if (filteredMessages.length > 0) {
-                await supabaseAdmin.from('whatsapp_messages').insert(filteredMessages);
-                console.log(`[Sync API] Inseridas ${filteredMessages.length} novas msgs p/ lead ${colVal}`);
-                
-                // V3: Atualiza timestamp de atividade manual e BOIA (atualizado_em)
+            // (b) Dedup legacy para o ramo sem sync_key (Evolution / mensagens sem id)
+            let filteredLegacy: typeof withoutSyncKey = [];
+            if (withoutSyncKey.length > 0) {
+                const { data: existingMsgs } = await supabaseAdmin
+                    .from('whatsapp_messages')
+                    .select('message_text, direction, message_id')
+                    .eq(colName, colVal)
+                    .order('created_at', { ascending: false })
+                    .limit(withoutSyncKey.length + 100);
+
+                const normalizeText = (s: string | null | undefined) =>
+                    (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+                filteredLegacy = withoutSyncKey.filter(newMsg => {
+                    const newText = normalizeText(newMsg.message_text);
+                    if (!newText) return false;
+                    return !existingMsgs?.some(extMsg => {
+                        if (newMsg.message_id && extMsg.message_id && newMsg.message_id === extMsg.message_id) return true;
+                        return normalizeText(extMsg.message_text) === newText && extMsg.direction === newMsg.direction;
+                    });
+                });
+
+                if (filteredLegacy.length > 0) {
+                    await supabaseAdmin.from('whatsapp_messages').insert(filteredLegacy);
+                }
+            }
+
+            const totalInserted = withSyncKey.length + filteredLegacy.length;
+            if (totalInserted > 0) {
+                console.log(`[Sync API] Inseridas ${totalInserted} msgs p/ lead ${colVal} (sync_key=${withSyncKey.length}, legacy=${filteredLegacy.length})`);
+
                 const now = new Date().toISOString();
                 const activityUpdates: any = {
                     atendimento_manual_at: now,
-                    respondeu_follow_up: true // Se estamos sincronizando, assumimos que houve interação
+                    respondeu_follow_up: true,
                 };
-                
+
                 if (leadType === 'crm26') {
                     activityUpdates.atualizado_em = now;
                     await supabaseAdmin.from('leads_distribuicao_crm_26').update(activityUpdates).eq('id', numericId);

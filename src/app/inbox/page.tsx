@@ -204,7 +204,7 @@ export default function InboxPage() {
         const query = supabase
             .from(sourceView)
             .select('uid, table_name, native_id, name, phone, vehicle_interest, source, ai_score, ai_classification, status, updated_at, created_at, proxima_acao, first_contact_channel, assigned_consultant_id, atendimento_iniciado_em, atendimento_iniciado_por, flagged_reversao, ultima_interacao_humana, descarte_financeiro, diagnostico_atendimento' + (viewMode === 'archived' ? ', archived_at' : ''))
-            .limit(adminMode ? 300 : 100);
+            .limit(adminMode ? 500 : 300);
 
         // FILA DE PESCA (V5): Vendedor vê seus leads OU QUALQUER lead sem atendimento iniciado.
         if (cid && !adminMode) {
@@ -221,8 +221,7 @@ export default function InboxPage() {
         if (filter === 'today' && viewMode === 'active') {
             const todayStart = new Date();
             todayStart.setHours(0, 0, 0, 0);
-            query.gte('created_at', todayStart.toISOString())
-                 .is('atendimento_iniciado_em', null);
+            query.gte('created_at', todayStart.toISOString());
             query.order('created_at', { ascending: false });
         } else if (filter === 'priority' && viewMode === 'active') {
             query.order('flagged_reversao', { ascending: false });
@@ -605,7 +604,8 @@ export default function InboxPage() {
             }
 
             // Descobrir estado da conversa
-            const msgs = lastMessages.get(lead.uid);
+            // V3.80: map indexado por native_id (m.lead_id), não pelo uid composto.
+            const msgs = lastMessages.get(String(lead.native_id));
             const state = getLeadState(lead, msgs?.inbound, msgs?.outbound);
 
             if (state === 'AGUARDANDO_VENDEDOR') {
@@ -954,7 +954,7 @@ function NextActionCard({ lead, lastMessages, consultantId }: {
         );
     }
 
-    const msgs = lastMessages.get(lead.uid);
+    const msgs = lastMessages.get(String(lead.native_id));
     const lastIn = msgs?.inbound;
     const lastOut = msgs?.outbound;
     const lastMsg = lastIn?.created_at && lastOut?.created_at
@@ -1020,7 +1020,7 @@ const Section = memo(function Section({ title, subtitle, icon, accent, leads, la
                         <LeadCard
                             key={lead.uid}
                             lead={lead}
-                            messages={lastMessages.get(lead.uid)}
+                            messages={lastMessages.get(String(lead.native_id))}
                             isExpanded={expandedUid === lead.uid}
                             onToggle={() => onToggle(expandedUid === lead.uid ? null : lead.uid)}
                             onArchive={(e) => onArchive(lead.uid, e)}
