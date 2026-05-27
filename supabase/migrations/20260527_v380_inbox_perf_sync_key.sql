@@ -34,9 +34,11 @@ DROP INDEX IF EXISTS public.idx_leads_distribuicao_crm_26_created_at;
 ALTER TABLE public.whatsapp_messages
     ADD COLUMN IF NOT EXISTS sync_key TEXT;
 
+-- UNIQUE INDEX completo (não parcial) — PostgREST/supabase-js não consegue
+-- ON CONFLICT em índice parcial. NULLs em sync_key continuam permitidos
+-- porque NULLs são distintos por padrão no Postgres.
 CREATE UNIQUE INDEX IF NOT EXISTS uq_whatsapp_messages_sync_key
-    ON public.whatsapp_messages (sync_key)
-    WHERE sync_key IS NOT NULL;
+    ON public.whatsapp_messages (sync_key);
 
 -- ─── ANALYZE p/ planner usar índices novos imediatamente ─────────────
 ANALYZE public.leads_manos_crm;

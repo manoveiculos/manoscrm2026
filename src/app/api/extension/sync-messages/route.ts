@@ -329,6 +329,8 @@ export async function POST(req: NextRequest) {
             });
 
             // (2) Upsert com onConflict — colisão de sync_key vira no-op (retry-storm seguro).
+            // Requer UNIQUE INDEX simples em sync_key (não parcial) pq supabase-js/PostgREST
+            // não consegue ON CONFLICT em índice parcial.
             let insertedCount = 0;
             if (messagesToInsert.length > 0) {
                 const { data: upserted, error: upsertErr } = await supabaseAdmin
@@ -336,10 +338,17 @@ export async function POST(req: NextRequest) {
                     .upsert(messagesToInsert, { onConflict: 'sync_key', ignoreDuplicates: true })
                     .select('id');
                 if (upsertErr) {
-                    console.error('[Sync API] upsert sync_key erro:', upsertErr.message);
-                } else {
-                    insertedCount = upserted?.length || 0;
+                    console.error('[Sync API] upsert sync_key erro:', upsertErr.message, upsertErr.details);
+                    return NextResponse.json({
+                        success: false,
+                        error: `Falha ao gravar mensagens: ${upsertErr.message}`,
+                        hint: upsertErr.details || null,
+                    }, {
+                        status: 500,
+                        headers: { ...corsHeaders, 'Cache-Control': 'no-store, max-age=0' }
+                    });
                 }
+                insertedCount = upserted?.length || 0;
             }
 
             // (3) Dedup legacy: só roda se NADA foi inserido via upsert E ainda existem msgs sem messageId,
