@@ -37,19 +37,45 @@ export async function POST() {
     const { error: errEnvios } = await supabase
       .from('registro_envios_whatsapp')
       .delete()
-      .neq('id', 0); // deleta todos (neq id 0 = todos os registros)
+      .neq('id', 0);
 
     const { error: errReminders } = await supabase
       .from('reminders_cobrancamanos26')
       .delete()
       .neq('id', 0);
 
+    // Tabelas novas — apagar ANTES dos records (FK CASCADE cobre, mas explícito é mais limpo)
+    const { error: errWhatsApp } = await supabase
+      .from('billing_whatsapp_messages')
+      .delete()
+      .neq('id', '00000000-0000-0000-0000-000000000000');
+
+    const { error: errAcordos } = await supabase
+      .from('billing_acordos')
+      .delete()
+      .neq('id', '00000000-0000-0000-0000-000000000000');
+
+    const { error: errJuridico } = await supabase
+      .from('billing_juridico_envios')
+      .delete()
+      .neq('id', '00000000-0000-0000-0000-000000000000');
+
+    const { error: errAiAnalysis } = await supabase
+      .from('billing_ai_analysis')
+      .delete()
+      .neq('record_id', '__never__');
+
+    const { error: errObs } = await supabase
+      .from('billing_observacoes_gerais')
+      .delete()
+      .neq('id', '00000000-0000-0000-0000-000000000000');
+
     const { error: errRecords } = await supabase
       .from('records_cobrancamanos26')
       .delete()
-      .neq('id', '00000000-0000-0000-0000-000000000000'); // UUID format
+      .neq('id', '__never__');
 
-    const errors = [errEnvios, errReminders, errRecords].filter(Boolean);
+    const errors = [errEnvios, errReminders, errWhatsApp, errAcordos, errJuridico, errAiAnalysis, errObs, errRecords].filter(Boolean);
 
     if (errors.length > 0) {
       console.warn('[reset-production] Avisos ao limpar banco:', errors.map(e => e?.message));
@@ -57,13 +83,18 @@ export async function POST() {
 
     return NextResponse.json({
       success: true,
-      message: 'Setor de cobrança zerado com sucesso! Pronto para produção real.',
+      message: 'Banco de cobrança apagado com sucesso! Pronto para começar do zero.',
       cleared: {
         memoria_fila: true,
         memoria_logs: true,
         banco_registro_envios: !errEnvios,
         banco_reminders: !errReminders,
         banco_records: !errRecords,
+        banco_whatsapp_msgs: !errWhatsApp,
+        banco_acordos: !errAcordos,
+        banco_juridico: !errJuridico,
+        banco_ai_analysis: !errAiAnalysis,
+        banco_observacoes: !errObs,
       }
     });
   } catch (err: any) {

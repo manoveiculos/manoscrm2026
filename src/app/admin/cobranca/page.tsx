@@ -3,9 +3,9 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  Check, AlertCircle, Plus, Info, Sparkles, RefreshCw, RotateCcw, 
+  Check, AlertCircle, Plus, Info, Sparkles, RefreshCw,
   Wallet, History, ShieldAlert, Pause, Upload, Bell, CheckSquare, 
-  ListOrdered, Hourglass, Trash2, ShieldX, Play, Bomb, BarChart3, MessageCircle
+  ListOrdered, Hourglass, Trash2, ShieldX, Play, Bomb, BarChart3, MessageCircle, Brain
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
@@ -27,6 +27,7 @@ import ReminderModal from './components/ReminderModal';
 import BatchFilterModal from './components/BatchFilterModal';
 import ControlePanel from './components/ControlePanel';
 import WhatsAppInbox from './components/WhatsAppInbox';
+import AnaliseIaPanel from './components/AnaliseIaPanel';
 
 interface ToastState {
   message: string;
@@ -42,7 +43,7 @@ export default function BillingPage() {
   const [authLoading, setAuthLoading] = useState(true);
 
   // Nav tab
-  const [activeTab, setActiveTab] = useState<'CONTROLE_CENTRAL' | 'HISTORICO' | 'FILA_ANTISPAM' | 'CONTROLE_RELATORIO' | 'WHATSAPP'>('CONTROLE_CENTRAL');
+  const [activeTab, setActiveTab] = useState<'CONTROLE_CENTRAL' | 'HISTORICO' | 'FILA_ANTISPAM' | 'CONTROLE_RELATORIO' | 'WHATSAPP' | 'ANALISE_IA'>('CONTROLE_CENTRAL');
 
   // Billing Data States
   const [records, setRecords] = useState<BillingRecord[]>([]);
@@ -173,44 +174,26 @@ export default function BillingPage() {
     return () => clearInterval(interval);
   }, [authLoading, user, loadData, loadWebhookLogs, loadQueueStatus]);
 
-  const handleResetToDefault = async () => {
-    if (window.confirm('Deseja restaurar as 121 cobranças originais do arquivo CSV? Suas alterações locais no Supabase serão reiniciadas.')) {
-      setLoading(true);
-      try {
-        localStorage.removeItem('premium_billing_system_records');
-        const res = await fetch('/api/billing/records');
-        if (res.ok) {
-          const data = await res.json();
-          setRecords(data);
-        } else {
-          const data = await fetchBillingRecords();
-          setRecords(data);
-        }
-        showToast('Planilha oficial com 121 lançamentos foi recarregada eficientemente!', 'success');
-      } catch (err) {
-        showToast('Erro ao reiniciar base de faturamentos', 'error');
-      } finally {
-        setLoading(false);
-      }
-    }
-  };
-
   const handleResetProduction = async () => {
     const confirmStep1 = window.confirm(
-      '⚠️ ATENÇãO — AÇÃO IRREVERSÍVEL \n\n' +
-      'Isso irá APAGAR PERMANENTEMENTE:\n' +
-      '• Todas as cobranças cadastradas\n' +
+      '⚠️ ATENÇÃO — AÇÃO IRREVERSÍVEL\n\n' +
+      'Isso irá APAGAR PERMANENTEMENTE do setor de Cobrança:\n' +
+      '• Todas as cobranças cadastradas (records)\n' +
       '• Todo o histórico de envios WhatsApp\n' +
-      '• Todos os lembretes\n' +
+      '• Todas as conversas WhatsApp recebidas\n' +
+      '• Todos os acordos e envios jurídicos\n' +
+      '• Todas as análises IA\n' +
+      '• Todos os lembretes e observações\n' +
       '• A fila anti-spam e logs em memória\n\n' +
+      'O resto do CRM (leads, vendas, etc) NÃO é afetado.\n\n' +
       'Deseja continuar para a confirmação final?'
     );
     if (!confirmStep1) return;
 
     const confirmStep2 = window.prompt(
-      'CONFIRMAÇÃO FINAL\n\nDigite exatamente  CONFIRMAR  para zerar o setor de cobrança e iniciar a produção real:'
+      'CONFIRMAÇÃO FINAL\n\nDigite exatamente  APAGAR  para limpar o banco de cobrança:'
     );
-    if (confirmStep2?.trim() !== 'CONFIRMAR') {
+    if (confirmStep2?.trim() !== 'APAGAR') {
       showToast('Operação cancelada. Nenhum dado foi alterado.', 'info');
       return;
     }
@@ -222,10 +205,10 @@ export default function BillingPage() {
       if (res.ok && data.success) {
         setRecords([]);
         setWebhookLogs([]);
-        showToast('✅ Setor de cobrança zerado! Pronto para produção real.', 'success');
+        showToast('✅ Banco de cobrança apagado! Pronto para começar do zero.', 'success');
         loadQueueStatus();
       } else {
-        showToast(data.error || 'Erro ao zerar o setor de cobrança.', 'error');
+        showToast(data.error || 'Erro ao apagar o banco de cobrança.', 'error');
       }
     } catch (err) {
       showToast('Falha ao conectar ao servidor.', 'error');
@@ -502,26 +485,6 @@ export default function BillingPage() {
         {/* Quick Toolbar */}
         <div className="flex flex-wrap items-center gap-2.5">
           <button
-            onClick={loadData}
-            disabled={loading}
-            className="px-4 py-2 bg-zinc-900 hover:bg-zinc-800/80 border border-zinc-850 rounded-xl text-xs font-bold text-zinc-400 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer shadow-md"
-            title="Sincronizar Supabase"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-violet-400' : ''}`} />
-            Sincronizar
-          </button>
-
-          <button
-            onClick={handleResetToDefault}
-            disabled={loading}
-            className="px-4 py-2 bg-amber-500/5 hover:bg-amber-500/10 border border-amber-500/15 rounded-xl text-xs font-black text-amber-400 transition-all flex items-center gap-1.5 cursor-pointer"
-            title="Restaurar base inicial de 121 faturamentos"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-            Restaurar Original
-          </button>
-
-          <button
             onClick={() => setIsCsvImportOpen(prev => !prev)}
             className={`px-4 py-2 rounded-xl border text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer ${
               isCsvImportOpen 
@@ -541,17 +504,17 @@ export default function BillingPage() {
             Faturamento Manual
           </button>
 
-          {/* Botão de Reset para Produção — separado visualmente */}
+          {/* Botão de Apagar Banco — separado visualmente, perigoso */}
           <div className="w-px h-6 bg-zinc-800 mx-1" />
           <button
-            id="btn-iniciar-producao"
+            id="btn-apagar-banco"
             onClick={handleResetProduction}
             disabled={loading}
             className="px-4 py-2 bg-red-500/8 hover:bg-red-500/15 border border-red-500/20 hover:border-red-500/40 rounded-xl text-xs font-black text-red-400 hover:text-red-300 transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-40"
-            title="Zera todo o setor de cobrança para começar a produção real"
+            title="Apaga TODOS os dados de cobrança no Supabase (records, lembretes, WhatsApp, acordos, jurídico, análises IA). Use para começar com cobranças reais do zero."
           >
             <Bomb className="w-3.5 h-3.5" />
-            Iniciar Produção
+            Apagar Banco de Dados
           </button>
         </div>
       </div>
@@ -810,6 +773,18 @@ export default function BillingPage() {
           <MessageCircle className="w-4 h-4" />
           WhatsApp
         </button>
+
+        <button
+          onClick={() => setActiveTab('ANALISE_IA')}
+          className={`flex items-center gap-2 px-5 py-3 border-b-2 text-xs font-black uppercase tracking-wider transition-all cursor-pointer ${
+            activeTab === 'ANALISE_IA'
+              ? 'border-red-500 text-white'
+              : 'border-transparent text-zinc-500 hover:text-zinc-300'
+          }`}
+        >
+          <Brain className="w-4 h-4" />
+          Análise IA
+        </button>
       </div>
 
       {/* Tab views */}
@@ -849,14 +824,25 @@ export default function BillingPage() {
             transition={{ duration: 0.2 }}
             className="bg-zinc-900/40 backdrop-blur-xl border border-zinc-800 rounded-3xl p-6 shadow-2xl space-y-4 text-xs"
           >
-            <div className="border-b border-white/[0.06] pb-3 flex items-center justify-between">
+            <div className="border-b border-white/[0.06] pb-3 flex items-center justify-between gap-3">
               <div>
                 <h3 className="text-sm font-black text-white">Disparos Enfileirados Pendentes</h3>
                 <p className="text-zinc-400 text-[11px] mt-0.5">Fila de contatos organizados temporariamente para envio programado via n8n.</p>
               </div>
-              <span className="px-3 py-1 bg-zinc-950 border border-zinc-850 text-zinc-400 rounded-xl font-bold font-mono">
-                {queueStatus.queueSize} Na Fila
-              </span>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="px-3 py-1 bg-zinc-950 border border-zinc-850 text-zinc-400 rounded-xl font-bold font-mono">
+                  {queueStatus.queueSize} Na Fila
+                </span>
+                <button
+                  onClick={handleClearQueue}
+                  disabled={queueStatus.queueSize === 0}
+                  className="px-3 py-1.5 rounded-xl bg-red-500/8 hover:bg-red-500/15 border border-red-500/20 hover:border-red-500/40 text-red-400 hover:text-red-300 text-[11px] font-black transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  title="Remove TODOS os disparos pendentes da fila (não afeta as cobranças cadastradas)"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Limpar Todos Disparos
+                </button>
+              </div>
             </div>
 
             {queueStatus.queueList.length === 0 ? (
@@ -936,6 +922,18 @@ export default function BillingPage() {
           </motion.div>
         )}
 
+        {activeTab === 'ANALISE_IA' && (
+          <motion.div
+            key="tab-analise-ia"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.2 }}
+          >
+            <AnaliseIaPanel records={records} showToast={showToast} />
+          </motion.div>
+        )}
+
         {activeTab === 'HISTORICO' && (
           <motion.div
             key="tab-historico"
@@ -999,8 +997,28 @@ export default function BillingPage() {
                             {log.timestamp}
                           </div>
                         </td>
-                        <td className="p-3 font-bold text-white uppercase">
-                          {(log.nome || '').replace(' (Enviado)', '').replace(' (Confirmado)', '')}
+                        <td className="p-3 font-bold uppercase">
+                          {(() => {
+                            const cleanName = (log.nome || '').replace(' (Enviado)', '').replace(' (Confirmado)', '');
+                            // Tenta achar o record pelo telefone OU pelo nome
+                            const phoneDigits = (log.telefone || '').replace(/\D/g, '');
+                            const matched = records.find(r =>
+                              (phoneDigits && r.telefone && r.telefone.replace(/\D/g, '').includes(phoneDigits)) ||
+                              (cleanName && r.clienteFornecedor?.toUpperCase() === cleanName.toUpperCase())
+                            );
+                            if (matched) {
+                              return (
+                                <button
+                                  onClick={() => handleEditRecordClick(matched)}
+                                  className="text-white hover:text-violet-400 underline decoration-dotted underline-offset-2 transition-colors cursor-pointer text-left"
+                                  title="Abrir cadastro desta cobrança"
+                                >
+                                  {cleanName}
+                                </button>
+                              );
+                            }
+                            return <span className="text-white">{cleanName}</span>;
+                          })()}
                         </td>
                         <td className="p-3 font-mono text-zinc-400">{log.telefone}</td>
                         <td className="p-3 font-mono text-zinc-400">{log.vencimento}</td>
