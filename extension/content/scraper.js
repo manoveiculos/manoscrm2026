@@ -146,11 +146,53 @@ const Scraper = {
         return '';
     },
 
+    extractTimestamp(msgElement) {
+        try {
+            const copyable = msgElement.querySelector('.copyable-text') || (msgElement.classList?.contains('copyable-text') ? msgElement : null);
+            if (copyable) {
+                const preText = copyable.getAttribute('data-pre-plain-text');
+                if (preText) {
+                    // Aceita ano 2 ou 4 dígitos (WA varia: 27/05/2026 ou 27/05/26)
+                    const match = preText.match(/\[(\d{1,2}):(\d{2})(?:\s*(AM|PM))?,\s*(\d{1,2})[\/\.-](\d{1,2})[\/\.-](\d{2,4})\]/i);
+                    if (match) {
+                        let [_, hourStr, minuteStr, ampm, part1Str, part2Str, yearStr] = match;
+                        let hour = parseInt(hourStr, 10);
+                        const minute = parseInt(minuteStr, 10);
+                        let year = parseInt(yearStr, 10);
+                        if (year < 100) year += 2000;
+                        const part1 = parseInt(part1Str, 10);
+                        const part2 = parseInt(part2Str, 10);
+
+                        if (ampm) {
+                            ampm = ampm.toUpperCase();
+                            if (ampm === 'PM' && hour < 12) hour += 12;
+                            if (ampm === 'AM' && hour === 12) hour = 0;
+                        }
+
+                        // Padrão brasileiro DD/MM, mas tolera US (MM/DD) se part1>12
+                        let day = part1;
+                        let month = part2;
+                        if (part1 > 12 && part2 <= 12) { day = part1; month = part2; }
+                        else if (part2 > 12 && part1 <= 12) { day = part2; month = part1; }
+
+                        const date = new Date(year, month - 1, day, hour, minute);
+                        if (!isNaN(date.getTime())) {
+                            return date.toISOString();
+                        }
+                    }
+                }
+            }
+        } catch (e) {
+            console.error("Erro ao extrair timestamp:", e);
+        }
+        return null;
+    },
+
     extractMessages() {
         const msgs = [];
         document.querySelectorAll('.message-in,.message-out,[data-testid="msg-container"],div[data-id^="true_"],div[data-id^="false_"]').forEach(n => {
             try {
-                const did = n.getAttribute('data-id')||'';
+                const did = n.getAttribute('data-id') || n.querySelector('[data-id]')?.getAttribute('data-id') || n.closest('[data-id]')?.getAttribute('data-id') || '';
                 if(did&&!did.includes('_')) return;
                 const isOut = n.classList.contains('message-out')||n.closest('.message-out')||(did&&did.startsWith('true_'));
                 let txt=''; const tn=n.querySelector('.selectable-text,span.copyable-text');
@@ -158,10 +200,21 @@ const Scraper = {
                 else { const ps=[]; n.querySelectorAll('span').forEach(s=>{const t=s.innerText?.trim();if(t&&t.length>0&&!/^\d{1,2}:\d{2}/.test(t))ps.push(t);}); txt=ps.join(' '); }
                 if(!txt?.trim()){const l=n.querySelector('[aria-label]');if(l)txt=`[Mídia: ${l.getAttribute('aria-label')}]`;}
                 txt=txt?.trim();
-                if(txt&&txt.length>0) msgs.push({text:txt.replace(/[\u0000-\u001F]/g,'').replace(/\s+/g,' '),direction:isOut?'outbound':'inbound',timestamp:new Date().toISOString(),_rawId:`${txt}|${isOut?'O':'I'}`});
+                
+                const msgId = did || null;
+                const msgTimestamp = this.extractTimestamp(n) || new Date().toISOString();
+                const rawId = msgId || `${txt}|${isOut?'O':'I'}`;
+
+                if(txt&&txt.length>0) msgs.push({
+                    id: msgId,
+                    text:txt.replace(/[\u0000-\u001F]/g,'').replace(/\s+/g,' '),
+                    direction:isOut?'outbound':'inbound',
+                    timestamp:msgTimestamp,
+                    _rawId:rawId
+                });
             } catch(e){}
         });
-        if(!msgs.length){const m=document.querySelector('#main');if(m)m.querySelectorAll('span.copyable-text,.selectable-text span').forEach(s=>{const t=s.innerText?.trim();if(t&&t.length>2)msgs.push({text:t,direction:'inbound',timestamp:new Date().toISOString(),_rawId:`${t}|I`});});}
+        if(!msgs.length){const m=document.querySelector('#main');if(m)m.querySelectorAll('span.copyable-text,.selectable-text span').forEach(s=>{const t=s.innerText?.trim();if(t&&t.length>2)msgs.push({id:null,text:t,direction:'inbound',timestamp:new Date().toISOString(),_rawId:`${t}|I`});});}
         return msgs;
     },
 
