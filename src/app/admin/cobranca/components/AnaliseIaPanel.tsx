@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react';
 import {
     Sparkles, RefreshCw, Copy, CheckCheck, Lightbulb, AlertTriangle,
-    Sun, Moon, Coffee, Phone, MessageCircle, Calendar, ArrowRight, Send
+    Sun, Moon, Coffee, Phone, MessageCircle, Calendar, ArrowRight, Send,
+    Printer, History, Share2
 } from 'lucide-react';
 import { BillingRecord } from '@/types';
 
@@ -61,20 +62,78 @@ export default function AnaliseIaPanel({ records, showToast }: AnaliseIaPanelPro
     const [generating, setGenerating] = useState(false);
     const [copiedScript, setCopiedScript] = useState<number | null>(null);
     const [sendingMsg, setSendingMsg] = useState<number | null>(null);
+    const [history, setHistory] = useState<{ date: string; created_at: string }[]>([]);
+    const [selectedDate, setSelectedDate] = useState<string>('');
+    const [sendingToCamila, setSendingToCamila] = useState(false);
+    const todayStr = new Date().toISOString().slice(0, 10);
 
-    const loadCached = async () => {
+    const loadHistory = async () => {
+        try {
+            const res = await fetch('/api/billing/ai-daily-briefing/history');
+            if (res.ok) {
+                const data = await res.json();
+                setHistory(data.history || []);
+            }
+        } catch {
+            // silencioso
+        }
+    };
+
+    const loadCached = async (date?: string) => {
         setLoading(true);
         try {
-            const res = await fetch('/api/billing/ai-daily-briefing');
+            const url = date
+                ? `/api/billing/ai-daily-briefing/history?date=${date}`
+                : '/api/billing/ai-daily-briefing';
+            const res = await fetch(url);
             if (res.ok) {
                 const data = await res.json();
                 setBriefing(data.briefing);
+                setSelectedDate(date || todayStr);
             }
         } catch (e) {
             // silencioso
         } finally {
             setLoading(false);
         }
+    };
+
+    const sendToCamila = async () => {
+        if (!briefing) return;
+        if (!window.confirm(
+            'Enviar a análise IA do dia para o WhatsApp da Camila (+55 47 98845-2087)?\n\n' +
+            'Vai disparar 1 mensagem de resumo + 1 mensagem para cada prioridade (' + (briefing.prioridades?.length || 0) + ' no total).\n\n' +
+            'Intervalo de 1,5s entre cada para não tomar ban.'
+        )) return;
+        setSendingToCamila(true);
+        try {
+            const res = await fetch('/api/billing/ai-daily-briefing/send-to-camila', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    briefing,
+                    date: selectedDate || todayStr,
+                }),
+            });
+            const data = await res.json();
+            if (res.ok && data.ok) {
+                showToast(`✅ ${data.sent} mensagem(ns) enviada(s) para a Camila${data.failed > 0 ? ` (${data.failed} falharam)` : ''}`, 'success');
+            } else {
+                showToast(data.error || 'Erro ao enviar para Camila', 'error');
+            }
+        } catch (e) {
+            showToast('Falha ao enviar', 'error');
+        } finally {
+            setSendingToCamila(false);
+        }
+    };
+
+    const handlePrint = () => {
+        document.body.classList.add('print-briefing');
+        setTimeout(() => {
+            window.print();
+            setTimeout(() => document.body.classList.remove('print-briefing'), 500);
+        }, 100);
     };
 
     const generate = async (force = false) => {
@@ -88,6 +147,8 @@ export default function AnaliseIaPanel({ records, showToast }: AnaliseIaPanelPro
             const data = await res.json();
             if (res.ok && data.briefing) {
                 setBriefing(data.briefing);
+                setSelectedDate(todayStr);
+                loadHistory();
                 showToast(data.cached ? 'Briefing do dia carregado (cache).' : 'Briefing gerado pela IA!', 'success');
             } else {
                 showToast(data.error || 'Erro ao gerar briefing', 'error');
@@ -101,6 +162,7 @@ export default function AnaliseIaPanel({ records, showToast }: AnaliseIaPanelPro
 
     useEffect(() => {
         loadCached();
+        loadHistory();
     }, []);
 
     const copyScript = (script: string, idx: number) => {
@@ -153,9 +215,34 @@ export default function AnaliseIaPanel({ records, showToast }: AnaliseIaPanelPro
     }
 
     return (
-        <div className="space-y-5">
+        <div className="space-y-5 briefing-root">
+            {/* Print styles */}
+            <style jsx global>{`
+                @media print {
+                    body.print-briefing { background: white !important; color: black !important; }
+                    body.print-briefing .no-print { display: none !important; }
+                    body.print-briefing .briefing-root,
+                    body.print-briefing .briefing-root * {
+                        color: black !important;
+                        background: white !important;
+                        border-color: #ccc !important;
+                        box-shadow: none !important;
+                    }
+                    body.print-briefing .briefing-root .prioridade-card { page-break-inside: avoid; border: 1px solid #999 !important; margin-bottom: 8px; }
+                    @page { size: A4; margin: 1.2cm; }
+                }
+            `}</style>
+
+            {/* Print-only header */}
+            <div className="hidden print:block mb-4 pb-3 border-b-2 border-black">
+                <h1 className="text-2xl font-black">Manos Veículos — Análise IA do Setor de Cobrança</h1>
+                <p className="text-sm">
+                    Data: {selectedDate || todayStr} · Gerado em {briefing?._cached_at ? new Date(briefing._cached_at).toLocaleString('pt-BR') : '—'}
+                </p>
+            </div>
+
             {/* Header */}
-            <div className="bg-gradient-to-br from-violet-500/10 to-indigo-500/5 border border-violet-500/20 rounded-3xl p-6">
+            <div className="bg-gradient-to-br from-violet-500/10 to-indigo-500/5 border border-violet-500/20 rounded-3xl p-6 no-print">
                 <div className="flex items-start justify-between gap-4 flex-wrap">
                     <div className="flex items-start gap-3">
                         <div className="p-3 rounded-2xl bg-violet-500/20 border border-violet-500/30">
@@ -168,19 +255,68 @@ export default function AnaliseIaPanel({ records, showToast }: AnaliseIaPanelPro
                             </p>
                             {briefing?._cached_at && (
                                 <p className="text-[10px] text-zinc-500 mt-1.5 font-mono">
+                                    {selectedDate && selectedDate !== todayStr ? `Análise de ${selectedDate} · ` : ''}
                                     Gerado em {new Date(briefing._cached_at).toLocaleString('pt-BR')}
                                 </p>
                             )}
                         </div>
                     </div>
-                    <button
-                        onClick={() => generate(true)}
-                        disabled={generating}
-                        className="px-4 py-2.5 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white font-black text-xs rounded-xl flex items-center gap-2 shadow-lg shadow-violet-900/20 transition-all disabled:opacity-50"
-                    >
-                        <RefreshCw className={`w-4 h-4 ${generating ? 'animate-spin' : ''}`} />
-                        {generating ? 'Gerando análise...' : briefing ? 'Atualizar Análise' : 'Gerar Análise do Dia'}
-                    </button>
+
+                    <div className="flex items-center gap-2 flex-wrap">
+                        {/* Histórico */}
+                        {history.length > 0 && (
+                            <div className="relative">
+                                <select
+                                    value={selectedDate || todayStr}
+                                    onChange={(e) => loadCached(e.target.value)}
+                                    className="px-3 py-2.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-200 text-xs font-bold rounded-xl cursor-pointer focus:outline-none focus:border-violet-500 pr-8 appearance-none"
+                                    title="Ver análise de um dia anterior"
+                                >
+                                    {history.map(h => (
+                                        <option key={h.date} value={h.date}>
+                                            📅 {h.date === todayStr ? 'Hoje' : new Date(h.date + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' })}
+                                        </option>
+                                    ))}
+                                </select>
+                                <History className="w-3.5 h-3.5 absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
+                            </div>
+                        )}
+
+                        {/* Imprimir */}
+                        {briefing && (
+                            <button
+                                onClick={handlePrint}
+                                className="px-3 py-2.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 hover:border-zinc-600 text-zinc-200 hover:text-white font-black text-xs rounded-xl flex items-center gap-2 transition-all"
+                                title="Imprimir ou salvar como PDF (Ctrl+P)"
+                            >
+                                <Printer className="w-4 h-4" />
+                                Imprimir / PDF
+                            </button>
+                        )}
+
+                        {/* Enviar Camila */}
+                        {briefing && briefing.prioridades?.length > 0 && (
+                            <button
+                                onClick={sendToCamila}
+                                disabled={sendingToCamila}
+                                className="px-3 py-2.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 hover:border-emerald-500/50 text-emerald-300 font-black text-xs rounded-xl flex items-center gap-2 transition-all disabled:opacity-50"
+                                title="Envia a análise completa para o WhatsApp da Camila (+55 47 98845-2087)"
+                            >
+                                <Share2 className={`w-4 h-4 ${sendingToCamila ? 'animate-pulse' : ''}`} />
+                                {sendingToCamila ? 'Enviando...' : 'Enviar p/ Camila'}
+                            </button>
+                        )}
+
+                        {/* Gerar / Atualizar */}
+                        <button
+                            onClick={() => generate(true)}
+                            disabled={generating}
+                            className="px-4 py-2.5 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white font-black text-xs rounded-xl flex items-center gap-2 shadow-lg shadow-violet-900/20 transition-all disabled:opacity-50"
+                        >
+                            <RefreshCw className={`w-4 h-4 ${generating ? 'animate-spin' : ''}`} />
+                            {generating ? 'Gerando...' : briefing ? 'Atualizar' : 'Gerar Análise'}
+                        </button>
+                    </div>
                 </div>
 
                 {/* Resumo do dia */}
@@ -237,7 +373,7 @@ export default function AnaliseIaPanel({ records, showToast }: AnaliseIaPanelPro
                         const QuandoIcon = quando.icon;
 
                         return (
-                            <div key={idx} className={`border rounded-2xl p-4 ${cfg.bg}`}>
+                            <div key={idx} className={`prioridade-card border rounded-2xl p-4 ${cfg.bg}`}>
                                 {/* Header da prioridade */}
                                 <div className="flex items-start justify-between gap-3 flex-wrap">
                                     <div className="flex items-start gap-3 min-w-0 flex-1">
