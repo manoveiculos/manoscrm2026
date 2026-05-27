@@ -32,11 +32,20 @@ function digits(s: string): string {
     return (s || '').replace(/\D/g, '');
 }
 
-function normalizeBR(raw: string): string {
+// Formato para enviar ao Evolution: PRECISA do 55
+function normalizeForEvolution(raw: string): string {
     const d = digits(raw);
     if (!d) return '';
     if (d.startsWith('55') && (d.length === 12 || d.length === 13)) return d;
     if (d.length === 10 || d.length === 11) return `55${d}`;
+    return d;
+}
+
+// Formato para gravar no DB: SEM o 55, igual ao webhook (consistência do inbox)
+function normalizeForDb(raw: string): string {
+    const d = digits(raw);
+    if (!d) return '';
+    if (d.startsWith('55') && (d.length === 12 || d.length === 13)) return d.slice(2);
     return d;
 }
 
@@ -85,15 +94,16 @@ export async function sendCobrancaWhatsApp(args: CobrancaSendArgs): Promise<Cobr
         return { ok: false, error: 'EVOLUTION_COBRANCA_* não configurado' };
     }
 
-    const to = normalizeBR(args.toPhone);
-    if (!to || to.length < 10) {
+    const toEvolution = normalizeForEvolution(args.toPhone);
+    const toDb = normalizeForDb(args.toPhone);
+    if (!toEvolution || toEvolution.length < 10) {
         return { ok: false, error: 'telefone_invalido' };
     }
     if (!args.message || args.message.trim().length < 2) {
         return { ok: false, error: 'mensagem_vazia' };
     }
 
-    if (!args.skipDedup && await checkDedup(to, args.message)) {
+    if (!args.skipDedup && await checkDedup(toDb, args.message)) {
         return { ok: false, error: 'dedup_hit_10min' };
     }
 
@@ -109,7 +119,7 @@ export async function sendCobrancaWhatsApp(args: CobrancaSendArgs): Promise<Cobr
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-                number: to,
+                number: toEvolution,
                 text: args.message,
                 linkPreview: false,
             }),
@@ -124,7 +134,7 @@ export async function sendCobrancaWhatsApp(args: CobrancaSendArgs): Promise<Cobr
         const json = await res.json().catch(() => ({}));
         const evolutionMsgId = json?.key?.id || json?.id;
 
-        await recordOutbound(args, evolutionMsgId, to);
+        await recordOutbound(args, evolutionMsgId, toDb);
 
         return { ok: true, evolutionMsgId };
     } catch (e: any) {
