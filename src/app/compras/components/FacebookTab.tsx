@@ -31,6 +31,8 @@ export interface FacebookLead {
   fipe_pct: number | null;
   deal_score: number | null;
   is_estimated: boolean;
+  status_negociacao?: string;
+  observacao_negociacao?: string;
 }
 
 interface FacebookTabProps {
@@ -48,6 +50,7 @@ export default function FacebookTab({ onNavigateToTab }: FacebookTabProps) {
   const [selectedCity, setSelectedCity] = useState<string>('ALL');
   const [onlyFipeAccepted, setOnlyFipeAccepted] = useState(false);
   const [sortBy, setSortBy] = useState<'recent' | 'discount' | 'score' | 'price'>('recent');
+  const [filterNegotiation, setFilterNegotiation] = useState<string>('ALL');
 
   // Modais / Gavetas
   const [selectedLead, setSelectedLead] = useState<FacebookLead | null>(null);
@@ -121,7 +124,12 @@ export default function FacebookTab({ onNavigateToTab }: FacebookTabProps) {
       const matchesFipe = !onlyFipeAccepted || 
         (lead.aceita_fipe?.trim().toLowerCase() === 'sim');
 
-      return matchesSearch && matchesCity && matchesFipe;
+      const leadStatus = lead.status_negociacao || 'PENDENTE';
+      const matchesNegotiation = filterNegotiation === 'ALL' ||
+        (filterNegotiation === 'PENDENTE' && (!lead.status_negociacao || lead.status_negociacao === 'PENDENTE')) ||
+        (leadStatus === filterNegotiation);
+
+      return matchesSearch && matchesCity && matchesFipe && matchesNegotiation;
     });
 
     if (sortBy === 'discount') {
@@ -136,7 +144,7 @@ export default function FacebookTab({ onNavigateToTab }: FacebookTabProps) {
       result.sort((a, b) => getPrice(a) - getPrice(b));
     }
     return result;
-  }, [leads, searchQuery, selectedCity, onlyFipeAccepted, sortBy]);
+  }, [leads, searchQuery, selectedCity, onlyFipeAccepted, sortBy, filterNegotiation]);
 
   const stats = useMemo(() => {
     const total = filteredLeads.length;
@@ -190,7 +198,7 @@ export default function FacebookTab({ onNavigateToTab }: FacebookTabProps) {
       {/* Filtros */}
       <section className="glass-panel border border-zinc-800 rounded-2xl p-5 flex flex-col gap-4">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-4 items-end">
-          <div className="lg:col-span-4 flex flex-col gap-1.5">
+          <div className="lg:col-span-3 flex flex-col gap-1.5">
             <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Busca de Veículo ou Cliente</label>
             <div className="relative">
               <Search className="absolute left-3 top-3.5 w-4 h-4 text-zinc-500" />
@@ -204,7 +212,7 @@ export default function FacebookTab({ onNavigateToTab }: FacebookTabProps) {
             </div>
           </div>
 
-          <div className="lg:col-span-3 flex flex-col gap-1.5">
+          <div className="lg:col-span-2 flex flex-col gap-1.5">
             <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Cidade</label>
             <select
               value={selectedCity}
@@ -218,7 +226,7 @@ export default function FacebookTab({ onNavigateToTab }: FacebookTabProps) {
             </select>
           </div>
 
-          <div className="lg:col-span-3 flex flex-col gap-1.5">
+          <div className="lg:col-span-2 flex flex-col gap-1.5">
             <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Ordenar por</label>
             <select
               value={sortBy}
@@ -229,6 +237,22 @@ export default function FacebookTab({ onNavigateToTab }: FacebookTabProps) {
               <option value="discount">MAIOR DESCONTO (FIPE)</option>
               <option value="score">MELHOR DEAL SCORE</option>
               <option value="price">MENOR VALOR PEDIDO</option>
+            </select>
+          </div>
+
+          <div className="lg:col-span-3 flex flex-col gap-1.5">
+            <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Negociação</label>
+            <select
+              value={filterNegotiation}
+              onChange={(e) => setFilterNegotiation(e.target.value)}
+              className="w-full bg-zinc-950 border border-zinc-900 rounded-xl px-4 py-3.5 text-zinc-350 text-sm font-semibold focus:outline-none focus:border-zinc-800 transition-colors cursor-pointer"
+            >
+              <option value="ALL">TODOS OS STATUS</option>
+              <option value="PENDENTE">PENDENTE / SEM CONTATO</option>
+              <option value="EM_NEGOCIACAO">EM NEGOCIAÇÃO</option>
+              <option value="CHAMAR_FUTURO">CHAMAR NO FUTURO</option>
+              <option value="DESCARTADO">DESCARTADO</option>
+              <option value="COMPRADO">COMPRADO</option>
             </select>
           </div>
 
@@ -272,6 +296,7 @@ export default function FacebookTab({ onNavigateToTab }: FacebookTabProps) {
                   <th className="px-6 py-4">KM</th>
                   <th className="px-6 py-4">Valor Pedido</th>
                   <th className="px-6 py-4">Cidade</th>
+                  <th className="px-6 py-4">Negociação</th>
                   <th className="px-6 py-4">Data Envio</th>
                   <th className="px-6 py-4">FIPE Oficial</th>
                   <th className="px-6 py-4 text-center">Calculadora</th>
@@ -300,7 +325,27 @@ export default function FacebookTab({ onNavigateToTab }: FacebookTabProps) {
                       <td className="px-6 py-4 text-sm text-zinc-300 font-semibold">{lead.ano || 'N/A'}</td>
                       <td className="px-6 py-4 text-sm text-zinc-350">{lead.km ? `${lead.km} km` : 'N/A'}</td>
                       <td className="px-6 py-4 text-sm text-white font-extrabold">{lead.valor_pedido || 'N/A'}</td>
-                      <td className="px-6 py-4 text-sm text-zinc-400 capitalize">{lead.cidade || 'N/A'}</td>
+                       <td className="px-6 py-4 text-sm text-zinc-400 capitalize">{lead.cidade || 'N/A'}</td>
+                      <td className="px-6 py-4">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-lg text-[9px] font-black border whitespace-nowrap uppercase tracking-wider ${
+                          lead.status_negociacao === 'CHAMAR_FUTURO' ? 'bg-blue-500/10 border-blue-500/20 text-blue-400' :
+                          lead.status_negociacao === 'DESCARTADO' ? 'bg-red-500/10 border-red-500/20 text-red-400' :
+                          lead.status_negociacao === 'EM_NEGOCIACAO' ? 'bg-amber-500/10 border-amber-500/20 text-amber-400' :
+                          lead.status_negociacao === 'COMPRADO' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' :
+                          'bg-zinc-900/50 border-zinc-850 text-zinc-400'
+                        }`}>
+                          {lead.status_negociacao === 'CHAMAR_FUTURO' ? 'Chamar Futuro' :
+                           lead.status_negociacao === 'DESCARTADO' ? 'Descartado' :
+                           lead.status_negociacao === 'EM_NEGOCIACAO' ? 'Em Negociação' :
+                           lead.status_negociacao === 'COMPRADO' ? 'Comprado' :
+                           'Pendente'}
+                        </span>
+                        {lead.observacao_negociacao && (
+                          <span className="block text-[10px] text-zinc-550 mt-1 max-w-[150px] truncate" title={lead.observacao_negociacao}>
+                            {lead.observacao_negociacao}
+                          </span>
+                        )}
+                      </td>
                       <td className="px-6 py-4 text-xs text-zinc-500">{lead.data_envio_formatada}</td>
                       <td className="px-6 py-4 text-sm text-zinc-350">
                         {lead.fipe_price ? (
@@ -379,6 +424,7 @@ export default function FacebookTab({ onNavigateToTab }: FacebookTabProps) {
         onOpenFipeSearch={handleOpenFipeSearch}
         onDelete={handleDeleteLead}
         onNavigateToTab={onNavigateToTab}
+        onUpdateLead={handleFipeLinked}
       />
     </div>
   );

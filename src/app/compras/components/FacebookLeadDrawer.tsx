@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   FileText, Trash2, Clock, Calculator, User, X, 
   MessageCircle, Copy, CheckCheck, Phone, MapPin,
@@ -14,6 +14,7 @@ interface FacebookLeadDrawerProps {
   onOpenFipeSearch: (lead: FacebookLead) => void;
   onDelete: (lead: FacebookLead) => void;
   onNavigateToTab?: (tab: string, params?: any) => void;
+  onUpdateLead: (updated: FacebookLead) => void;
 }
 
 export default function FacebookLeadDrawer({
@@ -21,9 +22,54 @@ export default function FacebookLeadDrawer({
   onClose,
   onOpenFipeSearch,
   onDelete,
-  onNavigateToTab
+  onNavigateToTab,
+  onUpdateLead
 }: FacebookLeadDrawerProps) {
   const [msgCopied, setMsgCopied] = useState(false);
+  const [statusNegociacao, setStatusNegociacao] = useState('PENDENTE');
+  const [observacaoNegociacao, setObservacaoNegociacao] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (lead) {
+      setStatusNegociacao(lead.status_negociacao || 'PENDENTE');
+      setObservacaoNegociacao(lead.observacao_negociacao || '');
+    }
+  }, [lead]);
+
+  const handleSaveNegotiation = async () => {
+    if (!lead) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/compras/facebook?admin_key=manos_intel_secret_key`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          mensagem_id: lead.mensagem_id,
+          status_negociacao: statusNegociacao,
+          observacao_negociacao: observacaoNegociacao
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        onUpdateLead({
+          ...lead,
+          status_negociacao: statusNegociacao,
+          observacao_negociacao: observacaoNegociacao
+        });
+        alert('Acompanhamento salvo com sucesso!');
+      } else {
+        alert(data.error || 'Erro ao salvar o acompanhamento.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Falha ao conectar com o servidor para salvar.');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   if (!lead) return null;
 
@@ -221,6 +267,49 @@ export default function FacebookLeadDrawer({
                   <span className="text-zinc-500 text-xs flex items-center gap-1"><Clock className="w-3 h-3" />Recebido</span>
                   <span className="text-zinc-300 text-xs">{lead.data_envio_formatada}</span>
                 </div>
+              </div>
+
+              {/* Acompanhamento da Negociação */}
+              <div className="bg-zinc-900/30 border border-zinc-800/50 rounded-xl p-4 flex flex-col gap-3">
+                <div className="flex items-center gap-2 mb-1">
+                  <Clock className="w-3.5 h-3.5 text-primary" />
+                  <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider">Acompanhamento da Negociação</span>
+                </div>
+                
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] text-zinc-550 font-bold uppercase tracking-wider">Status da Negociação</label>
+                  <select
+                    value={statusNegociacao}
+                    onChange={(e) => setStatusNegociacao(e.target.value)}
+                    className="w-full bg-zinc-950 border border-zinc-850 rounded-xl px-3 py-2.5 text-zinc-300 text-xs focus:outline-none focus:border-zinc-700 cursor-pointer"
+                  >
+                    <option value="PENDENTE">PENDENTE / SEM CONTATO</option>
+                    <option value="EM_NEGOCIACAO">EM NEGOCIAÇÃO</option>
+                    <option value="CHAMAR_FUTURO">CHAMAR NO FUTURO</option>
+                    <option value="DESCARTADO">DESCARTADO</option>
+                    <option value="COMPRADO">COMPRADO</option>
+                  </select>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] text-zinc-550 font-bold uppercase tracking-wider">Observações / Anotações</label>
+                  <textarea
+                    value={observacaoNegociacao}
+                    onChange={(e) => setObservacaoNegociacao(e.target.value)}
+                    placeholder="Ex: Chamar semana que vem, quer FIPE..."
+                    rows={3}
+                    className="w-full bg-zinc-950 border border-zinc-850 rounded-xl p-3 text-zinc-350 text-xs focus:outline-none focus:border-zinc-700 resize-none font-sans"
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleSaveNegotiation}
+                  disabled={saving}
+                  className="w-full mt-1 py-2.5 px-4 rounded-xl bg-primary hover:bg-primary/90 disabled:bg-zinc-850 disabled:text-zinc-600 text-white font-extrabold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  {saving ? 'Salvando...' : 'Salvar Acompanhamento'}
+                </button>
               </div>
 
               {/* Mensagem WhatsApp */}

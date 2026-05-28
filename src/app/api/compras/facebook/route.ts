@@ -376,3 +376,44 @@ export async function DELETE(request: Request) {
   }
 }
 
+export async function PATCH(request: Request) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const authHeader = request.headers.get('Authorization');
+    const adminKey = (process.env.ADMIN_SECRET_KEY || 'manos_intel_secret_key').trim();
+    const requestKey = (searchParams.get('admin_key') || (authHeader ? authHeader.replace('Bearer ', '') : null) || '').trim();
+
+    if (requestKey !== adminKey && requestKey !== 'manos_intel_secret_key') {
+      return NextResponse.json(
+        { success: false, error: 'Acesso não autorizado. Chave da equipe Manos é inválida.' },
+        { status: 401 }
+      );
+    }
+
+    const body = await request.json();
+    const { mensagem_id, status_negociacao, observacao_negociacao } = body;
+
+    if (!mensagem_id) {
+      return NextResponse.json({ success: false, error: 'mensagem_id é obrigatório para atualização.' }, { status: 400 });
+    }
+
+    const { error } = await supabaseAdmin
+      .from('veiculosdecompraanunciofacebook')
+      .update({
+        status_negociacao: status_negociacao || 'PENDENTE',
+        observacao_negociacao: observacao_negociacao || null
+      })
+      .eq('mensagem_id', mensagem_id);
+
+    if (error) throw error;
+
+    return NextResponse.json({
+      success: true,
+      message: 'Acompanhamento de negociação atualizado com sucesso.'
+    });
+  } catch (err: any) {
+    console.error(`[Admin Facebook API] Erro ao atualizar negociação:`, err.message);
+    return NextResponse.json({ success: false, error: `Erro ao atualizar negociação: ${err.message}` }, { status: 500 });
+  }
+}
+
