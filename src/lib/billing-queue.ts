@@ -336,6 +336,38 @@ export async function processNextQueueItem() {
       return;
     }
 
+    // 1.2. Daily Limit Check: Prevent sending more than one message to the same phone today
+    const todayBr = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
+    todayBr.setHours(0, 0, 0, 0);
+    const startOfDayIso = todayBr.toISOString();
+
+    const { data: todayMatch } = await supabaseAdmin
+      .from('registro_envios_whatsapp')
+      .select('id, estagio_cobranca')
+      .ilike('destinatario_id', `%${cleanPhone}%`)
+      .gte('data_hora_brasil', startOfDayIso)
+      .limit(1);
+
+    if (todayMatch && todayMatch.length > 0) {
+      item.status = 'DUPLICIDADE';
+      queue.shift(); // Remove from queue
+
+      const logEntry: WebhookLog = {
+        id: `log-${crypto.randomUUID()}`,
+        timestamp: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
+        nome: item.nome,
+        telefone: item.telefone,
+        vencimento: item.vencimento,
+        valor: String(item.valor),
+        estagio: item.estagio,
+        status: 'PULADO',
+        errorMessage: `Bloqueado: O telefone ${item.telefone} já recebeu uma mensagem de cobrança hoje (estágio: ${todayMatch[0].estagio_cobranca}).`
+      };
+      addWebhookLog(logEntry);
+      setLastDispatchTime(`${new Date().toLocaleTimeString('pt-BR')} (Duplicidade Diária: ${item.nome})`);
+      return;
+    }
+
     // 2. Execute Webhook Trigger on n8n
     const res = await fetch(TARGET_WEBHOOK_URL, {
       method: 'POST',

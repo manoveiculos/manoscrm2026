@@ -47,7 +47,7 @@ export const RadarTab: React.FC = () => {
   useEffect(() => {
     async function fetchOpportunities() {
       try {
-        const res = await fetch('/api/compras/oportunidades?limit=150');
+        const res = await fetch('/api/compras/oportunidades?limit=1000');
         const data = await res.json();
         
         if (!res.ok || !data.success) {

@@ -38,7 +38,7 @@ export async function POST(req: Request) {
     try {
       const { data } = await supabaseAdmin
         .from('registro_envios_whatsapp')
-        .select('destinatario_id, vencimento, estagio_cobranca');
+        .select('destinatario_id, vencimento, estagio_cobranca, data_hora_brasil');
       reminders = data || [];
     } catch (e: any) {
       console.warn('[Supabase API Warning] Failed to fetch reminders for batch scheduling:', e.message);
@@ -75,7 +75,25 @@ export async function POST(req: Request) {
           else stage = 'AVULSO';
         }
 
-        // Double check contra logs no banco (registro_envios_whatsapp)
+        // 1. Verificar se o telefone já recebeu alguma mensagem hoje no Brasil
+        const todayBr = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
+        todayBr.setHours(0, 0, 0, 0);
+        const startOfTodayMs = todayBr.getTime();
+
+        const isSentToday = reminders.some(el => {
+          const destId = el.destinatario_id || '';
+          if (!destId.includes(cleanPhone)) return false;
+          if (!el.data_hora_brasil) return false;
+          const sentTimeMs = new Date(el.data_hora_brasil).getTime();
+          return sentTimeMs >= startOfTodayMs;
+        });
+
+        if (isSentToday) {
+          duplicateSkippedCount++;
+          continue;
+        }
+
+        // 2. Double check contra logs no banco (registro_envios_whatsapp) por vencimento/estágio
         const isAlreadySent = reminders.some(el => {
           const destId = el.destinatario_id || '';
           return destId.includes(cleanPhone) && 
@@ -88,12 +106,10 @@ export async function POST(req: Request) {
           continue;
         }
 
-        // Double check dentro da fila em memória
+        // 3. Double check dentro da fila em memória (evita duplicidade no dia)
         const isAlreadyInQueue = billingQueue.some(item => {
           const cleanQueuePhone = item.telefone.replace(/\D/g, '');
-          return cleanQueuePhone === cleanPhone && 
-                 item.vencimento === rec.vencimento && 
-                 item.estagio === stage;
+          return cleanQueuePhone === cleanPhone;
         });
 
         if (isAlreadyInQueue) {

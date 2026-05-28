@@ -47,6 +47,38 @@ export async function POST(req: Request) {
           alreadySent: true
         });
       }
+
+      // 1.2. Daily Limit Check: Prevent sending more than one message to the same phone today
+      const todayBr = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
+      todayBr.setHours(0, 0, 0, 0);
+      const startOfDayIso = todayBr.toISOString();
+
+      const { data: todayMatch } = await supabaseAdmin
+        .from('registro_envios_whatsapp')
+        .select('id, estagio_cobranca')
+        .ilike('destinatario_id', `%${cleanPhone}%`)
+        .gte('data_hora_brasil', startOfDayIso)
+        .limit(1);
+
+      if (todayMatch && todayMatch.length > 0) {
+        addWebhookLog({
+          id: `log-${crypto.randomUUID()}`,
+          timestamp: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
+          nome,
+          telefone,
+          vencimento,
+          valor: String(valor),
+          estagio: estagio || 'MANUAL',
+          status: 'PULADO',
+          errorMessage: `Bloqueado para proteção Anti-Spam: O telefone ${telefone} já recebeu uma mensagem de cobrança hoje.`
+        });
+        
+        return NextResponse.json({ 
+          success: false, 
+          error: `Anti-Spam ativo: Este cliente já recebeu uma mensagem de cobrança hoje (estágio: ${todayMatch[0].estagio_cobranca}).`,
+          alreadySent: true
+        });
+      }
     } catch (e: any) {
       console.warn('[Supabase API Warning] Anti-spam query skipped:', e.message);
     }

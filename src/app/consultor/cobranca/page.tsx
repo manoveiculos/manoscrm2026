@@ -14,6 +14,7 @@ interface Consultant {
   id: string;
   name: string;
   email: string;
+  role?: string;
 }
 
 export default function ConsultantBillingPage() {
@@ -25,6 +26,8 @@ export default function ConsultantBillingPage() {
   const [loading, setLoading] = useState(true);
   const [records, setRecords] = useState<BillingRecord[]>([]);
   const [activeTab, setActiveTab] = useState<'OPORTUNIDADES' | 'GANHOS'>('OPORTUNIDADES');
+
+  const isAdmin = useMemo(() => consultant?.role === 'admin', [consultant]);
 
   // Modal de registro de acordo
   const [selectedRecordForAgreement, setSelectedRecordForAgreement] = useState<BillingRecord | null>(null);
@@ -60,7 +63,7 @@ export default function ConsultantBillingPage() {
           
           const { data: consultData, error } = await supabaseClient
             .from('consultants_manos_crm')
-            .select('id, name, email')
+            .select('id, name, email, role')
             .or(`user_id.eq.${session.user.id},auth_id.eq.${session.user.id}`)
             .maybeSingle();
 
@@ -75,7 +78,8 @@ export default function ConsultantBillingPage() {
             setConsultant({
               id: 'admin-test-id',
               name: session.user.user_metadata?.full_name || 'Vendedor Admin',
-              email: session.user.email || ''
+              email: session.user.email || '',
+              role: 'vendedor'
             });
           }
         }
@@ -115,14 +119,17 @@ export default function ConsultantBillingPage() {
     return records.filter(r => 
       r.fase === 'JURIDICO_VENDEDORES' && 
       r.status !== 'PAGO' &&
-      (!r.vendedor_id || r.vendedor_id === consultant?.id)
+      (isAdmin || !r.vendedor_id || r.vendedor_id === consultant?.id)
     );
-  }, [records, consultant]);
+  }, [records, consultant, isAdmin]);
 
-  // Filtrar ganhos e acordos do vendedor logado
+  // Filtrar ganhos e acordos (se admin, todos; se vendedor, apenas os próprios)
   const myAgreements = useMemo(() => {
+    if (isAdmin) {
+      return records.filter(r => r.vendedor_id !== null && r.vendedor_id !== undefined);
+    }
     return records.filter(r => r.vendedor_id === consultant?.id);
-  }, [records, consultant]);
+  }, [records, consultant, isAdmin]);
 
   // Calcular métricas
   const stats = useMemo(() => {
@@ -269,6 +276,61 @@ export default function ConsultantBillingPage() {
     }
   };
 
+  // Ação exclusiva de Admin: Excluir Acordo e desvincular o vendedor
+  const handleDeleteAgreement = async (record: BillingRecord) => {
+    if (!isAdmin) return;
+
+    if (window.confirm(`Tem certeza de que deseja EXCLUIR todos os acordos de ${record.clienteFornecedor} e liberar a cobrança para o time?`)) {
+      try {
+        const { error: deleteError } = await supabaseClient
+          .from('billing_acordos')
+          .delete()
+          .eq('record_id', record.id);
+
+        if (deleteError) throw deleteError;
+
+        const todayBr = new Date().toLocaleDateString('pt-BR');
+        const updatedRecord: BillingRecord = {
+          ...record,
+          vendedor_id: null as any,
+          vendedor_nome: null as any,
+          observacoes: (record.observacoes || '') + `\n[${todayBr}] O administrador ${consultant?.name} excluiu os acordos e desvinculou a cobrança.`
+        };
+
+        await saveBillingRecord(updatedRecord);
+        showToast('Acordo excluído e cobrança desvinculada!', 'success');
+        loadRecords();
+      } catch (err: any) {
+        console.error(err);
+        showToast('Erro ao excluir acordo: ' + err.message, 'error');
+      }
+    }
+  };
+
+  // Ação exclusiva de Admin: Apenas desvincular o vendedor mantendo o histórico de acordos
+  const handleReleaseRecord = async (record: BillingRecord) => {
+    if (!isAdmin) return;
+
+    if (window.confirm(`Deseja desvincular o consultor da cobrança de ${record.clienteFornecedor}?`)) {
+      try {
+        const todayBr = new Date().toLocaleDateString('pt-BR');
+        const updatedRecord: BillingRecord = {
+          ...record,
+          vendedor_id: null as any,
+          vendedor_nome: null as any,
+          observacoes: (record.observacoes || '') + `\n[${todayBr}] O administrador ${consultant?.name} desvinculou o vendedor desta cobrança.`
+        };
+
+        await saveBillingRecord(updatedRecord);
+        showToast('Cobrança desvinculada com sucesso!', 'success');
+        loadRecords();
+      } catch (err: any) {
+        console.error(err);
+        showToast('Erro ao desvincular cobrança.', 'error');
+      }
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh] w-full">
@@ -304,8 +366,14 @@ export default function ConsultantBillingPage() {
             <span className="p-1.5 rounded-lg bg-violet-500/10 text-violet-400 border border-violet-500/20 shrink-0">
               <User className="w-3.5 h-3.5" />
             </span>
-            <span className="text-xs text-zinc-400 font-bold uppercase tracking-wider">
-              Consultor: <strong className="text-white">{consultant.name}</strong>
+            <span className="text-xs text-zinc-400 font-bold uppercase tracking-wider flex items-center gap-2">
+              <span>{isAdmin ? 'Administrador' : 'Consultor'}:</span>
+              <strong className="text-white">{consultant.name}</strong>
+              {isAdmin && (
+                <span className="px-2 py-0.5 rounded-full bg-red-500/15 border border-red-500/30 text-[9px] font-black text-red-400 tracking-wider">
+                  PAINEL GERAL
+                </span>
+              )}
             </span>
           </div>
         </div>
@@ -329,7 +397,9 @@ export default function ConsultantBillingPage() {
               <TrendingUp className="w-5 h-5" />
             </span>
             <div>
-              <p className="text-[10px] text-zinc-500 font-black uppercase tracking-widest leading-none">Comissão Ganha (20%)</p>
+              <p className="text-[10px] text-zinc-500 font-black uppercase tracking-widest leading-none">
+                {isAdmin ? 'Comissões Gerais (20%)' : 'Comissão Ganha (20%)'}
+              </p>
               <h3 className="text-2xl font-black text-white mt-1.5 font-mono leading-none">
                 R$ {stats.comissaoGanha.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
               </h3>
@@ -344,7 +414,9 @@ export default function ConsultantBillingPage() {
               <Wallet className="w-5 h-5" />
             </span>
             <div>
-              <p className="text-[10px] text-zinc-500 font-black uppercase tracking-widest leading-none">Total Recuperado</p>
+              <p className="text-[10px] text-zinc-500 font-black uppercase tracking-widest leading-none">
+                {isAdmin ? 'Total Recuperado Geral' : 'Total Recuperado'}
+              </p>
               <h3 className="text-2xl font-black text-white mt-1.5 font-mono leading-none">
                 R$ {stats.totalRecuperado.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
               </h3>
@@ -359,7 +431,9 @@ export default function ConsultantBillingPage() {
               <Calendar className="w-5 h-5" />
             </span>
             <div>
-              <p className="text-[10px] text-zinc-500 font-black uppercase tracking-widest leading-none">Em Aberto / Renegociação</p>
+              <p className="text-[10px] text-zinc-500 font-black uppercase tracking-widest leading-none">
+                {isAdmin ? 'Total Geral Em Aberto' : 'Em Aberto / Renegociação'}
+              </p>
               <h3 className="text-2xl font-black text-white mt-1.5 font-mono leading-none">
                 R$ {stats.totalEmAndamento.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
               </h3>
@@ -374,7 +448,9 @@ export default function ConsultantBillingPage() {
               <Award className="w-5 h-5" />
             </span>
             <div>
-              <p className="text-[10px] text-zinc-500 font-black uppercase tracking-widest leading-none">Acordos Assumidos</p>
+              <p className="text-[10px] text-zinc-500 font-black uppercase tracking-widest leading-none">
+                {isAdmin ? 'Acordos Totais no CRM' : 'Acordos Assumidos'}
+              </p>
               <h3 className="text-2xl font-black text-white mt-1.5 font-mono leading-none">
                 {stats.acordosRealizados} Contratos
               </h3>
@@ -395,7 +471,7 @@ export default function ConsultantBillingPage() {
           }`}
         >
           <ShieldAlert className="w-4 h-4" />
-          Oportunidades de Acordo
+          {isAdmin ? 'Oportunidades Gerais' : 'Oportunidades de Acordo'}
           {opportunities.filter(o => !o.vendedor_id).length > 0 && (
             <span className="ml-1.5 bg-red-500 text-white text-[9.5px] font-black px-2 py-0.5 rounded-full animate-pulse">
               {opportunities.filter(o => !o.vendedor_id).length}
@@ -412,7 +488,7 @@ export default function ConsultantBillingPage() {
           }`}
         >
           <Award className="w-4 h-4" />
-          Meus Ganhos & Acordos
+          {isAdmin ? 'Todos os Ganhos & Acordos' : 'Meus Ganhos & Acordos'}
           {myAgreements.filter(a => a.status !== 'PAGO').length > 0 && (
             <span className="ml-1.5 bg-violet-600 text-white text-[9.5px] font-black px-2 py-0.5 rounded-full">
               {myAgreements.filter(a => a.status !== 'PAGO').length}
@@ -457,6 +533,7 @@ export default function ConsultantBillingPage() {
                         <th className="p-4">Cliente</th>
                         <th className="p-4">Veículo</th>
                         <th className="p-4">Quem Vendeu</th>
+                        {isAdmin && <th className="p-4">Consultor</th>}
                         <th className="p-4 text-right">Valor da Fatura</th>
                         <th className="p-4 text-right text-violet-400">Comissão (20%)</th>
                         <th className="p-4 text-right">Ação</th>
@@ -478,6 +555,17 @@ export default function ConsultantBillingPage() {
                             </td>
                             <td className="p-4 font-bold text-zinc-400">{record.veiculo || 'Nenhum veículo'}</td>
                             <td className="p-4 text-zinc-500 font-medium">{record.quem_vendeu || 'Não informado'}</td>
+                            {isAdmin && (
+                              <td className="p-4 font-bold text-zinc-300">
+                                {record.vendedor_nome ? (
+                                  <span className="px-2 py-0.5 rounded bg-zinc-800 border border-zinc-700 text-[10px] uppercase font-black text-amber-400">
+                                    {record.vendedor_nome}
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] text-zinc-500 uppercase italic">Disponível</span>
+                                )}
+                              </td>
+                            )}
                             <td className="p-4 font-mono font-black text-white text-right">
                               R$ {record.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                             </td>
@@ -502,6 +590,18 @@ export default function ConsultantBillingPage() {
                                     Acordo
                                   </button>
                                 </div>
+                              ) : record.vendedor_id ? (
+                                isAdmin ? (
+                                  <button
+                                    onClick={() => handleReleaseRecord(record)}
+                                    className="px-3 py-1.5 bg-red-950/40 hover:bg-red-900/30 border border-red-900/40 text-red-300 font-black rounded-xl text-[10px] cursor-pointer transition-all"
+                                    title="Desvincular o vendedor desta cobrança"
+                                  >
+                                    Desvincular
+                                  </button>
+                                ) : (
+                                  <span className="text-[10px] text-zinc-500 font-bold uppercase italic">Em Tratativa</span>
+                                )
                               ) : (
                                 <button
                                   onClick={() => handleClaimRecord(record)}
@@ -553,8 +653,11 @@ export default function ConsultantBillingPage() {
                         <th className="p-4">Vencimento</th>
                         <th className="p-4">Cliente</th>
                         <th className="p-4">Veículo</th>
+                        {isAdmin && <th className="p-4">Consultor</th>}
                         <th className="p-4 text-right">Valor Fatura</th>
-                        <th className="p-4 text-right text-violet-400">Minha Comissão</th>
+                        <th className="p-4 text-right text-violet-400">
+                          {isAdmin ? 'Comissão' : 'Minha Comissão'}
+                        </th>
                         <th className="p-4 text-center">Status Fatura</th>
                         <th className="p-4 text-right">Ação</th>
                       </tr>
@@ -574,6 +677,13 @@ export default function ConsultantBillingPage() {
                               <div className="text-[10px] text-zinc-500 font-mono mt-0.5">Tel: {record.telefone || 'Sem telefone'}</div>
                             </td>
                             <td className="p-4 font-bold text-zinc-400">{record.veiculo || 'Nenhum veículo'}</td>
+                            {isAdmin && (
+                              <td className="p-4 font-bold text-zinc-300">
+                                <span className="px-2 py-0.5 rounded bg-zinc-800 border border-zinc-700 text-[10px] uppercase font-black text-amber-400">
+                                  {record.vendedor_nome || 'Não Informado'}
+                                </span>
+                              </td>
+                            )}
                             <td className="p-4 font-mono font-black text-white text-right">
                               R$ {record.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                             </td>
@@ -613,11 +723,31 @@ export default function ConsultantBillingPage() {
                                   >
                                     Cliente Pagou
                                   </button>
+                                  {isAdmin && (
+                                    <button
+                                      onClick={() => handleDeleteAgreement(record)}
+                                      className="px-2.5 py-1.5 bg-red-600/15 hover:bg-red-650/25 border border-red-500/20 text-red-400 font-black rounded-xl text-[10px] cursor-pointer transition-all"
+                                      title="Excluir acordo e liberar cobrança"
+                                    >
+                                      Excluir
+                                    </button>
+                                  )}
                                 </div>
                               ) : (
-                                <span className="text-[10px] font-black text-emerald-400 flex items-center justify-end gap-1">
-                                  <Check className="w-3.5 h-3.5" /> Comissão Paga
-                                </span>
+                                <div className="flex items-center justify-end gap-2.5">
+                                  <span className="text-[10px] font-black text-emerald-400 flex items-center justify-end gap-1">
+                                    <Check className="w-3.5 h-3.5" /> Comissão Paga
+                                  </span>
+                                  {isAdmin && (
+                                    <button
+                                      onClick={() => handleDeleteAgreement(record)}
+                                      className="px-2.5 py-1 bg-red-650/15 hover:bg-red-650/25 border border-red-500/20 text-red-400 font-black rounded-xl text-[10px] cursor-pointer transition-all"
+                                      title="Desfazer acordo consolidado e liberar faturamento"
+                                    >
+                                      Excluir
+                                    </button>
+                                  )}
+                                </div>
                               )}
                             </td>
                           </tr>

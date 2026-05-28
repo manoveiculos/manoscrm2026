@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/admin';
+import { sendWhatsApp } from '@/lib/services/whatsappSender';
 
 export const dynamic = 'force-dynamic';
 
@@ -135,38 +136,46 @@ export async function POST(request: NextRequest) {
       .replace(/[\u0300-\u036f]/g, '') // Remove acentos (MÉDIA -> MEDIA)
       .trim();
 
-    // 6. Looping de Disparo de Webhooks Individuais (Totalmente Independentes)
+    // 6. Looping de Disparo de WhatsApp Direto (Totalmente Independentes)
     const resultadosDisparos = [];
 
     for (const alerta of alertasCorrespondentes) {
-      const payload = {
-        alerta_id: alerta.id,
-        nome_comprador: alerta.nome_cliente,
-        whatsapp_comprador: alerta.telefone_cliente,
-        carro_correspondente: {
-          marca: veiculo.marca,
-          modelo: veiculo.modelo,
-          ano_modelo: anoVeiculo || veiculo.ano_modelo,
-          km: veiculo.km,
-          preco_pedido: veiculo.preco_pedido,
-          preco_fipe: veiculo.preco_fipe,
-          classificacao_relevancia: classificacaoRelevancia === 'ALTA' ? 'ALTA' : 'MEDIA'
-        }
-      };
+      // Formatar o valor em R$
+      const formattedPrice = new Intl.NumberFormat('pt-BR', {
+        style: 'currency',
+        currency: 'BRL',
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      }).format(veiculo.preco_pedido || 0);
+
+      // Formatar a quilometragem
+      const formattedKm = new Intl.NumberFormat('pt-BR').format(Number(veiculo.km || 0));
+
+      const msgText = `Olá! Boas notícias. 🚗✨
+
+O carro que teu cliente ${alerta.nome_cliente} precisa acabou de ser anunciado no CRM da Manos:
+
+🔹 ${veiculo.marca.toUpperCase()} ${veiculo.modelo}
+📅 Ano: ${anoVeiculo || veiculo.ano_modelo || 'Não informado'}
+🛣️ KM: ${formattedKm} km
+💰 Valor: ${formattedPrice}
+
+👉 Acesse para conferir: manoscrm.com.br
+
+Corra para dar uma olhada antes que outra pessoa compre!`;
 
       try {
-        console.log(`[Webhook Alertas] Disparando webhook para comprador ${alerta.nome_cliente} (${alerta.telefone_cliente})`);
+        console.log(`[Webhook Alertas] Disparando mensagem de WhatsApp direta para comprador ${alerta.nome_cliente} (${alerta.telefone_cliente})`);
         
-        const response = await fetch(N8N_WEBHOOK_URL, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(payload),
+        const sendResult = await sendWhatsApp({
+          toPhone: alerta.telefone_cliente,
+          message: msgText,
+          kind: 'vendor_alert',
+          skipDedup: true
         });
 
-        if (!response.ok) {
-          throw new Error(`n8n retornou status ${response.status} ${response.statusText}`);
+        if (!sendResult.ok) {
+          throw new Error(sendResult.error || 'Erro no envio do WhatsApp');
         }
 
         resultadosDisparos.push({
@@ -176,7 +185,7 @@ export async function POST(request: NextRequest) {
         });
       } catch (err: any) {
         // Tratamento de erro isolado por disparo para que o fluxo principal não quebre
-        console.error(`[Webhook Alertas] Falha ao enviar notificação para o alerta ${alerta.id} (Cliente: ${alerta.nome_cliente}):`, err.message);
+        console.error(`[Webhook Alertas] Falha ao enviar WhatsApp para o alerta ${alerta.id} (Cliente: ${alerta.nome_cliente}):`, err.message);
         
         resultadosDisparos.push({
           alerta_id: alerta.id,

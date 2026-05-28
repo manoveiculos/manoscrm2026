@@ -211,7 +211,7 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const brandParam = searchParams.get('brand');
     const ratingParam = searchParams.get('rating');
-    const limitParam = Number(searchParams.get('limit') || 100);
+    const limitParam = Number(searchParams.get('limit') || 1000);
 
     const authHeader = request.headers.get('Authorization');
     const adminKey = process.env.ADMIN_SECRET_KEY || 'manos_intel_secret_key';
