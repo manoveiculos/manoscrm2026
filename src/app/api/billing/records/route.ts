@@ -8,7 +8,7 @@ export async function GET() {
   
   const supabase = createAdminClient();
   const { data, error } = await supabase
-    .from('records_cobrancamanos26')
+    .from('v_billing_controle')
     .select('*')
     .order('vencimento', { ascending: true });
 
@@ -16,7 +16,16 @@ export async function GET() {
     console.error('[Supabase API Error] Fetch billing records failed:', error.message);
     return NextResponse.json([]);
   }
-  return NextResponse.json(data || []);
+
+  // Mapeia os campos da view de volta para as propriedades camelCase esperadas pelo front-end
+  const mappedData = (data || []).map((item: any) => ({
+    ...item,
+    clienteFornecedor: item.cliente,
+    cpfCnpj: item.cpf_cnpj,
+    dataPagamento: item.data_pagamento
+  }));
+
+  return NextResponse.json(mappedData);
 }
 
 export async function POST(req: Request) {
@@ -26,10 +35,26 @@ export async function POST(req: Request) {
       record.id = `rec-${crypto.randomUUID()}`;
     }
 
+    // Sanitizar campos computados da view para persistência na tabela records_cobrancamanos26
+    const {
+      dias_atraso,
+      faixa_atraso,
+      acordos_ativos,
+      juridico_envios,
+      ultima_msg_whatsapp,
+      ai_classification,
+      risk_score,
+      vendedor_nome,
+      cliente,
+      cpf_cnpj,
+      data_pagamento,
+      ...cleanRecord
+    } = record;
+
     const supabase = createAdminClient();
     const { data, error } = await supabase
       .from('records_cobrancamanos26')
-      .upsert(record)
+      .upsert(cleanRecord)
       .select();
 
     if (error) {

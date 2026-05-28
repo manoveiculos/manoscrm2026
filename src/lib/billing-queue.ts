@@ -236,6 +236,76 @@ export async function processNextQueueItem() {
   const supabaseAdmin = createAdminClient();
   const cleanPhone = item.telefone.replace(/\D/g, '');
 
+  // Bloqueio de Fórum (Judicial Avançado) ou Fatura já Paga
+  if (item.recordId) {
+    const { data: recordData } = await supabaseAdmin
+      .from('records_cobrancamanos26')
+      .select('status, fase')
+      .eq('id', item.recordId)
+      .maybeSingle();
+
+    if (recordData?.status === 'PAGO' || recordData?.fase === 'PAGOS') {
+      queue.shift(); // remove da fila
+      const logEntry: WebhookLog = {
+        id: `log-${crypto.randomUUID()}`,
+        timestamp: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
+        nome: item.nome,
+        telefone: item.telefone,
+        vencimento: item.vencimento,
+        valor: String(item.valor),
+        estagio: item.estagio,
+        status: 'PULADO',
+        errorMessage: 'Cancelado: Parcela já foi paga (PAGOS).'
+      };
+      addWebhookLog(logEntry);
+      setLastDispatchTime(`${new Date().toLocaleTimeString('pt-BR')} (Cancelado, já paga: ${item.nome})`);
+      return;
+    }
+
+    if (recordData?.fase === 'ENVIO_FORUM') {
+      queue.shift(); // remove da fila
+      const logEntry: WebhookLog = {
+        id: `log-${crypto.randomUUID()}`,
+        timestamp: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
+        nome: item.nome,
+        telefone: item.telefone,
+        vencimento: item.vencimento,
+        valor: String(item.valor),
+        estagio: item.estagio,
+        status: 'PULADO',
+        errorMessage: 'Bloqueado: Cobrança enviada ao Fórum (Judicial). Proibido enviar WhatsApp.'
+      };
+      addWebhookLog(logEntry);
+      setLastDispatchTime(`${new Date().toLocaleTimeString('pt-BR')} (Bloqueio Fórum: ${item.nome})`);
+      return;
+    }
+  } else if (item.telefone) {
+    const cleanPhoneForSearch = item.telefone.replace(/\D/g, '');
+    const { data: recordsData } = await supabaseAdmin
+      .from('records_cobrancamanos26')
+      .select('fase')
+      .eq('telefone', cleanPhoneForSearch)
+      .eq('fase', 'ENVIO_FORUM')
+      .limit(1);
+    if (recordsData && recordsData.length > 0) {
+      queue.shift(); // remove da fila
+      const logEntry: WebhookLog = {
+        id: `log-${crypto.randomUUID()}`,
+        timestamp: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
+        nome: item.nome,
+        telefone: item.telefone,
+        vencimento: item.vencimento,
+        valor: String(item.valor),
+        estagio: item.estagio,
+        status: 'PULADO',
+        errorMessage: 'Bloqueado: Cobrança enviada ao Fórum (Judicial). Proibido enviar WhatsApp.'
+      };
+      addWebhookLog(logEntry);
+      setLastDispatchTime(`${new Date().toLocaleTimeString('pt-BR')} (Bloqueio Fórum: ${item.nome})`);
+      return;
+    }
+  }
+
   try {
     // 1. Double Dispatch Prevention Check
     const { data: match } = await supabaseAdmin

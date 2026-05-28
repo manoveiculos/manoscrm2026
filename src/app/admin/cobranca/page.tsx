@@ -374,6 +374,48 @@ export default function BillingPage() {
     }
   };
 
+  const handleToggleTelefoneInvalido = async (id: string, isInvalid: boolean) => {
+    const target = records.find(r => r.id === id);
+    if (!target) return;
+
+    const updatedRecord: BillingRecord = {
+      ...target,
+      telefone_invalido: isInvalid
+    };
+
+    try {
+      await saveBillingRecord(updatedRecord);
+      setRecords(prev => prev.map(r => r.id === id ? updatedRecord : r));
+      showToast(isInvalid ? 'Telefone sinalizado como inválido!' : 'Telefone ativado com sucesso!', 'success');
+    } catch (err: any) {
+      showToast('Erro ao atualizar status do telefone', 'error');
+    }
+  };
+
+  const handleChangeFase = async (id: string, newFase: 'NORMAL' | 'ENVIO_JURIDICO' | 'JURIDICO_VENDEDORES' | 'ENVIO_FORUM') => {
+    const target = records.find(r => r.id === id);
+    if (!target) return;
+
+    const updatedRecord: BillingRecord = {
+      ...target,
+      fase: newFase
+    };
+
+    try {
+      await saveBillingRecord(updatedRecord);
+      setRecords(prev => prev.map(r => r.id === id ? updatedRecord : r));
+      
+      let faseName = 'Normal';
+      if (newFase === 'ENVIO_JURIDICO') faseName = 'Cobrança Jurídica';
+      if (newFase === 'JURIDICO_VENDEDORES') faseName = 'Cobrança Vendedores';
+      if (newFase === 'ENVIO_FORUM') faseName = 'Envio ao Fórum';
+      
+      showToast(`Estágio da cobrança atualizado para: ${faseName}!`, 'success');
+    } catch (err: any) {
+      showToast('Erro ao atualizar estágio da cobrança', 'error');
+    }
+  };
+
   const handleSaveRecord = async (record: BillingRecord) => {
     try {
       const saved = await saveBillingRecord(record);
@@ -440,7 +482,7 @@ export default function BillingPage() {
   const isAuthorized = useMemo(() => {
     if (!user) return false;
     const isAdmin = userRole === 'admin';
-    const isCamila = user.email === 'camila.renatta@hotmail.com';
+    const isCamila = user.email === 'camila.renatta@hotmail.com' || user.email === 'camilarenatta@hotmail.com';
     const isAlexandre = user.email === 'alexandre_gorges@hotmail.com';
     return isAdmin || isCamila || isAlexandre;
   }, [user, userRole]);
@@ -822,6 +864,8 @@ export default function BillingPage() {
                 onEditRecord={handleEditRecordClick}
                 onSendReminder={handleReminderClick}
                 onDeleteRecord={handleDeleteRecord}
+                onToggleTelefoneInvalido={handleToggleTelefoneInvalido}
+                onChangeFase={handleChangeFase}
               />
             )}
           </motion.div>

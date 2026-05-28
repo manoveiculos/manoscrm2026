@@ -46,6 +46,7 @@ const NAV_ITEMS: NavItem[] = [
     { label: 'Atendimento', icon: PlayCircle, href: '/atendimento' },
     { label: 'Leads', icon: LayoutDashboard, href: '/leads' },
     { label: 'Compras', icon: Radar, href: '/compras' },
+    { label: 'Cobrança Acordos', icon: DollarSign, href: '/consultor/cobranca' },
     { label: 'Cobrança', icon: DollarSign, href: '/admin/cobranca', adminOnly: true },
     { label: 'Pipeline', icon: KanbanSquare, href: '/pipeline', adminOnly: true },
     { label: 'Dashboard', icon: BarChart3, href: '/', adminOnly: true },
@@ -192,7 +193,7 @@ export const NavigationV2 = () => {
                 )}
                 {NAV_ITEMS.filter(item => {
                     const isAdmin = role === 'admin';
-                    const isCamila = user?.email === 'camila.renatta@hotmail.com';
+                    const isCamila = user?.email === 'camila.renatta@hotmail.com' || user?.email === 'camilarenatta@hotmail.com';
                     const isAlexandre = user?.email === 'alexandre_gorges@hotmail.com';
 
                     // Camila tem acesso EXCLUSIVO à Cobrança — esconde tudo o mais

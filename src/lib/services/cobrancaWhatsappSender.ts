@@ -103,6 +103,30 @@ export async function sendCobrancaWhatsApp(args: CobrancaSendArgs): Promise<Cobr
         return { ok: false, error: 'mensagem_vazia' };
     }
 
+    // Bloqueio de Fórum (Judicial Avançado)
+    if (args.recordId) {
+        const admin = createClient();
+        const { data: recordData } = await admin
+            .from('records_cobrancamanos26')
+            .select('fase')
+            .eq('id', args.recordId)
+            .maybeSingle();
+        if (recordData?.fase === 'ENVIO_FORUM') {
+            return { ok: false, error: 'bloqueio_judicial_forum' };
+        }
+    } else if (args.toPhone) {
+        const admin = createClient();
+        const { data: recordsData } = await admin
+            .from('records_cobrancamanos26')
+            .select('fase')
+            .eq('telefone', toDb)
+            .eq('fase', 'ENVIO_FORUM')
+            .limit(1);
+        if (recordsData && recordsData.length > 0) {
+            return { ok: false, error: 'bloqueio_judicial_forum' };
+        }
+    }
+
     if (!args.skipDedup && await checkDedup(toDb, args.message)) {
         return { ok: false, error: 'dedup_hit_10min' };
     }

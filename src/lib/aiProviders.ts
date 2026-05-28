@@ -17,7 +17,7 @@ export const anthropic = new Anthropic({
 export const AI_MODELS = {
     OPENAI_MINI:    'gpt-4o-mini',
     OPENAI_FULL:    'gpt-4o',
-    GEMINI_FLASH:   'gemini-2.0-flash',
+    GEMINI_FLASH:   'gemini-2.5-flash',
     CLAUDE_SONNET:  'claude-sonnet-4-6',
 } as const;
 

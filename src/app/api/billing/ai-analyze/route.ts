@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/admin';
-import { anthropic, AI_MODELS } from '@/lib/aiProviders';
+import { anthropic, AI_MODELS, openai, genAI } from '@/lib/aiProviders';
 
 /**
  * IA de análise de cobrança.
@@ -120,20 +120,51 @@ ${msgsFmt}
 ## Tarefa
 Analise o caso e devolva o JSON pedido. Hoje é ${todayStr}.`;
 
-        const completion = await anthropic.messages.create({
-            model: AI_MODELS.CLAUDE_SONNET,
-            max_tokens: 600,
-            system: [
-                {
-                    type: 'text',
-                    text: SYSTEM_PROMPT,
-                    cache_control: { type: 'ephemeral' },
-                },
-            ],
-            messages: [{ role: 'user', content: userPrompt }],
-        });
+        let raw = '';
+        let modelUsed = 'Claude Sonnet';
+        let usage: any = undefined;
+        try {
+            const completion = await anthropic.messages.create({
+                model: AI_MODELS.CLAUDE_SONNET,
+                max_tokens: 600,
+                system: [
+                    {
+                        type: 'text',
+                        text: SYSTEM_PROMPT,
+                        cache_control: { type: 'ephemeral' },
+                    },
+                ],
+                messages: [{ role: 'user', content: userPrompt }],
+            });
+            raw = completion.content[0]?.type === 'text' ? completion.content[0].text : '';
+            usage = completion.usage;
+        } catch (anthropicError: any) {
+            console.warn('[ai-analyze] Erro no Anthropic, tentando fallback para Gemini 2.5 Flash:', anthropicError.message);
+            modelUsed = 'Gemini 2.5 Flash';
+            try {
+                const model = genAI.getGenerativeModel({
+                    model: 'gemini-2.5-flash',
+                    generationConfig: { responseMimeType: 'application/json' }
+                });
+                const prompt = `${SYSTEM_PROMPT}\n\n${userPrompt}`;
+                const response = await model.generateContent(prompt);
+                raw = response.response.text();
+            } catch (geminiError: any) {
+                console.warn('[ai-analyze] Erro no Gemini, tentando fallback secundário para OpenAI:', geminiError.message);
+                modelUsed = 'OpenAI GPT-4o-mini';
+                const completion = await openai.chat.completions.create({
+                    model: 'gpt-4o-mini',
+                    messages: [
+                        { role: 'system' as const, content: SYSTEM_PROMPT },
+                        { role: 'user' as const, content: userPrompt }
+                    ],
+                    response_format: { type: 'json_object' },
+                });
+                raw = completion.choices[0]?.message?.content || '';
+                usage = completion.usage;
+            }
+        }
 
-        const raw = completion.content[0]?.type === 'text' ? completion.content[0].text : '';
         let parsed: any;
         try {
             // Remove eventuais ```json wrappers
@@ -154,7 +185,7 @@ Analise o caso e devolva o JSON pedido. Hoje é ${todayStr}.`;
             next_action: parsed.next_action ?? null,
             next_action_at: parsed.next_action_at ?? null,
             summary: parsed.summary ?? null,
-            model: AI_MODELS.CLAUDE_SONNET,
+            model: modelUsed,
             analyzed_at: new Date().toISOString(),
         });
 
@@ -162,7 +193,7 @@ Analise o caso e devolva o JSON pedido. Hoje é ${todayStr}.`;
             ok: true,
             analysis: parsed,
             cached: false,
-            usage: completion.usage,
+            usage: usage,
         });
     } catch (e: any) {
         console.error('[ai-analyze] erro:', e);

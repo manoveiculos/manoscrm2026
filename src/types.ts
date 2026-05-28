@@ -11,6 +11,17 @@ export interface BillingRecord {
   status: BillingStatus;     // Status (PAGO, PENDENTE, ATRASADO)
   dataPagamento?: string;    // Date when marked as paid
   observacoes?: string;      // Metadata
+  fase?: 'NORMAL' | 'ENVIO_JURIDICO' | 'JURIDICO_VENDEDORES' | 'ENVIO_FORUM' | 'PAGOS';
+  telefone_invalido?: boolean;
+  vendedor_id?: string | null;
+  quem_vendeu?: string | null;
+  vendedor_nome?: string;
+  acordos_ativos?: number;
+  dias_atraso?: number;
+  faixa_atraso?: string;
+  ultima_msg_whatsapp?: string;
+  ai_classification?: string;
+  risk_score?: number;
 }
 
 export interface DashboardStats {

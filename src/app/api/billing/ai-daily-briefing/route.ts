@@ -1,6 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/admin';
-import { anthropic, AI_MODELS } from '@/lib/aiProviders';
+import { anthropic, AI_MODELS, openai, genAI } from '@/lib/aiProviders';
+
+function extractJSON(text: string): string {
+    const firstBrace = text.indexOf('{');
+    const lastBrace = text.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+        return text.slice(firstBrace, lastBrace + 1);
+    }
+    return text;
+}
 
 /**
  * Briefing diário da IA para o setor de Cobrança.
@@ -47,7 +56,8 @@ Sua saída DEVE ser um JSON válido com este formato exato (sem markdown wrapper
 }
 
 REGRAS DE OURO:
-- Máximo 10 prioridades — escolha as mais críticas.
+- Máximo 5 prioridades — escolha as mais críticas.
+- Seja extremamente conciso nos textos (máximo de 2 a 3 frases curtas nos campos "porque", "o_que_fazer" e "script_sugerido" para manter a clareza e evitar truncamento).
 - "URGENTE_HOJE" = atraso 1-3 dias, fácil de recuperar agora.
 - "FALAR_AGORA" = cliente respondeu mas a Camila ainda não respondeu de volta.
 - "FOLLOWUP_HOJE" = prometeu pagar e chegou o dia prometido.
@@ -158,8 +168,18 @@ export async function POST(req: NextRequest) {
             acordosByRecord[a.record_id].push(a);
         }
 
-        // Monta linhas resumidas (limita a 100 records para não estourar tokens)
-        const linhas = records.slice(0, 100).map(r => {
+        // Ordena records: ATRASADOS primeiro, ordenados por data de vencimento decrescente (atrasos mais recentes primeiro)
+        const sortedRecords = [...records].sort((a, b) => {
+            if (a.status === 'ATRASADO' && b.status !== 'ATRASADO') return -1;
+            if (a.status !== 'ATRASADO' && b.status === 'ATRASADO') return 1;
+            return b.vencimento.localeCompare(a.vencimento);
+        });
+
+        // Limita a amostra para no máximo 20 records mais críticos
+        const sampleRecords = sortedRecords.slice(0, 20);
+
+        // Monta linhas resumidas
+        const linhas = sampleRecords.map(r => {
             const venc = new Date(r.vencimento + 'T00:00:00');
             const today = new Date(todayStr + 'T00:00:00');
             const dias = Math.floor((today.getTime() - venc.getTime()) / (24 * 3600 * 1000));
@@ -179,29 +199,60 @@ ${msgs.length > 0 ? `Conversa recente:\n${msgs.slice(0, 4).join('\n')}` : 'Sem m
 `.trim();
         }).join('\n\n---\n\n');
 
-        const completion = await anthropic.messages.create({
-            model: AI_MODELS.CLAUDE_SONNET,
-            max_tokens: 4000,
-            system: [
-                { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
-            ],
-            messages: [
-                {
-                    role: 'user',
-                    content: `Hoje é ${todayStr}.\n\nLista de cobranças em aberto (${records.length} no total, ${Math.min(100, records.length)} amostradas):\n\n${linhas}\n\nProduza o briefing JSON conforme as instruções do system prompt. Foque nas 10 prioridades mais críticas.`,
-                },
-            ],
-        });
+        let raw = '';
+        let usage: any = undefined;
+        let modelUsed = 'Claude Sonnet';
+        try {
+            const completion = await anthropic.messages.create({
+                model: AI_MODELS.CLAUDE_SONNET,
+                max_tokens: 4000,
+                system: [
+                    { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
+                ],
+                messages: [
+                    {
+                        role: 'user',
+                        content: `Hoje é ${todayStr}.\n\nLista de cobranças em aberto (${records.length} no total, ${sampleRecords.length} amostradas):\n\n${linhas}\n\nProduza o briefing JSON conforme as instruções do system prompt. Foque nas 5 prioridades mais críticas.`,
+                    },
+                ],
+            });
+            raw = completion.content[0]?.type === 'text' ? completion.content[0].text : '';
+            usage = completion.usage;
+        } catch (anthropicError: any) {
+            console.warn('[ai-daily-briefing] Erro no Anthropic, tentando fallback para Gemini 2.5 Flash:', anthropicError.message);
+            modelUsed = 'Gemini 2.5 Flash';
+            try {
+                const model = genAI.getGenerativeModel({
+                    model: 'gemini-2.5-flash',
+                    generationConfig: { responseMimeType: 'application/json' }
+                });
+                const prompt = `${SYSTEM_PROMPT}\n\nHoje é ${todayStr}.\n\nLista de cobranças em aberto (${records.length} no total, ${sampleRecords.length} amostradas):\n\n${linhas}\n\nProduza o briefing JSON conforme as instruções do system prompt. Foque nas 5 prioridades mais críticas.`;
+                const response = await model.generateContent(prompt);
+                raw = response.response.text();
+            } catch (geminiError: any) {
+                console.warn('[ai-daily-briefing] Erro no Gemini, tentando fallback secundário para OpenAI:', geminiError.message);
+                modelUsed = 'OpenAI GPT-4o-mini';
+                const completion = await openai.chat.completions.create({
+                    model: 'gpt-4o-mini',
+                    messages: [
+                        { role: 'system' as const, content: SYSTEM_PROMPT },
+                        { role: 'user' as const, content: `Hoje é ${todayStr}.\n\nLista de cobranças em aberto (${records.length} no total, ${sampleRecords.length} amostradas):\n\n${linhas}\n\nProduza o briefing JSON conforme as instruções do system prompt. Foque nas 5 prioridades mais críticas.` }
+                    ],
+                    response_format: { type: 'json_object' },
+                });
+                raw = completion.choices[0]?.message?.content || '';
+                usage = completion.usage;
+            }
+        }
 
-        const raw = completion.content[0]?.type === 'text' ? completion.content[0].text : '';
         let parsed: any;
         try {
-            const clean = raw.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
+            const clean = extractJSON(raw).trim();
             parsed = JSON.parse(clean);
         } catch {
             return NextResponse.json({
                 error: 'IA devolveu resposta inválida',
-                raw: raw.slice(0, 500),
+                raw: raw.slice(0, 1000),
             }, { status: 502 });
         }
 
@@ -210,7 +261,8 @@ ${msgs.length > 0 ? `Conversa recente:\n${msgs.slice(0, 4).join('\n')}` : 'Sem m
         return NextResponse.json({
             briefing: parsed,
             cached: false,
-            usage: completion.usage,
+            usage: usage,
+            model: modelUsed,
         });
     } catch (e: any) {
         console.error('[ai-daily-briefing] erro:', e);

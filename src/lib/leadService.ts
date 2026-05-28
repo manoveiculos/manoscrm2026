@@ -295,8 +295,8 @@ export const leadService = {
 
             // Mapeamentos específicos CRM26
             if (updateData.name) { updateData.nome = updateData.name; delete updateData.name; }
-            if (updateData.vehicle_interest) { updateData.interesse = updateData.vehicle_interest; } 
-            if (updateData.carro_troca) { updateData.troca = updateData.carro_troca; }
+            if (updateData.vehicle_interest) { updateData.interesse = updateData.vehicle_interest; delete updateData.vehicle_interest; } 
+            if (updateData.carro_troca) { updateData.troca = updateData.carro_troca; delete updateData.carro_troca; }
             if (updateData.cidade) { /* já é 'cidade' no crm26 */ }
         }
 

@@ -474,6 +474,7 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
                 if (setLeads) {
                     setLeads((prev: any[]) => prev.map(l => l.id === lead.id ? { ...l, [col]: colValue, [fieldLower]: value } : l));
                 }
+                saved = true;
                 break;
             } catch (err) {
                 lastError = err;

@@ -12,6 +12,8 @@ interface DataGridProps {
   onEditRecord: (record: BillingRecord) => void;
   onSendReminder: (record: BillingRecord) => void;
   onDeleteRecord: (id: string) => void;
+  onToggleTelefoneInvalido?: (id: string, isInvalid: boolean) => void;
+  onChangeFase?: (id: string, newFase: 'NORMAL' | 'ENVIO_JURIDICO' | 'JURIDICO_VENDEDORES' | 'ENVIO_FORUM') => void;
 }
 
 type SortField = 'clienteFornecedor' | 'valor' | 'vencimento' | 'status';
@@ -22,14 +24,38 @@ export default function DataGrid({
   onMarkAsPaid, 
   onEditRecord, 
   onSendReminder, 
-  onDeleteRecord 
+  onDeleteRecord,
+  onToggleTelefoneInvalido,
+  onChangeFase
 }: DataGridProps) {
   const [filterCliente, setFilterCliente] = useState('');
   const [filterDescricao, setFilterDescricao] = useState('');
   const [filterVeiculo, setFilterVeiculo] = useState('');
   const [filterVencimento, setFilterVencimento] = useState('');
 
-  const [statusFilter, setStatusFilter] = useState<'TODOS' | BillingStatus>('TODOS');
+  const [statusFilter, setStatusFilter] = useState<'ATIVOS' | 'TODOS' | BillingStatus>('ATIVOS');
+  const [faseFilter, setFaseFilter] = useState<'TODOS' | 'NORMAL' | 'ENVIO_JURIDICO' | 'JURIDICO_VENDEDORES' | 'ENVIO_FORUM' | 'PAGOS'>('TODOS');
+
+  const handleStatusFilterChange = (status: 'ATIVOS' | 'TODOS' | BillingStatus) => {
+    setStatusFilter(status);
+    setCurrentPage(1);
+    if (status === 'PAGO') {
+      setFaseFilter('PAGOS');
+    } else if (faseFilter === 'PAGOS') {
+      setFaseFilter('TODOS');
+    }
+  };
+
+  const handleFaseFilterChange = (fase: 'TODOS' | 'NORMAL' | 'ENVIO_JURIDICO' | 'JURIDICO_VENDEDORES' | 'ENVIO_FORUM' | 'PAGOS') => {
+    setFaseFilter(fase);
+    setCurrentPage(1);
+    if (fase === 'PAGOS') {
+      setStatusFilter('PAGO');
+    } else if (statusFilter === 'PAGO') {
+      setStatusFilter('ATIVOS');
+    }
+  };
+
   const [sortField, setSortField] = useState<SortField>('vencimento');
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -51,7 +77,8 @@ export default function DataGrid({
     setFilterDescricao('');
     setFilterVeiculo('');
     setFilterVencimento('');
-    setStatusFilter('TODOS');
+    setStatusFilter('ATIVOS');
+    setFaseFilter('TODOS');
     setSelectedIds([]);
     setCurrentPage(1);
   };
@@ -61,10 +88,14 @@ export default function DataGrid({
 
     if (filterCliente.trim() !== '') {
       const query = filterCliente.toLowerCase();
-      result = result.filter(rec => 
-        rec.clienteFornecedor.toLowerCase().includes(query) ||
-        rec.cpfCnpj.includes(query)
-      );
+      const queryDigits = query.replace(/\D/g, '');
+      result = result.filter(rec => {
+        const nameMatches = rec.clienteFornecedor.toLowerCase().includes(query);
+        const docMatches = (rec.cpfCnpj || '').includes(query);
+        const phoneDigits = (rec.telefone || '').replace(/\D/g, '');
+        const phoneMatches = queryDigits !== '' && phoneDigits.includes(queryDigits);
+        return nameMatches || docMatches || phoneMatches;
+      });
     }
 
     if (filterDescricao.trim() !== '') {
@@ -86,8 +117,18 @@ export default function DataGrid({
       result = result.filter(rec => rec.vencimento.includes(filterVencimento));
     }
 
-    if (statusFilter !== 'TODOS') {
-      result = result.filter(rec => rec.status === statusFilter);
+    if (statusFilter === 'PAGO' || faseFilter === 'PAGOS') {
+      result = result.filter(rec => rec.status === 'PAGO' || rec.fase === 'PAGOS');
+    } else {
+      if (statusFilter === 'ATIVOS') {
+        result = result.filter(rec => rec.status === 'PENDENTE' || rec.status === 'ATRASADO');
+      } else if (statusFilter !== 'TODOS') {
+        result = result.filter(rec => rec.status === statusFilter);
+      }
+
+      if (faseFilter !== 'TODOS') {
+        result = result.filter(rec => (rec.fase || 'NORMAL') === faseFilter);
+      }
     }
 
     result.sort((a, b) => {
@@ -105,7 +146,7 @@ export default function DataGrid({
     });
 
     return result;
-  }, [records, filterCliente, filterDescricao, filterVeiculo, filterVencimento, statusFilter, sortField, sortOrder]);
+  }, [records, filterCliente, filterDescricao, filterVeiculo, filterVencimento, statusFilter, faseFilter, sortField, sortOrder]);
 
   const paginatedRecords = useMemo(() => {
     const startIndex = (currentPage - 1) * itemsPerPage;
@@ -240,28 +281,62 @@ export default function DataGrid({
         </div>
 
         {/* Action Toggle Strip */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pt-4 border-t border-white/[0.06]">
-          <div className="flex items-center gap-2.5">
-            <span className="text-zinc-500 text-[10px] font-black uppercase tracking-widest">Exibindo:</span>
-            <div className="inline-flex bg-zinc-950/60 p-0.5 rounded-xl border border-zinc-850">
-              {(['TODOS', 'PAGO', 'PENDENTE', 'ATRASADO'] as const).map((filter) => (
-                <button
-                  key={filter}
-                  onClick={() => { setStatusFilter(filter); setCurrentPage(1); }}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                    statusFilter === filter
-                      ? 'bg-zinc-800 text-white shadow-md'
-                      : 'text-zinc-500 hover:text-zinc-300'
-                  }`}
-                >
-                  {filter === 'TODOS' ? 'Todos' : filter === 'PAGO' ? 'Pagos' : filter === 'PENDENTE' ? 'Pendentes' : 'Atrasados'}
-                </button>
-              ))}
+        <div className="flex flex-col xl:flex-row items-start xl:items-center justify-between gap-4 pt-4 border-t border-white/[0.06] text-xs">
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2.5">
+              <span className="text-zinc-500 text-[10px] font-black uppercase tracking-widest">Status:</span>
+              <div className="inline-flex bg-zinc-950/60 p-0.5 rounded-xl border border-zinc-850">
+                {([
+                  { key: 'ATIVOS', label: 'Ativos' },
+                  { key: 'TODOS', label: 'Todos' },
+                  { key: 'PAGO', label: 'Pagos' },
+                  { key: 'PENDENTE', label: 'Pendentes' },
+                  { key: 'ATRASADO', label: 'Atrasados' }
+                ] as const).map((filter) => (
+                  <button
+                    key={filter.key}
+                    onClick={() => handleStatusFilterChange(filter.key)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      statusFilter === filter.key
+                        ? 'bg-zinc-800 text-white shadow-md'
+                        : 'text-zinc-500 hover:text-zinc-300'
+                    }`}
+                  >
+                    {filter.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2.5">
+              <span className="text-zinc-500 text-[10px] font-black uppercase tracking-widest">Estágio:</span>
+              <div className="inline-flex bg-zinc-950/60 p-0.5 rounded-xl border border-zinc-850">
+                {([
+                  { key: 'TODOS', label: 'Todos' },
+                  { key: 'NORMAL', label: 'Normal' },
+                  { key: 'ENVIO_JURIDICO', label: 'Jurídico' },
+                  { key: 'JURIDICO_VENDEDORES', label: 'Vendedores' },
+                  { key: 'ENVIO_FORUM', label: 'Fórum' },
+                  { key: 'PAGOS', label: 'Pagos' }
+                ] as const).map((f) => (
+                  <button
+                    key={f.key}
+                    onClick={() => handleFaseFilterChange(f.key)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      faseFilter === f.key
+                        ? 'bg-zinc-800 text-white shadow-md'
+                        : 'text-zinc-500 hover:text-zinc-300'
+                    }`}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            {(filterCliente || filterDescricao || filterVeiculo || filterVencimento || statusFilter !== 'TODOS') && (
+          <div className="flex items-center gap-3 self-end xl:self-auto">
+            {(filterCliente || filterDescricao || filterVeiculo || filterVencimento || statusFilter !== 'TODOS' || faseFilter !== 'TODOS') && (
               <button
                 onClick={clearFilters}
                 className="px-3.5 py-1.5 text-xs text-red-400 hover:text-red-300 bg-red-500/5 hover:bg-red-500/10 border border-red-500/10 hover:border-red-500/20 rounded-xl font-bold transition-all"
@@ -312,6 +387,9 @@ export default function DataGrid({
                     Valor <ArrowUpDown className="w-3.5 h-3.5 text-zinc-500" />
                   </div>
                 </th>
+                <th className="p-4 text-xs font-black uppercase tracking-widest text-zinc-500">
+                  Estágio Cobrança
+                </th>
                 <th className="p-4 text-xs font-black uppercase tracking-widest text-zinc-500 text-right pr-6">
                   Ações
                 </th>
@@ -361,8 +439,35 @@ export default function DataGrid({
                           <div className="font-extrabold text-zinc-100 uppercase tracking-tight">
                             {record.clienteFornecedor}
                           </div>
-                          <div className="text-zinc-500 text-[10px] font-mono mt-1 font-semibold">
-                            CPF/CNPJ: {record.cpfCnpj || '000.000.000-00'} | Tel: {record.telefone}
+                          <div className="text-zinc-500 text-[10px] font-mono mt-1 font-semibold flex flex-wrap items-center gap-1.5 leading-relaxed">
+                            <span>CPF/CNPJ: {record.cpfCnpj || '000.000.000-00'}</span>
+                            <span>|</span>
+                            <span className={record.telefone_invalido ? 'line-through text-red-400 font-bold' : ''}>
+                              Tel: {record.telefone || 'Sem Telefone'}
+                            </span>
+                            
+                            <button
+                              onClick={() => onToggleTelefoneInvalido?.(record.id, !record.telefone_invalido)}
+                              className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase border transition-all cursor-pointer ${
+                                record.telefone_invalido 
+                                  ? 'bg-red-500/10 text-red-450 border-red-500/20' 
+                                  : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-400 border-zinc-700/80 hover:text-zinc-200'
+                              }`}
+                              title={record.telefone_invalido ? 'Marcar telefone como VÁLIDO' : 'Sinalizar telefone como INVÁLIDO'}
+                            >
+                              {record.telefone_invalido ? 'Inválido ⚠️' : 'Sinalizar Inválido'}
+                            </button>
+
+                            {record.vendedor_nome && (
+                              <span className="bg-violet-500/10 text-violet-400 border border-violet-500/20 px-1.5 py-0.5 rounded text-[8.5px] font-black uppercase tracking-wider">
+                                Assumido: {record.vendedor_nome}
+                              </span>
+                            )}
+                            {record.quem_vendeu && (
+                              <span className="bg-zinc-950 text-zinc-500 border border-zinc-850 px-1.5 py-0.5 rounded text-[8.5px] font-bold">
+                                Vendedor: {record.quem_vendeu}
+                              </span>
+                            )}
                           </div>
                         </td>
 
@@ -371,7 +476,7 @@ export default function DataGrid({
                           <div className="text-zinc-400 font-bold tracking-tight">
                             {record.veiculo || 'Nenhum veículo cadastrado'}
                           </div>
-                          <div className="text-[10px] uppercase font-bold text-zinc-500 flex items-center gap-1.5">
+                          <div className="text-[10px] uppercase font-bold text-zinc-500 flex flex-wrap items-center gap-1.5">
                             <span className="text-zinc-500">{getSubtextByStatus(record)}</span>
                             <span>•</span>
                             <span className={`px-1.5 py-0.2 rounded text-[9px] font-extrabold uppercase border ${
@@ -383,12 +488,33 @@ export default function DataGrid({
                             }`}>
                               {record.status}
                             </span>
+
+                            {record.acordos_ativos && record.acordos_ativos > 0 ? (
+                              <span className="px-1.5 py-0.2 rounded text-[9px] font-extrabold uppercase border bg-purple-500/10 text-purple-400 border-purple-500/20">
+                                Renegociando
+                              </span>
+                            ) : null}
                           </div>
                         </td>
 
                         {/* Valor */}
                         <td className="p-4 text-right pr-6 font-mono font-black text-sky-400 text-[13px]">
                           {formatCurrency(record.valor)}
+                        </td>
+
+                        {/* Estágio Cobrança */}
+                        <td className="p-4">
+                          <select
+                            value={record.fase || 'NORMAL'}
+                            onChange={(e) => onChangeFase?.(record.id, e.target.value as any)}
+                            className="bg-zinc-950 border border-zinc-850 hover:border-zinc-700 text-zinc-300 text-[11px] rounded-lg py-1 px-1.5 focus:outline-none cursor-pointer font-bold transition-all"
+                          >
+                            <option value="NORMAL">Normal</option>
+                            <option value="ENVIO_JURIDICO">Cobrança Jurídica</option>
+                            <option value="JURIDICO_VENDEDORES">Cobrança Vendedores</option>
+                            <option value="ENVIO_FORUM">Envio ao Fórum</option>
+                            <option value="PAGOS">Pagos</option>
+                          </select>
                         </td>
 
                         {/* Actions */}

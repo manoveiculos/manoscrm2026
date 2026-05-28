@@ -42,31 +42,43 @@ export async function POST(req: Request) {
       reminders = data || [];
     } catch (e: any) {
       console.warn('[Supabase API Warning] Failed to fetch reminders for batch scheduling:', e.message);
+    }    // Agrupar records ativos qualificados por telefone para evitar spam
+    const activeRecords = records.filter(rec => rec.status !== 'PAGO' && rec.fase !== 'PAGOS');
+    const groupedByPhone: Record<string, any[]> = {};
+
+    for (const rec of activeRecords) {
+      const cleanPhone = rec.telefone ? rec.telefone.replace(/\D/g, '') : '';
+      if (!cleanPhone || cleanPhone.length < 8) continue;
+
+      if (!groupedByPhone[cleanPhone]) {
+        groupedByPhone[cleanPhone] = [];
+      }
+      groupedByPhone[cleanPhone].push(rec);
     }
 
-    for (const rec of records) {
-      if (rec.status === 'PAGO') continue;
+    for (const cleanPhone of Object.keys(groupedByPhone)) {
+      const phoneRecords = groupedByPhone[cleanPhone];
+      const eligibleSubRecords = [];
 
-      const diff = getDaysDiff(rec.vencimento, checkDate);
-      let stage: string | null = forcedStage || null;
+      for (const rec of phoneRecords) {
+        const diff = getDaysDiff(rec.vencimento, checkDate);
+        let stage: string | null = forcedStage || null;
 
-      if (!stage) {
-        if (diff === -1) stage = 'PRE_1_DIA';
-        else if (diff === 0) stage = 'NO_DIA';
-        else if (diff === 1) stage = 'POS_1_DIA';
-        else if (diff === 3) stage = 'POS_3_DIAS';
-        else if (diff === 5) stage = 'POS_5_DIAS';
-        else if (diff === 10) stage = 'POS_10_DIAS';
-        else if (diff >= 30) stage = 'POS_30_DIAS';
-        else stage = 'AVULSO'; // Fallback stage so it enqueues successfully instead of being ignored!
-      }
+        if (!stage) {
+          if (diff === -1) stage = 'PRE_1_DIA';
+          else if (diff === 0) stage = 'NO_DIA';
+          else if (diff === 1) stage = 'POS_1_DIA';
+          else if (diff === 3) stage = 'POS_3_DIAS';
+          else if (diff === 5) stage = 'POS_5_DIAS';
+          else if (diff === 10) stage = 'POS_10_DIAS';
+          else if (diff >= 30) stage = 'POS_30_DIAS';
+          else stage = 'AVULSO';
+        }
 
-      if (stage) {
-        // Double check against database records_envios_whatsapp log
-        const cleanRecPhone = rec.telefone.replace(/\D/g, '');
+        // Double check contra logs no banco (registro_envios_whatsapp)
         const isAlreadySent = reminders.some(el => {
           const destId = el.destinatario_id || '';
-          return destId.includes(cleanRecPhone) && 
+          return destId.includes(cleanPhone) && 
                  el.vencimento === rec.vencimento && 
                  String(el.estagio_cobranca).toUpperCase() === String(stage).toUpperCase();
         });
@@ -76,10 +88,10 @@ export async function POST(req: Request) {
           continue;
         }
 
-        // Double check inside current queue
+        // Double check dentro da fila em memória
         const isAlreadyInQueue = billingQueue.some(item => {
           const cleanQueuePhone = item.telefone.replace(/\D/g, '');
-          return cleanQueuePhone === cleanRecPhone && 
+          return cleanQueuePhone === cleanPhone && 
                  item.vencimento === rec.vencimento && 
                  item.estagio === stage;
         });
@@ -89,31 +101,35 @@ export async function POST(req: Request) {
           continue;
         }
 
+        eligibleSubRecords.push({ rec, stage });
+      }
+
+      if (eligibleSubRecords.length === 0) {
+        continue;
+      }
+
+      // Se sobrou apenas 1 fatura qualificada, envia mensagem individual
+      if (eligibleSubRecords.length === 1) {
+        const { rec, stage } = eligibleSubRecords[0];
         const valStr = formatBRL(rec.valor);
         const dateStrBr = fmtDateBr(rec.vencimento);
         let msg = '';
 
-        // Helper: retorna referência correta ao veículo
-        // Com veículo: "do veículo *NOME*" | Sem veículo: apenas omite
         const veiculo = rec.veiculo && rec.veiculo.trim() !== '' && !rec.veiculo.toLowerCase().includes('nenhum')
           ? rec.veiculo.trim()
           : null;
 
-        // Primeiro nome (mais cordial) — fallback para nome completo se não der pra split
         const primeiroNome = (rec.clienteFornecedor || '').split(' ')[0] || rec.clienteFornecedor;
 
-        // Bloco PIX padronizado em todas as mensagens
         const pixBlock =
           `💳 *Pagamento via Pix (CNPJ):*\n` +
           `🔑 28.918.081/0001-22\n` +
           `🏦 Raccar Comércio de Veículos`;
 
-        // Disclaimer obrigatório em TODAS as mensagens — CDC Art. 71 + redução de atrito
         const disclaimer =
           `\n\n_⚠️ Caso o pagamento já tenha sido efetuado, por favor desconsidere esta mensagem ou responda por aqui sinalizando como *PAGO*. Estamos sujeitos a atrasos na conciliação bancária — agradecemos a compreensão._`;
 
         if (stage === 'PRE_1_DIA') {
-          // Tom: gentil, antecipação amigável
           msg =
             `Olá, *${primeiroNome}*! Tudo bem? 😊\n\n` +
             `Passando para lembrar que sua parcela${veiculo ? ` referente ao veículo *${veiculo}*` : ''} no valor de *${valStr}* vence *amanhã (${dateStrBr})*.\n\n` +
@@ -122,7 +138,6 @@ export async function POST(req: Request) {
             disclaimer;
 
         } else if (stage === 'NO_DIA') {
-          // Tom: lembrete cordial no dia
           msg =
             `📌 *Vencimento Hoje*\n\n` +
             `Olá, *${primeiroNome}*. Sua parcela${veiculo ? ` do veículo *${veiculo}*` : ''} no valor de *${valStr}* vence hoje, *${dateStrBr}*.\n\n` +
@@ -132,7 +147,6 @@ export async function POST(req: Request) {
             disclaimer;
 
         } else if (stage === 'POS_1_DIA') {
-          // Tom: aviso firme mas calmo (1 dia é pouco — pode ser esquecimento)
           msg =
             `Olá, *${primeiroNome}*.\n\n` +
             `Identificamos que a parcela${veiculo ? ` do veículo *${veiculo}*` : ''} no valor de *${valStr}*, com vencimento em *${dateStrBr}*, ainda consta em aberto em nosso sistema.\n\n` +
@@ -142,7 +156,6 @@ export async function POST(req: Request) {
             disclaimer;
 
         } else if (stage === 'POS_3_DIAS') {
-          // Tom: firme + oferta de negociação
           msg =
             `⚠️ *Parcela em atraso — 3 dias*\n\n` +
             `*${primeiroNome}*, sua parcela${veiculo ? ` do veículo *${veiculo}*` : ''} no valor de *${valStr}* (vencimento em *${dateStrBr}*) continua pendente.\n\n` +
@@ -152,7 +165,6 @@ export async function POST(req: Request) {
             disclaimer;
 
         } else if (stage === 'POS_5_DIAS') {
-          // Tom: firme + alerta de negativação possível
           msg =
             `⚠️ *Notificação de Inadimplência — 5 dias*\n\n` +
             `*${primeiroNome}*, sua parcela${veiculo ? ` do veículo *${veiculo}*` : ''} no valor de *${valStr}*, vencida em *${dateStrBr}*, está em aberto há *5 dias*.\n\n` +
@@ -163,7 +175,6 @@ export async function POST(req: Request) {
             disclaimer;
 
         } else if (stage === 'POS_10_DIAS') {
-          // Tom: firme — menciona possibilidade de protesto/negativação SEM afirmar ação tomada
           msg =
             `🚨 *Aviso Importante de Cobrança — 10 dias de atraso*\n\n` +
             `*${primeiroNome}*, sua parcela${veiculo ? ` do veículo *${veiculo}*` : ''} no valor de *${valStr}* (vencimento em *${dateStrBr}*) encontra-se em aberto há *10 dias*.\n\n` +
@@ -176,7 +187,6 @@ export async function POST(req: Request) {
             disclaimer;
 
         } else if (stage === 'POS_30_DIAS') {
-          // Tom: último aviso — fala em transferência ao jurídico SEM afirmar ação judicial tomada
           msg =
             `⚖️ *Último Aviso de Cobrança — 30 dias de atraso*\n\n` +
             `*${primeiroNome}*, a parcela${veiculo ? ` do veículo *${veiculo}*` : ''} no valor de *${valStr}*, vencida em *${dateStrBr}*, completou *30 dias em aberto*.\n\n` +
@@ -189,7 +199,6 @@ export async function POST(req: Request) {
             disclaimer;
 
         } else {
-          // AVULSO / fallback genérico
           msg =
             `Olá, *${primeiroNome}*!\n\n` +
             `Estamos passando para lembrar da sua parcela${veiculo ? ` do veículo *${veiculo}*` : ''} no valor de *${valStr}*, com vencimento em *${dateStrBr}*.\n\n` +
@@ -197,7 +206,6 @@ export async function POST(req: Request) {
             `Qualquer dúvida ou se quiser apresentar uma proposta de pagamento, é só responder por aqui. Obrigado!` +
             disclaimer;
         }
-
 
         billingQueue.push({
           id: `q-${crypto.randomUUID()}`,
@@ -208,6 +216,53 @@ export async function POST(req: Request) {
           valor: rec.valor,
           msg,
           estagio: stage,
+          status: 'AGUARDANDO',
+          addedAt: new Date().toLocaleTimeString('pt-BR')
+        });
+
+        newlyQueuedCount++;
+      } else {
+        // Múltiplas faturas no lote: consolida em uma única mensagem
+        const principalItem = eligibleSubRecords[0];
+        const primeiroNome = (principalItem.rec.clienteFornecedor || '').split(' ')[0] || principalItem.rec.clienteFornecedor;
+        
+        let msg = `Olá, *${primeiroNome}*! Tudo bem? 😊\n\n` +
+                  `Identificamos que você possui *mais de uma parcela pendente* em nosso sistema financeiro:\n\n`;
+        
+        let somaValores = 0;
+        eligibleSubRecords.forEach((item, idx) => {
+          const valStr = formatBRL(item.rec.valor);
+          const dateStrBr = fmtDateBr(item.rec.vencimento);
+          const veic = item.rec.veiculo && item.rec.veiculo.trim() !== '' && !item.rec.veiculo.toLowerCase().includes('nenhum')
+            ? ` (${item.rec.veiculo.trim()})`
+            : '';
+          msg += `• Parcela ${idx + 1}: *${valStr}* (vencimento em ${dateStrBr})${veic}\n`;
+          somaValores += item.rec.valor;
+        });
+
+        const totalAcumuladoStr = formatBRL(somaValores);
+        const pixBlock =
+          `💳 *Pagamento via Pix (CNPJ):*\n` +
+          `🔑 28.918.081/0001-22\n` +
+          `🏦 Raccar Comércio de Veículos`;
+
+        const disclaimer =
+          `\n\n_⚠️ Caso o pagamento já tenha sido efetuado, por favor desconsidere esta mensagem ou responda por aqui nos enviando o comprovante. Agradecemos a colaboração._`;
+
+        msg += `\n*Total acumulado em aberto: ${totalAcumuladoStr}*\n\n` +
+               `Para sua comodidade, você pode regularizar o pagamento via Pix acima ou responder esta mensagem nos enviando o comprovante ou sua proposta de acordo. Estamos prontos para te ouvir e facilitar!\n\n` +
+               `${pixBlock}` +
+               disclaimer;
+
+        billingQueue.push({
+          id: `q-${crypto.randomUUID()}`,
+          recordId: principalItem.rec.id,
+          nome: principalItem.rec.clienteFornecedor,
+          telefone: principalItem.rec.telefone,
+          vencimento: principalItem.rec.vencimento,
+          valor: somaValores,
+          msg,
+          estagio: 'COBRANCA_CONSOLIDADA',
           status: 'AGUARDANDO',
           addedAt: new Date().toLocaleTimeString('pt-BR')
         });
