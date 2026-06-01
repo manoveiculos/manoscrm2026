@@ -37,9 +37,10 @@ export interface FacebookLead {
 
 interface FacebookTabProps {
   onNavigateToTab?: (tab: string, params?: any) => void;
+  userEmail?: string | null;
 }
 
-export default function FacebookTab({ onNavigateToTab }: FacebookTabProps) {
+export default function FacebookTab({ onNavigateToTab, userEmail }: FacebookTabProps) {
   const [leads, setLeads] = useState<FacebookLead[]>([]);
   const [cities, setCities] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -425,6 +426,7 @@ export default function FacebookTab({ onNavigateToTab }: FacebookTabProps) {
         onDelete={handleDeleteLead}
         onNavigateToTab={onNavigateToTab}
         onUpdateLead={handleFipeLinked}
+        userEmail={userEmail}
       />
     </div>
   );

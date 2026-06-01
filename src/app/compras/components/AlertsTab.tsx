@@ -216,17 +216,17 @@ export default function AlertsTab() {
               </div>
               <div>
                 <h2 className="font-bold text-white text-lg">Novo Monitoramento</h2>
-                <p className="text-xs text-zinc-400 mt-0.5">Cadastre o comprador e a marca/modelo desejados</p>
+                <p className="text-xs text-zinc-400 mt-0.5">Cadastre quem deve receber o alerta e a marca/modelo desejados</p>
               </div>
             </div>
 
             <form onSubmit={handleSubmit} className="flex flex-col gap-4">
               <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Nome do Comprador *</label>
+                <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Para quem devo enviar o alerta quando localizar? *</label>
                 <div className="relative">
                   <User className="absolute left-3 top-3.5 w-4 h-4 text-zinc-500" />
                   <input
-                    type="text" required placeholder="Ex: João Silveira" value={nome}
+                    type="text" required placeholder="Ex: Vendedor João Silveira" value={nome}
                     onChange={(e) => setNome(e.target.value)}
                     className="w-full bg-zinc-950 border border-zinc-900 rounded-xl pl-9 pr-4 py-3 text-zinc-200 text-sm focus:outline-none focus:border-zinc-850 transition-colors"
                   />

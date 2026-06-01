@@ -1,18 +1,50 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/admin';
+import { createClient as createSupabaseAdmin } from '@/lib/supabase/admin';
+import { createClient as createSupabaseServer } from '@/lib/supabase/server';
 
-const supabaseAdmin = createClient();
+const supabaseAdmin = createSupabaseAdmin();
 
 export const dynamic = 'force-dynamic';
 
-// GET: Lista todos os alertas cadastrados no banco (oculta os marcados com [EXCLUIDO])
+// Função auxiliar para validar usuário e verificar se é admin
+async function getAuthContext() {
+  const supabaseServer = await createSupabaseServer();
+  const { data: { user }, error: authError } = await supabaseServer.auth.getUser();
+  
+  if (authError || !user) {
+    return { errorResponse: NextResponse.json({ success: false, error: 'Não autorizado.' }, { status: 401 }) };
+  }
+
+  const { data: consultant } = await supabaseServer
+    .from('consultants_manos_crm')
+    .select('role')
+    .or(`user_id.eq.${user.id},auth_id.eq.${user.id}`)
+    .maybeSingle();
+
+  const isAdmin = consultant?.role === 'admin' || user.email === 'alexandre_gorges@hotmail.com';
+
+  return { user, isAdmin };
+}
+
+// GET: Lista os alertas cadastrados no banco (oculta os marcados com [EXCLUIDO])
+// Admin vê todos; Consultores comuns veem apenas os próprios alertas criados por eles.
 export async function GET() {
   try {
-    const { data: alerts, error } = await supabaseAdmin
+    const authContext = await getAuthContext();
+    if ('errorResponse' in authContext) return authContext.errorResponse;
+    const { user, isAdmin } = authContext;
+
+    let query = supabaseAdmin
       .from('alertas_clientes')
       .select('*')
-      .not('nome_cliente', 'ilike', '[EXCLUIDO]%')
-      .order('criado_em', { ascending: false });
+      .not('nome_cliente', 'ilike', '[EXCLUIDO]%');
+
+    // Se não for admin, filtra apenas pelos alertas que o próprio usuário criou
+    if (!isAdmin) {
+      query = query.eq('criado_por', user.email);
+    }
+
+    const { data: alerts, error } = await query.order('criado_em', { ascending: false });
 
     if (error) {
       console.error('[API Alertas] Erro ao buscar alertas no Supabase:', error);
@@ -35,6 +67,10 @@ export async function GET() {
 // POST: Cria um novo alerta de monitoramento
 export async function POST(request: Request) {
   try {
+    const authContext = await getAuthContext();
+    if ('errorResponse' in authContext) return authContext.errorResponse;
+    const { user } = authContext;
+
     const body = await request.json();
     const { 
       nome_cliente, 
@@ -80,7 +116,8 @@ export async function POST(request: Request) {
           combustivel: combustivel && combustivel.trim() !== '' && combustivel !== 'TODOS' ? combustivel.trim() : null,
           km_minimo: km_minimo ? Number(km_minimo) : null,
           km_maximo: km_maximo ? Number(km_maximo) : null,
-          ativo: true
+          ativo: true,
+          criado_por: user.email // Salva o e-mail de quem criou o alerta
         }
       ])
       .select()
@@ -107,6 +144,10 @@ export async function POST(request: Request) {
 // PATCH: Liga / Desliga o alerta (alterna o estado 'ativo')
 export async function PATCH(request: Request) {
   try {
+    const authContext = await getAuthContext();
+    if ('errorResponse' in authContext) return authContext.errorResponse;
+    const { user, isAdmin } = authContext;
+
     const body = await request.json();
     const { id, ativo } = body;
 
@@ -114,6 +155,28 @@ export async function PATCH(request: Request) {
       return NextResponse.json(
         { success: false, error: 'Dados insuficientes para atualizar o alerta.' },
         { status: 400 }
+      );
+    }
+
+    // Busca o alerta para validar permissão
+    const { data: alertData, error: fetchError } = await supabaseAdmin
+      .from('alertas_clientes')
+      .select('criado_por')
+      .eq('id', id)
+      .single();
+
+    if (fetchError || !alertData) {
+      return NextResponse.json(
+        { success: false, error: 'Alerta não localizado no banco.' },
+        { status: 404 }
+      );
+    }
+
+    // Se não for admin, impede de alterar alertas de outros usuários
+    if (!isAdmin && alertData.criado_por !== user.email) {
+      return NextResponse.json(
+        { success: false, error: 'Você não tem permissão para alterar este alerta.' },
+        { status: 403 }
       );
     }
 
@@ -145,6 +208,10 @@ export async function PATCH(request: Request) {
 // DELETE: Executa Soft Delete no alerta (prefixa nome com [EXCLUIDO] e desativa)
 export async function DELETE(request: Request) {
   try {
+    const authContext = await getAuthContext();
+    if ('errorResponse' in authContext) return authContext.errorResponse;
+    const { user, isAdmin } = authContext;
+
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');
 
@@ -155,10 +222,10 @@ export async function DELETE(request: Request) {
       );
     }
 
-    // 1. Busca o alerta para saber o nome_cliente atual
+    // 1. Busca o alerta para saber o nome_cliente e o criado_por
     const { data: alertData, error: fetchError } = await supabaseAdmin
       .from('alertas_clientes')
-      .select('nome_cliente')
+      .select('nome_cliente, criado_por')
       .eq('id', id)
       .single();
 
@@ -166,6 +233,14 @@ export async function DELETE(request: Request) {
       return NextResponse.json(
         { success: false, error: 'Alerta não localizado no banco.' },
         { status: 404 }
+      );
+    }
+
+    // Se não for admin, impede de remover alertas de outros usuários
+    if (!isAdmin && alertData.criado_por !== user.email) {
+      return NextResponse.json(
+        { success: false, error: 'Você não tem permissão para remover este alerta.' },
+        { status: 403 }
       );
     }
 

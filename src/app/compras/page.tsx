@@ -83,7 +83,7 @@ function ComprasContent() {
 
   const allowedTabIds = role === 'admin'
     ? ['radar', 'calculator', 'facebook', 'alerts', 'import', 'admin']
-    : (userEmail?.toLowerCase() === 'hgledra@hotmail.com'
+    : (userEmail?.toLowerCase() === 'hgledra@hotmail.com' || userEmail?.toLowerCase() === 'ivo@acesso.com'
         ? ['radar', 'calculator', 'facebook', 'alerts']
         : ['radar', 'calculator', 'alerts']);
 
@@ -234,7 +234,7 @@ function ComprasContent() {
           )}
 
           {activeTab === 'facebook' && allowedTabIds.includes('facebook') && (
-            <FacebookTab onNavigateToTab={handleNavigateToTab} />
+            <FacebookTab onNavigateToTab={handleNavigateToTab} userEmail={userEmail} />
           )}
 
           {activeTab === 'alerts' && allowedTabIds.includes('alerts') && (

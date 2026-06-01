@@ -165,6 +165,41 @@ O carro que teu cliente ${alerta.nome_cliente} precisa acabou de ser anunciado n
 Corra para dar uma olhada antes que outra pessoa compre!`;
 
       try {
+        // Disparar o webhook para o n8n com informações do alerta, veículo, grupo do anúncio, quem anunciou e valor da tabela fipe
+        try {
+          console.log(`[Webhook Alertas] Disparando webhook n8n para alerta ${alerta.id}`);
+          const webhookRes = await fetch(N8N_WEBHOOK_URL, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              alerta_id: alerta.id,
+              nome_comprador_vendedor: alerta.nome_cliente,
+              telefone_comprador_vendedor: alerta.telefone_cliente,
+              criado_por: alerta.criado_por || null,
+              veiculo: {
+                id: veiculo.id,
+                marca: veiculo.marca,
+                modelo: veiculo.modelo,
+                ano_modelo: veiculo.ano_modelo || null,
+                km: veiculo.km || null,
+                preco_pedido: veiculo.preco_pedido || null,
+                preco_fipe: veiculo.preco_fipe || null,
+                grupo_anuncio: veiculo.nome_grupo || null,
+                quem_anunciou_nome: veiculo.nome_anunciante || null,
+                quem_anunciou_contato: veiculo.numero_anunciante || null,
+                texto_original: veiculo.texto_bruto_original || null
+              }
+            })
+          });
+          if (!webhookRes.ok) {
+            console.warn(`[Webhook Alertas] n8n retornou status ${webhookRes.status}`);
+          }
+        } catch (webhookErr: any) {
+          console.error(`[Webhook Alertas] Erro ao disparar webhook do n8n para o alerta ${alerta.id}:`, webhookErr.message);
+        }
+
         console.log(`[Webhook Alertas] Disparando mensagem de WhatsApp direta para comprador ${alerta.nome_cliente} (${alerta.telefone_cliente})`);
         
         const sendResult = await sendWhatsApp({

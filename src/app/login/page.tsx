@@ -30,6 +30,16 @@ export default function LoginPage() {
         return () => window.removeEventListener('mousemove', handleMouseMove);
     }, []);
 
+    // Capturar erro de redirecionamento do middleware/layout
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            const params = new URLSearchParams(window.location.search);
+            if (params.get('error') === 'unauthorized') {
+                setError('Sua conta não possui permissão de acesso ao CRM ou foi desativada.');
+            }
+        }
+    }, []);
+
     const handleAuth = async (e: React.FormEvent) => {
         e.preventDefault();
         setLoading(true);
@@ -60,13 +70,22 @@ export default function LoginPage() {
                     console.warn('Erro ao buscar status do consultor:', dbError);
                 }
 
-                if (consultant?.status === 'pending') {
+                if (!consultant) {
+                    await supabase.auth.signOut();
+                    throw new Error('Sua conta não está autorizada no CRM. Solicite liberação ao administrador.');
+                }
+
+                if (consultant.status === 'pending') {
                     await supabase.auth.signOut();
                     throw new Error('Sua conta está aguardando aprovação administrativa.');
                 }
-                if (consultant?.status === 'blocked') {
+                if (consultant.status === 'blocked') {
                     await supabase.auth.signOut();
                     throw new Error('Acesso bloqueado. Entre em contato com o suporte.');
+                }
+                if (consultant.status !== 'active') {
+                    await supabase.auth.signOut();
+                    throw new Error('Sua conta não está ativa no CRM. Solicite liberação ao administrador.');
                 }
 
                 router.push('/');

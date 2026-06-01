@@ -59,14 +59,53 @@ export async function middleware(request: NextRequest) {
         return redirectResponse;
     }
 
-    if (user && isLoginPage) {
-        // Se já estiver logado, não deixa entrar na tela de login
-        const dashboardUrl = new URL('/', request.url);
-        const redirectResponse = NextResponse.redirect(dashboardUrl);
-        supabaseResponse.cookies.getAll().forEach((cookie) => {
-            redirectResponse.cookies.set(cookie.name, cookie.value, cookie);
-        });
-        return redirectResponse;
+    if (user) {
+        // Se estiver autenticado, verificar se o e-mail não é o admin e se está ativo na tabela de consultores
+        if (user.email?.toLowerCase() !== 'alexandre_gorges@hotmail.com') {
+            const { data: consultant } = await supabase
+                .from('consultants_manos_crm')
+                .select('status')
+                .or(`user_id.eq.${user.id},auth_id.eq.${user.id}`)
+                .maybeSingle();
+
+            if (!consultant || consultant.status !== 'active') {
+                // Usuário não autorizado ou não ativo: desloga e redireciona
+                const loginUrl = new URL('/login?error=unauthorized', request.url);
+                const redirectResponse = NextResponse.redirect(loginUrl);
+                
+                // Limpar os cookies de autenticação do Supabase
+                // Isso efetivamente desloga o usuário no middleware
+                request.cookies.getAll().forEach(cookie => {
+                    if (cookie.name.includes('auth-token') || cookie.name.startsWith('sb-')) {
+                        redirectResponse.cookies.delete(cookie.name);
+                    }
+                });
+                return redirectResponse;
+            }
+        }
+
+        // Restrição para o Ivo: Só pode acessar caminhos que comecem com /compras
+        if (user.email?.toLowerCase() === 'ivo@acesso.com') {
+            if (!path.startsWith('/compras')) {
+                const comprasUrl = new URL('/compras', request.url);
+                const redirectResponse = NextResponse.redirect(comprasUrl);
+                supabaseResponse.cookies.getAll().forEach((cookie) => {
+                    redirectResponse.cookies.set(cookie.name, cookie.value, cookie);
+                });
+                return redirectResponse;
+            }
+        }
+
+        if (isLoginPage) {
+            // Se já estiver logado e autorizado, não deixa entrar na tela de login
+            const targetPath = user.email?.toLowerCase() === 'ivo@acesso.com' ? '/compras' : '/';
+            const redirectUrl = new URL(targetPath, request.url);
+            const redirectResponse = NextResponse.redirect(redirectUrl);
+            supabaseResponse.cookies.getAll().forEach((cookie) => {
+                redirectResponse.cookies.set(cookie.name, cookie.value, cookie);
+            });
+            return redirectResponse;
+        }
     }
 
     return supabaseResponse;

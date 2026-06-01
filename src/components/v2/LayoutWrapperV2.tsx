@@ -1,16 +1,62 @@
 'use client';
 
-import { usePathname } from 'next/navigation';
+import { useEffect } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
 import { NavigationV2 } from '@/components/v2/NavigationV2';
 import { BackgroundDecor } from '@/components/BackgroundDecor';
 import { ConsultantAlertModal } from '@/components/v2/ConsultantAlertModal';
 import { TrafficAlertBanner } from '@/components/v2/TrafficAlertBanner';
-
+import { createClient } from '@/lib/supabase/client';
 
 export const LayoutWrapperV2 = ({ children }: { children: React.ReactNode }) => {
     const pathname = usePathname() || '';
     const isEmbed = pathname.endsWith('/embed');
     const isLogin = pathname === '/login';
+    const supabase = createClient();
+    const router = useRouter();
+
+    useEffect(() => {
+        if (isLogin || isEmbed) return;
+
+        let alive = true;
+        async function checkAccess() {
+            try {
+                const { data: { session } } = await supabase.auth.getSession();
+                const user = session?.user;
+                if (!user) return;
+
+                // E-mail administrador de bypass
+                if (user.email?.toLowerCase() === 'alexandre_gorges@hotmail.com') {
+                    return;
+                }
+
+                // Consultar se o consultor existe e está ativo no banco
+                const { data: consultant, error } = await supabase
+                    .from('consultants_manos_crm')
+                    .select('status')
+                    .or(`user_id.eq.${user.id},auth_id.eq.${user.id}`)
+                    .maybeSingle();
+
+                if (error) {
+                    console.error('Erro ao verificar acesso:', error);
+                    return;
+                }
+
+                if (alive) {
+                    if (!consultant || consultant.status !== 'active') {
+                        console.warn('Usuário logado inativo ou não autorizado no CRM. Desconectando...');
+                        await supabase.auth.signOut();
+                        window.location.href = '/login?error=unauthorized';
+                    }
+                }
+            } catch (err) {
+                console.error('Erro ao checar acesso no wrapper:', err);
+            }
+        }
+
+        checkAccess();
+        return () => { alive = false; };
+    }, [pathname, isLogin, isEmbed, supabase, router]);
 
     if (isEmbed || isLogin) {
         return (
