@@ -38,9 +38,10 @@ export interface FacebookLead {
 interface FacebookTabProps {
   onNavigateToTab?: (tab: string, params?: any) => void;
   userEmail?: string | null;
+  role?: 'admin' | 'consultant';
 }
 
-export default function FacebookTab({ onNavigateToTab, userEmail }: FacebookTabProps) {
+export default function FacebookTab({ onNavigateToTab, userEmail, role }: FacebookTabProps) {
   const [leads, setLeads] = useState<FacebookLead[]>([]);
   const [cities, setCities] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -301,7 +302,7 @@ export default function FacebookTab({ onNavigateToTab, userEmail }: FacebookTabP
                   <th className="px-6 py-4">Data Envio</th>
                   <th className="px-6 py-4">FIPE Oficial</th>
                   <th className="px-6 py-4 text-center">Calculadora</th>
-                  <th className="px-6 py-4 text-center">Excluir</th>
+                  {role === 'admin' && <th className="px-6 py-4 text-center">Excluir</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-900/60">
@@ -393,15 +394,17 @@ export default function FacebookTab({ onNavigateToTab, userEmail }: FacebookTabP
                           )}
                         </button>
                       </td>
-                      <td className="px-6 py-4 text-center" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteLead(lead)}
-                          className="p-2 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded-xl transition-all cursor-pointer"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </td>
+                      {role === 'admin' && (
+                        <td className="px-6 py-4 text-center" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteLead(lead)}
+                            className="p-2 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded-xl transition-all cursor-pointer"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
@@ -427,6 +430,7 @@ export default function FacebookTab({ onNavigateToTab, userEmail }: FacebookTabP
         onNavigateToTab={onNavigateToTab}
         onUpdateLead={handleFipeLinked}
         userEmail={userEmail}
+        role={role}
       />
     </div>
   );

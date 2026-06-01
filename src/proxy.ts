@@ -84,8 +84,10 @@ export async function middleware(request: NextRequest) {
             }
         }
 
-        // Restrição para o Ivo: Só pode acessar caminhos que comecem com /compras
-        if (user.email?.toLowerCase() === 'ivo@acesso.com') {
+        const isRestrictedBuyer = user.email?.toLowerCase() === 'ivo@acesso.com' || user.email?.toLowerCase() === 'paulo@manoscrm.com';
+
+        // Restrição para compradores restritos: Só podem acessar caminhos que comecem com /compras
+        if (isRestrictedBuyer) {
             if (!path.startsWith('/compras')) {
                 const comprasUrl = new URL('/compras', request.url);
                 const redirectResponse = NextResponse.redirect(comprasUrl);
@@ -98,7 +100,7 @@ export async function middleware(request: NextRequest) {
 
         if (isLoginPage) {
             // Se já estiver logado e autorizado, não deixa entrar na tela de login
-            const targetPath = user.email?.toLowerCase() === 'ivo@acesso.com' ? '/compras' : '/';
+            const targetPath = isRestrictedBuyer ? '/compras' : '/';
             const redirectUrl = new URL(targetPath, request.url);
             const redirectResponse = NextResponse.redirect(redirectUrl);
             supabaseResponse.cookies.getAll().forEach((cookie) => {

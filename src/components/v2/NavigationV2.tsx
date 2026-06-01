@@ -195,10 +195,10 @@ export const NavigationV2 = () => {
                     const isAdmin = role === 'admin';
                     const isCamila = user?.email === 'camila.renatta@hotmail.com' || user?.email === 'camilarenatta@hotmail.com';
                     const isAlexandre = user?.email === 'alexandre_gorges@hotmail.com';
-                    const isIvo = user?.email === 'ivo@acesso.com';
+                    const isRestrictedBuyer = user?.email === 'ivo@acesso.com' || user?.email === 'paulo@manoscrm.com';
 
-                    // Ivo tem acesso EXCLUSIVO à Central de Compras — esconde tudo o mais
-                    if (isIvo && !isAdmin && !isAlexandre) {
+                    // Compradores restritos têm acesso EXCLUSIVO à Central de Compras — esconde tudo o mais
+                    if (isRestrictedBuyer && !isAdmin && !isAlexandre) {
                         return item.href === '/compras';
                     }
 

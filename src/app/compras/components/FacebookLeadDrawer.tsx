@@ -16,6 +16,7 @@ interface FacebookLeadDrawerProps {
   onNavigateToTab?: (tab: string, params?: any) => void;
   onUpdateLead: (updated: FacebookLead) => void;
   userEmail?: string | null;
+  role?: 'admin' | 'consultant';
 }
 
 export default function FacebookLeadDrawer({
@@ -25,7 +26,8 @@ export default function FacebookLeadDrawer({
   onDelete,
   onNavigateToTab,
   onUpdateLead,
-  userEmail
+  userEmail,
+  role
 }: FacebookLeadDrawerProps) {
   const [msgCopied, setMsgCopied] = useState(false);
   const [statusNegociacao, setStatusNegociacao] = useState('PENDENTE');
@@ -139,13 +141,15 @@ export default function FacebookLeadDrawer({
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <button
-              onClick={() => onDelete(lead)}
-              className="p-2 bg-red-950/20 hover:bg-red-900/40 border border-red-900/30 hover:border-red-700 rounded-xl transition-all text-red-500 hover:text-red-300"
-              title="Excluir lead"
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
+            {role === 'admin' && (
+              <button
+                onClick={() => onDelete(lead)}
+                className="p-2 bg-red-950/20 hover:bg-red-900/40 border border-red-900/30 hover:border-red-700 rounded-xl transition-all text-red-500 hover:text-red-300"
+                title="Excluir lead"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            )}
             <button
               onClick={onClose}
               className="p-2 hover:bg-zinc-800 border border-zinc-700 hover:border-zinc-600 rounded-xl transition-all text-zinc-400 hover:text-white"
@@ -258,7 +262,7 @@ export default function FacebookLeadDrawer({
                 <div className="flex justify-between items-center text-sm">
                   <span className="text-zinc-500 text-xs flex items-center gap-1"><Phone className="w-3 h-3" />Telefone</span>
                   <span className="text-white font-bold font-mono">
-                    {userEmail?.toLowerCase() === 'ivo@acesso.com' ? 'Telefone Ocultado' : (lead.telefone || 'N/A')}
+                    {userEmail?.toLowerCase() === 'ivo@acesso.com' || userEmail?.toLowerCase() === 'paulo@manoscrm.com' ? 'Telefone Ocultado' : (lead.telefone || 'N/A')}
                   </span>
                 </div>
                 {lead.contato_nome_whatsapp && (
@@ -338,10 +342,10 @@ export default function FacebookLeadDrawer({
 
               {/* Ações */}
               <div className="flex flex-col gap-3 shrink-0">
-                {userEmail?.toLowerCase() === 'ivo@acesso.com' ? (
+                {userEmail?.toLowerCase() === 'ivo@acesso.com' || userEmail?.toLowerCase() === 'paulo@manoscrm.com' ? (
                   <div className="w-full py-4 px-6 rounded-2xl bg-zinc-800 text-zinc-500 font-extrabold text-sm flex items-center justify-center gap-2.5 cursor-not-allowed">
                     <Phone className="w-5 h-5" />
-                    WhatsApp Bloqueado (Ivo)
+                    WhatsApp Bloqueado
                   </div>
                 ) : waNumber ? (
                   <a
