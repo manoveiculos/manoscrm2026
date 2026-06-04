@@ -155,7 +155,7 @@ function ComprasContent() {
 
   const allTabs = [
     { id: 'radar', label: 'Radar 24h', icon: TrendingUp },
-    { id: 'calculator', label: 'Calculadora FIPE', icon: Calculator },
+    { id: 'calculator', label: 'Calculadora de Compra', icon: Calculator },
     { id: 'facebook', label: 'Exclusivas Manos', icon: FacebookIcon },
     { id: 'alerts', label: 'Configurar Alertas', icon: Bell },
     { id: 'import', label: 'Importar Logs', icon: Database },

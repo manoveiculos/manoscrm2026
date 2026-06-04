@@ -128,60 +128,157 @@ export async function GET(request: NextRequest) {
       });
     }
 
+    const firstWordModel = model.trim().split(' ')[0];
+
     if (!fipeMatch) {
+      console.log(`[API Avaliação] Veículo não encontrado na FIPE oficial: ${brand} ${model} (${yearModel})`);
       return NextResponse.json(
         { 
           success: false, 
-          error: 'Não foi possível encontrar este veículo na tabela FIPE oficial. Se possível, tente especificar melhor o modelo.' 
+          error: `O veículo ${brand} ${model} não foi encontrado na tabela FIPE oficial para o ano modelo ${yearModel}.` 
         },
         { status: 404 }
       );
     }
-
-    // 2. Busca ofertas reais semelhantes no banco para cálculo de deságio de mercado
-    // Buscaremos ofertas da mesma marca contendo o primeiro termo do modelo
-    const firstWordModel = model.trim().split(' ')[0];
     const { data: similarOffers, error: similarError } = await supabaseAdmin
       .from('repassecentral')
       .select('id, modelo, ano_modelo, preco_pedido, preco_fipe, data_hora_recebimento')
       .eq('marca', brand.toUpperCase())
       .ilike('modelo', `%${firstWordModel}%`)
       .order('data_hora_recebimento', { ascending: false })
-      .limit(5);
+      .limit(10);
 
     if (similarError) {
-      console.warn('[API Avaliação] Erro ao buscar ofertas similares:', similarError.message);
+      console.warn('[API Avaliação] Erro ao buscar ofertas similares repassecentral:', similarError.message);
     }
 
-    // Mapeia para o formato que o frontend espera
-    const mappedOffers = (similarOffers || []).map((o: any) => {
-      const year = o.ano_modelo && String(o.ano_modelo).toLowerCase() !== 'null'
-        ? Number(String(o.ano_modelo).replace(/[^\d]/g, '').slice(0, 4))
-        : yearModel;
+    // Busca também no histórico de vendas reais (varejo)
+    let similarSales = null;
+    try {
+      const { data: salesData, error: salesError } = await supabaseAdmin
+        .from('sales')
+        .select('id, vehicle_name, sale_value, profit_margin, sale_date')
+        .ilike('vehicle_name', `%${firstWordModel}%`)
+        .order('sale_date', { ascending: false })
+        .limit(10);
+
+      if (salesError) throw salesError;
+      similarSales = salesData;
+    } catch (salErr: any) {
+      console.warn('[API Avaliação] Erro ao buscar vendas similares:', salErr.message);
+    }
+
+    // Consolidação de repasses de ambas as fontes (repassecentral e offers)
+    let allOffers = [];
+    
+    // Mapeia ofertas de repassecentral
+    if (similarOffers) {
+      for (const o of similarOffers) {
+        const askPrice = Number(o.preco_pedido) || 0;
+        const fipePrice = Number(o.preco_fipe) || 0;
+        const year = o.ano_modelo && String(o.ano_modelo).toLowerCase() !== 'null'
+          ? Number(String(o.ano_modelo).replace(/[^\d]/g, '').slice(0, 4))
+          : yearModel;
+          
+        if (askPrice > 0 && fipePrice > 0) {
+          allOffers.push({
+            id: o.id,
+            model: o.modelo,
+            year_model: year,
+            ask_price: askPrice,
+            fipe_price: fipePrice,
+            created_at: o.data_hora_recebimento,
+            source: 'repassecentral'
+          });
+        }
+      }
+    }
+
+    // Busca em offers
+    try {
+      const { data: offersData } = await supabaseAdmin
+        .from('offers')
+        .select('id, model, year_model, ask_price, fipe_price_official, fipe_price, posted_at')
+        .eq('brand', brand.toUpperCase())
+        .ilike('model', `%${firstWordModel}%`)
+        .order('posted_at', { ascending: false })
+        .limit(10);
+
+      if (offersData) {
+        for (const o of offersData) {
+          const askPrice = Number(o.ask_price) || 0;
+          const fipePrice = Number(o.fipe_price_official || o.fipe_price) || 0;
+          if (askPrice > 0 && fipePrice > 0) {
+            allOffers.push({
+              id: o.id,
+              model: o.model,
+              year_model: o.year_model,
+              ask_price: askPrice,
+              fipe_price: fipePrice,
+              created_at: o.posted_at,
+              source: 'offers'
+            });
+          }
+        }
+      }
+    } catch (offErr) {
+      console.warn('[API Avaliação] Erro ao buscar em offers:', offErr);
+    }
+
+    // Remove duplicados de allOffers (por modelo+ano+preço)
+    const seenOffers = new Set();
+    const uniqueOffers = [];
+    for (const o of allOffers) {
+      const key = `${(o.model || '').toUpperCase()}_${o.year_model}_${o.ask_price}`;
+      if (!seenOffers.has(key)) {
+        seenOffers.add(key);
+        uniqueOffers.push(o);
+      }
+    }
+
+    // Ordena do mais recente para o mais antigo e limita a 10 ofertas
+    uniqueOffers.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    const finalOffers = uniqueOffers.slice(0, 10);
+
+    // Calcula o deságio médio de repasse verificado historicamente
+    let avgRepasseDiscount = 15; // Padrão
+    if (finalOffers.length > 0) {
+      const discounts = finalOffers.map(o => {
+        return ((o.fipe_price - o.ask_price) / o.fipe_price) * 100;
+      }).filter(d => d >= 3 && d <= 45); // Filtra outliers absurdos
       
-      const askPrice = Number(o.preco_pedido) || 0;
-      const fipePrice = Number(o.preco_fipe) || 0;
+      if (discounts.length > 0) {
+        const sum = discounts.reduce((acc, d) => acc + d, 0);
+        avgRepasseDiscount = Math.round((sum / discounts.length) * 10) / 10;
+      }
+    }
 
-      return {
-        id: o.id,
-        model: o.modelo,
-        year_model: year,
-        ask_price: askPrice,
-        net_price: askPrice, // no repasse, o preco liquido de venda repasse e o preco pedido
-        fipe_price_official: fipePrice,
-        fipe_price: fipePrice,
-        created_at: o.data_hora_recebimento
-      };
-    });
-
-    // Remove duplicados idênticos de mappedOffers
-    const seen = new Set<string>();
-    const uniqueSimilarOffers = mappedOffers.filter((o: any) => {
-      const key = `${(o.model || '').toUpperCase()}_${o.year_model}_${o.ask_price}_${o.fipe_price_official}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
+    // Mapeia vendas similares
+    const finalSales = [];
+    let avgRetailPrice = 0;
+    if (similarSales && similarSales.length > 0) {
+      let salesSum = 0;
+      let validSalesCount = 0;
+      
+      for (const s of similarSales) {
+        const val = Number(s.sale_value) || 0;
+        if (val > 0) {
+          salesSum += val;
+          validSalesCount++;
+          finalSales.push({
+            id: s.id,
+            vehicle_name: s.vehicle_name,
+            sale_value: val,
+            profit_margin: Number(s.profit_margin) || 0,
+            sale_date: s.sale_date
+          });
+        }
+      }
+      
+      if (validSalesCount > 0) {
+        avgRetailPrice = Math.round(salesSum / validSalesCount);
+      }
+    }
 
     return NextResponse.json({
       success: true,
@@ -192,7 +289,18 @@ export async function GET(request: NextRequest) {
         confidence: fipeMatch.confidence,
         is_estimated: !!fipeMatch.is_estimated
       },
-      similarOffers: uniqueSimilarOffers
+      similarOffers: finalOffers.map(o => ({
+        id: o.id,
+        model: o.model,
+        year_model: o.year_model,
+        ask_price: o.ask_price,
+        net_price: o.ask_price,
+        fipe_price_official: o.fipe_price,
+        created_at: o.created_at
+      })),
+      similarSales: finalSales,
+      avgRepasseDiscount,
+      avgRetailPrice
     });
 
   } catch (error: any) {

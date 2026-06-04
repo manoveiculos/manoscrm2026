@@ -211,7 +211,23 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const brandParam = searchParams.get('brand');
     const ratingParam = searchParams.get('rating');
-    const limitParam = Number(searchParams.get('limit') || 1000);
+    const queryParam = searchParams.get('query');
+    const minYearParam = searchParams.get('min_year');
+    const maxYearParam = searchParams.get('max_year');
+    const maxKmParam = searchParams.get('max_km');
+    const maxFipePctParam = searchParams.get('max_fipe_pct');
+
+    const hasFilter = !!queryParam || 
+                      (brandParam && brandParam.toUpperCase() !== 'ALL') || 
+                      (ratingParam && ratingParam.toUpperCase() !== 'ALL' && ratingParam.toUpperCase() !== 'DESAGIO') || 
+                      !!minYearParam || 
+                      !!maxYearParam || 
+                      (maxKmParam && maxKmParam !== 'ALL') || 
+                      (maxFipePctParam && maxFipePctParam !== 'ALL');
+
+    const limitParam = hasFilter 
+      ? Number(searchParams.get('limit') || 5000) 
+      : Number(searchParams.get('limit') || 100);
 
     const authHeader = request.headers.get('Authorization');
     const adminKey = process.env.ADMIN_SECRET_KEY || 'manos_intel_secret_key';
@@ -393,12 +409,57 @@ export async function GET(request: Request) {
     });
 
     // Filtros adicionais
-    if (ratingParam) {
+    if (ratingParam && ratingParam.toUpperCase() !== 'ALL' && ratingParam.toUpperCase() !== 'DESAGIO') {
       opportunities = opportunities.filter((o: any) => o.rating === ratingParam.toUpperCase());
     }
 
-    if (brandParam) {
-      opportunities = opportunities.filter((o: any) => o.brand === brandParam.toUpperCase());
+    if (brandParam && brandParam.toUpperCase() !== 'ALL') {
+      opportunities = opportunities.filter((o: any) => {
+        if (brandParam.toUpperCase() === 'OUTROS') {
+          return !o.brand || o.brand.toUpperCase() === 'OUTROS';
+        }
+        return o.brand && o.brand.toUpperCase() === brandParam.toUpperCase();
+      });
+    }
+
+    if (queryParam) {
+      const q = queryParam.toLowerCase().trim();
+      opportunities = opportunities.filter((o: any) => 
+        (o.model && o.model.toLowerCase().includes(q)) || 
+        (o.brand && o.brand.toLowerCase().includes(q))
+      );
+    }
+
+    if (minYearParam) {
+      const minYear = parseInt(minYearParam, 10);
+      if (!isNaN(minYear)) {
+        opportunities = opportunities.filter((o: any) => o.year_model >= minYear);
+      }
+    }
+
+    if (maxYearParam) {
+      const maxYear = parseInt(maxYearParam, 10);
+      if (!isNaN(maxYear)) {
+        opportunities = opportunities.filter((o: any) => o.year_model <= maxYear);
+      }
+    }
+
+    if (maxKmParam && maxKmParam !== 'ALL') {
+      if (maxKmParam === 'OVER_100000') {
+        opportunities = opportunities.filter((o: any) => o.km > 100000);
+      } else {
+        const maxKm = parseInt(maxKmParam, 10);
+        if (!isNaN(maxKm)) {
+          opportunities = opportunities.filter((o: any) => o.km <= maxKm);
+        }
+      }
+    }
+
+    if (maxFipePctParam && maxFipePctParam !== 'ALL') {
+      const maxFipePct = parseInt(maxFipePctParam, 10);
+      if (!isNaN(maxFipePct)) {
+        opportunities = opportunities.filter((o: any) => o.fipe_pct !== null && o.fipe_pct <= maxFipePct);
+      }
     }
 
     const totalCount = opportunities.length;
@@ -411,12 +472,24 @@ export async function GET(request: Request) {
       avgDiscount = Math.round(sum / totalCount);
     }
 
+    // Busca contagem absoluta rápida de ofertas recebidas até agora no banco
+    let totalDbCount = totalCount;
+    try {
+      const { count } = await supabaseAdmin
+        .from('repassecentral')
+        .select('*', { count: 'exact', head: true });
+      if (count !== null) totalDbCount = count;
+    } catch (cntErr: any) {
+      console.warn('[API Oportunidades] Falha ao obter contagem total do banco:', cntErr.message);
+    }
+
     const slicedOpportunities = opportunities.slice(0, limitParam);
 
     return NextResponse.json({
       success: true,
       opportunities: slicedOpportunities,
-      totalCount,
+      totalCount: totalDbCount,
+      filteredCount: totalCount,
       excelentesCount,
       bonsCount,
       avgDiscount

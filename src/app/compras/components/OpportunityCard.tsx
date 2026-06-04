@@ -118,10 +118,19 @@ export const OpportunityCard: React.FC<OpportunityCardProps> = ({ opp, onSelect,
   const circumference = 2 * Math.PI * radius;
   const offset = circumference - (opp.deal_score / 100) * circumference;
 
+  const postedDate = opp.posted_at ? new Date(opp.posted_at) : null;
+  const isOlderThan3Days = postedDate 
+    ? (Math.abs(new Date().getTime() - postedDate.getTime()) / (1000 * 60 * 60 * 24)) > 3
+    : false;
+
+  const cardBorderClass = isOlderThan3Days 
+    ? 'border-red-500/30 bg-red-950/5 hover:border-red-500/50 shadow-[0_0_15px_rgba(239,68,68,0.08)]' 
+    : `${styles.border} ${styles.glow}`;
+
   return (
     <div 
       onClick={() => onSelect(opp)}
-      className={`glass-panel border rounded-2xl p-5 md:p-6 flex flex-col justify-between gap-5 relative overflow-hidden transition-all hover:bg-zinc-900/15 hover:border-zinc-700 cursor-pointer ${styles.border} ${styles.glow}`}
+      className={`glass-panel border rounded-2xl p-5 md:p-6 flex flex-col justify-between gap-5 relative overflow-hidden transition-all hover:bg-zinc-900/15 hover:border-zinc-700 cursor-pointer ${cardBorderClass}`}
     >
       <div className="absolute top-0 right-0 w-32 h-32 bg-zinc-950/20 rounded-full blur-3xl pointer-events-none" />
 
@@ -135,6 +144,11 @@ export const OpportunityCard: React.FC<OpportunityCardProps> = ({ opp, onSelect,
             {opp.recovered_accident && (
               <span className="text-[8px] font-extrabold text-red-400 bg-red-500/10 border border-red-500/20 px-1.5 py-0.5 rounded uppercase">
                 Sinistrado / Leilão
+              </span>
+            )}
+            {isOlderThan3Days && (
+              <span className="text-[8px] font-extrabold text-red-500 bg-red-950/50 border border-red-500/40 px-1.5 py-0.5 rounded uppercase flex items-center gap-1 animate-pulse">
+                ⚠️ +3 Dias Anunciado
               </span>
             )}
           </div>

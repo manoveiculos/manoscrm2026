@@ -40,20 +40,52 @@ export const RadarTab: React.FC = () => {
   const [maxFipePct, setMaxFipePct] = useState('ALL');
   const [activeQuickFilter, setActiveQuickFilter] = useState<'ALL' | 'EXCELENTE' | 'BOM' | 'DESAGIO'>('ALL');
 
+  // Stats da API
+  const [totalCount, setTotalCount] = useState(0);
+  const [excelentesCount, setExcelentesCount] = useState(0);
+  const [bonsCount, setBonsCount] = useState(0);
+  const [avgDiscount, setAvgDiscount] = useState(0);
+
   // Modals e Drawers
   const [selectedOppForDrawer, setSelectedOppForDrawer] = useState<Opportunity | null>(null);
   const [selectedOppForInterest, setSelectedOppForInterest] = useState<Opportunity | null>(null);
 
+  // Debounce para Busca Rápida
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState(searchQuery);
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+    }, 300);
+    return () => clearTimeout(handler);
+  }, [searchQuery]);
+
   useEffect(() => {
     async function fetchOpportunities() {
+      setLoading(true);
+      setError(null);
       try {
-        const res = await fetch('/api/compras/oportunidades?limit=1000');
+        const queryParams = new URLSearchParams();
+        if (debouncedSearchQuery) queryParams.set('query', debouncedSearchQuery);
+        if (selectedBrand && selectedBrand !== 'ALL') queryParams.set('brand', selectedBrand);
+        if (activeQuickFilter === 'EXCELENTE') queryParams.set('rating', 'EXCELENTE');
+        if (activeQuickFilter === 'BOM') queryParams.set('rating', 'BOM');
+        if (minYear) queryParams.set('min_year', minYear);
+        if (maxYear) queryParams.set('max_year', maxYear);
+        if (maxKm && maxKm !== 'ALL') queryParams.set('max_km', maxKm);
+        if (maxFipePct && maxFipePct !== 'ALL') queryParams.set('max_fipe_pct', maxFipePct);
+
+        const res = await fetch(`/api/compras/oportunidades?${queryParams.toString()}`);
         const data = await res.json();
         
         if (!res.ok || !data.success) {
           throw new Error(data.error || 'Erro ao carregar oportunidades.');
         }
         setOpportunities(data.opportunities || []);
+        setTotalCount(data.totalCount || 0);
+        setExcelentesCount(data.excelentesCount || 0);
+        setBonsCount(data.bonsCount || 0);
+        setAvgDiscount(data.avgDiscount || 0);
       } catch (err: any) {
         setError(err.message || 'Falha ao buscar oportunidades.');
       } finally {
@@ -61,7 +93,7 @@ export const RadarTab: React.FC = () => {
       }
     }
     fetchOpportunities();
-  }, []);
+  }, [debouncedSearchQuery, selectedBrand, minYear, maxYear, maxKm, maxFipePct, activeQuickFilter]);
 
   const uniqueBrands = useMemo(() => {
     const brands = opportunities.map(o => o.brand ? o.brand.toUpperCase() : 'OUTROS');
@@ -72,44 +104,31 @@ export const RadarTab: React.FC = () => {
   }, [opportunities]);
 
   const filteredOpportunities = useMemo(() => {
-    let result = opportunities.filter(o => {
-      if (activeQuickFilter === 'EXCELENTE' && o.rating !== 'EXCELENTE') return false;
-      if (activeQuickFilter === 'BOM' && o.rating !== 'BOM') return false;
-
-      const matchesSearch = o.model.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (o.brand ? o.brand.toLowerCase().includes(searchQuery.toLowerCase()) : false);
-      const matchesBrand = selectedBrand === 'ALL' || 
-        (selectedBrand === 'OUTROS' && (!o.brand || o.brand.toUpperCase() === 'OUTROS')) ||
-        (o.brand ? o.brand.toUpperCase() === selectedBrand : false);
-      
-      const year = o.year_model;
-      const matchesMinYear = !minYear || year >= parseInt(minYear, 10);
-      const matchesMaxYear = !maxYear || year <= parseInt(maxYear, 10);
-      const matchesKm = maxKm === 'ALL' || (maxKm === 'OVER_100000' ? o.km > 100000 : o.km <= parseInt(maxKm, 10));
-      const matchesFipePct = maxFipePct === 'ALL' || (o.fipe_pct !== null && o.fipe_pct <= parseInt(maxFipePct, 10));
-
-      return matchesSearch && matchesBrand && matchesMinYear && matchesMaxYear && matchesKm && matchesFipePct;
-    });
-
+    let result = [...opportunities];
     if (activeQuickFilter === 'DESAGIO') {
       result.sort((a, b) => (a.fipe_pct ?? 100) - (b.fipe_pct ?? 100));
     } else {
       result.sort((a, b) => new Date(b.posted_at).getTime() - new Date(a.posted_at).getTime());
     }
     return result;
-  }, [opportunities, searchQuery, selectedBrand, minYear, maxYear, maxKm, maxFipePct, activeQuickFilter]);
+  }, [opportunities, activeQuickFilter]);
 
   const stats = useMemo(() => {
-    const total = filteredOpportunities.length;
-    const excelentes = filteredOpportunities.filter(o => o.deal_score >= 85).length;
-    const bons = filteredOpportunities.filter(o => o.deal_score >= 70 && o.deal_score < 85).length;
-    const offersWithFipe = filteredOpportunities.filter(o => o.fipe_price > 0);
-    let avgDiscount = 0;
-    if (offersWithFipe.length > 0) {
-      avgDiscount = Math.round(offersWithFipe.reduce((acc, o) => acc + (100 - o.fipe_pct), 0) / offersWithFipe.length);
-    }
-    return { total, excelentes, bons, avgDiscount };
-  }, [filteredOpportunities]);
+    const hasFilter = !!debouncedSearchQuery || 
+                      selectedBrand !== 'ALL' || 
+                      (activeQuickFilter !== 'ALL' && activeQuickFilter !== 'DESAGIO') || 
+                      !!minYear || 
+                      !!maxYear || 
+                      maxKm !== 'ALL' || 
+                      maxFipePct !== 'ALL';
+
+    return { 
+      total: hasFilter ? filteredOpportunities.length : totalCount, 
+      excelentes: excelentesCount, 
+      bons: bonsCount, 
+      avgDiscount 
+    };
+  }, [filteredOpportunities, totalCount, excelentesCount, bonsCount, avgDiscount, debouncedSearchQuery, selectedBrand, activeQuickFilter, minYear, maxYear, maxKm, maxFipePct]);
 
   const clearAllFilters = () => {
     setSearchQuery('');

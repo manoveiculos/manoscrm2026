@@ -63,28 +63,15 @@ export default function CalculatorTab({ initialParams }: CalculatorTabProps) {
 
   const [fipeData, setFipeData] = useState<FipeResult | null>(null);
   const [similarOffers, setSimilarOffers] = useState<SimilarOffer[]>([]);
+  const [similarSales, setSimilarSales] = useState<any[]>([]);
   const [optionsList, setOptionsList] = useState<FipeResult[] | null>(null);
   const [correctionSuggestion, setCorrectionSuggestion] = useState<CorrectionSuggestion | null>(null);
 
   const [prepCost, setPrepCost] = useState<number>(2500);
   const [condition, setCondition] = useState<string>('bom');
 
-  const marginPercent = useMemo(() => {
-    if (!similarOffers || similarOffers.length === 0) return 15;
-    
-    const margins = similarOffers.map(offer => {
-      const fipe = offer.fipe_price_official || offer.fipe_price || 0;
-      const purchase = offer.net_price || offer.ask_price || 0;
-      if (fipe > 0 && purchase > 0) {
-        return ((fipe - purchase) / fipe) * 100;
-      }
-      return null;
-    }).filter((m): m is number => m !== null && m >= 3 && m <= 30);
-
-    if (margins.length === 0) return 15;
-    const sum = margins.reduce((acc, m) => acc + m, 0);
-    return Math.round((sum / margins.length) * 10) / 10;
-  }, [similarOffers]);
+  const [avgRepasseDiscount, setAvgRepasseDiscount] = useState<number>(15);
+  const [avgRetailPrice, setAvgRetailPrice] = useState<number>(0);
 
   // Efeito para sincronizar com cliques em outras abas (via state)
   useEffect(() => {
@@ -164,6 +151,9 @@ export default function CalculatorTab({ initialParams }: CalculatorTabProps) {
       } else {
         setFipeData(data.fipe);
         setSimilarOffers(data.similarOffers || []);
+        setSimilarSales(data.similarSales || []);
+        setAvgRepasseDiscount(data.avgRepasseDiscount ?? 15);
+        setAvgRetailPrice(data.avgRetailPrice ?? 0);
         setSearchDone(true);
       }
     } catch (err: any) {
@@ -198,6 +188,9 @@ export default function CalculatorTab({ initialParams }: CalculatorTabProps) {
 
       setFipeData(data.fipe);
       setSimilarOffers(data.similarOffers || []);
+      setSimilarSales(data.similarSales || []);
+      setAvgRepasseDiscount(data.avgRepasseDiscount ?? 15);
+      setAvgRetailPrice(data.avgRetailPrice ?? 0);
       setOptionsList(null);
     } catch (err: any) {
       setError(err.message || 'Falha ao buscar dados da avaliação selecionada.');
@@ -237,9 +230,10 @@ export default function CalculatorTab({ initialParams }: CalculatorTabProps) {
     }
 
     const estimatedRetailPrice = baseFipe * (1 + (kmAdjustmentPercent + conditionAdjustmentPercent) / 100);
-    const marginAmount = estimatedRetailPrice * (marginPercent / 100);
-    const recommendedPurchasePrice = Math.max(estimatedRetailPrice - marginAmount - prepCost, 0);
+    const baseRepasse = baseFipe * (1 - avgRepasseDiscount / 100);
+    const recommendedPurchasePrice = Math.max(baseRepasse * (1 + (kmAdjustmentPercent + conditionAdjustmentPercent) / 100) - prepCost, 0);
     const purchaseToFipeRatio = baseFipe > 0 ? (recommendedPurchasePrice / baseFipe) * 100 : 0;
+    const estimatedProfit = Math.max(estimatedRetailPrice - recommendedPurchasePrice - prepCost, 0);
 
     return {
       age,
@@ -248,11 +242,12 @@ export default function CalculatorTab({ initialParams }: CalculatorTabProps) {
       kmAdjustmentPercent,
       conditionAdjustmentPercent,
       estimatedRetailPrice,
-      marginAmount,
+      baseRepasse,
       recommendedPurchasePrice,
-      purchaseToFipeRatio
+      purchaseToFipeRatio,
+      estimatedProfit
     };
-  }, [fipeData, yearModel, km, marginPercent, prepCost, condition]);
+  }, [fipeData, yearModel, km, avgRepasseDiscount, prepCost, condition]);
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 w-full">
@@ -264,8 +259,8 @@ export default function CalculatorTab({ initialParams }: CalculatorTabProps) {
               <Layers className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="font-bold text-white text-lg">Avaliar Veículo</h2>
-              <p className="text-xs text-zinc-400 mt-0.5">Simulação de compra e precificação</p>
+              <h2 className="font-bold text-white text-lg">Calculadora de Compra</h2>
+              <p className="text-xs text-zinc-400 mt-0.5">Diagnóstico de mercado e precificação exata</p>
             </div>
           </div>
 
@@ -324,7 +319,7 @@ export default function CalculatorTab({ initialParams }: CalculatorTabProps) {
               disabled={loading}
               className="w-full mt-2 py-4 px-6 rounded-xl bg-primary hover:bg-primary/90 text-white font-bold text-sm transition-all flex items-center justify-center gap-2 group cursor-pointer disabled:opacity-50"
             >
-              {loading ? 'Consultando FIPE...' : 'Pesquisar Preço FIPE'} 
+              {loading ? 'Analisando Mercado...' : 'Consultar Preço de Compra'} 
               <Sparkles className="w-4 h-4" />
             </button>
           </form>
@@ -359,7 +354,7 @@ export default function CalculatorTab({ initialParams }: CalculatorTabProps) {
             </div>
             <div>
               <h3 className="font-bold text-white text-lg">Aguardando Avaliação</h3>
-              <p className="text-sm text-zinc-400 mt-1 max-w-sm">Insira os dados do carro no formulário ao lado para carregar a FIPE oficial e simular os custos.</p>
+              <p className="text-sm text-zinc-400 mt-1 max-w-sm">Insira os dados do carro no formulário ao lado para carregar a FIPE oficial e realizar o diagnóstico de compra.</p>
             </div>
           </div>
         )}
@@ -369,7 +364,7 @@ export default function CalculatorTab({ initialParams }: CalculatorTabProps) {
             <div className="w-12 h-12 border-2 border-primary/20 border-t-primary rounded-full animate-spin" />
             <div>
               <h3 className="font-bold text-white text-lg">Analisando Inteligência de Mercado</h3>
-              <p className="text-sm text-zinc-400 mt-1">Conectando ao banco de dados FIPE e analisando histórico de repasses...</p>
+              <p className="text-sm text-zinc-400 mt-1">Conectando ao banco de dados FIPE, histórico de repasses e histórico de vendas...</p>
             </div>
           </div>
         )}
@@ -468,18 +463,19 @@ export default function CalculatorTab({ initialParams }: CalculatorTabProps) {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="flex flex-col gap-5">
                   <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <Percent className="w-3.5 h-3.5 text-primary" /> Margem do Lojista (Inteligente)
+                    <Percent className="w-3.5 h-3.5 text-primary" /> Margem / Deságio de Repasse
                   </h4>
                   <div className="bg-zinc-950/60 border border-zinc-900 rounded-xl p-4 flex flex-col gap-3">
                     <div className="flex justify-between items-start">
                       <div>
-                        <span className="text-zinc-400 text-sm font-semibold block">Margem de Lucro</span>
+                        <span className="text-zinc-400 text-sm font-semibold block">Deságio de Repasse Médio</span>
                         <span className="text-[10px] text-zinc-500 block mt-1">
-                          {similarOffers.length > 0 ? `Média sobre ${similarOffers.length} anúncios` : 'Estimada de forma padrão'}
+                          {similarOffers.length > 0 ? `Calculado sobre ${similarOffers.length} anúncios no banco` : 'Média padrão do mercado'}
                         </span>
                       </div>
                       <div className="text-right">
-                        <span className="text-2xl font-black text-primary block leading-none">{marginPercent}%</span>
+                        <span className="text-2xl font-black text-primary block leading-none">{avgRepasseDiscount}%</span>
+                        <span className="text-[9px] text-zinc-500 block mt-1 uppercase">Abaixo FIPE</span>
                       </div>
                     </div>
                   </div>
@@ -543,34 +539,42 @@ export default function CalculatorTab({ initialParams }: CalculatorTabProps) {
                     <span className="text-zinc-200">{fipeData.fipe_price_official.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>Desgaste KM</span>
+                    <span>Desgaste KM ({precificacao.kmAdjustmentPercent.toFixed(2)}%)</span>
                     <span className={`font-semibold ${precificacao.kmAdjustmentPercent >= 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
-                      {precificacao.kmAdjustmentPercent >= 0 ? '+' : ''}{precificacao.kmAdjustmentPercent.toFixed(2)}% ({
-                        (fipeData.fipe_price_official * (precificacao.kmAdjustmentPercent / 100)).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-                      })
+                      { (fipeData.fipe_price_official * (precificacao.kmAdjustmentPercent / 100)).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) }
                     </span>
                   </div>
                   <div className="flex justify-between">
-                    <span>Conservação</span>
+                    <span>Conservação ({precificacao.conditionAdjustmentPercent}%)</span>
                     <span className="text-amber-400 font-semibold">
-                      {precificacao.conditionAdjustmentPercent}% ({
-                        (fipeData.fipe_price_official * (precificacao.conditionAdjustmentPercent / 100)).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-                      })
+                      { (fipeData.fipe_price_official * (precificacao.conditionAdjustmentPercent / 100)).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) }
                     </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Deságio de Repasse Praticado ({avgRepasseDiscount}%)</span>
+                    <span className="text-zinc-350 font-semibold">
+                      -{ (fipeData.fipe_price_official * (avgRepasseDiscount / 100)).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 }) }
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-zinc-550">
+                    <span>Preparação</span>
+                    <span className="text-zinc-450 font-semibold">-{prepCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
                   </div>
                   <div className="h-px bg-zinc-900 my-1" />
                   <div className="flex justify-between font-bold text-zinc-200">
                     <span>Venda (Varejo) Estimada</span>
                     <span className="text-white">{precificacao.estimatedRetailPrice.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
                   </div>
-                  <div className="flex justify-between text-zinc-500">
-                    <span>Margem do Lojista ({marginPercent}%)</span>
-                    <span className="text-zinc-400">-{precificacao.marginAmount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                  <div className="flex justify-between font-semibold text-zinc-500">
+                    <span>Preço Médio de Repasse de Mercado</span>
+                    <span className="text-zinc-300">{precificacao.baseRepasse.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
                   </div>
-                  <div className="flex justify-between text-zinc-500">
-                    <span>Preparação</span>
-                    <span className="text-zinc-400">-{prepCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
-                  </div>
+                  {avgRetailPrice > 0 && (
+                    <div className="flex justify-between font-semibold text-zinc-500">
+                      <span>Venda Média Real (Manos)</span>
+                      <span className="text-emerald-400 font-extrabold">{avgRetailPrice.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })}</span>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -578,14 +582,12 @@ export default function CalculatorTab({ initialParams }: CalculatorTabProps) {
                 <div className="flex items-start gap-3">
                   <CheckCircle2 className="w-6 h-6 text-primary shrink-0 mt-0.5" />
                   <div>
-                    <h4 className="font-extrabold text-white text-base">Preço de Compra Recomendado</h4>
-                    <p className="text-xs text-zinc-400 mt-1">Valor sugerido de oferta (repasse).</p>
+                    <h4 className="font-extrabold text-white text-base">Oferta Recomendada de Compra</h4>
+                    <p className="text-xs text-zinc-400 mt-1">Valor ideal sugerido para a proposta de repasse.</p>
                     <div className="flex items-center gap-1.5 mt-2">
-                      <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">+ / - FIPE:</span>
+                      <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Margem sobre FIPE:</span>
                       <span className="text-xs font-extrabold text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded">
-                        {precificacao.purchaseToFipeRatio - 100 > 0 
-                          ? `+${(precificacao.purchaseToFipeRatio - 100).toFixed(1)}%` 
-                          : `${(precificacao.purchaseToFipeRatio - 100).toFixed(1)}%`}
+                        -{ (100 - precificacao.purchaseToFipeRatio).toFixed(1) }%
                       </span>
                     </div>
                   </div>
@@ -599,47 +601,70 @@ export default function CalculatorTab({ initialParams }: CalculatorTabProps) {
               </div>
             </div>
 
-            <div className="glass-panel border border-zinc-900 rounded-2xl p-6 flex flex-col gap-5">
-              <h3 className="font-bold text-white text-base flex items-center gap-2">
-                <TrendingDown className="w-5 h-5 text-primary" /> Ofertas Históricas Reais
-              </h3>
-              {similarOffers.length === 0 ? (
-                <p className="text-xs text-zinc-500 italic">Não foram encontradas ofertas anteriores no banco de dados.</p>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {similarOffers.map((offer) => {
-                    const discountFipeNum = offer.fipe_price_official && offer.net_price 
-                      ? Math.round((offer.net_price / offer.fipe_price_official) * 100) - 100
-                      : null;
-
-                    return (
-                      <div key={offer.id} className="bg-zinc-950 border border-zinc-900 hover:border-zinc-800 rounded-xl p-4 flex flex-col justify-between gap-3 transition-colors">
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <h4 className="font-bold text-xs text-white uppercase">{offer.model}</h4>
-                            <p className="text-[10px] text-zinc-500 mt-1">Ano: {offer.year_model} • Coletado em: {new Date(offer.created_at).toLocaleDateString('pt-BR')}</p>
-                          </div>
-                          {discountFipeNum !== null && (
-                            <span className={`text-[9px] font-bold bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded ${discountFipeNum <= -10 ? 'text-lime-400' : 'text-emerald-400'}`}>
-                              {discountFipeNum > 0 ? `+${discountFipeNum}%` : `${discountFipeNum}%`}
-                            </span>
-                          )}
+            {/* Diagnóstico Real de Mercado (Históricos de Vendas e Anúncios) */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full mt-2">
+              {/* Vendas Similares (Varejo) */}
+              <div className="glass-panel border border-zinc-900 rounded-2xl p-6 flex flex-col gap-5">
+                <h3 className="font-bold text-white text-sm flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" /> Vendas Similares (Varejo Manos)
+                </h3>
+                {similarSales.length === 0 ? (
+                  <p className="text-xs text-zinc-500 italic py-4">Nenhuma venda desse modelo registrada no histórico da Manos.</p>
+                ) : (
+                  <div className="flex flex-col gap-3 max-h-[220px] overflow-y-auto pr-1">
+                    {similarSales.map((sale) => (
+                      <div key={sale.id} className="bg-zinc-950/60 border border-zinc-900/80 rounded-xl p-3 flex justify-between items-center text-xs">
+                        <div>
+                          <span className="font-bold text-zinc-200 block uppercase leading-snug">{sale.vehicle_name}</span>
+                          <span className="text-[9px] text-zinc-500 block mt-1">Vendido em: {new Date(sale.sale_date).toLocaleDateString('pt-BR')}</span>
                         </div>
-                        <div className="flex justify-between items-end border-t border-zinc-900/60 pt-2 text-xs">
-                          <div>
-                            <span className="text-[9px] text-zinc-500 block uppercase">Pedida</span>
-                            <span className="text-zinc-300 font-semibold">{offer.ask_price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })}</span>
-                          </div>
-                          <div className="text-right">
-                            <span className="text-[9px] text-zinc-500 block uppercase">Líquido</span>
-                            <span className="text-white font-bold">{offer.net_price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })}</span>
-                          </div>
+                        <div className="text-right">
+                          <span className="text-[9px] text-zinc-500 block uppercase">Preço Venda</span>
+                          <span className="text-emerald-400 font-extrabold block">{sale.sale_value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })}</span>
                         </div>
                       </div>
-                    );
-                  })}
-                </div>
-              )}
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Anúncios de Repasse Similares */}
+              <div className="glass-panel border border-zinc-900 rounded-2xl p-6 flex flex-col gap-5">
+                <h3 className="font-bold text-white text-sm flex items-center gap-2">
+                  <TrendingDown className="w-4 h-4 text-primary" /> Histórico de Anúncios de Repasse
+                </h3>
+                {similarOffers.length === 0 ? (
+                  <p className="text-xs text-zinc-500 italic py-4">Não foram encontradas ofertas anteriores no banco de dados.</p>
+                ) : (
+                  <div className="flex flex-col gap-3 max-h-[220px] overflow-y-auto pr-1">
+                    {similarOffers.map((offer) => {
+                      const discountFipeNum = offer.fipe_price_official && offer.net_price 
+                        ? Math.round((offer.net_price / offer.fipe_price_official) * 100) - 100
+                        : null;
+
+                      return (
+                        <div key={offer.id} className="bg-zinc-950/60 border border-zinc-900/80 rounded-xl p-3 flex justify-between items-center text-xs">
+                          <div>
+                            <span className="font-bold text-zinc-200 block uppercase leading-snug">{offer.model}</span>
+                            <span className="text-[9px] text-zinc-500 block mt-1">Ano: {offer.year_model} • {new Date(offer.created_at).toLocaleDateString('pt-BR')}</span>
+                          </div>
+                          <div className="text-right flex items-center gap-3">
+                            <div>
+                              <span className="text-[9px] text-zinc-550 block uppercase">Repasse</span>
+                              <span className="text-zinc-250 font-bold block">{offer.ask_price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })}</span>
+                            </div>
+                            {discountFipeNum !== null && (
+                              <span className={`text-[9px] font-bold bg-primary/10 border border-primary/20 px-2 py-0.5 rounded ${discountFipeNum <= -10 ? 'text-primary' : 'text-zinc-400'}`}>
+                                {discountFipeNum}%
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
           </>
         )}
