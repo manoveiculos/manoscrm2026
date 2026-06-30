@@ -346,8 +346,45 @@ function VeiculoModal({ veiculo, onClose, onSaved }: { veiculo: Veiculo | null; 
     });
     const [saving, setSaving] = useState(false);
     const [erro, setErro] = useState<string | null>(null);
+    const [busca, setBusca] = useState('');
+    const [resultados, setResultados] = useState<any[]>([]);
+    const [buscando, setBuscando] = useState(false);
 
     const set = (k: string, v: any) => setForm((f: any) => ({ ...f, [k]: v }));
+
+    // Busca no estoque ao vivo do Altimus (debounced) — só no cadastro de carro novo
+    useEffect(() => {
+        if (veiculo) return;
+        const q = busca.trim();
+        if (q.length < 2) { setResultados([]); return; }
+        setBuscando(true);
+        const t = setTimeout(async () => {
+            try {
+                const res = await fetch(`/api/milhao/estoque?q=${encodeURIComponent(q)}`);
+                const json = await res.json();
+                setResultados(json?.veiculos || []);
+            } catch { setResultados([]); }
+            finally { setBuscando(false); }
+        }, 300);
+        return () => clearTimeout(t);
+    }, [busca, veiculo]);
+
+    // Puxa um carro do estoque do Altimus para o formulário (custos ficam pra preencher na mão)
+    const puxarDoEstoque = (v: any) => {
+        setForm((f: any) => ({
+            ...f,
+            estoque_id_externo: v.id_externo || '',
+            marca: v.marca || '',
+            modelo: v.modelo || '',
+            versao: v.versao || '',
+            ano: v.ano || '',
+            km: v.km || '',
+            cor: v.cor || '',
+            valor_anuncio: v.preco || '',
+        }));
+        setBusca('');
+        setResultados([]);
+    };
 
     const salvar = async () => {
         if (!form.marca || !form.modelo) { setErro('Marca e modelo são obrigatórios.'); return; }
@@ -385,6 +422,49 @@ function VeiculoModal({ veiculo, onClose, onSaved }: { veiculo: Veiculo | null; 
                     <h3 className="font-bold text-white">{veiculo ? 'Editar carro' : 'Lançar carro no Milhão'}</h3>
                     <button onClick={onClose} className="text-gray-400 hover:text-white"><X className="w-5 h-5" /></button>
                 </div>
+
+                {!veiculo && (
+                    <div className="px-5 pt-4">
+                        <div className="bg-zinc-800/40 border border-zinc-700 rounded-lg p-3">
+                            <div className="flex items-center gap-2 text-[12px] text-gray-300 mb-2">
+                                <Car className="w-4 h-4 text-blue-400" />
+                                Puxar do estoque Altimus <span className="text-gray-500">(busca por marca/modelo)</span>
+                            </div>
+                            <input
+                                value={busca}
+                                onChange={(ev) => setBusca(ev.target.value)}
+                                placeholder="Ex: Civic, BMW Z4, Onix…"
+                                className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-sm text-white focus:border-red-500 outline-none"
+                            />
+                            {buscando && <div className="text-[11px] text-gray-500 mt-1">Buscando…</div>}
+                            {resultados.length > 0 && (
+                                <div className="mt-2 max-h-44 overflow-y-auto rounded border border-zinc-700 divide-y divide-zinc-800">
+                                    {resultados.map((v, i) => (
+                                        <button
+                                            key={i}
+                                            type="button"
+                                            onClick={() => puxarDoEstoque(v)}
+                                            className="w-full text-left px-2 py-1.5 hover:bg-zinc-700/40 transition-colors"
+                                        >
+                                            <div className="text-[12px] text-white">{v.marca} {v.modelo} {v.versao || ''}</div>
+                                            <div className="text-[10px] text-gray-500">
+                                                {[v.ano, v.km ? `${Number(v.km).toLocaleString('pt-BR')}km` : null, v.cor].filter(Boolean).join(' · ')}
+                                                {v.preco ? ` · ${brl(v.preco)}` : ''}
+                                            </div>
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                            {!buscando && busca.trim().length >= 2 && resultados.length === 0 && (
+                                <div className="text-[11px] text-gray-500 mt-1">Nada encontrado no estoque para “{busca}”.</div>
+                            )}
+                            {form.estoque_id_externo && (
+                                <div className="text-[11px] text-emerald-400 mt-2">✓ Puxado do Altimus — agora preencha compra e reconto.</div>
+                            )}
+                        </div>
+                    </div>
+                )}
+
                 <div className="p-5 grid grid-cols-2 gap-3">
                     {field('marca', 'Marca *')}
                     {field('modelo', 'Modelo *')}
