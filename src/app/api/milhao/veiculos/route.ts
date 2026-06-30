@@ -11,10 +11,20 @@ const CAMPOS = [
     'data_compra', 'data_venda', 'status', 'consultor', 'obs',
 ];
 
+// Colunas NOT NULL (com DEFAULT no banco): nunca gravar null — omitir deixa o DEFAULT valer
+const NOT_NULL_COLS = new Set(['marca', 'modelo', 'valor_compra', 'custos_reconto', 'data_compra', 'status']);
+
 function sanitize(body: any) {
     const row: Record<string, any> = {};
     for (const k of CAMPOS) {
-        if (body[k] !== undefined) row[k] = body[k] === '' ? null : body[k];
+        if (body[k] === undefined) continue;
+        const v = body[k];
+        if (v === '' || v === null) {
+            if (NOT_NULL_COLS.has(k)) continue; // deixa o DEFAULT do banco (0 / hoje / 'estoque')
+            row[k] = null;                       // colunas nuláveis podem ser limpas
+        } else {
+            row[k] = v;
+        }
     }
     return row;
 }
