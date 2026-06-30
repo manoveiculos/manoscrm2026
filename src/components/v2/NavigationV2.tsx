@@ -23,18 +23,21 @@ import {
     DollarSign,
     Radar, // Radar de Tráfego
     PlayCircle, // Atendimento ativo
+    Banknote, // Projeto Milhão (exclusivo Alexandre)
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
 import { UserProfileModal } from '@/components/UserProfileModal'; // using existing profile modal
 import { useAIAlerts } from '@/hooks/useAIAlerts';
 import { NotificationBell } from '@/components/v2/NotificationBell';
+import { CobrancaPressureBell } from '@/components/v2/CobrancaPressureBell';
 
 interface NavItem {
     label: string;
     icon: any;
     href: string;
     adminOnly?: boolean;
+    alexandreOnly?: boolean; // visível SOMENTE para o login Alexandre (nem outros admins veem)
     blocked?: boolean;
 }
 
@@ -50,6 +53,7 @@ const NAV_ITEMS: NavItem[] = [
     { label: 'Cobrança', icon: DollarSign, href: '/admin/cobranca', adminOnly: true },
     { label: 'Pipeline', icon: KanbanSquare, href: '/pipeline', adminOnly: true },
     { label: 'Dashboard', icon: BarChart3, href: '/', adminOnly: true },
+    { label: 'Milhão', icon: Banknote, href: '/admin/milhao', alexandreOnly: true },
     { label: 'Conversão', icon: BarChart3, href: '/admin/conversion', adminOnly: true },
     { label: 'Resgate', icon: Bot, href: '/admin/rescue', adminOnly: true },
     { label: 'Consultores', icon: Shield, href: '/admin/users', adminOnly: true },
@@ -207,6 +211,9 @@ export const NavigationV2 = () => {
                         return item.href === '/admin/cobranca';
                     }
 
+                    // Milhão é exclusivo do Alexandre — nem outros admins enxergam
+                    if (item.alexandreOnly) return isAlexandre;
+
                     if (item.adminOnly) {
                         if (item.href === '/admin/cobranca') {
                             if (!isAdmin && !isCamila && !isAlexandre) return false;
@@ -265,6 +272,11 @@ export const NavigationV2 = () => {
                     );
                 })}
 
+            </div>
+
+            {/* Sino de Pressão de Cobrança — lê inactivity_alerts (leads esfriando) */}
+            <div className={`w-full ${isCollapsed ? 'px-2' : 'px-3'} py-1`}>
+                <CobrancaPressureBell isCollapsed={isCollapsed} role={role} />
             </div>
 
             {/* Sininho de Notificação de Novos Leads */}
