@@ -12,6 +12,7 @@ export const LayoutWrapperV2 = ({ children }: { children: React.ReactNode }) => 
     const pathname = usePathname() || '';
     const isEmbed = pathname.endsWith('/embed');
     const isLogin = pathname === '/login';
+    const isRepasse = pathname.startsWith('/repasse'); // app mobile do Paulo, sem sidebar
     const supabase = createClient();
     const router = useRouter();
 
@@ -57,6 +58,15 @@ export const LayoutWrapperV2 = ({ children }: { children: React.ReactNode }) => 
         checkAccess();
         return () => { alive = false; };
     }, [pathname, isLogin, isEmbed, supabase, router]);
+
+    // App mobile do Paulo (/repasse): casca própria com bottom-nav, sem o sidebar do desktop
+    if (isRepasse) {
+        return (
+            <div className="min-h-screen bg-[#0C0C0F] font-inter text-white w-full max-w-[100vw]">
+                {children}
+            </div>
+        );
+    }
 
     if (isEmbed || isLogin) {
         return (

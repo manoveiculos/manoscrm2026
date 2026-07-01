@@ -84,13 +84,18 @@ export async function middleware(request: NextRequest) {
             }
         }
 
-        const isRestrictedBuyer = user.email?.toLowerCase() === 'ivo@acesso.com' || user.email?.toLowerCase() === 'paulo@manoscrm.com';
+        const isPaulo = user.email?.toLowerCase() === 'paulo@manoscrm.com';
+        const isRestrictedBuyer = user.email?.toLowerCase() === 'ivo@acesso.com' || isPaulo;
 
-        // Restrição para compradores restritos: Só podem acessar caminhos que comecem com /compras
+        // Paulo tem seu próprio ecossistema mobile em /repasse (além do /compras).
+        // Demais compradores restritos (ex: Ivo) só acessam /compras.
         if (isRestrictedBuyer) {
-            if (!path.startsWith('/compras')) {
-                const comprasUrl = new URL('/compras', request.url);
-                const redirectResponse = NextResponse.redirect(comprasUrl);
+            const allowed = isPaulo
+                ? (path.startsWith('/repasse') || path.startsWith('/compras'))
+                : path.startsWith('/compras');
+            if (!allowed) {
+                const homeUrl = new URL(isPaulo ? '/repasse' : '/compras', request.url);
+                const redirectResponse = NextResponse.redirect(homeUrl);
                 supabaseResponse.cookies.getAll().forEach((cookie) => {
                     redirectResponse.cookies.set(cookie.name, cookie.value, cookie);
                 });
@@ -100,7 +105,7 @@ export async function middleware(request: NextRequest) {
 
         if (isLoginPage) {
             // Se já estiver logado e autorizado, não deixa entrar na tela de login
-            const targetPath = isRestrictedBuyer ? '/compras' : '/';
+            const targetPath = isPaulo ? '/repasse' : (isRestrictedBuyer ? '/compras' : '/');
             const redirectUrl = new URL(targetPath, request.url);
             const redirectResponse = NextResponse.redirect(redirectUrl);
             supabaseResponse.cookies.getAll().forEach((cookie) => {
