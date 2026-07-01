@@ -1,9 +1,11 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
+import { after } from 'next/server';
 import { verifyExtensionToken } from '@/lib/extensionAuth';
 import { runEliteCloser } from '@/lib/services/ai-closer-service';
 
+// V3.85: limite de tempo curto — evita empilhar requisições zumbis no Node.
 export const maxDuration = 30;
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -34,23 +36,23 @@ export async function POST(req: NextRequest) {
         if (!messages || !Array.isArray(messages)) {
             return NextResponse.json({ error: 'Mensagens inválidas' }, { status: 400 });
         }
-        let numericId: number | null = null;
+        let numericId: number | null = null;
         let uuidId: string | null = null;
         let compraId: string | null = null;
-        let leadFound = null;
+        let leadFound: any = null;
         let leadType: 'main' | 'crm26' | 'compra' = 'crm26';
 
         const cleanPhone = phone ? phone.replace(/\D/g, '') : '';
-        
+
         const getPhoneVariants = (p: string) => {
             if (!p) return [];
             const variants = new Set<string>();
             let base = p;
             if (p.startsWith('55')) base = p.substring(2);
-            
+
             variants.add(p); // Original
             variants.add(base); // Sem 55
-            
+
             // Lógica para 9º dígito (Brasil)
             if (base.length === 11 && base[2] === '9') {
                 // Tem 11 dígitos e o 3º é 9 (formato novo), tenta o formato antigo
@@ -65,7 +67,7 @@ export async function POST(req: NextRequest) {
             if (base.length >= 6) variants.add(base.slice(-6));
             if (base.length >= 8) variants.add(base.slice(-8));
             if (base.length >= 9) variants.add(base.slice(-9));
-            
+
             // Casos onde o BANCO está truncado (ex: o banco tem 12 dígitos, mas o real tem 13)
             // Se o real tem 13 e o banco 12, o banco cortou o último dígito.
             if (base.length >= 6) {
@@ -82,7 +84,7 @@ export async function POST(req: NextRequest) {
         // 1. Resolver o ID do lead - Suporta o formato de UID composto (ex: leads_distribuicao_crm_26:1859)
         let parsedTable: string | null = null;
         let parsedNativeId: string | null = null;
-        
+
         if (leadId) {
             const decoded = decodeURIComponent(leadId);
             const colonIdx = decoded.indexOf(':');
@@ -135,7 +137,7 @@ export async function POST(req: NextRequest) {
         if (!uuidId && !numericId && !compraId && leadId) {
             const cleanId = leadId.replace(/^(main_|dist_|crm26_|dist_|lead_|crm25_|master_)/, '');
             const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-            
+
             if (uuidRegex.test(cleanId)) {
                 // Tenta leads_master
                 const { data: leadMaster } = await supabaseAdmin.from('leads_master').select('*').eq('id', cleanId).maybeSingle();
@@ -158,10 +160,10 @@ export async function POST(req: NextRequest) {
         // 2. Se não encontrou por ID, tentar por telefone em leads_master e leads_manos_crm
         if (!uuidId && !numericId && !compraId && cleanPhone) {
             const orConditions = phoneVariants.map(v => `phone.ilike.%${v}%`).join(',');
-            
+
             // Tenta leads_master por telefone
             const { data: leadsMaster, error: errMaster } = await supabaseAdmin.from('leads_master').select('*').or(orConditions).order('created_at', { ascending: false }).limit(3);
-            
+
             if (leadsMaster && leadsMaster.length > 0) {
                 const bestMatch = leadsMaster.find(l => {
                     const lClean = (l.phone || '').replace(/\D/g, '');
@@ -174,10 +176,10 @@ export async function POST(req: NextRequest) {
                 console.log(`[Sync API] Lead localizado em leads_master: ${bestMatch.name}`);
             } else {
                 if (errMaster) console.error('[Sync API] Erro busca leads_master:', errMaster);
-                
+
                 // Tenta leads_manos_crm por telefone
                 const { data: leadsMain, error: errMain } = await supabaseAdmin.from('leads_manos_crm').select('*').or(orConditions).order('created_at', { ascending: false }).limit(3);
-                
+
                 if (leadsMain && leadsMain.length > 0) {
                     const bestMatch = leadsMain.find(l => {
                         const lClean = (l.phone || '').replace(/\D/g, '');
@@ -205,11 +207,11 @@ export async function POST(req: NextRequest) {
                     }
                 }
             }
-            
+
             if (!numericId && cleanPhone) {
                 const orConditions = phoneVariants.map(v => `telefone.ilike.%${v}%`).join(',');
                 const { data: leads26, error: err26 } = await supabaseAdmin.from('leads_distribuicao_crm_26').select('*').or(orConditions).order('created_at', { ascending: false }).limit(3);
-                
+
                 if (leads26 && leads26.length > 0) {
                     const bestMatch = leads26.find(l => {
                         const lClean = (l.telefone || l.phone || '').replace(/\D/g, '');
@@ -238,7 +240,7 @@ export async function POST(req: NextRequest) {
             if (!compraId && cleanPhone) {
                 const orConditions = phoneVariants.map(v => `telefone.ilike.%${v}%`).join(',');
                 const { data: leadsCompra, error: errCompra } = await supabaseAdmin.from('leads_compra').select('*').or(orConditions).order('criado_em', { ascending: false }).limit(3);
-                
+
                 if (leadsCompra && leadsCompra.length > 0) {
                     const bestMatch = leadsCompra.find(l => {
                         const lClean = (l.telefone || '').replace(/\D/g, '');
@@ -259,9 +261,9 @@ export async function POST(req: NextRequest) {
             console.error(`[Sync API] Falha crítica: ${errorMsg} | payload: ${JSON.stringify(body).slice(0, 500)}`);
 
             return NextResponse.json({
-                success: false, 
-                error: 'Lead não encontrado no CRM. Certifique-se que o lead já está cadastrado.' 
-            }, { 
+                success: false,
+                error: 'Lead não encontrado no CRM. Certifique-se que o lead já está cadastrado.'
+            }, {
                 status: 404,
                 headers: {
                     ...corsHeaders,
@@ -272,312 +274,280 @@ export async function POST(req: NextRequest) {
 
         console.log(`[Sync API] Sincronizando ${messages.length} mensagens para lead (${leadType}): ${uuidId || numericId || compraId}`);
 
-        // 2. Preparar registros para inserção
-        // V3.80.1: dedup em 3 camadas:
-        //   (1) intra-batch — extensão envia payload com duplicatas
-        //   (2) sync_key UNIQUE — barreira de entrada idempotente
-        //   (3) dedup legacy contra DB existente — Evolution / msgs sem id
-        if (leadType === 'crm26' || leadType === 'compra' || leadType === 'main') {
-            const colName = leadType === 'compra' ? 'lead_compra_id' : 'lead_id';
-            const colVal  = leadType === 'compra' ? compraId : (leadType === 'crm26' ? String(numericId) : uuidId);
-            const leadRef = leadType; // 'main' | 'crm26' | 'compra' — discrimina entre tabelas no sync_key
+        // ════════════════════════════════════════════════════════════════════
+        // FAST PATH (V3.85) — só o que é barato e crítico roda SÍNCRONO:
+        //   (a) grava as mensagens (upsert idempotente por sync_key)
+        //   (b) CASA os timestamps de interação humana → DESARMA o monitor
+        //   (c) responde 200 imediatamente (< 100ms)
+        // A IA (runEliteCloser + OpenAI) sai do caminho do request → roda em
+        // after(), depois da resposta. Antes ela segurava a conexão e dava
+        // timeout, fazendo a extensão reenviar em loop.
+        // ════════════════════════════════════════════════════════════════════
+        let insertedCount = 0;
+        const colName = leadType === 'compra' ? 'lead_compra_id' : 'lead_id';
+        const colVal: any = leadType === 'compra' ? compraId : (leadType === 'crm26' ? String(numericId) : uuidId);
+        const leadRef = leadType; // 'main' | 'crm26' | 'compra' — discrimina entre tabelas no sync_key
 
-            const normalizeText = (s: string | null | undefined) =>
-                (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+        const normalizeText = (s: string | null | undefined) =>
+            (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
 
-            // (1) Dedup intra-batch: extensão repete msgs no mesmo POST. Bucket por minuto.
-            const seenInBatch = new Set<string>();
-            const uniqueInBatch = (messages as any[]).filter((m: any) => {
-                const text = normalizeText(m.text);
-                if (!text) return false;
-                const dir = m.direction || 'inbound';
-                const tsBucket = m.timestamp
-                    ? new Date(m.timestamp).toISOString().slice(0, 16)
-                    : 'no-ts';
-                const k = `${dir}:${text}:${tsBucket}`;
-                if (seenInBatch.has(k)) return false;
-                seenInBatch.add(k);
-                return true;
-            });
-
-            const droppedIntraBatch = messages.length - uniqueInBatch.length;
-            if (droppedIntraBatch > 0) {
-                console.warn(`[Sync API] ${droppedIntraBatch} dupes intra-batch descartadas p/ lead ${colVal}`);
-            }
-
-            const messagesToInsert = uniqueInBatch.map((m: any) => {
-                const messageId = m.id || m.messageId || null;
-                const direction = m.direction || 'inbound';
-                const text = m.text || '';
-                const tsBucket = m.timestamp
-                    ? new Date(m.timestamp).toISOString().slice(0, 16)
-                    : new Date().toISOString().slice(0, 16);
-                // sync_key SEMPRE — com messageId quando disponível, senão fallback determinístico.
-                // Fallback usa text(80c) + direction + minuto. Risco: 2 msgs idênticas no mesmo
-                // minuto colidem (raro no WhatsApp; o ganho contra retry-storm compensa).
-                const syncKey = messageId
-                    ? `${leadRef}:${colVal}:id:${messageId}:${direction}`
-                    : `${leadRef}:${colVal}:txt:${normalizeText(text).slice(0, 80)}:${direction}:${tsBucket}`;
-                return {
-                    [colName]: colVal,
-                    message_text: m.text,
-                    direction,
-                    message_id: messageId,
-                    sync_key: syncKey,
-                    created_at: m.timestamp || new Date().toISOString(),
-                };
-            });
-
-            // (2) Upsert com onConflict — colisão de sync_key vira no-op (retry-storm seguro).
-            // Requer UNIQUE INDEX simples em sync_key (não parcial) pq supabase-js/PostgREST
-            // não consegue ON CONFLICT em índice parcial.
-            let insertedCount = 0;
-            if (messagesToInsert.length > 0) {
-                const { data: upserted, error: upsertErr } = await supabaseAdmin
-                    .from('whatsapp_messages')
-                    .upsert(messagesToInsert, { onConflict: 'sync_key', ignoreDuplicates: true })
-                    .select('id');
-                if (upsertErr) {
-                    console.error('[Sync API] upsert sync_key erro:', upsertErr.message, upsertErr.details);
-                    return NextResponse.json({
-                        success: false,
-                        error: `Falha ao gravar mensagens: ${upsertErr.message}`,
-                        hint: upsertErr.details || null,
-                    }, {
-                        status: 500,
-                        headers: { ...corsHeaders, 'Cache-Control': 'no-store, max-age=0' }
-                    });
-                }
-                insertedCount = upserted?.length || 0;
-            }
-
-            // (3) Dedup legacy: só roda se NADA foi inserido via upsert E ainda existem msgs sem messageId,
-            // como fallback histórico (caso fallback hash falhe por alguma razão exótica).
-            // Mantida desligada por padrão — sync_key fallback cobre o caso. Se reativar, descomentar.
-
-            if (insertedCount > 0) {
-                console.log(`[Sync API] Inseridas ${insertedCount}/${messagesToInsert.length} msgs p/ lead ${colVal} (intra-batch dedup=${droppedIntraBatch}, sync_key dupes=${messagesToInsert.length - insertedCount})`);
-
-                const now = new Date().toISOString();
-                const activityUpdates: any = {
-                    atendimento_manual_at: now,
-                    respondeu_follow_up: true,
-                };
-
-                if (leadType === 'crm26') {
-                    activityUpdates.atualizado_em = now;
-                    await supabaseAdmin.from('leads_distribuicao_crm_26').update(activityUpdates).eq('id', numericId);
-                } else if (leadType === 'compra') {
-                    activityUpdates.updated_at = now;
-                    await supabaseAdmin.from('leads_compra').update(activityUpdates).eq('id', compraId);
-                } else {
-                    activityUpdates.updated_at = now;
-                    const table = leadFound?.source_table || 'leads_master';
-                    await supabaseAdmin.from(table).update(activityUpdates).eq('id', uuidId);
-                }
-            }
-
-        }
-
-        // 4. Trigger AI Analysis — delega ao Elite Closer oficial.
-        // O runEliteCloser injeta inventário, behavioral_profile, memória de ações
-        // anteriores e atualiza ai_summary, ai_score, ai_classification, ai_reason,
-        // proxima_acao, next_step, last_scripts_*, ai_last_run_at em uma única
-        // transação. Aqui só preservamos o que é específico desta rota:
-        // (a) auto-pipeline status move, (b) detecção de buying signal,
-        // (c) inserção de mensagens individuais na timeline.
-        let aiAnalysisResult: any = null;
-        let aiError: string | null = null;
-
-        try {
-            // Mapeia o formato da extensão (m.text/m.timestamp) para o que o
-            // ai-closer-service espera (m.content/m.created_at).
-            const mappedMessages = messages.map((m: any) => ({
-                content: m.text || m.content || m.message_text || '',
-                direction: m.direction,
-                created_at: m.timestamp || m.created_at || new Date().toISOString(),
-            }));
-
-            const targetLeadId = uuidId || (numericId !== null ? `crm26_${numericId}` : (compraId !== null ? `compra_${compraId}` : ''));
-            if (!targetLeadId) throw new Error('Lead ID resolvido vazio antes de runEliteCloser');
-
-            // ── Quick Buying Signal Detection (Immediate Score Impact) ──
-            const inboundMsgs = messages.filter((m: any) => m.direction === 'inbound');
-            const lastClientMsg = inboundMsgs[inboundMsgs.length - 1]?.text?.toLowerCase() || '';
-            
-            const immediateBuyingKeywords = [
-                'quero comprar', 'vou fechar', 'onde assina', 'manda o pix', 
-                'qual a conta', 'pode reservar', 'vou buscar', 'fechado',
-                'quero esse', 'vende pra mim', 'tenho o dinheiro'
-            ];
-            
-            const isImmediateHot = immediateBuyingKeywords.some(kw => lastClientMsg.includes(kw));
-            
-            if (isImmediateHot) {
-                console.log(`[QuickAI] Sinal de compra (venda imediata) detectado p/ lead ${targetLeadId}. Forçando score 95.`);
-                let tableToUpdate = 'leads_master';
-                if (leadType === 'compra') tableToUpdate = 'leads_compra';
-                else if (leadType === 'crm26') tableToUpdate = 'leads_distribuicao_crm_26';
-                else if (leadFound?.source_table) tableToUpdate = leadFound.source_table;
-                
-                await supabaseAdmin.from(tableToUpdate)
-                    .update({ 
-                        ai_score: 95, 
-                        ai_classification: 'hot',
-                        ai_last_run_at: new Date().toISOString()
-                    })
-                    .eq('id', uuidId || numericId || compraId);
-            }
-
-            const eliteResult = await runEliteCloser(targetLeadId, mappedMessages, consultor);
-
-            aiAnalysisResult = {
-                diagnostico: eliteResult.diagnostico,
-                orientacao: eliteResult.orientacao,
-                script_whatsapp: eliteResult.scriptWhatsApp,
-                script_options: eliteResult.scriptOptions,
-                urgency_score: eliteResult.urgencyScore,
-                temperature: eliteResult.temperature === 'hot' ? 'quente' : eliteResult.temperature === 'warm' ? 'morno' : 'frio',
-                model_used: eliteResult.modelUsed,
-            };
-
-            // ── Auto-pipeline status move ──────────────────────────────
-            // Deriva o próximo status do urgencyScore (substitui o
-            // "novo_status_sugerido" do prompt fraco).
-            let suggestedStatus: string | null = null;
-            if (eliteResult.urgencyScore >= 88)      suggestedStatus = 'negotiation';
-            else if (eliteResult.urgencyScore >= 70) suggestedStatus = 'contacted';
-            else if (eliteResult.urgencyScore >= 50) suggestedStatus = 'attempt';
-
-            const pipelineOrder = ['received', 'new', 'attempt', 'contacted', 'scheduled', 'visited', 'negotiation', 'proposed'];
-            const isTerminalStatus = (s: string) => s === 'closed' || s === 'lost' || s === 'comprado';
-
-            if (suggestedStatus && leadType === 'main' && uuidId) {
-                const tableToUpdate = leadFound.source_table || 'leads_master';
-                const currentStatus = leadFound.status;
-                if (!isTerminalStatus(currentStatus)) {
-                    const currentIndex = pipelineOrder.indexOf(currentStatus);
-                    const suggestedIndex = pipelineOrder.indexOf(suggestedStatus);
-                    if (suggestedIndex > currentIndex) {
-                        await supabaseAdmin.from(tableToUpdate)
-                            .update({ status: suggestedStatus })
-                            .eq('id', uuidId);
-                        console.log(`[Hyper-AI] Lead ${uuidId}: ${currentStatus} → ${suggestedStatus}`);
-                    }
-                }
-            } else if (suggestedStatus && leadType === 'crm26' && numericId) {
-                // Re-fetch para evitar race condition com status manual do usuário
-                const { data: latestLead } = await supabaseAdmin
-                    .from('leads_distribuicao_crm_26')
-                    .select('status')
-                    .eq('id', numericId)
-                    .single();
-                const dbStatus = latestLead?.status || leadFound.status;
-                if (!isTerminalStatus(dbStatus)) {
-                    const dbIndex = pipelineOrder.indexOf(dbStatus);
-                    const suggestedIndex = pipelineOrder.indexOf(suggestedStatus);
-                    if (suggestedIndex > dbIndex) {
-                        await supabaseAdmin.from('leads_distribuicao_crm_26')
-                            .update({ status: suggestedStatus })
-                            .eq('id', numericId);
-                        console.log(`[Hyper-AI] CRM26 lead ${numericId}: ${dbStatus} → ${suggestedStatus}`);
-                    }
-                }
-            }
-
-            // ── Detecção de intenção de compra ─────────────────────────
-            // Independe da IA — examina mensagens raw em busca de keywords.
-            if (leadType === 'main' && uuidId) {
-                const clientMsgs = messages.filter((m: any) => m.direction === 'inbound').slice(-5);
-                const buyingKeywords = ['quando posso', 'quanto de entrada', 'tenho o dinheiro', 'vou comprar',
-                    'fechar', 'quero comprar', 'vou pegar', 'que horas', 'visita', 'test drive',
-                    'buscar', 'posso ir', 'valor total', 'quanto fica', 'à vista'];
-                const hasBuyingSignal = clientMsgs.some((m: any) =>
-                    buyingKeywords.some(kw => (m.text || '').toLowerCase().includes(kw))
-                );
-                const isHighScore = eliteResult.urgencyScore >= 88;
-
-                if (hasBuyingSignal || isHighScore) {
-                    // Dedup: não cria se já existe alerta nas últimas 4h
-                    const cutoff4h = new Date(Date.now() - 4 * 3_600_000).toISOString();
-                    const { data: existingAlert } = await supabaseAdmin
-                        .from('follow_ups')
-                        .select('id')
-                        .eq('lead_id', uuidId)
-                        .eq('type', 'ai_alert_compra')
-                        .gte('created_at', cutoff4h)
-                        .maybeSingle();
-
-                    if (!existingAlert) {
-                        await supabaseAdmin.from('follow_ups').insert({
-                            lead_id: uuidId,
-                            user_id: leadFound.assigned_consultant_id || 'system',
-                            scheduled_at: new Date().toISOString(),
-                            type: 'ai_alert_compra',
-                            note: hasBuyingSignal
-                                ? `🔥 Sinal de compra detectado! Última msg: "${clientMsgs.at(-1)?.text?.slice(0, 100)}"`
-                                : `🔥 Score de urgência elevado (${eliteResult.urgencyScore}). Contato imediato recomendado.`,
-                            priority: 'high',
-                            status: 'pending',
-                        });
-                        console.log(`[BuyingSignal] Alerta criado para lead ${uuidId}`);
-                    }
-                }
-            }
-
-            // ── Insere mensagens individuais na timeline (main/master) ─
-            if (leadType === 'main' && uuidId) {
-                const { data: existingInteractions } = await supabaseAdmin
-                    .from('interactions_manos_crm')
-                    .select('notes, type')
-                    .eq('lead_id', uuidId)
-                    .ilike('type', 'whatsapp%')
-                    .order('created_at', { ascending: false })
-                    .limit(100);
-
-                const messagesToInsert = messages.map((m: any) => ({
-                    lead_id: uuidId,
-                    type: m.direction === 'outbound' ? 'whatsapp_out' : 'whatsapp_in',
-                    notes: m.text,
-                    user_name: m.direction === 'outbound' ? (consultantName || 'Consultor') : 'Cliente',
-                    created_at: m.timestamp || new Date().toISOString()
-                }));
-
-                const filteredInteractions = messagesToInsert.filter(newMsg =>
-                    !existingInteractions?.some(extInt =>
-                        extInt.notes === newMsg.notes && extInt.type === newMsg.type
-                    )
-                );
-
-                if (filteredInteractions.length > 0) {
-                    await supabaseAdmin.from('interactions_manos_crm').insert(filteredInteractions);
-                    console.log(`[Sync API] Inseridas ${filteredInteractions.length} interações de WhatsApp p/ lead ${uuidId}`);
-                }
-            }
-
-            console.log(`[SyncMessages] runEliteCloser persisted analysis for ${leadType} lead: ${uuidId || numericId} (model=${eliteResult.modelUsed})`);
-        } catch (aiErr: any) {
-            console.error("[Sync API] AI Analysis failed:", aiErr);
-            aiError = aiErr?.message || String(aiErr);
-        }
-
-        return NextResponse.json({ 
-            success: true, 
-            count: messages.length,
-            leadId: uuidId || `crm26_${numericId}` || `compra_${compraId}`,
-            aiAnalysis: aiAnalysisResult,
-            aiError: aiError
-        }, {
-            headers: { 'X-Sync-API-Version': '2.5.DUAL' }
+        // (1) Dedup intra-batch: extensão repete msgs no mesmo POST. Bucket por minuto.
+        const seenInBatch = new Set<string>();
+        const uniqueInBatch = (messages as any[]).filter((m: any) => {
+            const text = normalizeText(m.text);
+            if (!text) return false;
+            const dir = m.direction || 'inbound';
+            const tsBucket = m.timestamp ? new Date(m.timestamp).toISOString().slice(0, 16) : 'no-ts';
+            const k = `${dir}:${text}:${tsBucket}`;
+            if (seenInBatch.has(k)) return false;
+            seenInBatch.add(k);
+            return true;
         });
 
+        const droppedIntraBatch = messages.length - uniqueInBatch.length;
+        if (droppedIntraBatch > 0) {
+            console.warn(`[Sync API] ${droppedIntraBatch} dupes intra-batch descartadas p/ lead ${colVal}`);
+        }
+
+        const messagesToInsert = uniqueInBatch.map((m: any) => {
+            const messageId = m.id || m.messageId || null;
+            const direction = m.direction || 'inbound';
+            const text = m.text || '';
+            const tsBucket = m.timestamp ? new Date(m.timestamp).toISOString().slice(0, 16) : new Date().toISOString().slice(0, 16);
+            const syncKey = messageId
+                ? `${leadRef}:${colVal}:id:${messageId}:${direction}`
+                : `${leadRef}:${colVal}:txt:${normalizeText(text).slice(0, 80)}:${direction}:${tsBucket}`;
+            return {
+                [colName]: colVal,
+                message_text: m.text,
+                direction,
+                message_id: messageId,
+                sync_key: syncKey,
+                created_at: m.timestamp || new Date().toISOString(),
+            };
+        });
+
+        // (2) Upsert idempotente — colisão de sync_key vira no-op (retry-storm seguro).
+        if (messagesToInsert.length > 0) {
+            const { data: upserted, error: upsertErr } = await supabaseAdmin
+                .from('whatsapp_messages')
+                .upsert(messagesToInsert, { onConflict: 'sync_key', ignoreDuplicates: true })
+                .select('id');
+            if (upsertErr) {
+                console.error('[Sync API] upsert sync_key erro:', upsertErr.message, (upsertErr as any).details);
+                return NextResponse.json({
+                    success: false,
+                    error: `Falha ao gravar mensagens: ${upsertErr.message}`,
+                    hint: (upsertErr as any).details || null,
+                }, {
+                    status: 500,
+                    headers: { ...corsHeaders, 'Cache-Control': 'no-store, max-age=0' }
+                });
+            }
+            insertedCount = upserted?.length || 0;
+        }
+
+        // (3) CASAMENTO DE TIMESTAMPS — o que desarma o monitor de inatividade.
+        // Só quando houve mensagem nova (insertedCount > 0): re-sync de histórico
+        // antigo (tudo dedupado) não deve "ressuscitar" o lead.
+        if (insertedCount > 0) {
+            const nowIso = new Date().toISOString();
+
+            // Marca de interação humana = data da ÚLTIMA msg do lote (mais correto
+            // que NOW p/ não inflar atividade). Fallback NOW se sem timestamp.
+            const tsList = uniqueInBatch
+                .map((m: any) => (m.timestamp ? new Date(m.timestamp).getTime() : 0))
+                .filter((n: number) => n > 0);
+            const lastHumanTs = tsList.length ? new Date(Math.max(...tsList)).toISOString() : nowIso;
+            const hasOutbound = uniqueInBatch.some((m: any) => (m.direction || 'inbound') === 'outbound');
+
+            const targetTable =
+                leadType === 'crm26' ? 'leads_distribuicao_crm_26' :
+                leadType === 'compra' ? 'leads_compra' :
+                (leadFound?.source_table || 'leads_master');
+            const isMaster = targetTable === 'leads_master';
+
+            const updates: Record<string, any> = {};
+            // updated_at correto por tabela (dist usa atualizado_em)
+            if (targetTable === 'leads_distribuicao_crm_26') updates.atualizado_em = nowIso;
+            else updates.updated_at = nowIso;
+
+            // Colunas de interação humana — DESARMAM o monitor.
+            // (leads_master é espelho e NÃO tem essas colunas nem é varrido pelo monitor.)
+            if (!isMaster) {
+                updates.ultima_interacao_humana = lastHumanTs;
+                updates.atendimento_manual_at = nowIso;
+                updates.respondeu_follow_up = true;
+            }
+
+            // Vendedor falou (outbound) → marca 1º contato (se ainda vazio) e
+            // move status frio/received → contacted.
+            if (hasOutbound) {
+                if (!leadFound?.first_contact_at) {
+                    updates.first_contact_at = lastHumanTs;            // COALESCE(first_contact_at, ...)
+                    updates.first_contact_channel = leadFound?.first_contact_channel || 'vendor_whatsapp';
+                }
+                const cur = String(leadFound?.status || '').toLowerCase();
+                if (['received', 'frio', 'novo', 'triagem'].includes(cur)) {
+                    updates.status = 'contacted';
+                }
+            }
+
+            const idVal: any = leadType === 'crm26' ? numericId : (leadType === 'compra' ? compraId : uuidId);
+            const { error: updErr } = await supabaseAdmin.from(targetTable).update(updates).eq('id', idVal);
+            if (updErr) console.error('[Sync API] update de timestamps falhou:', updErr.message);
+            else console.log(`[Sync API] Timestamps casados em ${targetTable} (outbound=${hasOutbound}) — monitor desarmado p/ ${idVal}`);
+        }
+
+        // ── RESPOSTA IMEDIATA À EXTENSÃO ────────────────────────────────────
+        const response = NextResponse.json({
+            success: true,
+            count: messages.length,
+            leadId: uuidId || (numericId !== null ? `crm26_${numericId}` : `compra_${compraId}`),
+            inserted: insertedCount,
+            aiQueued: true,
+        }, {
+            headers: { ...corsHeaders, 'X-Sync-API-Version': '3.85.FAST' }
+        });
+
+        // ════════════════════════════════════════════════════════════════════
+        // BACKGROUND — roda DEPOIS da resposta (não segura a extensão).
+        // Elite Closer (OpenAI), movimentação de status por urgência, detecção
+        // de sinal de compra e gravação na timeline.
+        // ════════════════════════════════════════════════════════════════════
+        after(async () => {
+            try {
+                const mappedMessages = (messages as any[]).map((m: any) => ({
+                    content: m.text || m.content || m.message_text || '',
+                    direction: m.direction,
+                    created_at: m.timestamp || m.created_at || new Date().toISOString(),
+                }));
+
+                const targetLeadId = uuidId || (numericId !== null ? `crm26_${numericId}` : (compraId !== null ? `compra_${compraId}` : ''));
+                if (!targetLeadId) throw new Error('Lead ID resolvido vazio antes de runEliteCloser');
+
+                // ── Quick Buying Signal (impacto imediato no score) ──
+                const inboundMsgs = (messages as any[]).filter((m: any) => m.direction === 'inbound');
+                const lastClientMsg = inboundMsgs[inboundMsgs.length - 1]?.text?.toLowerCase() || '';
+                const immediateBuyingKeywords = [
+                    'quero comprar', 'vou fechar', 'onde assina', 'manda o pix',
+                    'qual a conta', 'pode reservar', 'vou buscar', 'fechado',
+                    'quero esse', 'vende pra mim', 'tenho o dinheiro'
+                ];
+                const isImmediateHot = immediateBuyingKeywords.some(kw => lastClientMsg.includes(kw));
+                if (isImmediateHot) {
+                    let tableToUpdate = 'leads_master';
+                    if (leadType === 'compra') tableToUpdate = 'leads_compra';
+                    else if (leadType === 'crm26') tableToUpdate = 'leads_distribuicao_crm_26';
+                    else if (leadFound?.source_table) tableToUpdate = leadFound.source_table;
+                    await supabaseAdmin.from(tableToUpdate)
+                        .update({ ai_score: 95, ai_classification: 'hot', ai_last_run_at: new Date().toISOString() })
+                        .eq('id', uuidId || numericId || compraId);
+                }
+
+                const eliteResult = await runEliteCloser(targetLeadId, mappedMessages, consultor);
+
+                // ── Auto-pipeline status move (derivado do urgencyScore) ──
+                let suggestedStatus: string | null = null;
+                if (eliteResult.urgencyScore >= 88) suggestedStatus = 'negotiation';
+                else if (eliteResult.urgencyScore >= 70) suggestedStatus = 'contacted';
+                else if (eliteResult.urgencyScore >= 50) suggestedStatus = 'attempt';
+
+                const pipelineOrder = ['received', 'new', 'attempt', 'contacted', 'scheduled', 'visited', 'negotiation', 'proposed'];
+                const isTerminalStatus = (s: string) => s === 'closed' || s === 'lost' || s === 'comprado';
+
+                if (suggestedStatus && leadType === 'main' && uuidId) {
+                    const tableToUpdate = leadFound.source_table || 'leads_master';
+                    const currentStatus = leadFound.status;
+                    if (!isTerminalStatus(currentStatus)) {
+                        const currentIndex = pipelineOrder.indexOf(currentStatus);
+                        const suggestedIndex = pipelineOrder.indexOf(suggestedStatus);
+                        if (suggestedIndex > currentIndex) {
+                            await supabaseAdmin.from(tableToUpdate).update({ status: suggestedStatus }).eq('id', uuidId);
+                            console.log(`[Hyper-AI] Lead ${uuidId}: ${currentStatus} → ${suggestedStatus}`);
+                        }
+                    }
+                } else if (suggestedStatus && leadType === 'crm26' && numericId) {
+                    const { data: latestLead } = await supabaseAdmin
+                        .from('leads_distribuicao_crm_26').select('status').eq('id', numericId).single();
+                    const dbStatus = latestLead?.status || leadFound.status;
+                    if (!isTerminalStatus(dbStatus)) {
+                        const dbIndex = pipelineOrder.indexOf(dbStatus);
+                        const suggestedIndex = pipelineOrder.indexOf(suggestedStatus);
+                        if (suggestedIndex > dbIndex) {
+                            await supabaseAdmin.from('leads_distribuicao_crm_26').update({ status: suggestedStatus }).eq('id', numericId);
+                            console.log(`[Hyper-AI] CRM26 lead ${numericId}: ${dbStatus} → ${suggestedStatus}`);
+                        }
+                    }
+                }
+
+                // ── Detecção de intenção de compra → alerta follow_up ──
+                if (leadType === 'main' && uuidId) {
+                    const clientMsgs = (messages as any[]).filter((m: any) => m.direction === 'inbound').slice(-5);
+                    const buyingKeywords = ['quando posso', 'quanto de entrada', 'tenho o dinheiro', 'vou comprar',
+                        'fechar', 'quero comprar', 'vou pegar', 'que horas', 'visita', 'test drive',
+                        'buscar', 'posso ir', 'valor total', 'quanto fica', 'à vista'];
+                    const hasBuyingSignal = clientMsgs.some((m: any) =>
+                        buyingKeywords.some(kw => (m.text || '').toLowerCase().includes(kw)));
+                    const isHighScore = eliteResult.urgencyScore >= 88;
+
+                    if (hasBuyingSignal || isHighScore) {
+                        const cutoff4h = new Date(Date.now() - 4 * 3_600_000).toISOString();
+                        const { data: existingAlert } = await supabaseAdmin
+                            .from('follow_ups').select('id')
+                            .eq('lead_id', uuidId).eq('type', 'ai_alert_compra')
+                            .gte('created_at', cutoff4h).maybeSingle();
+                        if (!existingAlert) {
+                            await supabaseAdmin.from('follow_ups').insert({
+                                lead_id: uuidId,
+                                user_id: leadFound.assigned_consultant_id || 'system',
+                                scheduled_at: new Date().toISOString(),
+                                type: 'ai_alert_compra',
+                                note: hasBuyingSignal
+                                    ? `🔥 Sinal de compra detectado! Última msg: "${clientMsgs.at(-1)?.text?.slice(0, 100)}"`
+                                    : `🔥 Score de urgência elevado (${eliteResult.urgencyScore}). Contato imediato recomendado.`,
+                                priority: 'high',
+                                status: 'pending',
+                            });
+                        }
+                    }
+                }
+
+                // ── Insere mensagens individuais na timeline (main/master) ──
+                if (leadType === 'main' && uuidId) {
+                    const { data: existingInteractions } = await supabaseAdmin
+                        .from('interactions_manos_crm').select('notes, type')
+                        .eq('lead_id', uuidId).ilike('type', 'whatsapp%')
+                        .order('created_at', { ascending: false }).limit(100);
+
+                    const toInsert = (messages as any[]).map((m: any) => ({
+                        lead_id: uuidId,
+                        type: m.direction === 'outbound' ? 'whatsapp_out' : 'whatsapp_in',
+                        notes: m.text,
+                        user_name: m.direction === 'outbound' ? (consultantName || 'Consultor') : 'Cliente',
+                        created_at: m.timestamp || new Date().toISOString()
+                    }));
+                    const filtered = toInsert.filter(newMsg =>
+                        !existingInteractions?.some(ext => ext.notes === newMsg.notes && ext.type === newMsg.type));
+                    if (filtered.length > 0) {
+                        await supabaseAdmin.from('interactions_manos_crm').insert(filtered);
+                    }
+                }
+
+                console.log(`[SyncMessages/after] análise persistida p/ ${leadType} lead ${uuidId || numericId} (model=${eliteResult.modelUsed})`);
+            } catch (aiErr: any) {
+                console.error('[Sync API/after] AI Analysis failed:', aiErr?.message || aiErr);
+            }
+        });
+
+        return response;
 
     } catch (err: any) {
         console.error("Sync API Error (Catch):", err);
-        return NextResponse.json({ 
+        return NextResponse.json({
             success: false,
             error: `Erro Crítico na API: ${err.message}`,
-            version: '1.2.DEBUG'
+            version: '3.85.DEBUG'
         }, { status: 500 });
     }
 }
