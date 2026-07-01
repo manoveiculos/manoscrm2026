@@ -58,77 +58,91 @@ export async function POST(req: NextRequest) {
         const cleanId = stripPrefix(lead_id);
         const realId: any = table === 'leads_distribuicao_crm_26' ? parseInt(cleanId) : cleanId;
 
+        const nowIso = new Date().toISOString();
+        // leads_master é espelho e NÃO tem colunas de atendimento — trata à parte.
+        const hasAtendimento = table !== 'leads_master';
+
         const updates: Record<string, any> = {
             status: 'attempt', // V4: Move para atendimento para ativar cobranças
-            atendimento_iniciado_em: new Date().toISOString(),
-            atendimento_iniciado_por: consultant.id,
-            ultima_interacao_humana: new Date().toISOString(),
+            assigned_consultant_id: consultant.id, // "quem clica leva"
+            ultima_interacao_humana: nowIso,
         };
-
-        // Lê estado atual do lead pra decidir o que fazer
-        const { data: leadRow } = await admin
-            .from(table)
-            .select('assigned_consultant_id, atendimento_iniciado_em, atendimento_iniciado_por')
-            .eq('id', realId)
-            .maybeSingle();
-
-        // BLOQUEIO: já iniciado por OUTRO consultor → não permite ataque
-        if (leadRow?.atendimento_iniciado_em && leadRow.atendimento_iniciado_por && leadRow.atendimento_iniciado_por !== consultant.id) {
-            // Busca nome do dono pra mostrar mensagem clara
-            const { data: dono } = await admin
-                .from('consultants_manos_crm')
-                .select('name')
-                .eq('id', leadRow.atendimento_iniciado_por)
-                .maybeSingle();
-            const donoName = dono?.name || 'outro vendedor';
-            return NextResponse.json({
-                success: false,
-                locked: true,
-                locked_by: donoName,
-                error: `Lead já está sendo atendido por ${donoName.split(' ')[0]}.`,
-            }, { status: 409 });
+        if (hasAtendimento) {
+            updates.atendimento_iniciado_em = nowIso;
+            updates.atendimento_iniciado_por = consultant.id;
         }
-
-        // Já iniciado por VOCÊ → idempotente, retorna sem mudar nada
-        if (leadRow?.atendimento_iniciado_em && leadRow.atendimento_iniciado_por === consultant.id) {
-            return NextResponse.json({
-                success: true,
-                already_started: true,
-                started_at: leadRow.atendimento_iniciado_em,
-            });
-        }
-
-        // Atribui ao consultor que iniciou (mesmo se já tinha outro dono sem atendimento iniciado)
-        // — é "quem chega primeiro e clica leva". Isso protege contra distribuição automática
-        // que não foi seguida na prática.
-        updates.assigned_consultant_id = consultant.id;
-
-        // Sincroniza o nome do vendedor na coluna de texto 'vendedor' para evitar inconsistência de dados
+        // Sincroniza a coluna de texto 'vendedor' (evita inconsistência de dados)
         if (table === 'leads_distribuicao_crm_26' || table === 'leads_master') {
             updates.vendedor = consultant.name;
         }
 
-        const { error } = await admin.from(table).update(updates).eq('id', realId);
-        if (error) {
-            console.error('[start-atendimento] update erro:', error);
-            return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+        if (hasAtendimento) {
+            // ── CLAIM ATÔMICO (anti-race) ────────────────────────────────────
+            // Reivindica SÓ se ninguém iniciou. UPDATE ... WHERE é atômico: sob
+            // concorrência, quem commita primeiro ganha; o 2º re-avalia o WHERE
+            // contra a linha já reivindicada (READ COMMITTED) → 0 linhas afetadas.
+            const { data: claimed, error: claimErr } = await admin
+                .from(table)
+                .update(updates)
+                .eq('id', realId)
+                .is('atendimento_iniciado_por', null)
+                .select('id');
+
+            if (claimErr) {
+                console.error('[start-atendimento] claim erro:', claimErr);
+                return NextResponse.json({ success: false, error: claimErr.message }, { status: 500 });
+            }
+
+            if (!claimed || claimed.length === 0) {
+                // Não reivindiquei → ou o lead não existe, ou já tem dono.
+                const { data: leadRow } = await admin
+                    .from(table)
+                    .select('atendimento_iniciado_por, atendimento_iniciado_em')
+                    .eq('id', realId)
+                    .maybeSingle();
+
+                if (!leadRow) {
+                    return NextResponse.json({ success: false, error: 'lead não encontrado' }, { status: 404 });
+                }
+                // Já é seu → idempotente (não reseta o timer)
+                if (leadRow.atendimento_iniciado_por === consultant.id) {
+                    return NextResponse.json({ success: true, already_started: true, started_at: leadRow.atendimento_iniciado_em });
+                }
+                // Outro vendedor chegou primeiro → 409 com o nome do dono
+                const { data: dono } = await admin
+                    .from('consultants_manos_crm').select('name').eq('id', leadRow.atendimento_iniciado_por).maybeSingle();
+                const donoName = dono?.name || 'outro vendedor';
+                return NextResponse.json({
+                    success: false,
+                    locked: true,
+                    locked_by: donoName,
+                    error: `Lead já capturado por ${donoName.split(' ')[0]}.`,
+                }, { status: 409 });
+            }
+        } else {
+            // leads_master (raro no fluxo de pesca): best-effort, sem lock de atendimento.
+            const { error } = await admin.from(table).update(updates).eq('id', realId);
+            if (error) {
+                console.error('[start-atendimento] update master erro:', error);
+                return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+            }
         }
 
-        // Audit trail
+        // Audit trail (só chega aqui quem reivindicou de fato)
         const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(String(realId));
         await admin.from('interactions_manos_crm').insert({
             [isUUID ? 'lead_id' : 'lead_id_v1']: String(realId),
             type: 'atendimento_iniciado',
             notes: `🤝 ${consultant.name} iniciou atendimento`,
             user_name: consultant.name,
-            created_at: new Date().toISOString(),
+            created_at: nowIso,
         }).then(null, () => {});
 
         return NextResponse.json({
             success: true,
             consultant_id: consultant.id,
             consultant_name: consultant.name,
-            started_at: updates.atendimento_iniciado_em,
+            started_at: nowIso,
         });
     } catch (e: any) {
         console.error('[start-atendimento] exception:', e);

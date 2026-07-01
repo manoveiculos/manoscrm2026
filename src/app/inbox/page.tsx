@@ -1229,21 +1229,27 @@ const LeadCard = memo(function LeadCard({ lead, messages, isExpanded, onToggle, 
                                 </button>
                             ) : (
                                 <>
-                                    <button 
+                                    <button
                                         onClick={async (e) => {
                                             e.stopPropagation();
-                                            const parsed = parseUid(lead.uid);
-                                            if (!parsed) return;
-                                            
-                                            // Automação Status V3: Iniciar Atendimento -> Status Attempt (Kanban)
-                                            await supabase.from(parsed.table).update({ 
-                                                status: 'attempt',
-                                                atendimento_iniciado_em: new Date().toISOString(),
-                                                atendimento_iniciado_por: consultantId,
-                                                ultima_interacao_humana: new Date().toISOString()
-                                            }).eq('id', parsed.nativeId);
-                                            
-                                            router.push(`/lead/${encodeURIComponent(lead.uid)}`);
+                                            // Passa pela API (claim atômico) — NUNCA update direto no
+                                            // cliente, senão dois vendedores roubam o mesmo lead.
+                                            try {
+                                                const res = await fetch('/api/lead/start-atendimento', {
+                                                    method: 'POST',
+                                                    headers: { 'Content-Type': 'application/json' },
+                                                    body: JSON.stringify({ lead_id: lead.native_id, lead_table: lead.table_name }),
+                                                });
+                                                const data = await res.json();
+                                                if (data.success) {
+                                                    if (onCaptureSuccess) onCaptureSuccess(lead.uid);
+                                                    router.push(`/lead/${encodeURIComponent(lead.uid)}`);
+                                                } else {
+                                                    alert(`Ops! ${data.error || 'Não foi possível iniciar o atendimento.'}`);
+                                                }
+                                            } catch (err) {
+                                                console.error('Erro ao iniciar atendimento:', err);
+                                            }
                                         }}
                                         className="col-span-2 md:col-span-1 min-h-[56px] flex items-center justify-center bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-black text-lg transition-all active:scale-95 shadow-xl shadow-emerald-900/20"
                                     >
