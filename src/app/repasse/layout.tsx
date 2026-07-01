@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Home, Car, Wallet, Store, AlertTriangle } from 'lucide-react';
+import { Home, Car, Wallet, Store, ShoppingCart, AlertTriangle } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { PERMITIDOS } from './lib';
 
@@ -12,6 +12,7 @@ const TABS = [
     { href: '/repasse/carros', label: 'Carros', icon: Car },
     { href: '/repasse/caixa', label: 'Caixa', icon: Wallet },
     { href: '/repasse/lojas', label: 'Lojas', icon: Store },
+    { href: '/compras', label: 'Compras', icon: ShoppingCart },
 ];
 
 export default function RepasseLayout({ children }: { children: React.ReactNode }) {
@@ -38,7 +39,7 @@ export default function RepasseLayout({ children }: { children: React.ReactNode 
     return (
         <div className="min-h-screen bg-[#0C0C0F] text-white flex flex-col max-w-md mx-auto relative">
             <main className="flex-1 pb-24">{children}</main>
-            <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-[#131318]/95 backdrop-blur-xl border-t border-white/10 grid grid-cols-4 z-50">
+            <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-[#131318]/95 backdrop-blur-xl border-t border-white/10 grid grid-cols-5 z-50">
                 {TABS.map((t) => {
                     const active = t.href === '/repasse' ? pathname === '/repasse' : pathname.startsWith(t.href);
                     return (

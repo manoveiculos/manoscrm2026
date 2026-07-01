@@ -24,6 +24,7 @@ import {
     Radar, // Radar de Tráfego
     PlayCircle, // Atendimento ativo
     Banknote, // Projeto Milhão (exclusivo Alexandre)
+    Store, // App de Repasse (Paulo)
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
@@ -38,6 +39,7 @@ interface NavItem {
     href: string;
     adminOnly?: boolean;
     alexandreOnly?: boolean; // visível SOMENTE para o login Alexandre (nem outros admins veem)
+    pauloOnly?: boolean; // app de Repasse — só Paulo (e Alexandre p/ supervisão)
     blocked?: boolean;
 }
 
@@ -50,6 +52,7 @@ const NAV_ITEMS: NavItem[] = [
     { label: 'Leads', icon: LayoutDashboard, href: '/leads' },
     { label: 'Compras', icon: Radar, href: '/compras' },
     { label: 'Cobrança Acordos', icon: DollarSign, href: '/consultor/cobranca' },
+    { label: 'Repasse', icon: Store, href: '/repasse', pauloOnly: true },
     { label: 'Cobrança', icon: DollarSign, href: '/admin/cobranca', adminOnly: true },
     { label: 'Pipeline', icon: KanbanSquare, href: '/pipeline', adminOnly: true },
     { label: 'Dashboard', icon: BarChart3, href: '/', adminOnly: true },
@@ -199,10 +202,12 @@ export const NavigationV2 = () => {
                     const isAdmin = role === 'admin';
                     const isCamila = user?.email === 'camila.renatta@hotmail.com' || user?.email === 'camilarenatta@hotmail.com';
                     const isAlexandre = user?.email === 'alexandre_gorges@hotmail.com';
-                    const isRestrictedBuyer = user?.email === 'ivo@acesso.com' || user?.email === 'paulo@manoscrm.com';
+                    const isPaulo = user?.email === 'paulo@manoscrm.com';
+                    const isRestrictedBuyer = user?.email === 'ivo@acesso.com' || isPaulo;
 
-                    // Compradores restritos têm acesso EXCLUSIVO à Central de Compras — esconde tudo o mais
+                    // Compradores restritos: Central de Compras. Paulo também tem o app de Repasse.
                     if (isRestrictedBuyer && !isAdmin && !isAlexandre) {
+                        if (isPaulo) return item.href === '/compras' || item.href === '/repasse';
                         return item.href === '/compras';
                     }
 
