@@ -94,12 +94,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             })
             .catch(e => {
                 clearTimeout(t);
-                console.error("[ManosCRM-BG] Fetch error:", {
-                    url: request.url,
-                    error: e.message,
-                    stack: e.stack
-                });
-                sendResponse({ success: false, error: e.name === 'AbortError' ? 'Timeout (15s)' : e.message });
+                const isTimeout = e.name === 'AbortError';
+                const msg = isTimeout ? 'Timeout (15s)' : (e.message || String(e));
+                // warn (não error) + string legível: falha transitória de rede não
+                // deve poluir a página de erros da extensão com objeto "[object Object]".
+                console.warn(`[ManosCRM-BG] Fetch falhou (${request.url}): ${msg}`);
+                sendResponse({ success: false, error: msg });
             });
         return true;
     }

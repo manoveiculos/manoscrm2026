@@ -8,6 +8,19 @@ const Scraper = {
 
     getPhone() {
         try {
+            // 0. CANÔNICO (não-intrusivo): JID @c.us / @s.whatsapp.net no data-id das
+            //    mensagens. Funciona p/ contato SALVO e NÃO-salvo sempre que houver
+            //    conversa — sem depender do header (que esconde o número atrás do
+            //    nome salvo) e SEM abrir nenhum painel.
+            for (const n of document.querySelectorAll('#main [data-id^="true_"], #main [data-id^="false_"]')) {
+                const id = n.getAttribute('data-id') || '';
+                const at = id.includes('@c.us') ? '@c.us' : (id.includes('@s.whatsapp.net') ? '@s.whatsapp.net' : null);
+                if (at) {
+                    const ph = id.split(at)[0].split('_').pop().replace(/\D/g, '');
+                    if (this._isValid(ph)) return this._norm(ph);
+                }
+            }
+
             const fromDataId = (sel) => {
                 const els = document.querySelectorAll(sel);
                 for (const el of els) {
@@ -25,7 +38,7 @@ const Scraper = {
             let r = fromDataId('#main header') || fromDataId('[data-testid="conversation-panel-wrapper"] [data-id]') || fromDataId('[data-testid="chat-header"]');
             if (r) return r;
 
-            // 2. Contact info drawer (Agressivo se aberto)
+            // 2. Contact info drawer (Agressivo se aberto) — só LÊ se já estiver aberto.
             const drawer = document.querySelector('[data-testid="contact-info-drawer"]') || document.querySelector('section[role="region"]');
             if (drawer) {
                 // Tenta extrair do data-id do drawer
@@ -70,6 +83,107 @@ const Scraper = {
             }
         } catch(e) { console.error("Scraper error",e); }
         return null;
+    },
+
+    // Fallback para CONTATO SALVO (o DOM novo do WhatsApp não expõe mais o número):
+    // pede o telefone do chat ativo ao bridge no main world (wa-store.js), que lê
+    // do Store interno do WhatsApp. Não abre painel, não clica em nada.
+    getPhoneFromStore(timeoutMs = 1800) {
+        return new Promise((resolve) => {
+            let done = false;
+            const reqId = 'p' + Date.now() + '_' + Math.random().toString(36).slice(2);
+            const handler = (ev) => {
+                if (ev.source !== window || !ev.data || ev.data.__manos !== 'phoneResult' || ev.data.reqId !== reqId) return;
+                done = true;
+                window.removeEventListener('message', handler);
+                // 'store_not_found' é esperado nessa versão do WhatsApp (cai pro painel) —
+                // não polui o console. Loga só motivos inesperados (útil p/ futuro).
+                if (ev.data.debug && !ev.data.phone && ev.data.debug.reason && ev.data.debug.reason !== 'store_not_found') {
+                    console.log('[Manos] Store sem telefone:', ev.data.debug);
+                }
+                const ph = ev.data.phone ? this._norm(String(ev.data.phone)) : null;
+                resolve(this._isValid(ph) ? ph : null);
+            };
+            window.addEventListener('message', handler);
+            window.postMessage({ __manos: 'getPhone', reqId }, '*');
+            setTimeout(() => {
+                if (done) return;
+                window.removeEventListener('message', handler);
+                resolve(null);
+            }, timeoutMs);
+        });
+    },
+
+    // ── Painel "Dados do contato": fonte do número p/ contato SALVO ──────────
+    // O WhatsApp novo tirou o telefone do DOM das mensagens; o número só aparece
+    // no painel de contato. Abrimos, lemos e FECHAMOS no X — NUNCA Escape (Escape
+    // fecha a conversa inteira).
+
+    // Procura um texto que seja SÓ um telefone com '+' (DDI). O '+' evita pegar
+    // horário/contador; "ser o texto inteiro" evita pegar número no meio de msg.
+    _scanPhoneFromText(root) {
+        if (!root) return null;
+        for (const el of root.querySelectorAll('span, div')) {
+            const t = (el.innerText || '').trim();
+            if (/^\+\d[\d\s().\-]{8,17}$/.test(t)) {
+                const c = t.replace(/\D/g, '');
+                if (this._isValid(c)) return this._norm(c);
+            }
+        }
+        return null;
+    },
+
+    _closeContactPanel() {
+        // Fecha pelo X do painel. Se não achar o X, DEIXA ABERTO (nunca Escape).
+        const sels = [
+            '[data-testid="btn-close-drawer"]',
+            'header [data-icon="x"]',
+            'span[data-icon="x"]',
+            'div[aria-label="Fechar"]',
+            'button[aria-label="Fechar"]',
+            'div[aria-label="Close"]'
+        ];
+        for (const s of sels) {
+            const el = document.querySelector(s);
+            if (el) { (el.closest('div[role="button"]') || el).click(); return true; }
+        }
+        return false;
+    },
+
+    async getPhoneFromPanel(timeoutMs = 2500) {
+        let opened = false;
+        try {
+            // Já aberto? lê direto.
+            let scope = document.querySelector('[data-testid="contact-info-drawer"]') || document.querySelector('section');
+            let p = scope ? this._scanPhoneFromText(scope) : null;
+            if (p) return p;
+
+            const hdr = document.querySelector('#main header');
+            if (!hdr) return null;
+
+            // Clica no título/avatar do cabeçalho (abre "Dados do contato").
+            const titleEl = hdr.querySelector('span[title]') || hdr.querySelector('img');
+            const opener = titleEl?.closest('div[role="button"]')
+                || titleEl?.closest('[tabindex]')
+                || titleEl?.parentElement
+                || hdr.querySelector('div[role="button"]');
+            if (!opener) return null;
+            opener.click();
+            opened = true;
+
+            const start = Date.now();
+            while (Date.now() - start < timeoutMs && !p) {
+                await new Promise(r => setTimeout(r, 150));
+                scope = document.querySelector('[data-testid="contact-info-drawer"]') || document.querySelector('section') || document.body;
+                p = this._scanPhoneFromText(scope);
+            }
+            return p;
+        } catch (e) {
+            console.error('getPhoneFromPanel', e);
+            return null;
+        } finally {
+            if (opened) this._closeContactPanel();   // restaura a tela (X, não Escape)
+        }
     },
 
     getName() {
@@ -196,7 +310,7 @@ const Scraper = {
         // Gerava 2-3 duplicatas por msg.
         const msgs = new Map();
 
-        document.querySelectorAll('div[data-id^="true_"], div[data-id^="false_"]').forEach(n => {
+        document.querySelectorAll('[data-id^="true_"], [data-id^="false_"]').forEach(n => {
             try {
                 const did = n.getAttribute('data-id');
                 if (!did || !did.includes('_')) return;
@@ -224,7 +338,7 @@ const Scraper = {
 
                 msgs.set(did, {
                     id: did,
-                    text: txt.replace(/[ -]/g, '').replace(/\s+/g, ' '),
+                    text: txt.replace(/[ -]/g, '').replace(/\s+/g, ' '),
                     direction: isOut ? 'outbound' : 'inbound',
                     timestamp: this.extractTimestamp(n) || new Date().toISOString(),
                 });

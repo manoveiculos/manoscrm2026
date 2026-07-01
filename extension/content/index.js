@@ -12,6 +12,9 @@ const App = {
     currentLeadId: null,
     currentNextSteps: null,
     isFetching: false,
+    _resolvingPanel: false,
+    _phoneCache: {},
+    _orphaned: false,
     _pollInterval: null,
     _heartbeatInterval: null,
     _lastHeartbeatPhone: null,
@@ -80,10 +83,59 @@ const App = {
         this.handleChatChange();
     },
 
-    // ── Troca de Chat ─────────────────────────────────
     async handleChatChange() {
-        const phone = Scraper.getPhone();
-        const name  = Scraper.getName();
+        if (this._orphaned) return;
+        if (!this._contextAlive()) { this._shutdownOrphan(); return; }
+        // Não reentra enquanto abre/lê/fecha o painel de contato (evita loop).
+        if (this._resolvingPanel) return;
+        const startName = Scraper.getName();
+        let phone = Scraper.getPhone();
+        let name  = Scraper.getName();
+
+        // Se o telefone não for detectado de imediato e houver um chat aberto (startName presente),
+        // realiza novas tentativas a cada 200ms por até 3 segundos enquanto as mensagens/DOM carregam.
+        if (!phone && startName) {
+            console.log(`Manos CRM: Telefone não detectado de imediato para "${startName}". Iniciando retries...`);
+            let retries = 15; // 15 * 200ms = 3000ms
+            while (retries > 0 && !phone) {
+                await new Promise(r => setTimeout(r, 200));
+                
+                // Se o usuário mudar de conversa durante as tentativas, aborta o retry anterior
+                if (Scraper.getName() !== startName) {
+                    console.log('Manos CRM: Troca de chat detectada durante o retry. Abortando retry anterior.');
+                    return;
+                }
+                
+                phone = Scraper.getPhone();
+                name = Scraper.getName();
+                retries--;
+            }
+        }
+
+        // Fallback p/ CONTATO SALVO: o DOM novo do WhatsApp não traz o número.
+        //   1) cache em memória (não reabre painel pro mesmo contato na sessão)
+        //   2) Store interno (silencioso, se disponível nessa versão)
+        //   3) painel "Dados do contato" (lê o "+55 ...", fecha no X)
+        if (!phone && startName) {
+            if (this._phoneCache[startName]) {
+                phone = this._phoneCache[startName];
+            } else if (!this._resolvingPanel) {
+                this._resolvingPanel = true;
+                try {
+                    phone = await Scraper.getPhoneFromStore();
+                    if (!phone) phone = await Scraper.getPhoneFromPanel();
+                    if (phone) {
+                        this._phoneCache[startName] = phone;   // cacheia ANTES de liberar a trava
+                        name = Scraper.getName();
+                        console.log('Manos CRM: número recuperado p/ contato salvo ->', phone);
+                    } else {
+                        console.warn('Manos CRM: número não encontrado para', startName);
+                    }
+                } finally {
+                    this._resolvingPanel = false;
+                }
+            }
+        }
 
         if (phone) {
             if (phone.length < 8 || phone.length > 18) return;
@@ -129,6 +181,7 @@ const App = {
      */
     _sendHeartbeat(phone, action, reason) {
         if (!phone) return;
+        if (!this._contextAlive()) { this._shutdownOrphan(); return; }
         // Sem identificação do consultor o backend nem aceita; evita request inútil.
         if (!this.consultantEmail && !this.consultantName) {
             if (action === 'opened') {
@@ -145,19 +198,24 @@ const App = {
             action,
             reason,
         };
-        chrome.runtime.sendMessage({
-            type: 'FETCH_DATA',
-            url: `${this.API_BASE}/heartbeat`,
-            options: {
-                method: 'POST',
-                headers: this.authHeaders(),
-                body: JSON.stringify(body),
-            }
-        }, (response) => {
-            if (response && response.success === false) {
-                console.warn(`Manos CRM: heartbeat ${action} falhou →`, response.error);
-            }
-        });
+        try {
+            chrome.runtime.sendMessage({
+                type: 'FETCH_DATA',
+                url: `${this.API_BASE}/heartbeat`,
+                options: {
+                    method: 'POST',
+                    headers: this.authHeaders(),
+                    body: JSON.stringify(body),
+                }
+            }, (response) => {
+                if (chrome.runtime.lastError) return; // contexto sumiu entre envio e callback
+                if (response && response.success === false) {
+                    console.warn(`Manos CRM: heartbeat ${action} falhou →`, response.error);
+                }
+            });
+        } catch (e) {
+            this._shutdownOrphan();
+        }
     },
 
     _startHeartbeat(phone, name) {
@@ -177,6 +235,22 @@ const App = {
             this._heartbeatInterval = null;
         }
         this._lastHeartbeatPhone = null;
+    },
+
+    // ── Resiliência a reload da extensão ──────────────────
+    // Ao recarregar a extensão com o WhatsApp aberto, este content script fica
+    // órfão: chrome.runtime.* passa a lançar "Extension context invalidated".
+    // Detectamos e paramos os intervalos (heartbeat/poll). Reativa no F5.
+    _contextAlive() {
+        try { return !!(chrome.runtime && chrome.runtime.id); } catch (_) { return false; }
+    },
+
+    _shutdownOrphan() {
+        if (this._orphaned) return;
+        this._orphaned = true;
+        try { this._stopHeartbeat(); } catch (_) {}
+        try { this._stopLeadPolling(); } catch (_) {}
+        console.warn('Manos CRM: extensão recarregada — content script órfão. Dê F5 no WhatsApp Web pra reativar.');
     },
 
     // ── Feedback de Score ────────────────────────────

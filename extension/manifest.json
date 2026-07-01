@@ -21,6 +21,12 @@
   "content_scripts": [
     {
       "matches": ["https://web.whatsapp.com/*"],
+      "js": ["content/wa-store.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://web.whatsapp.com/*"],
       "js": [
         "content/scraper.js",
         "content/observers.js",
