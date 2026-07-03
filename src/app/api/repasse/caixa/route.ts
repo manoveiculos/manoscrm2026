@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/admin';
-import { OWNER_REPASSE, buildLedger } from '@/lib/repasse/compute';
+import { buildLedger } from '@/lib/repasse/compute';
+import { getRepasseOwner } from '@/lib/repasse/owner';
 
 export const dynamic = 'force-dynamic';
 const sb = createClient();
@@ -22,9 +23,11 @@ function sanitize(body: any) {
 // Extrato unificado: movimentos manuais + os derivados dos carros
 export async function GET() {
     try {
+        const owner = await getRepasseOwner();
+        if (!owner) return NextResponse.json({ success: false, error: 'não autenticado' }, { status: 401 });
         const [{ data: veiculos }, { data: caixa }] = await Promise.all([
-            sb.from('repasse_veiculos').select('*').eq('owner_email', OWNER_REPASSE),
-            sb.from('repasse_caixa').select('*').eq('owner_email', OWNER_REPASSE),
+            sb.from('repasse_veiculos').select('*').eq('owner_email', owner),
+            sb.from('repasse_caixa').select('*').eq('owner_email', owner),
         ]);
         return NextResponse.json({ success: true, extrato: buildLedger(veiculos || [], caixa || []) });
     } catch (err: any) {
@@ -34,6 +37,8 @@ export async function GET() {
 
 export async function POST(request: Request) {
     try {
+        const owner = await getRepasseOwner();
+        if (!owner) return NextResponse.json({ success: false, error: 'não autenticado' }, { status: 401 });
         const body = await request.json();
         if (!['entrada', 'saida'].includes(body.tipo)) {
             return NextResponse.json({ success: false, error: 'Tipo inválido (entrada/saida).' }, { status: 400 });
@@ -42,7 +47,7 @@ export async function POST(request: Request) {
             return NextResponse.json({ success: false, error: 'Valor obrigatório.' }, { status: 400 });
         }
         const row = sanitize(body);
-        row.owner_email = OWNER_REPASSE;
+        row.owner_email = owner;
         const { data, error } = await sb.from('repasse_caixa').insert(row).select().single();
         if (error) throw error;
         return NextResponse.json({ success: true, mov: data });

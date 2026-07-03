@@ -51,6 +51,7 @@ const NAV_ITEMS: NavItem[] = [
     { label: 'Atendimento', icon: PlayCircle, href: '/atendimento' },
     { label: 'Leads', icon: LayoutDashboard, href: '/leads' },
     { label: 'Compras', icon: Radar, href: '/compras' },
+    { label: 'Repasse', icon: DollarSign, href: '/repasse' },
     { label: 'Cobrança Acordos', icon: DollarSign, href: '/consultor/cobranca' },
     { label: 'Repasse', icon: Store, href: '/repasse', pauloOnly: true },
     { label: 'Cobrança', icon: DollarSign, href: '/admin/cobranca', adminOnly: true },

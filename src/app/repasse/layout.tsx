@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Home, Car, Wallet, Store, ShoppingCart, AlertTriangle } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { PERMITIDOS } from './lib';
 
 const TABS = [
     { href: '/repasse', label: 'Início', icon: Home },
@@ -22,8 +21,9 @@ export default function RepasseLayout({ children }: { children: React.ReactNode 
     useEffect(() => {
         (async () => {
             const { data: { session } } = await supabase.auth.getSession();
+            // Repasse é por usuário: qualquer um logado tem o SEU (isolado por email).
             const email = session?.user?.email?.toLowerCase();
-            setAllowed(!!email && PERMITIDOS.includes(email));
+            setAllowed(!!email);
         })();
     }, []);
 
@@ -31,8 +31,8 @@ export default function RepasseLayout({ children }: { children: React.ReactNode 
     if (!allowed) return (
         <div className="p-10 text-center">
             <AlertTriangle className="w-10 h-10 text-red-500 mx-auto mb-3" />
-            <h1 className="text-lg font-bold text-white">Acesso restrito</h1>
-            <p className="text-white/50 text-sm mt-1">Esta área é exclusiva do repasse do Paulo.</p>
+            <h1 className="text-lg font-bold text-white">Faça login</h1>
+            <p className="text-white/50 text-sm mt-1">Entre com sua conta para acessar o seu Repasse.</p>
         </div>
     );
 
