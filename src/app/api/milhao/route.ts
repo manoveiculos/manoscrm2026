@@ -7,6 +7,7 @@ const supabaseAdmin = createClient();
 
 // ── Helpers ──────────────────────────────────────────────────────────
 const num = (v: any) => (v == null || isNaN(Number(v)) ? 0 : Number(v));
+const brl0 = (n: number) => (n || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
 const daysBetween = (a: Date, b: Date) =>
     Math.round((b.getTime() - a.getTime()) / (1000 * 60 * 60 * 24));
 
@@ -126,6 +127,67 @@ export async function GET() {
         else if (coberturaParcela >= 0.6) verediroStatus = 'atencao';
         else verediroStatus = 'critico';
 
+        // ── Série mensal (para gráficos e relatório) ─────────────────
+        const MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+        const ymLabel = (d: Date) => `${MESES[d.getMonth()]}/${String(d.getFullYear()).slice(2)}`;
+        const mensalMap = new Map<string, any>();
+        const bucket = (ym: string, d: Date) => {
+            let b = mensalMap.get(ym);
+            if (!b) {
+                b = { ym, label: ymLabel(d), comprados: 0, vendidos: 0, custo_comprado: 0, receita_vendida: 0, lucro: 0, dias_giro_soma: 0 };
+                mensalMap.set(ym, b);
+            }
+            return b;
+        };
+        for (const v of lista) {
+            if (v.data_compra) {
+                const d = new Date(v.data_compra);
+                const b = bucket(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, d);
+                b.comprados++; b.custo_comprado += v.custo_total;
+            }
+            if (v.status === 'vendido' && v.data_venda) {
+                const d = new Date(v.data_venda);
+                const b = bucket(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, d);
+                b.vendidos++; b.receita_vendida += num(v.valor_venda); b.lucro += (v.lucro || 0); b.dias_giro_soma += v.dias_estoque;
+            }
+        }
+        const mensal = [...mensalMap.values()]
+            .sort((a, b) => a.ym.localeCompare(b.ym))
+            .map((b) => ({
+                ym: b.ym, label: b.label,
+                comprados: b.comprados, vendidos: b.vendidos,
+                custo_comprado: b.custo_comprado, receita_vendida: b.receita_vendida,
+                lucro: b.lucro,
+                giro_medio_dias: b.vendidos ? Math.round(b.dias_giro_soma / b.vendidos) : null,
+            }));
+
+        // ── Pontos de atenção (calculados no servidor) ───────────────
+        const atencao: { tipo: string; severidade: 'critico' | 'aviso' | 'info'; titulo: string; detalhe: string; veiculo_id?: string }[] = [];
+        for (const v of emEstoque) {
+            if (v.dias_estoque >= ENCALHE_DIAS) {
+                atencao.push({ tipo: 'encalhe', severidade: 'critico', titulo: `${v.marca} ${v.modelo} encalhado`, detalhe: `${v.dias_estoque} dias parado (limite ${ENCALHE_DIAS}d). Capital de ${brl0(v.custo_total)} travado — reprecificar ou girar.`, veiculo_id: v.id });
+            } else if (v.dias_estoque >= 45) {
+                atencao.push({ tipo: 'quase_encalhe', severidade: 'aviso', titulo: `${v.marca} ${v.modelo} perto do limite`, detalhe: `${v.dias_estoque} dias em estoque. Faltam ${ENCALHE_DIAS - v.dias_estoque}d pra encalhar.`, veiculo_id: v.id });
+            }
+            if (num(v.valor_anuncio) > 0 && num(v.valor_anuncio) < v.custo_total) {
+                atencao.push({ tipo: 'anuncio_prejuizo', severidade: 'aviso', titulo: `${v.marca} ${v.modelo} anunciado no prejuízo`, detalhe: `Anúncio ${brl0(num(v.valor_anuncio))} < custo ${brl0(v.custo_total)}.`, veiculo_id: v.id });
+            }
+            if (!num(v.valor_anuncio) && !num(v.valor_fipe)) {
+                atencao.push({ tipo: 'sem_referencia', severidade: 'info', titulo: `${v.marca} ${v.modelo} sem preço de referência`, detalhe: `Preencha FIPE e/ou anúncio — sem isso a marcação a mercado usa o custo.`, veiculo_id: v.id });
+            }
+        }
+        if (!(diasCarencia > 0) && coberturaParcela < 1 && vendidos.length > 0) {
+            atencao.push({ tipo: 'cobertura', severidade: 'critico', titulo: 'Lucro não cobre a parcela', detalhe: `Lucro médio/mês ${brl0(lucroMensalMedio)} < parcela ${brl0(valorParcela)} (cobertura ${(coberturaParcela * 100).toFixed(0)}%).` });
+        }
+        if (caixaLivre > capitalInicial * 0.35) {
+            atencao.push({ tipo: 'caixa_ocioso', severidade: 'info', titulo: 'Caixa ocioso alto', detalhe: `${brl0(caixaLivre)} parados sem girar (${((caixaLivre / capitalInicial) * 100).toFixed(0)}% do capital). Dinheiro parado não dobra.` });
+        }
+        if (margemMediaVendidos != null && margemMediaVendidos < 0.08 && vendidos.length > 0) {
+            atencao.push({ tipo: 'margem_baixa', severidade: 'aviso', titulo: 'Margem média apertada', detalhe: `Média de ${(margemMediaVendidos * 100).toFixed(1)}% nos vendidos. Meta saudável ≥ 12%.` });
+        }
+        const sevOrder = { critico: 0, aviso: 1, info: 2 } as const;
+        atencao.sort((a, b) => sevOrder[a.severidade] - sevOrder[b.severidade]);
+
         return NextResponse.json({
             success: true,
             config: {
@@ -183,6 +245,8 @@ export async function GET() {
                 falta_para_meta: faltaParaMeta,
                 liquido_no_bolso: liquidoNoBolso,
             },
+            mensal,
+            atencao,
             veiculos: lista,
             parcelas: parcelas || [],
         });
