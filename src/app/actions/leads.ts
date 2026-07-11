@@ -6,6 +6,7 @@ import { sendMetaConversion } from '@/lib/meta-service';
 import { dataService } from '@/lib/dataService';
 import { revalidatePath } from 'next/cache';
 import { cacheInvalidate } from '@/lib/services/cacheLayer';
+import { getTableForLead, stripPrefix } from '@/lib/services/leadRouter';
 
 export async function updateLeadStatusAction(
     leadId: string,
@@ -20,25 +21,25 @@ export async function updateLeadStatusAction(
     const adminClient = createClient();
     dataService.setClient(adminClient);
 
-    let table = 'leads_manos_crm';
-    let realId: any = leadId;
-
-    if (leadId.startsWith('crm26_')) {
-        table = 'leads_distribuicao_crm_26';
-        realId = parseInt(leadId.substring(6));
-    } else if (leadId.startsWith('main_')) {
-        table = 'leads_manos_crm';
-        realId = leadId.substring(5);
-    } else if (leadId.startsWith('master_')) {
-        table = 'leads_master';
-        realId = leadId.substring(7);
-    } else if (leadId.startsWith('dist_')) {
-        table = 'leads_distribuicao';
-        realId = parseInt(leadId.substring(5));
-    }
+    // Roteamento via leadRouter (fonte única): suporta tanto o formato legado
+    // (crm26_, main_, dist_, master_, compra_) quanto o UID novo da view
+    // leads_unified ("tabela:id"). Antes, IDs no formato colon caíam no default
+    // 'leads_manos_crm' e o UPDATE dava "Erro ao sincronizar status com o
+    // servidor" ao marcar Vendido/Perdido em lead de outra tabela.
+    const table = getTableForLead(leadId);
+    const strippedId = stripPrefix(leadId);
+    // Tabelas com PK bigint precisam de número; as de UUID ficam string.
+    const bigintPk = table === 'leads_distribuicao_crm_26' || table === 'leads_distribuicao';
+    const realId: string | number = bigintPk ? parseInt(strippedId, 10) : strippedId;
 
     // REDISTRIBUTION TRIGGER LOGIC
-    const isRedistributionTrigger = ['lost', 'post_sale'].includes(status);
+    // Só as tabelas com a infraestrutura de reativação (dados_brutos / vendedor /
+    // enviado / vendedor_anterior) entram no fluxo de redistribuição. leads_master
+    // e leads_compra NÃO têm essas colunas — mandá-las pra cá fazia o UPDATE
+    // estourar ("Erro ao sincronizar status") ao finalizar como Perdido. Para elas,
+    // caímos no update simples de status abaixo (que grava só colunas existentes).
+    const REDISTRIBUTION_TABLES = ['leads_manos_crm', 'leads_distribuicao_crm_26', 'leads_distribuicao'];
+    const isRedistributionTrigger = ['lost', 'post_sale'].includes(status) && REDISTRIBUTION_TABLES.includes(table);
     let targetStatus = status;
 
     if (isRedistributionTrigger) {
@@ -152,13 +153,18 @@ export async function updateLeadStatusAction(
         }
     }
 
-    // 2. Won At
-    if (['VENDIDO', 'COMPRA REALIZADA', 'CLOSED', 'COMPRADO', 'FECHADO', 'VENDA'].includes(s)) {
+    // 2. Won At — a coluna só existe em leads_manos_crm e leads_compra.
+    //    Gravar won_at em tabelas sem a coluna (crm26/master) fazia o UPDATE
+    //    inteiro falhar (PGRST204) — era a causa do erro ao marcar Vendido.
+    const hasWonAt = table === 'leads_manos_crm' || table === 'leads_compra';
+    if (hasWonAt && ['VENDIDO', 'COMPRA REALIZADA', 'CLOSED', 'COMPRADO', 'FECHADO', 'VENDA'].includes(s)) {
         updatePayload.won_at = now;
     }
 
-    // 3. Lost At
-    if (['PERDA / SEM CONTATO', 'PERDIDO / DESCARTE', 'LOST', 'LOST_REDISTRIBUTED', 'POST_SALE', 'TRASH'].includes(s)) {
+    // 3. Lost At — nenhuma tabela de lead tem essa coluna hoje. Guardado para
+    //    não quebrar o UPDATE. Reative por-tabela se a coluna for criada.
+    const hasLostAt = false;
+    if (hasLostAt && ['PERDA / SEM CONTATO', 'PERDIDO / DESCARTE', 'LOST', 'LOST_REDISTRIBUTED', 'POST_SALE', 'TRASH'].includes(s)) {
         updatePayload.lost_at = now;
     }
 
