@@ -164,13 +164,16 @@ async function runTriage(dryRun: boolean): Promise<TriageMetrics> {
 
                 m.reativar++;
             } else {
-                // arquivar (status='frio')
-                const updates: Record<string, any> = { status: 'frio' };
-                if (z.table_name === 'leads_distribuicao_crm_26') {
-                    updates.atualizado_em = new Date().toISOString();
-                } else {
-                    updates.updated_at = new Date().toISOString();
-                }
+                // arquivar: seta archived_at (sinal canônico de "saiu da fila"),
+                // que a view leads_unified_active passou a respeitar (mig 20260711).
+                // Mantém status='frio' só como marcador de motivo.
+                // NÃO reseta updated_at: resetar mascarava a idade real do lead e
+                // era o que criava o "zumbi imortal" (reaparecia fresco a cada rodada).
+                const updates: Record<string, any> = {
+                    status: 'frio',
+                    archived_at: new Date().toISOString(),
+                    archived_reason: 'zombie_auto_archive: 15d+ sem interação',
+                };
                 const { error: upErr } = await admin
                     .from(z.table_name)
                     .update(updates)
