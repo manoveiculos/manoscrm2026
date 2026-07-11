@@ -21,9 +21,12 @@ export const runtime = 'nodejs';
 // Fatias da roleta (R$). Iguais na UI. Server-authoritative.
 const PRIZES = [50, 100, 150, 200, 300, 500] as const;
 
-// Pesos opcionais p/ proteger a verba de comissão (mesmo tamanho de PRIZES).
-// null = sorteio uniforme. Ex.: [30,25,20,13,8,4] enviesa pros valores baixos.
-const PRIZE_WEIGHTS: number[] | null = null;
+// Distribuição CONSERVADORA (protege a verba de comissão). Índices batem com PRIZES.
+//   R$50 → 40% | R$100 → 27% | R$150 → 17% | R$200 → 9% | R$300 → 5% | R$500 → 2%
+//   Valor esperado ≈ R$115/venda (vs ~R$216 no uniforme). R$500 vira jackpot raro (~1 em 50).
+//   A roleta continua VISUALMENTE igual (fatias iguais) — só a probabilidade muda.
+//   null = sorteio uniforme.
+const PRIZE_WEIGHTS: number[] | null = [40, 27, 17, 9, 5, 2];
 
 const N8N_WEBHOOK_URL =
     process.env.N8N_ROLETA_WEBHOOK_URL ||
