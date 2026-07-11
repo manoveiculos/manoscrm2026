@@ -584,41 +584,17 @@ export default function InboxPage() {
         };
 
         for (const lead of leads) {
-            // 1. Fila de pesca: sem atendimento iniciado
+            // Inbox = FILA DE CAPTURA (V6). Só entra lead AINDA NÃO atendido.
+            // Assim que o vendedor inicia o atendimento, o lead sai da Inbox e
+            // passa a ser gerido no /atendimento (Kanban). Decisão do dono
+            // (2026-07-11): "em atendimento não fica no inbox; só não atendidos".
             if (!lead.atendimento_iniciado_em) {
                 buckets.fishing.push(lead);
-                continue;
-            }
-
-            // 2. Zumbis: mais de 15 dias sem ação
-            const ageMin = ageMinutes(lead.updated_at, lead.created_at);
-            if (ageMin > ZOMBIE_DAYS * 24 * 60) {
-                buckets.zombie.push(lead);
-                continue;
-            }
-
-            // 3. Reversão: prioridade máxima
-            if (lead.flagged_reversao) {
-                buckets.reversao.push(lead);
-                continue;
-            }
-
-            // Descobrir estado da conversa
-            // V3.80: map indexado por native_id (m.lead_id), não pelo uid composto.
-            const msgs = lastMessages.get(String(lead.native_id));
-            const state = getLeadState(lead, msgs?.inbound, msgs?.outbound);
-
-            if (state === 'AGUARDANDO_VENDEDOR') {
-                buckets.waitingReply.push(lead);
-            } else if (ageMin > 48 * 60) {
-                buckets.cooling.push(lead);
-            } else {
-                buckets.inConversation.push(lead);
             }
         }
 
         return buckets;
-    }, [leads, lastMessages]);
+    }, [leads]);
 
     const counts = {
         reversao: groups.reversao.length,
@@ -713,12 +689,9 @@ export default function InboxPage() {
 
             {filter !== 'archived' && (
                 <div className="flex items-center gap-3 mb-5 text-xs text-gray-400">
-                    <span>🔥 <strong className="text-red-400">{counts.waitingReply}</strong> responder cliente</span>
-                    <span>💬 <strong className="text-blue-300">{counts.inConversation}</strong> em conversa</span>
-                    <span>❄️ <strong className="text-zinc-500">{counts.cooling}</strong> frios</span>
-                    {filter === 'all' && counts.zombie > 0 && (
-                        <span>🪦 <strong className="text-zinc-500">{counts.zombie}</strong> zumbis</span>
-                    )}
+                    <span>🎣 <strong className="text-amber-400">{groups.fishing.length}</strong> aguardando atendimento</span>
+                    <span className="text-zinc-600">·</span>
+                    <span className="text-zinc-500">Leads em atendimento agora ficam no <strong className="text-zinc-300">Atendimento</strong></span>
                 </div>
             )}
             {filter === 'archived' && (
@@ -788,7 +761,7 @@ export default function InboxPage() {
                         )}
 
                         <NextActionCard
-                            lead={groups.reversao[0] || groups.waitingReply[0] || groups.inConversation[0] || null}
+                            lead={groups.fishing[0] || null}
                             lastMessages={lastMessages}
                             consultantId={consultantId}
                         />
