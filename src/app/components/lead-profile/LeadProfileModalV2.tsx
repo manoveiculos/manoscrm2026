@@ -24,6 +24,8 @@ import ProposalTab from './tabs/ProposalTab';
 import { StatusSelector } from './sections/StatusSelector';
 import { LeadHeader } from './sections/LeadHeader';
 import { ConsultantBadge } from './sections/ConsultantBadge';
+import PrizeWheelModal from '@/app/components/roleta/PrizeWheelModal';
+import { normalizeStatus } from '@/constants/status';
 
 import { 
     getTemplatesForStage, 
@@ -66,6 +68,20 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
     
     // Core Data Hooks
     const { lead, setLead, updateStatus, handleUpdateLead, isEditing, setIsEditing, editedLead, setEditedLead } = useLeadData(initialLead, setLeads, userName);
+
+    // 🎡 Roleta de Prêmios (gamificação): abre ao marcar o veículo como Vendido.
+    const [roleta, setRoleta] = useState<{ veiculoId: string; modelo: string } | null>(null);
+    const openRoletaForSale = useCallback((modelo?: string) => {
+        setRoleta({
+            veiculoId: String(lead.id),
+            modelo: modelo || (lead.vehicle_interest as string) || 'Veículo',
+        });
+    }, [lead]);
+    // Wrapper do dropdown de status: só abre a roleta se o "Vendido" persistir de fato.
+    const handleStatusChange = useCallback(async (newStatus: string, reason?: string) => {
+        const ok = await updateStatus(newStatus, reason);
+        if (ok && normalizeStatus(newStatus) === 'vendido') openRoletaForSale();
+    }, [updateStatus, openRoletaForSale]);
 
     // specialized Hooks
     const timeline = useLeadTimeline(lead.id, lead.phone);
@@ -412,14 +428,24 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
                 );
             }
 
+            const wasVenda = finishType === 'venda';
+            const modeloVendido = vehicleDetails || (lead.vehicle_interest as string) || 'Veículo';
+
             setShowFinishing(false);
             setFinishType(null);
             setVehicleDetails('');
             setLossReason('');
 
             await timeline.refresh();
-            onClose();
-            alert('✅ Atendimento finalizado com sucesso!');
+
+            if (wasVenda) {
+                // 🎡 Venda fechada → abre a Roleta de Prêmios (no lugar do alert padrão).
+                // O modal cuida da comemoração e fecha o perfil ao final.
+                openRoletaForSale(modeloVendido);
+            } else {
+                onClose();
+                alert('✅ Atendimento finalizado com sucesso!');
+            }
         } catch (err: any) {
             console.error('[handleSaveFinish]', err);
             alert('Erro ao salvar conclusão: ' + (err.message || 'Tente novamente.'));
@@ -634,7 +660,7 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
                                 <StatusSelector
                                     lead={lead}
                                     currentStatus={lead.status}
-                                    onChange={updateStatus}
+                                    onChange={handleStatusChange}
                                     scoreInfo={score.scoreInfo}
                                     displayScore={score.finalScore}
                                     userName={userName}
@@ -832,7 +858,20 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
     );
 
     if (mounted) {
-        return createPortal(modalContent, document.body);
+        return createPortal(
+            <>
+                {modalContent}
+                {roleta && (
+                    <PrizeWheelModal
+                        open
+                        veiculoId={roleta.veiculoId}
+                        veiculoModelo={roleta.modelo}
+                        onClose={() => { setRoleta(null); onClose(); }}
+                    />
+                )}
+            </>,
+            document.body
+        );
     }
     return null;
 };

@@ -93,9 +93,11 @@ export function useLeadData(initialLead: Lead, setLeads: React.Dispatch<React.Se
             
             // Disparar evento global para recarregar interações se necessário
             window.dispatchEvent(new CustomEvent('update-lead-timeline', { detail: lead.id }));
+            return true;
         } catch (err) {
             console.error("Erro ao atualizar status via Action:", err);
             alert("Erro ao sincronizar status com o servidor.");
+            return false;
         } finally {
             setLoading(false);
         }
