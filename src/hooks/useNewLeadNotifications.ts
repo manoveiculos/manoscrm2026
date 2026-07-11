@@ -127,9 +127,11 @@ export function useNewLeadNotifications(role?: string | null): UseNewLeadNotific
 
         fetchLeads(consultantId);
 
-        const channelFilter = role === 'admin'
-            ? { event: 'INSERT' as const, schema: 'public', table: 'leads_manos_crm' }
-            : { event: 'INSERT' as const, schema: 'public', table: 'leads_manos_crm', filter: `assigned_consultant_id=eq.${consultantId}` };
+        // Realtime postgres_changes só filtra por colunas da replica identity (a PK).
+        // assigned_consultant_id não é PK → Postgres rejeita com "invalid column for
+        // filter" (erro que aparecia repetido nos logs). Como fetchLeads já escopa por
+        // consultor, assinamos todos os INSERT e re-filtramos lá.
+        const channelFilter = { event: 'INSERT' as const, schema: 'public', table: 'leads_manos_crm' };
 
         const channel = supabase
             .channel(`new-leads-${consultantId}`)

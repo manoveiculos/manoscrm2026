@@ -36,11 +36,14 @@ export async function POST(req: NextRequest) {
             { cookies: { get: () => undefined, set: () => { }, remove: () => { } } }
         );
 
-        const { data: lead } = await supabase
+        const { data: leadData } = await supabase
             .from('leads_unified')
-            .select('table_name, name, status, vehicle_interest, ai_score, ai_summary, next_step, proxima_acao, source, behavioral_profile, ai_classification')
+            // ai_summary/next_step/behavioral_profile NÃO existem em leads_unified —
+            // a query falhava e o brief vinha vazio (404). Fallbacks tratam a ausência.
+            .select('table_name, name, status, vehicle_interest, ai_score, proxima_acao, source, ai_classification')
             .eq('native_id', leadId)
             .single();
+        const lead = leadData as any;
 
         if (!lead) {
             return NextResponse.json({ error: 'Lead não encontrado' }, { status: 404 });

@@ -284,8 +284,10 @@ export default function Dashboard() {
         // 3. Alertas de SLA
         const { data: slaActs } = await supabase
             .from('sla_escalations')
-            .select(`id, level, notes, created_at, lead_id`)
-            .order('created_at', { ascending: false })
+            // sla_escalations não tem created_at (a coluna é triggered_at). Aliasamos
+            // pra manter o resto do código lendo `created_at` sem mudança.
+            .select(`id, level, notes, created_at:triggered_at, lead_id`)
+            .order('triggered_at', { ascending: false })
             .limit(10);
 
         const items: ActivityItem[] = [];

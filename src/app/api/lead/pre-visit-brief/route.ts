@@ -44,7 +44,10 @@ export async function POST(req: NextRequest) {
         const [leadRes, interactionsRes] = await Promise.all([
             admin
                 .from('leads_unified')
-                .select('native_id, name, status, vehicle_interest, ai_score, ai_classification, ai_summary, behavioral_profile, next_step, proxima_acao, assigned_consultant_id')
+                // ai_summary/behavioral_profile/next_step NÃO existem em leads_unified —
+                // pediam a coluna e a query falhava, deixando o endpoint sempre em 404.
+                // Campos ausentes caem nos fallbacks abaixo (profile?., || proxima_acao).
+                .select('native_id, name, status, vehicle_interest, ai_score, ai_classification, proxima_acao, assigned_consultant_id')
                 .eq('native_id', leadId)
                 .single(),
             admin
