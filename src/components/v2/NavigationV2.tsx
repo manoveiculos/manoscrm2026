@@ -25,6 +25,7 @@ import {
     PlayCircle, // Atendimento ativo
     Banknote, // Projeto Milhão (exclusivo Alexandre)
     Store, // App de Repasse (Paulo)
+    Bike, // App de Scooters (Renato) — exclusivo Alexandre
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
@@ -58,6 +59,7 @@ const NAV_ITEMS: NavItem[] = [
     { label: 'Pipeline', icon: KanbanSquare, href: '/pipeline', adminOnly: true },
     { label: 'Dashboard', icon: BarChart3, href: '/', adminOnly: true },
     { label: 'Milhão', icon: Banknote, href: '/admin/milhao', alexandreOnly: true },
+    { label: 'Scooters', icon: Bike, href: '/admin/scooters', alexandreOnly: true },
     { label: 'Conversão', icon: BarChart3, href: '/admin/conversion', adminOnly: true },
     { label: 'Resgate', icon: Bot, href: '/admin/rescue', adminOnly: true },
     { label: 'Consultores', icon: Shield, href: '/admin/users', adminOnly: true },

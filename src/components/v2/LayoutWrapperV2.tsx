@@ -13,6 +13,7 @@ export const LayoutWrapperV2 = ({ children }: { children: React.ReactNode }) => 
     const isEmbed = pathname.endsWith('/embed');
     const isLogin = pathname === '/login';
     const isRepasse = pathname.startsWith('/repasse'); // app mobile do Paulo, sem sidebar
+    const isScooters = pathname.startsWith('/renato'); // app do Renato (RG Scooters), sem sidebar
     const supabase = createClient();
     const router = useRouter();
 
@@ -28,6 +29,13 @@ export const LayoutWrapperV2 = ({ children }: { children: React.ReactNode }) => 
 
                 // E-mail administrador de bypass
                 if (user.email?.toLowerCase() === 'alexandre_gorges@hotmail.com') {
+                    return;
+                }
+
+                // Renato: acesso só ao app dele (/renato). Não é consultor do CRM,
+                // então não passa pela checagem abaixo — mas fica confinado ao app.
+                if (user.email?.toLowerCase() === 'renato@manos.com.br') {
+                    if (!pathname.startsWith('/renato')) window.location.href = '/renato';
                     return;
                 }
 
@@ -66,6 +74,11 @@ export const LayoutWrapperV2 = ({ children }: { children: React.ReactNode }) => 
                 {children}
             </div>
         );
+    }
+
+    // App do Renato (/renato): RG Scooters tem tema claro próprio e bottom-nav — sem sidebar do CRM
+    if (isScooters) {
+        return <div className="min-h-screen w-full max-w-[100vw]">{children}</div>;
     }
 
     if (isEmbed || isLogin) {
