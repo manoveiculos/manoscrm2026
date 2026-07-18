@@ -67,7 +67,7 @@ CREATE INDEX IF NOT EXISTS idx_scooters_despesas_data ON public.scooters_despesa
 -- 5. Config (meta mensal, singleton por dono) ---------------------------
 CREATE TABLE IF NOT EXISTS public.scooters_config (
     owner_email TEXT PRIMARY KEY DEFAULT 'renato@manos.com.br',
-    meta        NUMERIC(12,2) NOT NULL DEFAULT 3000,
+    meta        NUMERIC(12,2) NOT NULL DEFAULT 30000,
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -126,5 +126,5 @@ END $$;
 
 -- 8. Seed: config única do Renato --------------------------------------
 INSERT INTO public.scooters_config (owner_email, meta)
-SELECT 'renato@manos.com.br', 3000
+SELECT 'renato@manos.com.br', 30000
 WHERE NOT EXISTS (SELECT 1 FROM public.scooters_config WHERE owner_email = 'renato@manos.com.br');

@@ -23,7 +23,7 @@ export async function GET() {
         vendas: (vendas.data || []).map((v) => ({ id: v.id, modelo: v.modelo, custo: Number(v.custo), cliente: v.cliente, valor: Number(v.valor), pagamento: v.pagamento, data: v.data })),
         clientes: (clientes.data || []).map((c) => ({ id: c.id, nome: c.nome, whats: c.whats, interesse: c.interesse, status: c.status })),
         despesas: (despesas.data || []).map((d) => ({ id: d.id, desc: d.descricao, valor: Number(d.valor), data: d.data })),
-        meta: Number(config.data?.meta ?? 3000),
+        meta: Number(config.data?.meta ?? 30000),
     });
 }
 

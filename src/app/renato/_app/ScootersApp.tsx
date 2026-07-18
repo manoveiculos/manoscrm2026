@@ -39,6 +39,17 @@ function Btn({ children, onClick, kind = 'primary', style, disabled }: any) {
 function Field({ label, children }: any) {
     return <label style={{ display: 'block', marginBottom: 14 }}><span style={{ fontSize: 13, fontWeight: 600, color: C.inkSoft, display: 'block', marginBottom: 6 }}>{label}</span>{children}</label>;
 }
+
+const miniBtn: any = { flex: 1, padding: '8px 0', borderRadius: 9, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', border: `1px solid ${C.line}`, background: 'transparent' };
+// Linha de ações Editar / Excluir reutilizada nos cards de venda, cliente e despesa
+function RowActions({ onEdit, onDelete, delMsg }: { onEdit: () => void; onDelete: () => void; delMsg: string }) {
+    return (
+        <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+            <button onClick={onEdit} style={{ ...miniBtn, color: C.inkSoft }}>Editar</button>
+            <button onClick={() => { if (confirm(delMsg)) onDelete(); }} style={{ ...miniBtn, color: C.red, background: '#FDECEC', border: '1px solid #F5C6C7' }}>Excluir</button>
+        </div>
+    );
+}
 const inputStyle: any = { width: '100%', boxSizing: 'border-box', padding: '12px 14px', borderRadius: 10, border: `1px solid ${C.line}`, fontSize: 16, fontFamily: "'Inter', sans-serif", color: C.ink, background: '#FAFCFB', outline: 'none' };
 function Sheet({ title, onClose, children }: any) {
     return (
@@ -150,7 +161,10 @@ function Estoque({ data, setModal, incModel, delModel }: any) {
                         <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
                             <Btn kind="ghost" style={{ padding: '9px' }} onClick={() => incModel(m.id, 1)}>+1 unidade</Btn>
                             <Btn kind="ghost" style={{ padding: '9px' }} disabled={m.qtd === 0} onClick={() => incModel(m.id, -1)}>−1 unidade</Btn>
-                            <Btn kind="danger" style={{ padding: '9px', width: 90 }} onClick={() => { if (confirm(`Excluir ${m.modelo}?`)) delModel(m.id); }}>Excluir</Btn>
+                        </div>
+                        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                            <Btn kind="ghost" style={{ padding: '9px' }} onClick={() => setModal({ type: 'scooter', edit: m })}>Editar</Btn>
+                            <Btn kind="danger" style={{ padding: '9px' }} onClick={() => { if (confirm(`Excluir ${m.modelo}?`)) delModel(m.id); }}>Excluir</Btn>
                         </div>
                     </Card>
                 );
@@ -159,7 +173,7 @@ function Estoque({ data, setModal, incModel, delModel }: any) {
     );
 }
 
-function Vendas({ data, setModal }: any) {
+function Vendas({ data, setModal, delVenda }: any) {
     const grupos = useMemo(() => {
         const g: any = {};
         [...data.vendas].sort((a: Venda, b: Venda) => b.data.localeCompare(a.data)).forEach((v: Venda) => { const k = monthKey(v.data); (g[k] = g[k] || []).push(v); });
@@ -193,6 +207,7 @@ function Vendas({ data, setModal }: any) {
                                         <div style={{ fontSize: 12, color: C.volt, fontWeight: 600 }}>lucro {fmt(v.valor - v.custo)}</div>
                                     </div>
                                 </div>
+                                <RowActions onEdit={() => setModal({ type: 'venda', edit: v })} onDelete={() => delVenda(v.id)} delMsg={`Excluir a venda de ${v.modelo} (${v.cliente})? A unidade volta pro estoque.`} />
                             </Card>
                         ))}
                     </div>
@@ -205,7 +220,7 @@ function Vendas({ data, setModal }: any) {
 const STATUS = ['Lead', 'Negociando', 'Comprou'];
 const statusColor: any = { Lead: C.blue, Negociando: C.amber, Comprou: C.volt };
 
-function Clientes({ data, setModal, setClienteStatus }: any) {
+function Clientes({ data, setModal, setClienteStatus, delCliente }: any) {
     return (
         <div>
             <Btn onClick={() => setModal({ type: 'cliente' })} style={{ marginBottom: 14 }}>+ Novo cliente / lead</Btn>
@@ -224,13 +239,14 @@ function Clientes({ data, setModal, setClienteStatus }: any) {
                             <button key={s} onClick={() => setClienteStatus(c.id, s)} style={{ flex: 1, padding: '8px 0', borderRadius: 9, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', border: `1px solid ${c.status === s ? statusColor[s] : C.line}`, background: c.status === s ? statusColor[s] : 'transparent', color: c.status === s ? '#fff' : C.inkSoft }}>{s}</button>
                         ))}
                     </div>
+                    <RowActions onEdit={() => setModal({ type: 'cliente', edit: c })} onDelete={() => delCliente(c.id)} delMsg={`Excluir o cliente ${c.nome}?`} />
                 </Card>
             ))}
         </div>
     );
 }
 
-function Caixa({ data, setModal }: any) {
+function Caixa({ data, setModal, delDespesa }: any) {
     const mk = monthKey();
     const receitas = data.vendas.filter((v: Venda) => monthKey(v.data) === mk).reduce((s: number, v: Venda) => s + v.valor, 0);
     const custos = data.vendas.filter((v: Venda) => monthKey(v.data) === mk).reduce((s: number, v: Venda) => s + v.custo, 0);
@@ -251,9 +267,12 @@ function Caixa({ data, setModal }: any) {
             </Card>
             <Btn onClick={() => setModal({ type: 'despesa' })} kind="dark" style={{ marginBottom: 14 }}>+ Lançar despesa</Btn>
             {despesas.map((d: Despesa) => (
-                <Card key={d.id} style={{ marginBottom: 8, padding: 14, display: 'flex', justifyContent: 'space-between' }}>
-                    <div><div style={{ fontWeight: 600, fontSize: 14.5, color: C.ink }}>{d.desc}</div><div style={{ fontSize: 12.5, color: C.inkSoft }}>{new Date(d.data + 'T12:00').toLocaleDateString('pt-BR')}</div></div>
-                    <div style={{ fontWeight: 700, color: C.red }}>− {fmt(d.valor)}</div>
+                <Card key={d.id} style={{ marginBottom: 8, padding: 14 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <div><div style={{ fontWeight: 600, fontSize: 14.5, color: C.ink }}>{d.desc}</div><div style={{ fontSize: 12.5, color: C.inkSoft }}>{new Date(d.data + 'T12:00').toLocaleDateString('pt-BR')}</div></div>
+                        <div style={{ fontWeight: 700, color: C.red }}>− {fmt(d.valor)}</div>
+                    </div>
+                    <RowActions onEdit={() => setModal({ type: 'despesa', edit: d })} onDelete={() => delDespesa(d.id)} delMsg={`Excluir a despesa "${d.desc}"?`} />
                 </Card>
             ))}
         </div>
@@ -261,31 +280,42 @@ function Caixa({ data, setModal }: any) {
 }
 
 // ---------- Formulários ----------
-function FormScooter({ addModel, close }: any) {
-    const [f, setF] = useState({ modelo: '', custo: '', preco: '', qtd: '1' });
+function FormScooter({ edit, onSubmit, close }: any) {
+    const [f, setF] = useState(edit
+        ? { modelo: edit.modelo, custo: String(edit.custo), preco: String(edit.preco), qtd: String(edit.qtd) }
+        : { modelo: '', custo: '', preco: '', qtd: '1' });
     return (
         <div>
             <Field label="Modelo"><input style={inputStyle} value={f.modelo} onChange={(e) => setF({ ...f, modelo: e.target.value })} placeholder="Ex.: Scooter X-1000 800W" /></Field>
             <Field label="Custo de compra (R$)"><input style={inputStyle} type="number" inputMode="numeric" value={f.custo} onChange={(e) => setF({ ...f, custo: e.target.value })} /></Field>
             <Field label="Preço de venda (R$)"><input style={inputStyle} type="number" inputMode="numeric" value={f.preco} onChange={(e) => setF({ ...f, preco: e.target.value })} /></Field>
             <Field label="Quantidade em estoque"><input style={inputStyle} type="number" inputMode="numeric" value={f.qtd} onChange={(e) => setF({ ...f, qtd: e.target.value })} /></Field>
-            <Btn disabled={!f.modelo || !f.preco} onClick={async () => { await addModel({ modelo: f.modelo, custo: +f.custo || 0, preco: +f.preco || 0, qtd: +f.qtd || 0 }); close(); }}>Salvar modelo</Btn>
+            <Btn disabled={!f.modelo || !f.preco} onClick={async () => { await onSubmit({ modelo: f.modelo, custo: +f.custo || 0, preco: +f.preco || 0, qtd: +f.qtd || 0 }); close(); }}>{edit ? 'Salvar alterações' : 'Salvar modelo'}</Btn>
         </div>
     );
 }
 
-function FormVenda({ data, addVenda, close }: any) {
+function FormVenda({ data, edit, onSubmit, close }: any) {
     const disponiveis = data.scooters.filter((s: Scooter) => s.qtd > 0);
-    const [f, setF] = useState({ scooterId: disponiveis[0]?.id || '', cliente: '', valor: '', pagamento: 'Pix', data: hoje() });
+    const [f, setF] = useState(edit
+        ? { scooterId: '', cliente: edit.cliente, valor: String(edit.valor), pagamento: edit.pagamento || 'Pix', data: edit.data }
+        : { scooterId: disponiveis[0]?.id || '', cliente: '', valor: '', pagamento: 'Pix', data: hoje() });
     const sel = data.scooters.find((s: Scooter) => s.id === f.scooterId);
-    useEffect(() => { if (sel && !f.valor) setF((p) => ({ ...p, valor: String(sel.preco) })); }, [f.scooterId]); // eslint-disable-line
+    useEffect(() => { if (!edit && sel && !f.valor) setF((p) => ({ ...p, valor: String(sel.preco) })); }, [f.scooterId]); // eslint-disable-line
+    const podeSalvar = edit ? (f.cliente && f.valor) : (sel && f.cliente && f.valor);
     return (
         <div>
-            <Field label="Modelo vendido">
-                <select style={inputStyle} value={f.scooterId} onChange={(e) => setF({ ...f, scooterId: e.target.value, valor: '' })}>
-                    {disponiveis.map((s: Scooter) => <option key={s.id} value={s.id}>{s.modelo} ({s.qtd} disp.)</option>)}
-                </select>
-            </Field>
+            {edit ? (
+                <div style={{ fontSize: 14, color: C.ink, background: '#F0F3F2', borderRadius: 10, padding: '10px 14px', marginBottom: 14 }}>
+                    Modelo vendido: <b>{edit.modelo}</b> <span style={{ color: C.inkSoft }}>(o estoque não é alterado ao editar)</span>
+                </div>
+            ) : (
+                <Field label="Modelo vendido">
+                    <select style={inputStyle} value={f.scooterId} onChange={(e) => setF({ ...f, scooterId: e.target.value, valor: '' })}>
+                        {disponiveis.map((s: Scooter) => <option key={s.id} value={s.id}>{s.modelo} ({s.qtd} disp.)</option>)}
+                    </select>
+                </Field>
+            )}
             <Field label="Cliente"><input style={inputStyle} value={f.cliente} onChange={(e) => setF({ ...f, cliente: e.target.value })} placeholder="Nome do cliente" /></Field>
             <Field label="Valor da venda (R$)"><input style={inputStyle} type="number" inputMode="numeric" value={f.valor} onChange={(e) => setF({ ...f, valor: e.target.value })} /></Field>
             <Field label="Pagamento">
@@ -294,32 +324,40 @@ function FormVenda({ data, addVenda, close }: any) {
                 </select>
             </Field>
             <Field label="Data"><input style={inputStyle} type="date" value={f.data} onChange={(e) => setF({ ...f, data: e.target.value })} /></Field>
-            {sel && f.valor && <div style={{ fontSize: 14, color: C.voltDark, background: '#E8F9F3', borderRadius: 10, padding: '10px 14px', marginBottom: 14, fontWeight: 600 }}>Lucro estimado: {fmt((+f.valor || 0) - sel.custo)}</div>}
-            <Btn disabled={!sel || !f.cliente || !f.valor} onClick={async () => { await addVenda({ scooterId: f.scooterId, cliente: f.cliente, valor: +f.valor, pagamento: f.pagamento, data: f.data }); close(); }}>Registrar venda</Btn>
+            {!edit && sel && f.valor && <div style={{ fontSize: 14, color: C.voltDark, background: '#E8F9F3', borderRadius: 10, padding: '10px 14px', marginBottom: 14, fontWeight: 600 }}>Lucro estimado: {fmt((+f.valor || 0) - sel.custo)}</div>}
+            <Btn disabled={!podeSalvar} onClick={async () => {
+                if (edit) await onSubmit({ cliente: f.cliente, valor: +f.valor, pagamento: f.pagamento, data: f.data });
+                else await onSubmit({ scooterId: f.scooterId, cliente: f.cliente, valor: +f.valor, pagamento: f.pagamento, data: f.data });
+                close();
+            }}>{edit ? 'Salvar alterações' : 'Registrar venda'}</Btn>
         </div>
     );
 }
 
-function FormCliente({ addCliente, close }: any) {
-    const [f, setF] = useState({ nome: '', whats: '', interesse: '' });
+function FormCliente({ edit, onSubmit, close }: any) {
+    const [f, setF] = useState(edit
+        ? { nome: edit.nome, whats: edit.whats || '', interesse: edit.interesse || '' }
+        : { nome: '', whats: '', interesse: '' });
     return (
         <div>
             <Field label="Nome"><input style={inputStyle} value={f.nome} onChange={(e) => setF({ ...f, nome: e.target.value })} /></Field>
             <Field label="WhatsApp (DDD + número)"><input style={inputStyle} inputMode="tel" value={f.whats} onChange={(e) => setF({ ...f, whats: e.target.value })} placeholder="47999998888" /></Field>
             <Field label="Interesse"><input style={inputStyle} value={f.interesse} onChange={(e) => setF({ ...f, interesse: e.target.value })} placeholder="Ex.: modelo 800W, cor preta" /></Field>
-            <Btn disabled={!f.nome} onClick={async () => { await addCliente(f); close(); }}>Salvar cliente</Btn>
+            <Btn disabled={!f.nome} onClick={async () => { await onSubmit(f); close(); }}>{edit ? 'Salvar alterações' : 'Salvar cliente'}</Btn>
         </div>
     );
 }
 
-function FormDespesa({ addDespesa, close }: any) {
-    const [f, setF] = useState({ desc: '', valor: '', data: hoje() });
+function FormDespesa({ edit, onSubmit, close }: any) {
+    const [f, setF] = useState(edit
+        ? { desc: edit.desc, valor: String(edit.valor), data: edit.data }
+        : { desc: '', valor: '', data: hoje() });
     return (
         <div>
             <Field label="Descrição"><input style={inputStyle} value={f.desc} onChange={(e) => setF({ ...f, desc: e.target.value })} placeholder="Ex.: frete, anúncio, contador" /></Field>
             <Field label="Valor (R$)"><input style={inputStyle} type="number" inputMode="numeric" value={f.valor} onChange={(e) => setF({ ...f, valor: e.target.value })} /></Field>
             <Field label="Data"><input style={inputStyle} type="date" value={f.data} onChange={(e) => setF({ ...f, data: e.target.value })} /></Field>
-            <Btn disabled={!f.desc || !f.valor} onClick={async () => { await addDespesa({ desc: f.desc, valor: +f.valor, data: f.data }); close(); }}>Lançar despesa</Btn>
+            <Btn disabled={!f.desc || !f.valor} onClick={async () => { await onSubmit({ desc: f.desc, valor: +f.valor, data: f.data }); close(); }}>{edit ? 'Salvar alterações' : 'Lançar despesa'}</Btn>
         </div>
     );
 }
@@ -366,12 +404,19 @@ export default function ScootersApp({ adminBadge = false }: { adminBadge?: boole
         await load();
     };
     const addModel = (b: any) => call('/api/scooters/models', 'POST', b);
+    const editModel = (id: string, b: any) => call(`/api/scooters/models/${id}`, 'PATCH', b);
     const incModel = (id: string, delta: number) => call(`/api/scooters/models/${id}`, 'PATCH', { qtd_delta: delta });
     const delModel = (id: string) => call(`/api/scooters/models/${id}`, 'DELETE');
     const addVenda = (b: any) => call('/api/scooters/vendas', 'POST', b);
+    const editVenda = (id: string, b: any) => call(`/api/scooters/vendas/${id}`, 'PATCH', b);
+    const delVenda = (id: string) => call(`/api/scooters/vendas/${id}`, 'DELETE');
     const addCliente = (b: any) => call('/api/scooters/clientes', 'POST', b);
+    const editCliente = (id: string, b: any) => call(`/api/scooters/clientes/${id}`, 'PATCH', b);
     const setClienteStatus = (id: string, status: string) => call(`/api/scooters/clientes/${id}`, 'PATCH', { status });
+    const delCliente = (id: string) => call(`/api/scooters/clientes/${id}`, 'DELETE');
     const addDespesa = (b: any) => call('/api/scooters/despesas', 'POST', b);
+    const editDespesa = (id: string, b: any) => call(`/api/scooters/despesas/${id}`, 'PATCH', b);
+    const delDespesa = (id: string) => call(`/api/scooters/despesas/${id}`, 'DELETE');
     const setMeta = (meta: number) => call('/api/scooters/config', 'PATCH', { meta });
 
     if (!data) {
@@ -379,7 +424,14 @@ export default function ScootersApp({ adminBadge = false }: { adminBadge?: boole
     }
 
     const titles: any = { inicio: 'Painel', estoque: 'Estoque', vendas: 'Vendas', clientes: 'Clientes', caixa: 'Caixa' };
-    const modalTitles: any = { scooter: 'Novo modelo', venda: 'Registrar venda', cliente: 'Novo cliente', despesa: 'Lançar despesa', meta: 'Meta mensal' };
+    const isEdit = !!modal?.edit;
+    const modalTitles: any = {
+        scooter: isEdit ? 'Editar modelo' : 'Novo modelo',
+        venda: isEdit ? 'Editar venda' : 'Registrar venda',
+        cliente: isEdit ? 'Editar cliente' : 'Novo cliente',
+        despesa: isEdit ? 'Editar despesa' : 'Lançar despesa',
+        meta: 'Meta mensal',
+    };
 
     return (
         <div style={{ minHeight: '100vh', background: C.bg, fontFamily: "'Inter', sans-serif" }}>
@@ -393,9 +445,9 @@ export default function ScootersApp({ adminBadge = false }: { adminBadge?: boole
 
                 {tab === 'inicio' && <Dashboard data={data} setModal={setModal} />}
                 {tab === 'estoque' && <Estoque data={data} setModal={setModal} incModel={incModel} delModel={delModel} />}
-                {tab === 'vendas' && <Vendas data={data} setModal={setModal} />}
-                {tab === 'clientes' && <Clientes data={data} setModal={setModal} setClienteStatus={setClienteStatus} />}
-                {tab === 'caixa' && <Caixa data={data} setModal={setModal} />}
+                {tab === 'vendas' && <Vendas data={data} setModal={setModal} delVenda={delVenda} />}
+                {tab === 'clientes' && <Clientes data={data} setModal={setModal} setClienteStatus={setClienteStatus} delCliente={delCliente} />}
+                {tab === 'caixa' && <Caixa data={data} setModal={setModal} delDespesa={delDespesa} />}
             </div>
 
             <nav style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: C.surface, borderTop: `1px solid ${C.line}`, display: 'flex', justifyContent: 'center', zIndex: 40 }}>
@@ -411,10 +463,10 @@ export default function ScootersApp({ adminBadge = false }: { adminBadge?: boole
 
             {modal && (
                 <Sheet title={modalTitles[modal.type]} onClose={() => setModal(null)}>
-                    {modal.type === 'scooter' && <FormScooter addModel={addModel} close={() => setModal(null)} />}
-                    {modal.type === 'venda' && <FormVenda data={data} addVenda={addVenda} close={() => setModal(null)} />}
-                    {modal.type === 'cliente' && <FormCliente addCliente={addCliente} close={() => setModal(null)} />}
-                    {modal.type === 'despesa' && <FormDespesa addDespesa={addDespesa} close={() => setModal(null)} />}
+                    {modal.type === 'scooter' && <FormScooter edit={modal.edit} onSubmit={(b: any) => (modal.edit ? editModel(modal.edit.id, b) : addModel(b))} close={() => setModal(null)} />}
+                    {modal.type === 'venda' && <FormVenda data={data} edit={modal.edit} onSubmit={(b: any) => (modal.edit ? editVenda(modal.edit.id, b) : addVenda(b))} close={() => setModal(null)} />}
+                    {modal.type === 'cliente' && <FormCliente edit={modal.edit} onSubmit={(b: any) => (modal.edit ? editCliente(modal.edit.id, b) : addCliente(b))} close={() => setModal(null)} />}
+                    {modal.type === 'despesa' && <FormDespesa edit={modal.edit} onSubmit={(b: any) => (modal.edit ? editDespesa(modal.edit.id, b) : addDespesa(b))} close={() => setModal(null)} />}
                     {modal.type === 'meta' && <FormMeta data={data} setMeta={setMeta} close={() => setModal(null)} />}
                 </Sheet>
             )}
