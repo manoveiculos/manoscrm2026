@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, useCallback, DragEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
-import { Clock, AlertTriangle, MessageCircle, Trophy, X as XIcon, GripVertical, Flag, Archive } from 'lucide-react';
+import { Clock, AlertTriangle, MessageCircle, Trophy, X as XIcon, GripVertical, Flag, Archive, Pencil } from 'lucide-react';
 
 interface KanbanLead {
     uid: string;
@@ -311,6 +311,27 @@ export default function AtendimentoKanbanPage() {
         }
     }, [supabase, consultantId, fetchLeads]);
 
+    // Renomear cliente direto no card (facilita achar o cliente no funil)
+    const renameLead = useCallback(async (l: KanbanLead) => {
+        const novo = prompt('Nome do cliente:', l.name || '');
+        if (novo === null || !novo.trim() || novo.trim() === l.name) return;
+        const sep = l.uid.indexOf(':');
+        const table = l.uid.slice(0, sep);
+        const id = l.uid.slice(sep + 1);
+        try {
+            const res = await fetch('/api/lead/update-info', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ lead_id: id, lead_table: table, name: novo.trim() }),
+            });
+            const data = await res.json();
+            if (!res.ok || !data.success) throw new Error(data.error || 'falha');
+            setLeads(prev => prev.map(x => x.uid === l.uid ? { ...x, name: novo.trim() } : x));
+        } catch (e: any) {
+            alert('Erro ao renomear: ' + (e?.message || 'tente de novo'));
+        }
+    }, []);
+
     const grouped = useMemo(() => {
         const map: Record<Column, KanbanLead[]> = { qualificacao: [], proposta: [], test_drive: [], fechamento: [], finalizado: [] };
         for (const l of leads) {
@@ -503,7 +524,14 @@ export default function AtendimentoKanbanPage() {
                                                     <div className="flex items-start justify-between gap-2 mb-1.5">
                                                         <h3 className="text-sm font-bold text-white truncate flex-1 flex items-center gap-1.5">
                                                             {l.flagged_reversao && <span title="Reversão" className="text-pink-400 text-base">🔥</span>}
-                                                            {l.name || 'Sem nome'}
+                                                            <span className="truncate">{l.name || 'Sem nome'}</span>
+                                                            <button
+                                                                onClick={(e) => { e.stopPropagation(); renameLead(l); }}
+                                                                className="shrink-0 text-zinc-600 hover:text-white transition opacity-0 group-hover:opacity-100"
+                                                                title="Renomear cliente"
+                                                            >
+                                                                <Pencil className="w-3 h-3" />
+                                                            </button>
                                                         </h3>
                                                         {l.ai_score != null && (
                                                             <span className={`text-[10px] font-black px-1.5 py-0.5 rounded shrink-0 ${

@@ -24,6 +24,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         patch.data_hora = b.data_hora;
         patch.lembrete_1d_enviado_em = null;
         patch.lembrete_dia_enviado_em = null;
+        patch.lembrete_2h_enviado_em = null;
         if (b.status === undefined) patch.status = 'agendado';
     }
     for (const k of EDITAVEIS) if (b[k] !== undefined) patch[k] = b[k] === '' ? null : b[k];

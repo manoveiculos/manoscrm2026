@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireVendedor, supabaseAdmin, startOfTodayBRT } from './_guard';
+import { postAgendaWebhook } from '@/lib/agendaWebhook';
 
 export const dynamic = 'force-dynamic';
 
@@ -50,7 +51,12 @@ export async function POST(request: Request) {
     const row: Record<string, any> = { vendedor_id: g.authId, status: 'agendado' };
     for (const k of CAMPOS) if (b[k] !== undefined && b[k] !== '') row[k] = b[k];
 
-    const { data, error } = await supabaseAdmin.from('agendamentos').insert(row).select('id').single();
+    const { data, error } = await supabaseAdmin.from('agendamentos').insert(row).select('*').single();
     if (error) return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+
+    // Confirma a criação no webhook n8n (best-effort: falha não bloqueia o agendamento)
+    postAgendaWebhook(data, { evento: 'agendamento_criado', tipo_lembrete: 'criacao' })
+        .catch((e) => console.warn('[agenda] webhook criação falhou:', e?.message));
+
     return NextResponse.json({ success: true, id: data.id });
 }

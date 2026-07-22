@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { X, Store, Car, Calendar, MapPin } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { X, Store, Car, Calendar, MapPin, Search, UserPlus } from 'lucide-react';
 
 export interface VisitaPrefill {
     id?: string;
@@ -40,6 +40,41 @@ export default function NovaVisitaModal({ edit, onClose, onSaved }: { edit?: Vis
     const set = (k: string, v: any) => setF((p) => ({ ...p, [k]: v }));
     const isEdit = !!edit?.id;
 
+    // ── Busca nos leads do CRM (nome ou telefone) ──
+    const [leadUid, setLeadUid] = useState<string | null>(edit?.lead_uid || null);
+    const [results, setResults] = useState<any[]>([]);
+    const [buscando, setBuscando] = useState(false);
+    const [dropOpen, setDropOpen] = useState(false);
+
+    useEffect(() => {
+        if (isEdit) return; // edição não re-busca
+        const q = f.cliente_nome.trim();
+        if (q.length < 2 || leadUid) { setResults([]); setDropOpen(false); return; }
+        setBuscando(true);
+        const t = setTimeout(async () => {
+            try {
+                const res = await fetch(`/api/agenda/buscar-lead?q=${encodeURIComponent(q)}`);
+                const json = await res.json();
+                setResults(json?.leads || []);
+                setDropOpen(true);
+            } catch { setResults([]); }
+            finally { setBuscando(false); }
+        }, 300);
+        return () => clearTimeout(t);
+    }, [f.cliente_nome, isEdit, leadUid]);
+
+    const pickLead = (l: any) => {
+        setF((p) => ({
+            ...p,
+            cliente_nome: l.nome,
+            cliente_whatsapp: l.telefone || p.cliente_whatsapp,
+            veiculo_interesse: l.veiculo || p.veiculo_interesse,
+        }));
+        setLeadUid(l.uid);
+        setDropOpen(false); setResults([]);
+    };
+    const cadastroNovo = () => { setLeadUid(null); setDropOpen(false); setResults([]); };
+
     const salvar = async () => {
         if (!f.cliente_nome.trim()) { setErro('Informe o nome do cliente.'); return; }
         if (!f.data || !f.hora) { setErro('Informe data e hora.'); return; }
@@ -57,7 +92,7 @@ export default function NovaVisitaModal({ edit, onClose, onSaved }: { edit?: Vis
                 data_hora,
                 observacoes: f.observacoes || null,
             };
-            if (!isEdit && edit?.lead_uid) payload.lead_uid = edit.lead_uid;
+            if (!isEdit && leadUid) payload.lead_uid = leadUid;
             const url = isEdit ? `/api/agenda/${edit!.id}` : '/api/agenda';
             const res = await fetch(url, { method: isEdit ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
             const json = await res.json();
@@ -78,9 +113,29 @@ export default function NovaVisitaModal({ edit, onClose, onSaved }: { edit?: Vis
                 </div>
 
                 <div className="p-5 space-y-3.5">
-                    <div>
-                        <span className={label}>Cliente *</span>
-                        <input className={inputCls} value={f.cliente_nome} onChange={(e) => set('cliente_nome', e.target.value)} placeholder="Nome do cliente" />
+                    <div className="relative">
+                        <span className={label}>Cliente * <span className="text-zinc-600 font-normal">(digite nome ou telefone — puxa dos leads)</span></span>
+                        <input className={inputCls} value={f.cliente_nome}
+                            onChange={(e) => { set('cliente_nome', e.target.value); if (leadUid) setLeadUid(null); }}
+                            placeholder="Nome ou telefone do cliente" />
+                        {leadUid && <div className="text-[11px] text-emerald-400 mt-1">✓ Vinculado ao lead do CRM</div>}
+                        {buscando && <div className="text-[11px] text-zinc-500 mt-1 flex items-center gap-1"><Search className="w-3 h-3" /> Buscando nos leads…</div>}
+                        {dropOpen && !buscando && (
+                            <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-zinc-800 border border-zinc-700 rounded-lg overflow-hidden shadow-2xl max-h-56 overflow-y-auto">
+                                {results.map((l) => (
+                                    <button key={l.uid} type="button" onClick={() => pickLead(l)}
+                                        className="w-full text-left px-3 py-2.5 hover:bg-zinc-700/60 border-b border-zinc-700/50">
+                                        <div className="text-[13px] font-semibold text-white">{l.nome}</div>
+                                        <div className="text-[11px] text-zinc-400">{[l.telefone, l.veiculo].filter(Boolean).join(' · ') || 'sem telefone visível'}</div>
+                                    </button>
+                                ))}
+                                <button type="button" onClick={cadastroNovo}
+                                    className="w-full text-left px-3 py-2.5 hover:bg-zinc-700/60 flex items-center gap-2 text-emerald-300 text-[13px] font-semibold">
+                                    <UserPlus className="w-4 h-4" />
+                                    {results.length === 0 ? 'Nenhum lead encontrado — cadastrar cliente novo' : 'Não é nenhum desses — cadastrar novo'}
+                                </button>
+                            </div>
+                        )}
                     </div>
                     <div>
                         <span className={label}>WhatsApp</span>

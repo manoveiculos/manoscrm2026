@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
-import { Trophy, X, CalendarPlus, ArrowLeft, MessageSquare, Activity, Archive, PlayCircle, Send } from 'lucide-react';
+import { Trophy, X, CalendarPlus, ArrowLeft, MessageSquare, Activity, Archive, PlayCircle, Send, Pencil } from 'lucide-react';
 import { parseUid } from '@/lib/services/unifiedLead';
 import CannedResponses, { CannedContext } from '@/components/CannedResponses';
 import FollowupHistory from '@/components/FollowupHistory';
@@ -403,6 +403,31 @@ export default function LeadDetailPage() {
         }
     }
 
+    // ── Editar nome do cliente / veículo de interesse ──
+    const [showEditInfo, setShowEditInfo] = useState(false);
+    const [editNome, setEditNome] = useState('');
+    const [editVeiculo, setEditVeiculo] = useState('');
+
+    async function handleUpdateInfo() {
+        if (!editNome.trim()) { alert('O nome não pode ficar vazio.'); return; }
+        setSubmitting(true);
+        try {
+            const res = await fetch('/api/lead/update-info', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ lead_id: leadId, lead_table: leadTable, name: editNome, vehicle_interest: editVeiculo }),
+            });
+            const data = await res.json();
+            if (!res.ok || !data.success) throw new Error(data.error || 'falha ao salvar');
+            setLead(prev => prev ? { ...prev, name: editNome.trim(), vehicle_interest: editVeiculo.trim() || null } : prev);
+            setShowEditInfo(false);
+        } catch (e: any) {
+            alert('Erro: ' + (e?.message || 'tente de novo'));
+        } finally {
+            setSubmitting(false);
+        }
+    }
+
     async function handleSchedule() {
         if (!scheduleAt) return;
         setSubmitting(true);
@@ -415,9 +440,26 @@ export default function LeadDetailPage() {
                 status: 'pending',
                 notes: scheduleNote || 'Retorno agendado pelo vendedor',
             });
+            // Cai na Agenda de Visitas (dispara webhook de criação + lembretes 24h/dia/2h)
+            const phoneOk = lead?.phone && !String(lead.phone).includes('*') ? lead.phone : null;
+            await fetch('/api/agenda', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    cliente_nome: lead?.name || 'Sem nome',
+                    cliente_telefone: phoneOk,
+                    cliente_whatsapp: phoneOk,
+                    veiculo_interesse: lead?.vehicle_interest || null,
+                    tipo: 'loja',
+                    data_hora: new Date(scheduleAt).toISOString(),
+                    observacoes: scheduleNote || null,
+                    lead_uid: `${leadTable}:${leadId}`,
+                }),
+            }).catch(() => { /* follow-up já registrado; agenda é best-effort */ });
             setShowSchedule(false);
             setScheduleAt('');
             setScheduleNote('');
+            alert('✅ Visita agendada! Ela está na sua Agenda e os lembretes automáticos foram ativados.');
         } finally {
             setSubmitting(false);
         }
@@ -474,9 +516,17 @@ export default function LeadDetailPage() {
             <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
                 {/* Esquerda — dados */}
                 <aside className="md:col-span-3 bg-zinc-900 rounded-lg p-3 md:p-4 min-w-0">
-                    <h2 className="text-xl font-black text-white">{lead.name || 'Sem nome'}</h2>
+                    <h2 className="text-xl font-black text-white flex items-center gap-2">
+                        <span className="truncate">{lead.name || 'Sem nome'}</span>
+                        <button
+                            onClick={() => { setEditNome(lead.name || ''); setEditVeiculo(lead.vehicle_interest || ''); setShowEditInfo(true); }}
+                            className="shrink-0 text-zinc-500 hover:text-white transition-colors" title="Editar nome / veículo de interesse"
+                        >
+                            <Pencil className="w-4 h-4" />
+                        </button>
+                    </h2>
                     <p className="text-sm text-gray-400 mt-1">{lead.phone || '—'}</p>
-                    
+
                     <div className="mt-4 space-y-2 text-sm bg-zinc-950/40 p-3 rounded-xl border border-zinc-800/40">
                         <div>
                             <span className="text-zinc-500 font-medium block text-[11px] uppercase tracking-wider mb-0.5">🚗 Veículo de Interesse</span>
@@ -690,6 +740,10 @@ export default function LeadDetailPage() {
                                         alert(`🔒 ${data.error}\n\nVocê não pode atender — outro vendedor já está cuidando deste lead.`);
                                         return;
                                     }
+                                    if (res.status === 429 && data.throttled) {
+                                        alert(`⏳ ${data.error}`);
+                                        return;
+                                    }
                                     if (!res.ok || !data.success) throw new Error(data.error || 'falha');
                                     setLead(prev => prev ? { ...prev, atendimento_iniciado_em: data.started_at || new Date().toISOString(), assigned_consultant_id: data.consultant_id } : prev);
                                     if (data.consultant_name) {
@@ -840,6 +894,18 @@ export default function LeadDetailPage() {
                     </Modal>
                 );
             })()}
+
+            {showEditInfo && (
+                <Modal title="Editar cliente" onClose={() => setShowEditInfo(false)}>
+                    <label className="block text-sm text-gray-300 mb-1">Nome do cliente *</label>
+                    <input value={editNome} onChange={e => setEditNome(e.target.value)} className="w-full p-2 rounded bg-zinc-800 text-white mb-3" placeholder="Nome completo" />
+                    <label className="block text-sm text-gray-300 mb-1">Veículo de interesse</label>
+                    <input value={editVeiculo} onChange={e => setEditVeiculo(e.target.value)} className="w-full p-2 rounded bg-zinc-800 text-white mb-4" placeholder="Ex.: Onix 1.0 2020 prata" />
+                    <button disabled={submitting || !editNome.trim()} onClick={handleUpdateInfo} className="w-full bg-blue-600 disabled:bg-gray-700 text-white py-3 rounded font-bold">
+                        {submitting ? 'Salvando…' : 'SALVAR'}
+                    </button>
+                </Modal>
+            )}
 
             {showSchedule && (
                 <Modal title="Agendar retorno" onClose={() => setShowSchedule(false)}>
