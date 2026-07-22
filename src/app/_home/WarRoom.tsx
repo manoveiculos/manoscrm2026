@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client';
 import {
     Trophy, XCircle, Users, AlertTriangle, Inbox, Zap, Pause,
     Flame, Clock, UserCheck, CheckCircle2, MessageSquare, Bot,
-    TrendingUp, ArrowRight, ChevronRight,
+    TrendingUp, ArrowRight, ChevronRight, CalendarClock,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -108,6 +108,38 @@ export default function WarRoom({ authId }: { authId: string | null }) {
                     {/* PAINEL DE AÇÃO */}
                     <div>
                         <h2 className="text-lg font-bold text-white flex items-center gap-2 mb-3"><Zap className="w-5 h-5 text-amber-400" /> O que fazer agora</h2>
+                        {/* Agenda de visitas — a nova meta é visita marcada */}
+                        <a href="/agenda" className="flex items-center gap-3 p-3.5 mb-2 rounded-2xl border border-red-500/30 bg-red-500/5 hover:bg-red-500/10 transition-colors">
+                            <span className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 text-red-400 bg-black/20"><CalendarClock className="w-4 h-4" /></span>
+                            <div className="flex-1 min-w-0">
+                                {isGer ? (
+                                    (data?.agenda?.hoje || 0) > 0 ? (
+                                        <>
+                                            <div className="text-sm font-bold text-zinc-100">{data.agenda.hoje} visita(s) hoje · {data.agenda.loja} na loja · {data.agenda.externa} externa(s)</div>
+                                            <div className="text-[12px] text-amber-400">{data.agenda.sem_confirmacao} sem confirmação — cobrar o time pra confirmar.</div>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <div className="text-sm font-bold text-zinc-100">Nenhuma visita agendada na loja hoje</div>
+                                            <div className="text-[12px] text-zinc-500">Toda conversa tem que virar visita. Cobre o time.</div>
+                                        </>
+                                    )
+                                ) : (
+                                    (data?.agenda?.hoje || 0) + (data?.agenda?.amanha || 0) > 0 ? (
+                                        <>
+                                            <div className="text-sm font-bold text-zinc-100">Você tem {data.agenda.hoje} visita(s) hoje e {data.agenda.amanha} amanhã</div>
+                                            <div className="text-[12px] text-zinc-500">Confirme cada uma e não deixe faltar.</div>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <div className="text-sm font-bold text-zinc-100">Nenhuma visita agendada</div>
+                                            <div className="text-[12px] text-zinc-500">Toda conversa tem que virar visita — bora agendar.</div>
+                                        </>
+                                    )
+                                )}
+                            </div>
+                            <ArrowRight className="w-4 h-4 text-zinc-500 shrink-0" />
+                        </a>
                         <div className="space-y-2">
                             {(data?.acoes || []).map((a: any, i: number) => {
                                 const s = SEV[a.sev] || SEV.info;

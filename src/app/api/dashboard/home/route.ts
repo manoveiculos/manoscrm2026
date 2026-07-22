@@ -41,7 +41,7 @@ export async function GET(request: Request) {
 
         // ── Dados base em paralelo ──
         const dobras48 = new Date(now - 48 * 3600_000).toISOString();
-        const [consRes, activeRes, wonRes, lostRes, settingsRes, staleRes] = await Promise.all([
+        const [consRes, activeRes, wonRes, lostRes, settingsRes, staleRes, agendaRes] = await Promise.all([
             supabaseAdmin.from('consultants_manos_crm').select('id, name, role, email, is_active').eq('is_active', true),
             supabaseAdmin.from('leads_unified_active').select(
                 'uid, name, vehicle_interest, ai_score, status, assigned_consultant_id, atendimento_iniciado_em, ultima_interacao_humana, first_contact_at, flagged_reversao, created_at'
@@ -52,6 +52,12 @@ export async function GET(request: Request) {
             // Cruft: leads travados em 'received/triagem', nunca atendidos e antigos (>48h) — higiene, não oportunidade quente
             supabaseAdmin.from('leads_unified').select('uid', { count: 'exact', head: true })
                 .in('status', ['received', 'triagem', 'novo']).is('atendimento_iniciado_em', null).lt('created_at', dobras48),
+            // Agenda de visitas: hoje + amanhã (janela de 2 dias a partir de hoje BRT)
+            supabaseAdmin.from('agendamentos')
+                .select('vendedor_id, data_hora, tipo, status')
+                .in('status', ['agendado', 'confirmado'])
+                .gte('data_hora', startToday)
+                .lt('data_hora', new Date(new Date(startToday).getTime() + 2 * 86400_000).toISOString()),
         ]);
 
         const consultants = consRes.data || [];
@@ -60,6 +66,22 @@ export async function GET(request: Request) {
         const lostRows = lostRes.data || [];
         const aiPaused = !!settingsRes.data?.ai_paused;
         const capturaAntiga = staleRes.count || 0;
+
+        // ── Agenda de visitas (hoje/amanhã) ──
+        const agenda = agendaRes.data || [];
+        const amanhaStart = new Date(startToday).getTime() + 86400_000;
+        const agHoje = agenda.filter((a: any) => new Date(a.data_hora).getTime() < amanhaStart);
+        const agAmanha = agenda.filter((a: any) => new Date(a.data_hora).getTime() >= amanhaStart);
+        const agendaConsultor = (cid: string | null) => ({
+            hoje: agHoje.filter((a: any) => a.vendedor_id === cid).length,
+            amanha: agAmanha.filter((a: any) => a.vendedor_id === cid).length,
+        });
+        const agendaLoja = {
+            hoje: agHoje.length,
+            loja: agHoje.filter((a: any) => a.tipo === 'loja').length,
+            externa: agHoje.filter((a: any) => a.tipo === 'externa').length,
+            sem_confirmacao: agHoje.filter((a: any) => a.status === 'agendado').length,
+        };
 
         // Vendedores do chão de loja (exclui Camila/cobrança)
         const vendedores = consultants.filter((c: any) => c.role === 'vendedor' && !CAMILA_EMAILS.has((c.email || '').toLowerCase()));
@@ -152,7 +174,7 @@ export async function GET(request: Request) {
             if (capturaAntiga >= 10) acoes.push({ sev: 'info', icon: 'inbox', titulo: `${capturaAntiga} leads antigos travados sem atendimento`, detalhe: 'Parados há +48h em "received", nunca atendidos. Arquivar ou reprocessar pra limpar a base.' });
             if (acoes.length === 0) acoes.push({ sev: 'ok', icon: 'check', titulo: 'Loja em dia', detalhe: 'Nenhum lead quente ou esfriando pendente. Bom momento pra prospectar.' });
 
-            return NextResponse.json({ success: true, view, nome: firstName(me?.name), ai_paused: aiPaused, kpis: kpisLoja, ranking, acoes, atividade: atividadeTop });
+            return NextResponse.json({ success: true, view, nome: firstName(me?.name), ai_paused: aiPaused, kpis: kpisLoja, ranking, acoes, atividade: atividadeTop, agenda: agendaLoja });
         }
 
         // ═══════════════════ CONSULTOR ═══════════════════
@@ -186,7 +208,7 @@ export async function GET(request: Request) {
         if (esf > 0) acoes.push({ sev: 'aviso', icon: 'clock', titulo: `${esf} esfriando há +8h`, detalhe: 'Manda um retorno antes de virar perdido por inatividade.' });
         if (acoes.length === 0) acoes.push({ sev: 'ok', icon: 'check', titulo: 'Fila limpa 👏', detalhe: meus.length ? 'Nada urgente. Siga trabalhando sua fila.' : 'Sem leads na sua fila. Vá pescar no Inbox.', cta: { label: 'Abrir Inbox', href: '/inbox' } });
 
-        return NextResponse.json({ success: true, view, nome: firstName(me?.name), ai_paused: aiPaused, kpis: kpisMe, foco: focoLista, acoes, atividade: atividadeTop });
+        return NextResponse.json({ success: true, view, nome: firstName(me?.name), ai_paused: aiPaused, kpis: kpisMe, foco: focoLista, acoes, atividade: atividadeTop, agenda: agendaConsultor(authId) });
     } catch (err: any) {
         console.error('[API dashboard/home] erro:', err?.message);
         return NextResponse.json({ success: false, error: err?.message || 'erro' }, { status: 500 });

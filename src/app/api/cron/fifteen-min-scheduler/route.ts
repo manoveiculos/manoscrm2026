@@ -21,6 +21,7 @@ export async function GET(req: NextRequest) {
 
     const tasks = [
         { name: 'sla-watcher', path: '/api/cron/sla-watcher' },
+        { name: 'agenda-lembretes', path: '/api/cron/agenda-lembretes' },
     ];
 
     const results: Record<string, string> = {};

@@ -324,7 +324,15 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                 </div>
             )}
 
-            <QuickActions onOpenFinish={(type) => { setShowFinishing(true); setFinishType(type); }} />
+            <QuickActions
+                onOpenFinish={(type) => { setShowFinishing(true); setFinishType(type); }}
+                agendarPrefill={{
+                    nome: (lead.name as string) || '',
+                    telefone: ((lead.phone as string) || '').includes('*') ? '' : (lead.phone as string) || '',
+                    veiculo: (lead.vehicle_interest as string) || '',
+                    leadUid: `${(lead as any).table_name || 'leads_manos_crm'}:${lead.id}`,
+                }}
+            />
         </div>
     );
 };

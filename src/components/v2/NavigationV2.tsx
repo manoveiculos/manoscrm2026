@@ -26,6 +26,7 @@ import {
     Banknote, // Projeto Milhão (exclusivo Alexandre)
     Store, // App de Repasse (Paulo)
     Bike, // App de Scooters (Renato) — exclusivo Alexandre
+    CalendarClock, // Agenda de Visitas
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
@@ -50,6 +51,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
     { label: 'Inbox', icon: Bot, href: '/inbox' },
     { label: 'Atendimento', icon: PlayCircle, href: '/atendimento' },
+    { label: 'Agenda', icon: CalendarClock, href: '/agenda' },
     { label: 'Leads', icon: LayoutDashboard, href: '/leads' },
     { label: 'Compras', icon: Radar, href: '/compras' },
     { label: 'Repasse', icon: DollarSign, href: '/repasse' },

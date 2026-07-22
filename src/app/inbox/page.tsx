@@ -7,6 +7,7 @@ import dynamic from 'next/dynamic';
 import { createClient } from '@/lib/supabase/client';
 import { parseUid } from '@/lib/services/unifiedLead';
 import { Flame, Snowflake, Thermometer, Clock, Phone, Wifi, Bell, X, AlertTriangle, MessageCircle, Zap, PhoneOff } from 'lucide-react';
+import AgendaStrip from '@/app/agenda/_components/AgendaStrip';
 
 const PTR = dynamic(() => import('react-pull-to-refresh'), { ssr: false }) as any;
 
@@ -686,6 +687,8 @@ export default function InboxPage() {
                     ))}
                 </div>
             </div>
+
+            <AgendaStrip />
 
             {filter !== 'archived' && (
                 <div className="flex items-center gap-3 mb-5 text-xs text-gray-400">
