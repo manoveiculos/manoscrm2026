@@ -7,6 +7,7 @@
  */
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
+import { createClient } from '@/lib/supabase/client';
 
 // ---------- Design tokens ----------
 const C = {
@@ -419,6 +420,12 @@ export default function ScootersApp({ adminBadge = false }: { adminBadge?: boole
     const delDespesa = (id: string) => call(`/api/scooters/despesas/${id}`, 'DELETE');
     const setMeta = (meta: number) => call('/api/scooters/config', 'PATCH', { meta });
 
+    const logout = async () => {
+        if (!confirm('Sair da conta?')) return;
+        try { await createClient().auth.signOut(); } catch { /* segue pro login mesmo assim */ }
+        window.location.href = '/login';
+    };
+
     if (!data) {
         return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: C.bg, fontFamily: "'Inter', sans-serif", color: C.inkSoft }}>{err ? `Erro: ${err}` : 'Carregando…'}</div>;
     }
@@ -436,11 +443,16 @@ export default function ScootersApp({ adminBadge = false }: { adminBadge?: boole
     return (
         <div style={{ minHeight: '100vh', background: C.bg, fontFamily: "'Inter', sans-serif" }}>
             <div style={{ maxWidth: 480, margin: '0 auto', padding: '18px 16px 96px' }}>
-                <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 16 }}>
+                <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                     <div>
                         <div style={{ fontSize: 12, letterSpacing: 1.5, fontWeight: 700, color: C.volt, textTransform: 'uppercase' }}>RG Scooters {adminBadge && '· admin'}</div>
                         <h1 style={{ margin: '2px 0 0', fontFamily: "'Space Grotesk', sans-serif", fontSize: 26, color: C.ink }}>{titles[tab]}</h1>
                     </div>
+                    {!adminBadge && (
+                        <button onClick={logout} style={{ border: `1px solid ${C.line}`, background: C.surface, color: C.inkSoft, borderRadius: 10, padding: '9px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                            ⏻ Sair
+                        </button>
+                    )}
                 </header>
 
                 {tab === 'inicio' && <Dashboard data={data} setModal={setModal} />}
