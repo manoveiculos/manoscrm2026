@@ -64,6 +64,7 @@ const NAV_ITEMS: NavItem[] = [
     { label: 'Scooters', icon: Bike, href: '/admin/scooters', alexandreOnly: true },
     { label: 'Conversão', icon: BarChart3, href: '/admin/conversion', adminOnly: true },
     { label: 'Resgate', icon: Bot, href: '/admin/rescue', adminOnly: true },
+    { label: 'Perdidos', icon: ClipboardCheck, href: '/admin/perdidos', adminOnly: true },
     { label: 'Consultores', icon: Shield, href: '/admin/users', adminOnly: true },
     { label: 'Saúde', icon: Activity, href: '/admin/health', adminOnly: true },
     { label: 'SDR Bench', icon: Bot, href: '/admin/sdr-bench', adminOnly: true },

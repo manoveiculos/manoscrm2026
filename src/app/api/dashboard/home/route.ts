@@ -171,6 +171,10 @@ export async function GET(request: Request) {
             }
             if (reversaoRespondeu > 0) acoes.push({ sev: 'aviso', icon: 'flame', titulo: `${reversaoRespondeu} cliente(s) responderam à reversão`, detalhe: 'Lead quente de volta — retomar antes que esfrie.' });
             if (kpisLoja.perdas_hoje > 0) acoes.push({ sev: 'info', icon: 'x', titulo: `${kpisLoja.perdas_hoje} perdido(s) hoje`, detalhe: 'Revisar motivos — a Karol tenta reverter automático.' });
+            // Auditoria de perdidos aguardando pesquisa de satisfação (tabela pode não existir ainda — degrada pra 0)
+            const { count: audPend } = await supabaseAdmin.from('perdidos_auditoria')
+                .select('id', { count: 'exact', head: true }).eq('status_auditoria', 'pendente');
+            if ((audPend || 0) > 0) acoes.push({ sev: 'aviso', icon: 'clock', titulo: `${audPend} perdido(s) aguardando auditoria`, detalhe: 'Ligue pro cliente: foi bem atendido? Ficou dúvida?', cta: { label: 'Abrir Perdidos', href: '/admin/perdidos' } });
             if (capturaAntiga >= 10) acoes.push({ sev: 'info', icon: 'inbox', titulo: `${capturaAntiga} leads antigos travados sem atendimento`, detalhe: 'Parados há +48h em "received", nunca atendidos. Arquivar ou reprocessar pra limpar a base.' });
             if (acoes.length === 0) acoes.push({ sev: 'ok', icon: 'check', titulo: 'Loja em dia', detalhe: 'Nenhum lead quente ou esfriando pendente. Bom momento pra prospectar.' });
 
@@ -200,6 +204,13 @@ export async function GET(request: Request) {
             .map((l) => ({ uid: l.uid, nome: firstName(l.name), veiculo: l.vehicle_interest || null, motivo: l.motivo, ai_score: l.ai_score || 0 }));
 
         const acoes: any[] = [];
+        // Cobrança da gerência (auditoria de perdidos) — aparece até ser resolvida
+        if (consId) {
+            const { count: cobrancas } = await supabaseAdmin.from('perdidos_auditoria')
+                .select('id', { count: 'exact', head: true })
+                .eq('vendedor_consultant_id', consId).eq('gerar_cobranca', true).eq('cobranca_resolvida', false);
+            if ((cobrancas || 0) > 0) acoes.push({ sev: 'critico', icon: 'x', titulo: `A gerência cobrou você em ${cobrancas} atendimento(s) perdido(s)`, detalhe: 'Cliente relatou problema no atendimento. Fale com o Alexandre hoje.' });
+        }
         const qSemResp = meus.filter((l) => isHot(l) && semResposta(l)).length;
         const esf = meus.filter(esfriando).length;
         const rev = meus.filter((l) => l.flagged_reversao).length;
