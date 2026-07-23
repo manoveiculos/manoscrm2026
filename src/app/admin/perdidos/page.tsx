@@ -23,8 +23,10 @@ export default function PerdidosPage() {
     const [allowed, setAllowed] = useState<boolean | null>(null);
     const [lista, setLista] = useState<Perdido[]>([]);
     const [loading, setLoading] = useState(true);
-    const [filtro, setFiltro] = useState<'pendente' | 'contatado' | 'todos'>('pendente');
+    const [filtro, setFiltro] = useState<'pendente' | 'contatado' | 'sem_resposta' | 'resolvido' | 'todos'>('pendente');
     const [vendFiltro, setVendFiltro] = useState('todos');
+    const [periodo, setPeriodo] = useState<'15' | '30' | 'todos'>('15'); // foco no fresco: 15d por padrão
+    const [catFiltro, setCatFiltro] = useState<'todos' | 'perdido' | 'spam'>('todos');
     const [auditando, setAuditando] = useState<Perdido | null>(null);
     const [conversaDe, setConversaDe] = useState<Perdido | null>(null);
 
@@ -52,18 +54,26 @@ export default function PerdidosPage() {
     useEffect(() => { if (allowed) load(); }, [allowed]);
 
     const vendedores = useMemo(() => [...new Set(lista.map((p) => p.vendedor_nome).filter(Boolean))] as string[], [lista]);
-    const filtrados = useMemo(() => lista.filter((p) => {
-        if (filtro === 'pendente' && p.status_auditoria !== 'pendente') return false;
-        if (filtro === 'contatado' && !['contatado', 'sem_resposta', 'resolvido'].includes(p.status_auditoria)) return false;
+
+    // Base do período (15d/30d/todos) — KPIs e lista partem daqui
+    const noPeriodo = useMemo(() => {
+        if (periodo === 'todos') return lista;
+        const corte = Date.now() - Number(periodo) * 86400_000;
+        return lista.filter((p) => p.perdido_em && new Date(p.perdido_em).getTime() >= corte);
+    }, [lista, periodo]);
+
+    const filtrados = useMemo(() => noPeriodo.filter((p) => {
+        if (filtro !== 'todos' && p.status_auditoria !== filtro) return false;
+        if (catFiltro !== 'todos' && p.categoria !== catFiltro) return false;
         if (vendFiltro !== 'todos' && p.vendedor_nome !== vendFiltro) return false;
         return true;
-    }), [lista, filtro, vendFiltro]);
+    }), [noPeriodo, filtro, catFiltro, vendFiltro]);
 
     const kpi = useMemo(() => ({
-        pendentes: lista.filter((p) => p.status_auditoria === 'pendente').length,
-        malAtendidos: lista.filter((p) => p.bem_atendido === false).length,
-        cobrancas: lista.filter((p) => p.gerar_cobranca && !p.cobranca_resolvida).length,
-    }), [lista]);
+        pendentes: noPeriodo.filter((p) => p.status_auditoria === 'pendente').length,
+        malAtendidos: noPeriodo.filter((p) => p.bem_atendido === false).length,
+        cobrancas: noPeriodo.filter((p) => p.gerar_cobranca && !p.cobranca_resolvida).length,
+    }), [noPeriodo]);
 
     if (allowed === null) return <div className="p-6 text-gray-400">Verificando acesso…</div>;
     if (!allowed) return (
@@ -92,14 +102,33 @@ export default function PerdidosPage() {
                 <div className="bg-fuchsia-500/5 border border-fuchsia-500/20 rounded-xl p-3"><div className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Cobranças abertas</div><div className="text-2xl font-black text-fuchsia-400">{kpi.cobrancas}</div></div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2 mb-4">
-                {([['pendente', 'Pendentes'], ['contatado', 'Já contatados'], ['todos', 'Todos']] as const).map(([k, l]) => (
-                    <button key={k} onClick={() => setFiltro(k)} className={`px-3 py-1.5 rounded-lg text-[12px] font-bold ${filtro === k ? 'bg-red-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-white'}`}>{l}</button>
-                ))}
-                <select value={vendFiltro} onChange={(e) => setVendFiltro(e.target.value)} className="ml-auto bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-[12px] text-white outline-none">
-                    <option value="todos">Todos os vendedores</option>
-                    {vendedores.map((v) => <option key={v} value={v}>{v}</option>)}
-                </select>
+            <div className="space-y-2 mb-4">
+                {/* Período — foco no fresco */}
+                <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-zinc-600 w-16">Período</span>
+                    {([['15', 'Últimos 15 dias'], ['30', '30 dias'], ['todos', 'Tudo (90d)']] as const).map(([k, l]) => (
+                        <button key={k} onClick={() => setPeriodo(k)} className={`px-3 py-1.5 rounded-lg text-[12px] font-bold ${periodo === k ? 'bg-red-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-white'}`}>{l}</button>
+                    ))}
+                    <select value={vendFiltro} onChange={(e) => setVendFiltro(e.target.value)} className="ml-auto bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1.5 text-[12px] text-white outline-none">
+                        <option value="todos">Todos os vendedores</option>
+                        {vendedores.map((v) => <option key={v} value={v}>{v}</option>)}
+                    </select>
+                </div>
+                {/* Status da auditoria */}
+                <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-zinc-600 w-16">Status</span>
+                    {([['pendente', 'Pendentes'], ['contatado', 'Contatados'], ['sem_resposta', 'Sem resposta'], ['resolvido', 'Resolvidos'], ['todos', 'Todos']] as const).map(([k, l]) => (
+                        <button key={k} onClick={() => setFiltro(k)} className={`px-3 py-1.5 rounded-lg text-[12px] font-bold ${filtro === k ? 'bg-amber-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-white'}`}>{l}</button>
+                    ))}
+                </div>
+                {/* Categoria */}
+                <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-zinc-600 w-16">Tipo</span>
+                    {([['todos', 'Todos'], ['perdido', 'Perdidos'], ['spam', 'Spam']] as const).map(([k, l]) => (
+                        <button key={k} onClick={() => setCatFiltro(k)} className={`px-3 py-1.5 rounded-lg text-[12px] font-bold ${catFiltro === k ? 'bg-zinc-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-white'}`}>{l}</button>
+                    ))}
+                    <span className="ml-auto text-[11px] text-zinc-500">{filtrados.length} lead(s) no filtro</span>
+                </div>
             </div>
 
             {loading ? <div className="text-zinc-500 py-10 text-center">Carregando…</div>
