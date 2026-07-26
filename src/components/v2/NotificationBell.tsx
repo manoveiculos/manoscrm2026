@@ -69,7 +69,8 @@ export const NotificationBell = ({ isCollapsed, role }: NotificationBellProps) =
     const handleLeadClick = (leadId: string) => {
         markSeen(leadId);
         setIsOpen(false);
-        router.push(`/pipeline?lead=${leadId}`);
+        // Pesca fica no /inbox (o /pipeline é admin-only). Deep-link opcional por uid.
+        router.push(`/inbox?lead=${encodeURIComponent(leadId)}`);
     };
 
     return (

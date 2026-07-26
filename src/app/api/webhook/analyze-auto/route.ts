@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { OpenAI } from 'openai';
-import { pickNextConsultant } from '@/lib/services/consultantService';
 
 export const maxDuration = 60; // Limite de 60s na Vercel
 
@@ -94,23 +93,8 @@ RETORNE UM JSON EXATAMENTE COM ESTAS CHAVES:
 
         const aiData = JSON.parse(output_text);
 
-        // 5. Salva de volta no Lead e garante ATRIBUIÇÃO se estiver faltando
-        let consultantId = lead.assigned_consultant_id;
-        let consultantName = lead.vendedor;
-
-        if (!consultantId) {
-            try {
-                const nextCons = await pickNextConsultant(lead.nome);
-                if (nextCons) {
-                    consultantId = nextCons.id;
-                    consultantName = nextCons.name;
-                    console.log(`[Auto Analyze Safety] Atribuindo lead ${lead.nome} (ID: ${leadId}) para ${consultantName}`);
-                }
-            } catch (err) {
-                console.error('[Auto Analyze Safety] Erro na atribuição automática:', err);
-            }
-        }
-
+        // 5. Salva de volta SÓ os campos de IA. PESCA PURA: analyze-auto não
+        // mexe em dono — lead sem vendedor continua na pesca.
         const behavioralPayload = {
             sentiment: aiData.sentiment || 'Neutro',
             intentions: aiData.intentions || ['Curiosidade inicial'],
@@ -127,9 +111,6 @@ RETORNE UM JSON EXATAMENTE COM ESTAS CHAVES:
                 next_step: aiData.next_step || 'Aguardar contato.',
                 ai_summary: aiData.ai_summary || chatText.substring(0, 100),
                 behavioral_profile: behavioralPayload,
-                assigned_consultant_id: consultantId,
-                vendedor: consultantName,
-                primeiro_vendedor: lead.primeiro_vendedor || consultantName, // Preserva se já existir, senão define
                 atualizado_em: new Date().toISOString()
             })
             .eq('id', leadId);

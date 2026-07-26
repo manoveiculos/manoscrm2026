@@ -111,24 +111,10 @@ export async function POST(req: NextRequest) {
             body: JSON.stringify({ lead_id: cleanId }),
         }).catch(() => {});
 
-        // 8. Auto-atribuição (Round-Robin) se não tiver consultor
-        // Buscamos o lead atualizado para checar se já tem consultor
-        const { data: currentLead } = await admin
-            .from(tableName)
-            .select('assigned_consultant_id')
-            .eq('id', cleanId)
-            .maybeSingle();
+        // 8. PESCA PURA (Fase 1): sem auto-atribuição. Lead sem dono permanece
+        // na pesca — o vendedor disponível "chama" no /inbox.
 
-        if (!currentLead?.assigned_consultant_id) {
-            try {
-                const { assignNextConsultant } = await import('@/lib/services/autoAssignService');
-                await assignNextConsultant(cleanId, tableName as any);
-            } catch (assignErr) {
-                console.warn('[init-score] auto-assignment failed:', assignErr);
-            }
-        }
-
-        // 9. Notificar vendedor
+        // 9. Notificar (in-app)
         notifyLeadArrival(cleanId).catch(e =>
             console.warn('[init-score] vendor notify failed:', e?.message)
         );

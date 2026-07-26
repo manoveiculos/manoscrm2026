@@ -2,9 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/services/supabaseClients';
 import { runEliteCloser } from '@/lib/services/ai-closer-service';
 import { runGenerateProposal } from '@/lib/services/proposal-service';
-import { assignNextConsultant } from '@/lib/services/autoAssignService';
 import { notifyLeadArrival } from '@/lib/services/vendorNotifyService';
-import { scheduleFirstContact } from '@/lib/services/aiSdrService';
 
 /**
  * Facebook Lead Ads Webhook (CORRIGIDO: Auditoria Forense 2026-04-18)
@@ -122,13 +120,10 @@ export async function POST(req: NextRequest) {
                     if (newLead && newLead.id) {
                         const fullId = `compra_` + newLead.id;
 
-                        // 2. Atribuição Automática (Round-Robin) - Síncrona
-                        const consultantId = await assignNextConsultant(newLead.id, 'leads_compra');
-                        if (!consultantId) {
-                            console.error('[Webhook] Sem consultor disponível para lead', newLead.id);
-                        }
-                        
-                        // 3. Disparar Elite Closer Automático (IA Proativa) com Fallback
+                        // 2. PESCA PURA (Fase 1): lead entra SEM dono. Vendedor disponível
+                        // "chama" no /inbox. Sem atribuição automática.
+
+                        // 3. Elite Closer (IA de ANÁLISE/score — não fala com cliente) com Fallback
                         console.log(`[Webhook] Iniciando análise Elite Closer para lead: ${fullId}`);
                         const analysis = await runEliteCloser(fullId, [], 'SISTEMA').catch(async (e) => {
                             console.error('[Webhook] Elite Closer falhou:', e);
@@ -161,24 +156,14 @@ export async function POST(req: NextRequest) {
                             });
                         }
 
-                        // 4. Notificar Vendedor (Fire-and-forget) - SEMPRE dispara
+                        // 4. Notificar (in-app). notifyLeadArrival só empurra se houver
+                        // dono; na pesca é no-op (aviso fica no Inbox + sininho).
                         notifyLeadArrival(newLead.id).catch(e =>
                             console.warn('[Webhook] notifyLeadArrival falhou:', e?.message)
                         );
 
-                        // 4b. AI SDR — primeira mensagem ao CLIENTE em ~30s (enfileira no DB)
-                        // Garante que o lead nunca espere pelo vendedor pra ter resposta.
-                        await scheduleFirstContact({
-                            leadId: newLead.id,
-                            leadName: name,
-                            leadPhone: cleanPhone,
-                            vehicleInterest: interest || campaignName,
-                            source: finalSource,
-                            consultantName: null,
-                            flow: 'compra',
-                        }, 'leads_compra').catch(e => {
-                            console.error('[Webhook FB] enqueue AI SDR falhou:', e?.message);
-                        });
+                        // (Fase 1) AI SDR de primeiro contato REMOVIDO: zero IA falando
+                        // com cliente. Lead aguarda o vendedor humano.
 
                         // 5. Gerar Proposta Automática se o Score for > 60
                         if (analysis && analysis.urgencyScore > 60) {

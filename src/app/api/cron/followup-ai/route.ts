@@ -44,6 +44,16 @@ export async function GET(request: Request) {
         return new NextResponse('Unauthorized', { status: 401 });
     }
 
+    // KILL SWITCH (Fase 1): nenhuma IA fala com cliente. A reversão (Karol) dorme
+    // até AI_CLIENTE_ATIVA=true. Código permanece, só não dispara.
+    if (process.env.AI_CLIENTE_ATIVA !== 'true') {
+        return NextResponse.json({
+            success: true,
+            disabled: true,
+            message: 'IA de reversão desligada (AI_CLIENTE_ATIVA != true).',
+        });
+    }
+
     return await withHeartbeat('followup-ai', async () => {
         const out = await runReversaoAgent();
         return { result: NextResponse.json(out), metrics: out };

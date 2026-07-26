@@ -25,6 +25,17 @@ export async function GET(request: Request) {
         return new NextResponse('Unauthorized', { status: 401 });
     }
 
+    // KILL SWITCH (Fase 1): nenhuma IA fala com cliente. O runner que drena a
+    // fila (primeiro contato + reversão) dorme até AI_CLIENTE_ATIVA=true.
+    if (process.env.AI_CLIENTE_ATIVA !== 'true') {
+        return NextResponse.json({
+            ok: true,
+            disabled: true,
+            processed: 0,
+            message: 'AI SDR runner desligado (AI_CLIENTE_ATIVA != true).',
+        });
+    }
+
     return await withHeartbeat('ai-sdr-runner', async () => {
         const out = await runAiSdrQueue();
         return { result: NextResponse.json(out), metrics: out };

@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/admin';
-import { assignNextConsultant } from '@/lib/services/autoAssignService';
-import { scheduleFirstContact } from '@/lib/services/aiSdrService';
 import { notifyLeadArrival } from '@/lib/services/vendorNotifyService';
 
 /**
@@ -19,9 +17,10 @@ import { notifyLeadArrival } from '@/lib/services/vendorNotifyService';
 
 export async function POST(req: NextRequest) {
     const admin = createClient();
+    let body: any = null;
     try {
-        const body = await req.json();
-        
+        body = await req.json();
+
         // Normalização de campos
         const name = body.name || body.nome || 'Lead Integrado';
         const rawPhone = body.phone || body.telefone || body.celular || '';
@@ -35,36 +34,41 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: 'Telefone inválido ou ausente' }, { status: 400 });
         }
 
-        // 1. DEDUPLICAÇÃO (Check de 30 dias)
-        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
-        const { data: existing } = await admin
-            .from('leads_manos_crm')
-            .select('id, status, assigned_consultant_id')
-            .eq('phone', cleanPhone)
-            .gte('created_at', thirtyDaysAgo)
-            .order('created_at', { ascending: false })
-            .limit(1)
+        // 1. DEDUPLICAÇÃO UNIFICADA — varre as 3 tabelas de lead (dist + manos +
+        // compra) via RPC, não só a leads_manos_crm. Evita duplicata cross-tabela
+        // (ex.: lead que já veio pelo WhatsApp e agora entra por um portal).
+        const { data: matchRaw } = await admin
+            .rpc('find_lead_by_phone', { p_phone: cleanPhone })
             .maybeSingle();
+        const match = matchRaw as any;
 
-        if (existing) {
-            // Se já existe e não é status final, apenas atualiza
-            const finalStatuses = ['vendido', 'perdido', 'lost', 'lost_by_inactivity'];
-            if (!finalStatuses.includes(existing.status)) {
-                await admin.from('leads_manos_crm').update({
-                    updated_at: new Date().toISOString(),
-                    resumo: `[RE-ENTRADA via ${source}]: ${message}\n\n` + (body.old_resumo || '')
-                }).eq('id', existing.id);
+        if (match?.native_id) {
+            const table = String(match.table_name);
+            const isDist = table === 'leads_distribuicao_crm_26';
+            const nativeId: any = isDist ? parseInt(String(match.native_id), 10) : match.native_id;
+            const nowIso = new Date().toISOString();
 
-                return NextResponse.json({ 
-                    success: true, 
-                    duplicated: true, 
-                    lead_id: existing.id, 
-                    message: 'Lead já existente. Atualizado histórico.' 
-                });
-            }
+            // Preserva o resumo existente, prepende a nota de re-entrada.
+            const { data: cur } = await admin.from(table).select('resumo').eq('id', nativeId).maybeSingle();
+            const novoResumo = `[RE-ENTRADA via ${source} — ${nowIso}]: ${message}\n\n${(cur as any)?.resumo || ''}`.slice(0, 8000);
+
+            // Re-entrada NÃO reatribui: se o lead estava sem dono, segue na pesca.
+            const upd: Record<string, any> = { resumo: novoResumo };
+            if (isDist) upd.atualizado_em = nowIso; else upd.updated_at = nowIso;
+
+            await admin.from(table).update(upd).eq('id', nativeId);
+
+            return NextResponse.json({
+                success: true,
+                duplicated: true,
+                lead_id: match.native_id,
+                table,
+                message: 'Lead já existente (dedup 3 tabelas). Histórico atualizado, pesca preservada.'
+            });
         }
 
-        // 2. CRIAÇÃO DE NOVO LEAD
+        // 2. CRIAÇÃO DE NOVO LEAD — PESCA PURA: entra SEM dono. Sem atribuição
+        // automática e sem AI SDR (zero IA falando com cliente).
         const { data: newLead, error: insertError } = await admin
             .from('leads_manos_crm')
             .insert({
@@ -74,6 +78,7 @@ export async function POST(req: NextRequest) {
                 vehicle_interest: vehicle,
                 source: `${source} (API)`,
                 status: 'new',
+                assigned_consultant_id: null,
                 dados_brutos: body,
                 observacoes: message
             })
@@ -82,33 +87,30 @@ export async function POST(req: NextRequest) {
 
         if (insertError) throw insertError;
 
-        // 3. ATRIBUIÇÃO AUTOMÁTICA
-        const consultantId = await assignNextConsultant(newLead.id, 'leads_manos_crm');
+        // 3. Aviso in-app (Inbox + sininho). notifyLeadArrival é no-op sem dono.
+        notifyLeadArrival(newLead.id).catch(e =>
+            console.warn('[Webhook Universal] notifyLeadArrival falhou:', e?.message)
+        );
 
-        // 4. AI SDR (Primeiro Contato em ~30s — enfileira no DB)
-        await scheduleFirstContact({
-            leadId: newLead.id,
-            leadName: name,
-            leadPhone: cleanPhone,
-            vehicleInterest: vehicle,
-            source: source,
-            consultantName: null,
-            flow: 'venda',
-        }, 'leads_manos_crm').catch(e => {
-            console.error('[Webhook Universal] enqueue AI SDR falhou:', e?.message);
-        });
-
-        // 5. NOTIFICAÇÃO VENDEDOR
-        notifyLeadArrival(newLead.id).catch(console.error);
-
-        return NextResponse.json({ 
-            success: true, 
-            lead_id: newLead.id, 
-            assigned_to: consultantId 
+        return NextResponse.json({
+            success: true,
+            lead_id: newLead.id,
+            assigned_to: null,
+            pesca: true
         });
 
     } catch (err: any) {
         console.error('[Universal Webhook] Erro:', err.message);
+        // Dead-letter auditável: nunca perde um lead sem rastro.
+        try {
+            await admin.from('webhook_errors').insert({
+                source: 'universal',
+                error_message: err?.message || 'erro desconhecido',
+                payload: body ?? null,
+            });
+        } catch (e) {
+            console.error('[Universal Webhook] Falha ao gravar em webhook_errors:', (e as any)?.message);
+        }
         return NextResponse.json({ error: 'Erro interno', details: err.message }, { status: 500 });
     }
 }
