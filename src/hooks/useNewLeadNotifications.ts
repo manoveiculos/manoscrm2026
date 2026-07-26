@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 
 export interface NewLeadNotification {
-    id: string;
+    id: string;          // uid da view (ex.: "leads_distribuicao_crm_26:123")
     name: string;
     source: string;
     vehicle_interest: string;
@@ -26,126 +26,107 @@ interface UseNewLeadNotificationsResult {
 
 const SEEN_KEY_PREFIX = 'lead_notif_seen_';
 const FETCH_WINDOW_HOURS = 48;
+const POLL_MS = 45_000;
 
-function getSeenState(consultantId: string): SeenState {
+function getSeenState(key: string): SeenState {
     try {
-        const raw = localStorage.getItem(`${SEEN_KEY_PREFIX}${consultantId}`);
+        const raw = localStorage.getItem(`${SEEN_KEY_PREFIX}${key}`);
         if (raw) return JSON.parse(raw);
     } catch { /* ignore */ }
     return { ids: [], updatedAt: new Date().toISOString() };
 }
 
-function saveSeenState(consultantId: string, state: SeenState) {
-    localStorage.setItem(`${SEEN_KEY_PREFIX}${consultantId}`, JSON.stringify(state));
+function saveSeenState(key: string, state: SeenState) {
+    localStorage.setItem(`${SEEN_KEY_PREFIX}${key}`, JSON.stringify(state));
 }
 
 /**
- * Hook que monitora novos leads atribuídos ao consultor via Supabase Realtime.
- * Exibe notificação no sininho da sidebar.
+ * Sininho da FILA DE PESCA (Fase 1).
+ *
+ * Com pesca pura, todo lead entra SEM dono. O sininho mostra a pesca — leads
+ * ainda não capturados (assigned_consultant_id NULL e atendimento_iniciado_em
+ * NULL) — para TODOS os vendedores, de TODAS as fontes (WhatsApp/dist, manos,
+ * compra) via a view unificada `leads_unified_active` (que já exclui status
+ * finais). Quem clica "Iniciar Atendimento" no /inbox tira o lead da pesca.
+ *
+ * Antes: lia só `leads_manos_crm` e filtrava por assigned = eu — o que, sob
+ * pesca, mostraria NADA e ignorava todo lead de WhatsApp.
  */
-export function useNewLeadNotifications(role?: string | null): UseNewLeadNotificationsResult {
+export function useNewLeadNotifications(_role?: string | null): UseNewLeadNotificationsResult {
     const [leads, setLeads] = useState<NewLeadNotification[]>([]);
     const [loading, setLoading] = useState(true);
-    const [consultantId, setConsultantId] = useState<string | null>(null);
+    const [seenKey, setSeenKey] = useState<string>('anon');
     const [seenIds, setSeenIds] = useState<string[]>([]);
     const prevLeadIdsRef = useRef<Set<string>>(new Set());
 
-    // ── Resolve o ID do consultor logado ──────────────────────────────────
+    // ── Resolve uma chave estável pro estado "visto" (por usuário) ────────
     useEffect(() => {
         supabase.auth.getSession().then(({ data: { session } }: any) => {
-            const user = session?.user;
-            if (!user) {
-                setLoading(false);
-                return;
-            }
-            supabase
-                .from('consultants_manos_crm')
-                .select('id')
-                .or(`user_id.eq.${user.id},auth_id.eq.${user.id}`)
-                .maybeSingle()
-                .then(({ data }: any) => {
-                    if (data?.id) {
-                        setConsultantId(data.id);
-                        const seen = getSeenState(data.id);
-                        setSeenIds(seen.ids);
-                    } else {
-                        setLoading(false);
-                    }
-                });
-        }).catch((err: any) => {
-            if (err?.name === 'AbortError' || err?.message?.includes('steal')) {
-                console.warn('[useNewLeadNotifications] Lock de autenticação abortado (esperado ao reiniciar HMR ou múltiplas abas).');
-            } else {
-                console.error('[useNewLeadNotifications] Erro ao obter sessão:', err);
-            }
-            setLoading(false);
-        });
+            const key = session?.user?.id || 'anon';
+            setSeenKey(key);
+            setSeenIds(getSeenState(key).ids);
+        }).catch(() => { /* mantém 'anon' */ });
     }, []);
 
-    // ── Busca leads novos recentes ───────────────────────────────────────
-    const fetchLeads = useCallback(async (cid: string) => {
+    // ── Busca a fila de pesca (leads sem dono / não iniciados) ────────────
+    const fetchLeads = useCallback(async () => {
         const since = new Date();
         since.setHours(since.getHours() - FETCH_WINDOW_HOURS);
 
-        let query = supabase
-            .from('leads_manos_crm')
-            .select('id, name, source, vehicle_interest, created_at')
-            .in('status', ['new', 'received', 'entrada'])
+        const { data, error } = await supabase
+            .from('leads_unified_active')
+            .select('uid, name, source, vehicle_interest, created_at')
+            .is('assigned_consultant_id', null)
+            .is('atendimento_iniciado_em', null)
             .gte('created_at', since.toISOString())
             .order('created_at', { ascending: false })
-            .limit(20);
-
-        // Admin vê todos, consultor vê só os seus
-        if (role !== 'admin') {
-            query = query.eq('assigned_consultant_id', cid);
-        }
-
-        const { data, error } = await query;
+            .limit(30);
 
         if (!error && data) {
-            const newLeads = data as NewLeadNotification[];
+            const newLeads: NewLeadNotification[] = (data as any[]).map((l) => ({
+                id: l.uid,
+                name: l.name,
+                source: l.source,
+                vehicle_interest: l.vehicle_interest,
+                created_at: l.created_at,
+            }));
 
-            // Detecta leads realmente novos para som/notificação
+            // Toca som se chegou lead realmente novo desde a última leitura.
             const currentIds = new Set(newLeads.map(l => l.id));
             const prevIds = prevLeadIdsRef.current;
-            if (prevIds.size > 0) {
-                const brandNew = newLeads.filter(l => !prevIds.has(l.id));
-                if (brandNew.length > 0) {
-                    playNotificationSound();
-                }
+            if (prevIds.size > 0 && newLeads.some(l => !prevIds.has(l.id))) {
+                playNotificationSound();
             }
             prevLeadIdsRef.current = currentIds;
 
             setLeads(newLeads);
         }
         setLoading(false);
-    }, [role]);
+    }, []);
 
-    // ── Realtime: re-busca ao receber INSERT ─────────────────────────────
+    // ── Realtime nas 3 tabelas de entrada + polling de segurança ──────────
     useEffect(() => {
-        if (!consultantId) return;
-
-        fetchLeads(consultantId);
-
-        // Realtime postgres_changes só filtra por colunas da replica identity (a PK).
-        // assigned_consultant_id não é PK → Postgres rejeita com "invalid column for
-        // filter" (erro que aparecia repetido nos logs). Como fetchLeads já escopa por
-        // consultor, assinamos todos os INSERT e re-filtramos lá.
-        const channelFilter = { event: 'INSERT' as const, schema: 'public', table: 'leads_manos_crm' };
+        fetchLeads();
 
         const channel = supabase
-            .channel(`new-leads-${consultantId}`)
-            .on('postgres_changes', channelFilter, () => fetchLeads(consultantId))
+            .channel('pesca-new-leads')
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'leads_distribuicao_crm_26' }, () => fetchLeads())
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'leads_manos_crm' }, () => fetchLeads())
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'leads_compra' }, () => fetchLeads())
             .subscribe();
 
-        return () => { supabase.removeChannel(channel); };
-    }, [consultantId, fetchLeads]);
+        // Fallback: realtime pode não estar habilitado em todas as tabelas.
+        const poll = setInterval(fetchLeads, POLL_MS);
 
-    // ── Sync localStorage entre abas ─────────────────────────────────────
+        return () => {
+            supabase.removeChannel(channel);
+            clearInterval(poll);
+        };
+    }, [fetchLeads]);
+
+    // ── Sync do "visto" entre abas ────────────────────────────────────────
     useEffect(() => {
-        if (!consultantId) return;
-        const key = `${SEEN_KEY_PREFIX}${consultantId}`;
-
+        const key = `${SEEN_KEY_PREFIX}${seenKey}`;
         const handler = (e: StorageEvent) => {
             if (e.key === key && e.newValue) {
                 try {
@@ -154,27 +135,23 @@ export function useNewLeadNotifications(role?: string | null): UseNewLeadNotific
                 } catch { /* ignore */ }
             }
         };
-
         window.addEventListener('storage', handler);
         return () => window.removeEventListener('storage', handler);
-    }, [consultantId]);
+    }, [seenKey]);
 
-    // ── Marcar como visto ────────────────────────────────────────────────
     const markAllSeen = useCallback(() => {
-        if (!consultantId) return;
         const allIds = leads.map(l => l.id);
         const merged = Array.from(new Set([...seenIds, ...allIds]));
         setSeenIds(merged);
-        saveSeenState(consultantId, { ids: merged, updatedAt: new Date().toISOString() });
-    }, [consultantId, leads, seenIds]);
+        saveSeenState(seenKey, { ids: merged, updatedAt: new Date().toISOString() });
+    }, [leads, seenIds, seenKey]);
 
     const markSeen = useCallback((leadId: string) => {
-        if (!consultantId) return;
         if (seenIds.includes(leadId)) return;
         const updated = [...seenIds, leadId];
         setSeenIds(updated);
-        saveSeenState(consultantId, { ids: updated, updatedAt: new Date().toISOString() });
-    }, [consultantId, seenIds]);
+        saveSeenState(seenKey, { ids: updated, updatedAt: new Date().toISOString() });
+    }, [seenIds, seenKey]);
 
     const unseenCount = leads.filter(l => !seenIds.includes(l.id)).length;
 

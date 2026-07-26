@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
-import { pickNextConsultant } from '@/lib/services/consultantService';
-import { scheduleFirstContact } from '@/lib/services/aiSdrService';
+import { createClient } from '@/lib/supabase/admin';
 import { notifyLeadArrival } from '@/lib/services/vendorNotifyService';
 import { detectClosingIntent, lossReasonFor } from '@/lib/services/conversationIntent';
 
@@ -117,21 +116,8 @@ export async function POST(req: NextRequest) {
 
         // 2. Cria o lead caso não exista
         if (!leadId) {
-            // ATRIBUIÇÃO AUTOMÁTICA (ROUND ROBIN)
-            let assignedId = null;
-            let assignedName = null;
-            
-            try {
-                const nextCons = await pickNextConsultant(senderName);
-                if (nextCons) {
-                    assignedId = nextCons.id;
-                    assignedName = nextCons.name;
-                    console.log(`[Webhook WA] Atribuindo novo lead ${senderName} para ${assignedName}`);
-                }
-            } catch (err) {
-                console.error('[Webhook WA] Erro na atribuição automática:', err);
-            }
-
+            // PESCA PURA (Fase 1): lead inbound entra SEM dono. O vendedor
+            // disponível "chama" clicando Iniciar Atendimento no /inbox.
             const { data: newLead, error: insertLeadError } = await supabase
                 .from('leads_distribuicao_crm_26')
                 .insert({
@@ -141,9 +127,9 @@ export async function POST(req: NextRequest) {
                     origem: 'WhatsApp Ativo',
                     ai_classification: 'warm',
                     ai_score: 50,
-                    assigned_consultant_id: assignedId,
-                    vendedor: assignedName,
-                    primeiro_vendedor: assignedName
+                    assigned_consultant_id: null,
+                    vendedor: null,
+                    primeiro_vendedor: null
                 })
                 .select('id, table_name')
                 .single();
@@ -158,28 +144,11 @@ export async function POST(req: NextRequest) {
             // Re-alimenta o existingLead para as lógicas de status abaixo
             existingLead = { ...newLead, native_id: newLead.id, table_name: 'leads_distribuicao_crm_26' };
 
-            // 🤖 AI SDR — primeiro contato automático em ~30s
-            // Dispara só para leads NOVOS (existingLead == null), e só se nome
-            // for real (não placeholder "Lead WhatsApp").
-            // Cliente já mandou msg → IA responde rapidinho com contexto inicial.
-            const hasRealName = senderName && senderName.toLowerCase() !== 'lead whatsapp';
-            try {
-                await scheduleFirstContact({
-                    leadId: String(leadId),
-                    leadName: hasRealName ? senderName : null,
-                    leadPhone: cleanPhone,
-                    vehicleInterest: null, // não temos da entrada inbound
-                    source: 'WhatsApp Ativo',
-                    consultantName: assignedName,
-                    flow: 'venda',
-                }, 'leads_distribuicao_crm_26', 30_000);
-                console.log(`[Webhook WA] AI SDR enfileirado para lead ${leadId} (${senderName})`);
-            } catch (sdrErr: any) {
-                console.error('[Webhook WA] Falha ao enfileirar AI SDR (não-bloqueante):', sdrErr?.message);
-            }
+            // (Fase 1) AI SDR de primeiro contato REMOVIDO: zero IA falando com
+            // cliente. O lead cai na pesca e aguarda o vendedor humano.
 
-            // 📲 Push WhatsApp pessoal ao vendedor — vê o lead em <30s no celular,
-            // não precisa abrir CRM. Speed-to-lead crítico.
+            // 📲 Aviso in-app: notifyLeadArrival só empurra se houver dono; na
+            // pesca é no-op. O lead novo aparece no /inbox + sininho.
             notifyLeadArrival(String(leadId)).catch(e =>
                 console.warn('[Webhook WA] notifyLeadArrival falhou:', e?.message)
             );
@@ -319,16 +288,21 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ success: true, lead_id: leadId, message: 'Processado com sucesso' });
 
     } catch (error: any) {
-        const payloadStr = 'payload' in error ? JSON.stringify(error.payload || {}).slice(0, 500) : 'N/A';
         const errorMsg = `[Webhook WA] Falha crítica: ${error.message}`;
         console.error(errorMsg, error);
-        
+
+        // Dead-letter auditável no banco (substitui o fs.appendFileSync em disco
+        // local, que não funciona em serverless). Best-effort: não estoura o handler.
         try {
-            const fs = require('fs');
-            const logPath = 'c:/Users/Usuario/OneDrive/Documentos/crm-manos/webhook_errors.log';
-            const logEntry = `${new Date().toISOString()} - ${errorMsg} - payload: ${payloadStr}\n`;
-            fs.appendFileSync(logPath, logEntry);
-        } catch (e) {}
+            const admin = createClient();
+            await admin.from('webhook_errors').insert({
+                source: 'whatsapp',
+                error_message: error?.message || 'erro desconhecido',
+                payload: (error && 'payload' in error ? error.payload : null) ?? null,
+            });
+        } catch (e) {
+            console.error('[Webhook WA] Falha ao gravar em webhook_errors:', (e as any)?.message);
+        }
 
         return NextResponse.json({ success: false, error: 'Erro interno no webhook', details: error.message }, { status: 500 });
     }

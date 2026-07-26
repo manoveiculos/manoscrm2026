@@ -2,7 +2,7 @@ import { supabase } from './supabaseClients';
 import { cacheGet, cacheSet, TTL, cacheInvalidate } from './cacheLayer';
 import { stripPrefix, getTableForLead } from './leadRouter';
 import { logHistory, getLeadMessages } from './interactionService';
-import { pickNextConsultant, resolveConsultantIdByName, markConsultantAsAssigned } from './consultantService';
+import { resolveConsultantIdByName, markConsultantAsAssigned } from './consultantService';
 import { Lead, LeadStatus, AIClassification } from '@/lib/types';
 import { sendMetaConversion } from '@/lib/meta-service';
 
@@ -153,16 +153,8 @@ export async function createLead(leadData: Partial<Lead>) {
             updated_at: new Date().toISOString()
         };
 
-        // [CORREÇÃO CRÍTICA] Se o lead existente não tem consultor, forçar atribuição agora
-        if (!existing.assigned_consultant_id) {
-            const consultants = await getConsultantNamesCached();
-            const nextCons = await pickNextConsultant(updatePayload.name);
-            if (nextCons) {
-                updatePayload.assigned_consultant_id = nextCons.id;
-                updatePayload.primeiro_vendedor = nextCons.name;
-                await markConsultantAsAssigned(nextCons.id);
-            }
-        }
+        // PESCA PURA (Fase 1): lead existente sem dono permanece na pesca.
+        // Sem round-robin forçado — quem pega é o vendedor que "chama".
 
         // Mapeamento para nomes de colunas CRM26 se necessário
         if (table === 'leads_distribuicao_crm_26') {
@@ -189,51 +181,32 @@ export async function createLead(leadData: Partial<Lead>) {
         return updated;
     }
 
-    // Se é novo, prepara payload e atribui consultor
+    // Se é novo, prepara payload. PESCA PURA (Fase 1): sem round-robin e sem
+    // "Regra de Ouro" (que jogava o órfão no Alexandre). Só há dono se vier
+    // EXPLÍCITO — por ID ou por nome informado pelo caller (ex.: vendedor
+    // criando o lead pra si). Sem isso, o lead entra na pesca.
     const payload = sanitizeLeadPayload(leadData, cleanPhone);
-    
+
     try {
         const consultants = await getConsultantNamesCached();
-        
-        // Se já temos o ID do consultor, apenas garantimos que o nome esteja preenchido
+
         if (payload.assigned_consultant_id) {
             const consultant = consultants.find(c => c.id === payload.assigned_consultant_id);
             if (consultant) {
                 payload.primeiro_vendedor = consultant.name;
             }
-        } 
-        // Se não temos ID, tentamos resolver por nome ou Round Robin
-        else {
-            if (payload.primeiro_vendedor) {
-                const resolvedId = await resolveConsultantIdByName(payload.primeiro_vendedor);
-                if (resolvedId) payload.assigned_consultant_id = resolvedId;
-            }
-            
-            if (!payload.assigned_consultant_id) {
-                const nextCons = await pickNextConsultant(payload.name);
-                if (nextCons) {
-                    payload.assigned_consultant_id = nextCons.id;
-                    payload.primeiro_vendedor = nextCons.name;
-                }
-            }
+        } else if (payload.primeiro_vendedor) {
+            // Dono explícito informado por nome pelo caller — resolve pra ID.
+            const resolvedId = await resolveConsultantIdByName(payload.primeiro_vendedor);
+            if (resolvedId) payload.assigned_consultant_id = resolvedId;
         }
 
-        // [REGRA DE OURO] Proibição de Lead Órfão - Contingência Final
-        if (!payload.assigned_consultant_id) {
-            console.warn("Round Robin falhou. Atribuindo lead ao Alexandre (Gerente) por contingência.");
-            const backup = consultants.find(c => c.name.toLowerCase().includes('alexandre')) || consultants[0];
-            if (backup) {
-                payload.assigned_consultant_id = backup.id;
-                payload.primeiro_vendedor = backup.name;
-            }
-        }
-
-        // Atualizar timestamp de atribuição para o consultor escolhido
+        // Timestamp de atribuição só quando houver dono explícito.
         if (payload.assigned_consultant_id) {
             await markConsultantAsAssigned(payload.assigned_consultant_id);
         }
     } catch (atribError) {
-        console.error("Erro crítico na atribuição de consultor:", atribError);
+        console.error("Erro na atribuição explícita de consultor:", atribError);
     }
 
     const { data, error } = await supabase.from('leads_manos_crm').insert([payload]).select().single();
