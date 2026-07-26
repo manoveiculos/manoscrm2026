@@ -54,7 +54,6 @@ const NAV_ITEMS: NavItem[] = [
     { label: 'Agenda', icon: CalendarClock, href: '/agenda' },
     { label: 'Leads', icon: LayoutDashboard, href: '/leads' },
     { label: 'Compras', icon: Radar, href: '/compras' },
-    { label: 'Repasse', icon: DollarSign, href: '/repasse' },
     { label: 'Cobrança Acordos', icon: DollarSign, href: '/consultor/cobranca' },
     { label: 'Repasse', icon: Store, href: '/repasse', pauloOnly: true },
     { label: 'Cobrança', icon: DollarSign, href: '/admin/cobranca', adminOnly: true },
@@ -237,7 +236,7 @@ export const NavigationV2 = () => {
                     const isActive = pathname.startsWith(item.href);
                     return (
                         <Link
-                            key={item.label}
+                            key={item.href}
                             href={item.blocked ? '#' : item.href}
                             title={isCollapsed ? item.label : undefined}
                             onClick={(e) => item.blocked && e.preventDefault()}
