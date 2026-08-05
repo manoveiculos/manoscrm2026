@@ -122,6 +122,13 @@ export default function AtendimentoKanbanPage() {
     // Mantém leads "aguardando desfecho" na coluna Finalizado sem persistir no banco
     const [pendingFinishUids, setPendingFinishUids] = useState<Set<string>>(new Set());
 
+    // Visita obrigatória (força marcar visita ao avançar) + badge no card
+    const [visitaUids, setVisitaUids] = useState<Set<string>>(new Set());
+    const [visitLead, setVisitLead] = useState<KanbanLead | null>(null);
+    const [visitPendingCol, setVisitPendingCol] = useState<Column | null>(null);
+    const [visitForm, setVisitForm] = useState({ tipo: 'loja', data_hora: '', endereco: '', observacoes: '' });
+    const [visitBusy, setVisitBusy] = useState(false);
+
     const fetchLeads = useCallback(async (cid: string) => {
         const { data, error } = await supabase
             .from('leads_unified_active')
@@ -220,6 +227,21 @@ export default function AtendimentoKanbanPage() {
         setLastMsgs(map);
     }, [supabase]);
 
+    // Visitas agendadas do vendedor (pra o badge e a trava de "forçar visita")
+    const fetchVisitas = useCallback(async () => {
+        try {
+            const r = await fetch('/api/agenda?scope=me', { cache: 'no-store' });
+            const j = await r.json();
+            if (j?.success) {
+                const s = new Set<string>();
+                for (const a of j.agendamentos || []) {
+                    if (a.lead_uid && ['agendado', 'confirmado', 'compareceu'].includes(a.status)) s.add(a.lead_uid);
+                }
+                setVisitaUids(s);
+            }
+        } catch { /* silencioso */ }
+    }, []);
+
     useEffect(() => {
         let alive = true;
         const timeoutId = setTimeout(() => { if (alive) setLoading(false); }, 10000);
@@ -239,8 +261,9 @@ export default function AtendimentoKanbanPage() {
                 if (cid) {
                     const list = await fetchLeads(cid);
                     if (alive) setLoading(false);
-                    // Mensagens em background
+                    // Mensagens + visitas em background
                     fetchLastMessages(list);
+                    fetchVisitas();
                 } else if (alive) {
                     setLoading(false);
                 }
@@ -251,7 +274,7 @@ export default function AtendimentoKanbanPage() {
             }
         })();
         return () => { alive = false; clearTimeout(timeoutId); };
-    }, [supabase, router, fetchLeads, fetchLastMessages]);
+    }, [supabase, router, fetchLeads, fetchLastMessages, fetchVisitas]);
 
     // Realtime: atualiza quando alguém mexer (debounce 1.5s)
     useEffect(() => {
@@ -272,16 +295,8 @@ export default function AtendimentoKanbanPage() {
         return () => { if (t) clearTimeout(t); supabase.removeChannel(channel); };
     }, [supabase, consultantId, fetchLeads, fetchLastMessages]);
 
-    const moveLead = useCallback(async (lead: KanbanLead, targetCol: Column) => {
-        if (columnFor(lead) === targetCol) return;
-        // FINALIZADO: não persiste; segura o card local e abre o menu de desfecho
-        if (targetCol === 'finalizado') {
-            setPendingFinishUids(prev => { const s = new Set(prev); s.add(lead.uid); return s; });
-            setFinishLead(lead);
-            setFinishType(null);
-            setDiagnostico('');
-            return;
-        }
+    // Persiste a mudança de coluna (sem as travas — usado por moveLead e pós-visita).
+    const doMove = useCallback(async (lead: KanbanLead, targetCol: Column) => {
         const newStatus = STATUS_OF_COLUMN[targetCol];
         if (!newStatus) return;
         // Optimistic update
@@ -304,12 +319,32 @@ export default function AtendimentoKanbanPage() {
             if (error) throw error;
         } catch (e: any) {
             alert('Erro ao mover: ' + (e?.message || 'tente novamente'));
-            // Reverte
             if (consultantId) await fetchLeads(consultantId);
         } finally {
             setBusyMoves(prev => { const s = new Set(prev); s.delete(lead.uid); return s; });
         }
     }, [supabase, consultantId, fetchLeads]);
+
+    const moveLead = useCallback(async (lead: KanbanLead, targetCol: Column) => {
+        if (columnFor(lead) === targetCol) return;
+        // FINALIZADO: não persiste; segura o card local e abre o menu de desfecho
+        if (targetCol === 'finalizado') {
+            setPendingFinishUids(prev => { const s = new Set(prev); s.add(lead.uid); return s; });
+            setFinishLead(lead);
+            setFinishType(null);
+            setDiagnostico('');
+            return;
+        }
+        // FORÇA VISITA: pra entrar em Test Drive ou Fechamento, o lead precisa ter
+        // uma visita agendada. Se não tem, abre o modal (obrigatório) antes de mover.
+        if ((targetCol === 'test_drive' || targetCol === 'fechamento') && !visitaUids.has(lead.uid)) {
+            setVisitLead(lead);
+            setVisitPendingCol(targetCol);
+            setVisitForm({ tipo: 'loja', data_hora: '', endereco: '', observacoes: '' });
+            return;
+        }
+        await doMove(lead, targetCol);
+    }, [doMove, visitaUids]);
 
     // Renomear cliente direto no card (facilita achar o cliente no funil)
     const renameLead = useCallback(async (l: KanbanLead) => {
@@ -341,6 +376,12 @@ export default function AtendimentoKanbanPage() {
         return map;
     }, [leads, pendingFinishUids]);
 
+    // Leads parados há +8h — o sistema COBRA o vendedor (nunca remove sozinho).
+    const staleLeads = useMemo(
+        () => leads.filter(l => ageInfo(l.ultima_interacao_humana || l.atendimento_iniciado_em).stale),
+        [leads]
+    );
+
     const closeFinishModal = useCallback(() => {
         setFinishLead(null);
         setFinishType(null);
@@ -357,8 +398,8 @@ export default function AtendimentoKanbanPage() {
 
     const submitFinish = useCallback(async () => {
         if (!finishLead || !finishType) return;
-        if (finishType === 'perdido' && diagnostico.trim().length < 5) {
-            alert('Descreva o motivo da perda (mínimo 5 caracteres) para alimentar o agente de reversão.');
+        if (finishType === 'perdido' && diagnostico.trim().length < 30) {
+            alert('O motivo da perda é OBRIGATÓRIO e precisa de no mínimo 30 caracteres. Explique o que travou a venda (preço, crédito, modelo, sumiu...) pra gente entender onde está o erro e reverter.');
             return;
         }
         setFinishBusy(true);
@@ -408,6 +449,43 @@ export default function AtendimentoKanbanPage() {
         }
     }, [finishLead, finishType, diagnostico, consultantId, supabase, closeFinishModal]);
 
+    // Cria a visita (obrigatória pra avançar) e só então move o card.
+    const submitVisit = useCallback(async () => {
+        if (!visitLead || !visitPendingCol) return;
+        if (!visitForm.data_hora) { alert('Escolha a data e a hora da visita.'); return; }
+        if (new Date(visitForm.data_hora).getTime() < Date.now() - 120_000) { alert('Não dá pra agendar visita no passado.'); return; }
+        if (visitForm.tipo === 'externa' && !visitForm.endereco.trim()) { alert('Endereço é obrigatório na visita externa.'); return; }
+        setVisitBusy(true);
+        try {
+            const res = await fetch('/api/agenda', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    lead_uid: visitLead.uid,
+                    cliente_nome: visitLead.name || 'Cliente',
+                    cliente_telefone: visitLead.phone || '',
+                    cliente_whatsapp: visitLead.phone || '',
+                    veiculo_interesse: visitLead.vehicle_interest || '',
+                    tipo: visitForm.tipo,
+                    endereco: visitForm.tipo === 'externa' ? visitForm.endereco.trim() : '',
+                    data_hora: new Date(visitForm.data_hora).toISOString(),
+                    observacoes: visitForm.observacoes.trim(),
+                }),
+            });
+            const data = await res.json();
+            if (!res.ok || !data.success) throw new Error(data.error || 'falha ao agendar');
+            const lead = visitLead; const col = visitPendingCol;
+            setVisitaUids(prev => { const s = new Set(prev); s.add(lead.uid); return s; });
+            setVisitLead(null); setVisitPendingCol(null);
+            await doMove(lead, col);
+        } catch (e: any) {
+            alert('Erro ao agendar visita: ' + (e?.message || 'tente de novo'));
+        } finally {
+            setVisitBusy(false);
+        }
+    }, [visitLead, visitPendingCol, visitForm, doMove]);
+
+    const cancelVisit = useCallback(() => { setVisitLead(null); setVisitPendingCol(null); }, []);
+
     // ── Drag handlers ──────────────────────────────────────────────────────
     const onDragStart = (e: DragEvent, lead: KanbanLead) => {
         e.dataTransfer.setData('text/plain', lead.uid);
@@ -451,6 +529,17 @@ export default function AtendimentoKanbanPage() {
                     </div>
                 </div>
             </div>
+
+            {/* Cobrança: leads parados há +8h (o sistema questiona, nunca remove) */}
+            {staleLeads.length > 0 && (
+                <div className="mb-4 rounded-2xl border border-orange-700/50 bg-orange-950/30 px-4 py-3 flex items-start gap-3">
+                    <AlertTriangle className="w-5 h-5 text-orange-400 shrink-0 mt-0.5" />
+                    <div className="text-sm text-orange-200">
+                        <b>{staleLeads.length}</b> {staleLeads.length === 1 ? 'lead parado' : 'leads parados'} há +8h sem você mexer: <span className="text-orange-300 font-semibold">{staleLeads.slice(0, 4).map(l => l.name || 'Sem nome').join(', ')}{staleLeads.length > 4 ? '…' : ''}</span>.
+                        <span className="text-orange-300/80"> Mexe agora ou marca o desfecho — lead parado é venda escorrendo pelo ralo.</span>
+                    </div>
+                </div>
+            )}
 
             {loading ? (
                 <p className="text-zinc-400">Carregando...</p>
@@ -573,11 +662,16 @@ export default function AtendimentoKanbanPage() {
 
                                                     {/* Footer: idade + ações */}
                                                     <div className="flex items-center justify-between gap-2 mt-2">
-                                                        <span className={`text-[10px] font-bold flex items-center gap-1 ${age.color}`}>
-                                                            <Clock className="w-3 h-3" />
-                                                            {age.text}
-                                                            {age.alert && <AlertTriangle className="w-3 h-3" />}
-                                                        </span>
+                                                        <div className="flex items-center gap-2 min-w-0">
+                                                            <span className={`text-[10px] font-bold flex items-center gap-1 ${age.color}`}>
+                                                                <Clock className="w-3 h-3" />
+                                                                {age.text}
+                                                                {age.alert && <AlertTriangle className="w-3 h-3" />}
+                                                            </span>
+                                                            {visitaUids.has(l.uid) && (
+                                                                <span className="text-[9px] font-bold text-purple-300 bg-purple-950/50 border border-purple-800/50 px-1.5 py-0.5 rounded shrink-0" title="Visita agendada">📅 visita</span>
+                                                            )}
+                                                        </div>
                                                         <Link
                                                             href={`/lead/${encodeURIComponent(l.uid)}`}
                                                             onClick={e => e.stopPropagation()}
@@ -682,7 +776,12 @@ export default function AtendimentoKanbanPage() {
                                     autoFocus
                                     className="w-full rounded-lg bg-zinc-950/80 border border-zinc-700 text-sm text-white p-3 focus:outline-none focus:border-red-500/60"
                                 />
-                                <p className="text-[10px] text-zinc-500 mt-1">Esse diagnóstico alimenta o agente Karol e habilita tentativa de reversão.</p>
+                                <div className="flex items-center justify-between mt-1">
+                                    <p className="text-[10px] text-zinc-500">Obrigatório pra entender onde está o erro (e a IA tentar reverter).</p>
+                                    <span className={`text-[10px] font-bold ${diagnostico.trim().length < 30 ? 'text-red-400' : 'text-emerald-400'}`}>
+                                        {diagnostico.trim().length}/30
+                                    </span>
+                                </div>
                             </div>
                         )}
 
@@ -708,10 +807,57 @@ export default function AtendimentoKanbanPage() {
                             </button>
                             <button
                                 onClick={submitFinish}
-                                disabled={finishBusy || !finishType}
+                                disabled={finishBusy || !finishType || (finishType === 'perdido' && diagnostico.trim().length < 30)}
                                 className="flex-1 py-2.5 rounded-xl bg-white text-black hover:bg-zinc-200 text-sm font-black disabled:opacity-40 disabled:cursor-not-allowed"
                             >
                                 {finishBusy ? 'Salvando...' : 'Confirmar'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal: FORÇA marcar visita antes de avançar pra Test Drive/Fechamento */}
+            {visitLead && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={() => !visitBusy && cancelVisit()}>
+                    <div className="w-full max-w-md rounded-2xl border border-purple-500/30 bg-zinc-900/90 backdrop-blur-2xl shadow-2xl p-6" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center justify-between mb-1">
+                            <h3 className="text-lg font-black text-white flex items-center gap-2">📅 Agendar visita</h3>
+                            <button onClick={cancelVisit} disabled={visitBusy} className="text-zinc-500 hover:text-white"><XIcon className="w-5 h-5" /></button>
+                        </div>
+                        <p className="text-xs text-zinc-400 mb-4">
+                            Pra avançar <b className="text-white">{visitLead.name || 'este lead'}</b> você precisa marcar a visita. Sem visita agendada o lead não avança — é assim que a gente vende.
+                        </p>
+
+                        <div className="grid grid-cols-2 gap-2 mb-3">
+                            {(['loja', 'externa'] as const).map(t => (
+                                <button key={t} onClick={() => setVisitForm(f => ({ ...f, tipo: t }))}
+                                    className={`py-2.5 rounded-xl text-xs font-bold border transition ${visitForm.tipo === t ? 'bg-purple-500 text-white border-purple-300' : 'bg-zinc-800/60 text-zinc-300 border-zinc-700 hover:bg-zinc-700/60'}`}>
+                                    {t === 'loja' ? '🏬 Na loja' : '📍 Externa'}
+                                </button>
+                            ))}
+                        </div>
+
+                        <label className="block text-[11px] uppercase tracking-wider text-zinc-400 font-bold mb-1">Data e hora <span className="text-red-400">*</span></label>
+                        <input type="datetime-local" value={visitForm.data_hora} onChange={e => setVisitForm(f => ({ ...f, data_hora: e.target.value }))}
+                            className="w-full rounded-lg bg-zinc-950/80 border border-zinc-700 text-sm text-white p-3 mb-3 focus:outline-none focus:border-purple-500/60" />
+
+                        {visitForm.tipo === 'externa' && (
+                            <>
+                                <label className="block text-[11px] uppercase tracking-wider text-zinc-400 font-bold mb-1">Endereço <span className="text-red-400">*</span></label>
+                                <input value={visitForm.endereco} onChange={e => setVisitForm(f => ({ ...f, endereco: e.target.value }))} placeholder="Rua, número, bairro"
+                                    className="w-full rounded-lg bg-zinc-950/80 border border-zinc-700 text-sm text-white p-3 mb-3 focus:outline-none focus:border-purple-500/60" />
+                            </>
+                        )}
+
+                        <label className="block text-[11px] uppercase tracking-wider text-zinc-400 font-bold mb-1">Observação (opcional)</label>
+                        <input value={visitForm.observacoes} onChange={e => setVisitForm(f => ({ ...f, observacoes: e.target.value }))} placeholder="Ex.: cliente vem ver o Onix branco"
+                            className="w-full rounded-lg bg-zinc-950/80 border border-zinc-700 text-sm text-white p-3 mb-5 focus:outline-none focus:border-purple-500/60" />
+
+                        <div className="flex gap-2">
+                            <button onClick={cancelVisit} disabled={visitBusy} className="flex-1 py-2.5 rounded-xl bg-zinc-800 text-zinc-300 hover:bg-zinc-700 text-sm font-bold disabled:opacity-50">Cancelar</button>
+                            <button onClick={submitVisit} disabled={visitBusy || !visitForm.data_hora} className="flex-1 py-2.5 rounded-xl bg-purple-500 text-white hover:bg-purple-400 text-sm font-black disabled:opacity-40 disabled:cursor-not-allowed">
+                                {visitBusy ? 'Agendando...' : 'Agendar e avançar'}
                             </button>
                         </div>
                     </div>
