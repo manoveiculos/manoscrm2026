@@ -64,3 +64,19 @@ CREATE POLICY "feriados service_role" ON public.feriados FOR ALL
     USING (auth.jwt() ->> 'role' = 'service_role') WITH CHECK (auth.jwt() ->> 'role' = 'service_role');
 -- leitura por qualquer logado (calendário não é sensível)
 CREATE POLICY "feriados read auth" ON public.feriados FOR SELECT TO authenticated USING (true);
+
+-- ---------------------------------------------------------------------
+-- 5) Agenda o tick do motor no pg_cron (1/min) — 100% automático, sem serviço
+--    externo. Reusa public.call_cron_endpoint (mesmo padrão dos outros crons;
+--    ela injeta base_url + CRON_SECRET a partir da tabela cron_config).
+--    Inofensivo antes do deploy (o endpoint só 404 até subir o código).
+-- ---------------------------------------------------------------------
+DO $do$
+BEGIN
+    IF EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'distribuicao') THEN
+        PERFORM cron.unschedule('distribuicao');
+    END IF;
+    PERFORM cron.schedule('distribuicao', '* * * * *',
+        $cmd$ SELECT public.call_cron_endpoint('/api/cron/distribuicao') $cmd$);
+END
+$do$;
