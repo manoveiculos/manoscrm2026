@@ -8,7 +8,20 @@
       "Bash(curl -sS -H \"Authorization: Bearer bb90d7dfd6b54c69bfa32979a906b777\" \"https://manoscrm.com.br/api/extension/lead-info?phone=5547996423678\")",
       "Bash(curl -sS -H 'Authorization: Bearer bb90d7dfd6b54c69bfa32979a906b777' 'https://manoscrm.com.br/api/extension/lead-info?phone=__TRACKED_VAR__')",
       "Bash(grep -o \"getLeadByPhone[^}]\\\\{1,300\\\\}\" d:/Antigravity/crm-manos/.next/server/app/api/extension/lead-info/route.js)",
-      "Bash(git commit -m ' *)"
+      "Bash(git commit -m ' *)",
+      "mcp__supabase__list_tables",
+      "mcp__supabase__list_extensions",
+      "mcp__supabase__list_edge_functions",
+      "mcp__supabase__get_advisors",
+      "mcp__supabase__execute_sql",
+      "Bash(node --check \"d:/Antigravity/Manos-CRM/extension/content/scraper.js\")",
+      "Bash(node --check \"d:/Antigravity/Manos-CRM/extension/content/index.js\")",
+      "Bash(node --check \"d:/Antigravity/Manos-CRM/extension/content/wa-store.js\")",
+      "Bash(node -e \"JSON.parse\\(require\\('fs'\\).readFileSync\\('d:/Antigravity/Manos-CRM/extension/manifest.json','utf8'\\)\\); console.log\\('manifest JSON valido'\\)\")",
+      "Bash(node -e \"JSON.parse\\(require\\('fs'\\).readFileSync\\('d:/Antigravity/Manos-CRM/extension/manifest.json','utf8'\\)\\); console.log\\('manifest OK'\\)\")",
+      "Bash(node --check \"d:/Antigravity/Manos-CRM/extension/background.js\")",
+      "mcp__supabase__apply_migration",
+      "PowerShell($env:NODE_PATH = \"d:\\\\Antigravity\\\\Manos-CRM\\\\node_modules\"; node \"C:\\\\Users\\\\Usuario\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\d--Antigravity-Manos-CRM\\\\b4e1eba3-5115-4bb4-9e0d-77951ebeea81\\\\scratchpad\\\\check_repasse.cjs\")"
     ]
   }
 }

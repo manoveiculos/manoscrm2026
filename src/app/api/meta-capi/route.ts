@@ -38,6 +38,8 @@ export async function POST(req: NextRequest) {
                 action_source: 'system_generated',
                 user_data: hashedUserData,
                 custom_data: {
+                    event_source: 'crm',
+                    lead_event_source: 'Manos CRM',
                     ...customData,
                     currency: 'BRL', // Default for this CRM
                 }

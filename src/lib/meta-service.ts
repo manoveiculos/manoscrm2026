@@ -45,9 +45,10 @@ export async function sendMetaConversion(leadData: any, eventName: string = 'Lea
     }
 
     try {
-        const normalizedPhone = normalizePhone(leadData.phone || leadData.telefone);
-        const hashedPhone = hashData(normalizedPhone);
-        const hashedEmail = leadData.email ? hashData(leadData.email) : undefined;
+        const rawPhone = leadData.phone || leadData.telefone || leadData.whatsapp;
+        const normalizedPhone = rawPhone ? normalizePhone(rawPhone) : "";
+        const hashedPhone = normalizedPhone ? hashData(normalizedPhone) : null;
+        const hashedEmail = leadData.email ? hashData(leadData.email) : null;
 
         const payload = {
             data: [
@@ -56,13 +57,14 @@ export async function sendMetaConversion(leadData: any, eventName: string = 'Lea
                     event_time: Math.floor(Date.now() / 1000),
                     action_source: "system_generated",
                     user_data: {
-                        ph: [hashedPhone],
+                        ph: hashedPhone ? [hashedPhone] : undefined,
                         em: hashedEmail ? [hashedEmail] : undefined,
-                        external_id: leadData.lead_id || leadData.id_meta || undefined,
-                        // O Facebook também aceita lead_id diretamente se vier de um formulário
-                        lead_id: leadData.lead_id || undefined
+                        lead_id: leadData.lead_id ? Number(leadData.lead_id) || leadData.lead_id : undefined,
+                        external_id: leadData.id ? [hashData(String(leadData.id))] : undefined
                     },
                     custom_data: {
+                        event_source: "crm",
+                        lead_event_source: extraCustomData?.lead_event_source || "Manos CRM",
                         vehicle_interest: leadData.vehicle_interest || leadData.interesse,
                         source: leadData.source || leadData.origem,
                         ...extraCustomData
@@ -71,7 +73,7 @@ export async function sendMetaConversion(leadData: any, eventName: string = 'Lea
             ]
         };
 
-        const response = await fetch(`https://graph.facebook.com/v19.0/${pixelId}/events`, {
+        const response = await fetch(`https://graph.facebook.com/v25.0/${pixelId}/events`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -85,7 +87,7 @@ export async function sendMetaConversion(leadData: any, eventName: string = 'Lea
         if (result.error) {
             console.error(`❌ Erro Meta Conversions API [${eventName}]:`, result.error.message);
         } else {
-            console.log(`✅ Evento [${eventName}] enviado para Meta | Lead ID: ${leadData.lead_id || 'N/A'}`);
+            console.log(`✅ Evento [${eventName}] enviado para Meta | Lead: ${leadData.name || leadData.nome || 'N/A'}`);
         }
 
         return result;
