@@ -77,38 +77,9 @@ export async function POST(req: NextRequest) {
         }
 
         if (hasAtendimento) {
-            // ── THROTTLE ANTI-AÇAMBARCAMENTO (1 lead a cada 5min) ────────────
-            // Vendedor não pega a fila inteira de uma vez. Admin é isento.
-            // Reabrir um lead que JÁ é seu nunca trava (checagem de dono antes).
-            if (consultant.role !== 'admin') {
-                const { data: jaMeu } = await admin
-                    .from(table)
-                    .select('atendimento_iniciado_por')
-                    .eq('id', realId)
-                    .maybeSingle();
-
-                if (jaMeu?.atendimento_iniciado_por !== consultant.id) {
-                    const THROTTLE_MS = 5 * 60_000;
-                    const desde = new Date(Date.now() - THROTTLE_MS).toISOString();
-                    const [t1, t2, t3] = await Promise.all([
-                        admin.from('leads_manos_crm').select('atendimento_iniciado_em').eq('atendimento_iniciado_por', consultant.id).gte('atendimento_iniciado_em', desde).limit(1),
-                        admin.from('leads_distribuicao_crm_26').select('atendimento_iniciado_em').eq('atendimento_iniciado_por', consultant.id).gte('atendimento_iniciado_em', desde).limit(1),
-                        admin.from('leads_compra').select('atendimento_iniciado_em').eq('atendimento_iniciado_por', consultant.id).gte('atendimento_iniciado_em', desde).limit(1),
-                    ]);
-                    const ultima = [...(t1.data || []), ...(t2.data || []), ...(t3.data || [])]
-                        .map((r: any) => new Date(r.atendimento_iniciado_em).getTime())
-                        .sort((a, b) => b - a)[0];
-                    if (ultima) {
-                        const faltamMin = Math.max(1, Math.ceil((ultima + THROTTLE_MS - Date.now()) / 60_000));
-                        return NextResponse.json({
-                            success: false,
-                            throttled: true,
-                            retry_in_min: faltamMin,
-                            error: `Calma, um de cada vez! 🎣 Você acabou de pegar um lead. Atenda ele primeiro — em ${faltamMin}min você pode pegar o próximo.`,
-                        }, { status: 429 });
-                    }
-                }
-            }
+            // (Modelo round-robin) SEM throttle de captura: o lead JÁ é do vendedor
+            // pela distribuição; "Iniciar" = aceitar. O claim atômico abaixo só
+            // garante que ninguém "roube" um lead que já tem outro dono.
 
             // ── CLAIM ATÔMICO (anti-race) ────────────────────────────────────
             // Reivindica SÓ se ninguém iniciou. UPDATE ... WHERE é atômico: sob
@@ -170,6 +141,9 @@ export async function POST(req: NextRequest) {
             user_name: consultant.name,
             created_at: nowIso,
         }).then(null, () => {});
+
+        // Motor de SLA: lead aceito → para o cronômetro de 10min.
+        try { const { marcarAtendido } = await import('@/lib/services/slaEngine'); await marcarAtendido(table as any, cleanId); } catch { /* best-effort */ }
 
         return NextResponse.json({
             success: true,

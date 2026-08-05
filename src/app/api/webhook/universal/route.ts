@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/admin';
-import { notifyLeadArrival } from '@/lib/services/vendorNotifyService';
+import { distribuirLead } from '@/lib/services/slaEngine';
 
 /**
  * WEBHOOK UNIVERSAL (Fase E)
@@ -87,16 +87,15 @@ export async function POST(req: NextRequest) {
 
         if (insertError) throw insertError;
 
-        // 3. Aviso in-app (Inbox + sininho). notifyLeadArrival é no-op sem dono.
-        notifyLeadArrival(newLead.id).catch(e =>
-            console.warn('[Webhook Universal] notifyLeadArrival falhou:', e?.message)
+        // 3. Motor de distribuição: round-robin + SLA 10min (ou standby fora do horário).
+        distribuirLead('leads_manos_crm', newLead.id).catch(e =>
+            console.warn('[Webhook Universal] distribuirLead falhou:', e?.message)
         );
 
         return NextResponse.json({
             success: true,
             lead_id: newLead.id,
-            assigned_to: null,
-            pesca: true
+            distribuido: true
         });
 
     } catch (err: any) {

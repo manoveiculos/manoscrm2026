@@ -8,6 +8,7 @@ import { createClient } from '@/lib/supabase/client';
 import { parseUid } from '@/lib/services/unifiedLead';
 import { Flame, Snowflake, Thermometer, Clock, Phone, Wifi, Bell, X, AlertTriangle, MessageCircle, Zap, PhoneOff } from 'lucide-react';
 import AgendaStrip from '@/app/agenda/_components/AgendaStrip';
+import { CheckinBanner } from '@/components/v2/CheckinBanner';
 
 const PTR = dynamic(() => import('react-pull-to-refresh'), { ssr: false }) as any;
 
@@ -207,9 +208,10 @@ export default function InboxPage() {
             .select('uid, table_name, native_id, name, phone, vehicle_interest, source, ai_score, ai_classification, status, updated_at, created_at, proxima_acao, first_contact_channel, assigned_consultant_id, atendimento_iniciado_em, atendimento_iniciado_por, flagged_reversao, ultima_interacao_humana, descarte_financeiro, diagnostico_atendimento' + (viewMode === 'archived' ? ', archived_at' : ''))
             .limit(adminMode ? 500 : 300);
 
-        // FILA DE PESCA (V5): Vendedor vê seus leads OU QUALQUER lead sem atendimento iniciado.
+        // ROUND-ROBIN (motor de distribuição): vendedor vê SÓ os leads dele. Nada
+        // de fila geral — cada lead tem um dono, distribuído pelo slaEngine.
         if (cid && !adminMode) {
-            query.or(`assigned_consultant_id.eq.${cid},atendimento_iniciado_em.is.null`);
+            query.eq('assigned_consultant_id', cid);
         }
 
         // ADMIN: mostra apenas leads SEM vendedor designado (fila livre, sem dono)
@@ -688,11 +690,13 @@ export default function InboxPage() {
                 </div>
             </div>
 
+            <CheckinBanner />
+
             <AgendaStrip />
 
             {filter !== 'archived' && (
                 <div className="flex items-center gap-3 mb-5 text-xs text-gray-400">
-                    <span>🎣 <strong className="text-amber-400">{groups.fishing.length}</strong> aguardando atendimento</span>
+                    <span>🎣 <strong className="text-amber-400">{groups.fishing.length}</strong> seus leads aguardando</span>
                     <span className="text-zinc-600">·</span>
                     <span className="text-zinc-500">Leads em atendimento agora ficam no <strong className="text-zinc-300">Atendimento</strong></span>
                 </div>
