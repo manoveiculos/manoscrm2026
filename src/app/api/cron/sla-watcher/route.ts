@@ -178,21 +178,9 @@ async function processLead(lead: LeadSla, results: any) {
         return;
     }
 
-    // Auto-finish após 7 dias sem atividade
-    if (minsSinceActivity > 60 * 24 * 7) {
-        if (!(await getOpenLevel(lead.id, 4))) {
-            const admin = createClient();
-            const finalCol = lead.table === 'leads_compra' ? { status: 'perdido' } : { status: 'lost_by_inactivity' };
-            await admin.from(lead.table).update({
-                ...finalCol,
-                loss_category: 'sem_resposta',
-                updated_at: new Date().toISOString(),
-            }).eq('id', lead.id);
-            await recordEscalation(lead.id, lead.table, lead.consultantId, 4, `Auto-finish após ${Math.floor(minsSinceActivity / 60 / 24)}d sem atividade`);
-            results.autoFinished++;
-        }
-        return;
-    }
+    // Auto-finish de 7 dias APOSENTADO — regra do dono: lead em atendimento nunca
+    // sai sozinho, só o vendedor tira (Vendido/Perdido/Arquivar) com justificativa.
+    // O sistema só cobra (aviso de 8h via run_inactivity_monitor), nunca remove.
 
     if (!isNew || !lead.consultantId) return;
 
