@@ -24,7 +24,42 @@ interface Scooter { id: string; modelo: string; custo: number; preco: number; qt
 interface Venda { id: string; modelo: string; custo: number; cliente: string; valor: number; pagamento: string; data: string; }
 interface Cliente { id: string; nome: string; whats?: string; interesse?: string; status: string; }
 interface Despesa { id: string; desc: string; valor: number; data: string; }
-interface Data { scooters: Scooter[]; vendas: Venda[]; clientes: Cliente[]; despesas: Despesa[]; meta: number; isAdmin: boolean; }
+interface Data { scooters: Scooter[]; vendas: Venda[]; clientes: Cliente[]; despesas: Despesa[]; meta: number; saldoInicial: number; metaLoja: number; isAdmin: boolean; }
+
+// ---------- Lógica de caixa (acumulado = banco) ----------
+const somaVendas = (d: Data) => d.vendas.reduce((s, v) => s + v.valor, 0);
+const somaDespesas = (d: Data) => d.despesas.reduce((s, x) => s + x.valor, 0);
+// Dinheiro que o Renato TEM hoje: abre com o saldo inicial e acumula tudo. Nunca zera.
+const caixaAtual = (d: Data) => d.saldoInicial + somaVendas(d) - somaDespesas(d);
+
+// ---------- Mentor (ensina o Renato, 13 anos) ----------
+type Alerta = { tone: 'good' | 'warn' | 'info'; icon: string; text: string };
+function mentorAlertas(d: Data): Alerta[] {
+    const mk = monthKey();
+    const entradasMes = d.vendas.filter((v) => monthKey(v.data) === mk).reduce((s, v) => s + v.valor, 0);
+    const saidasMes = d.despesas.filter((x) => monthKey(x.data) === mk).reduce((s, x) => s + x.valor, 0);
+    const a: Alerta[] = [];
+
+    if (saidasMes > entradasMes && (entradasMes > 0 || saidasMes > 0)) {
+        a.push({ tone: 'warn', icon: '⚠️', text: `Esse mês saiu ${fmt(saidasMes)} e entrou ${fmt(entradasMes)}. Você gastou mais do que ganhou — segura as despesas e foca em vender.` });
+    } else if (entradasMes > 0) {
+        a.push({ tone: 'good', icon: '🚀', text: `Boa! Esse mês entrou ${fmt(entradasMes)} e saiu ${fmt(saidasMes)}. Está sobrando dinheiro — é assim que a empresa cresce.` });
+    }
+    if (entradasMes > 0) {
+        a.push({ tone: 'info', icon: '🐷', text: `Dica de dono: guarde ${fmt(entradasMes * 0.2)} (20% do que vendeu) e não gaste. Esse dinheiro é o que vai virar a sua loja física.` });
+    }
+    const baixaMargem = d.scooters.filter((m) => m.preco > 0 && (m.preco - m.custo) / m.preco < 0.2);
+    if (baixaMargem.length) {
+        a.push({ tone: 'warn', icon: '📉', text: `Margem baixa em: ${baixaMargem.map((m) => m.modelo).join(', ')}. Você lucra pouco vendendo esses — aumente o preço ou compre mais barato.` });
+    }
+    const leads = d.clientes.filter((c) => c.status !== 'Comprou').length;
+    if (leads > 0) {
+        a.push({ tone: 'info', icon: '💬', text: `Você tem ${leads} ${leads === 1 ? 'cliente esperando' : 'clientes esperando'} resposta. Lead parado é venda perdida — chama no WhatsApp hoje.` });
+    }
+    return a;
+}
+const alertaBg: any = { good: '#E8F9F3', warn: '#FFF8EC', info: '#EEF3FF' };
+const alertaInk: any = { good: '#0A3D31', warn: '#8A6110', info: '#28407A' };
 
 // ---------- UI base ----------
 function Card({ children, style }: any) {
@@ -39,6 +74,17 @@ function Btn({ children, onClick, kind = 'primary', style, disabled }: any) {
 }
 function Field({ label, children }: any) {
     return <label style={{ display: 'block', marginBottom: 14 }}><span style={{ fontSize: 13, fontWeight: 600, color: C.inkSoft, display: 'block', marginBottom: 6 }}>{label}</span>{children}</label>;
+}
+// Botão de envio à prova de toque-duplo: trava enquanto o POST está em andamento.
+// Mata a duplicidade de registros (venda/despesa/cliente/modelo salvos 2x no celular).
+function SubmitBtn({ children, onClick, kind = 'primary', style, disabled }: any) {
+    const [busy, setBusy] = useState(false);
+    return (
+        <Btn kind={kind} style={style} disabled={disabled || busy}
+            onClick={async () => { if (busy) return; setBusy(true); try { await onClick(); } catch { /* erro tratado no chamador */ } finally { setBusy(false); } }}>
+            {busy ? 'Salvando…' : children}
+        </Btn>
+    );
 }
 
 const miniBtn: any = { flex: 1, padding: '8px 0', borderRadius: 9, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', border: `1px solid ${C.line}`, background: 'transparent' };
@@ -92,6 +138,12 @@ function Dashboard({ data, setModal }: any) {
     const leadsAbertos = data.clientes.filter((c: Cliente) => c.status !== 'Comprou').length;
     const pct = data.meta > 0 ? (faturamento / data.meta) * 100 : 0;
     const mesNome = new Date().toLocaleDateString('pt-BR', { month: 'long' });
+    // Mentor: caixa acumulado + progresso rumo à loja física + alertas
+    const saldo = caixaAtual(data);
+    const metaLoja = data.metaLoja;
+    const pctLoja = metaLoja > 0 ? (saldo / metaLoja) * 100 : 0;
+    const faltam = Math.max(0, metaLoja - saldo);
+    const alertas = mentorAlertas(data);
 
     return (
         <div>
@@ -117,6 +169,33 @@ function Dashboard({ data, setModal }: any) {
                     </Card>
                 ))}
             </div>
+
+            {/* META LOJA FÍSICA (mentor) */}
+            <Card style={{ marginBottom: 16, background: C.voltDark, border: 'none', color: '#fff' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <div style={{ fontWeight: 700, fontSize: 14 }}>🏪 Meta: sua loja física</div>
+                    <button onClick={() => setModal({ type: 'metaLoja' })} style={{ background: 'rgba(255,255,255,0.14)', border: 'none', color: '#fff', borderRadius: 9, padding: '6px 10px', fontSize: 12, cursor: 'pointer' }}>{fmt(metaLoja)}</button>
+                </div>
+                <div style={{ height: 12, borderRadius: 8, background: 'rgba(255,255,255,0.15)', overflow: 'hidden', marginBottom: 8 }}>
+                    <div style={{ width: `${Math.min(100, Math.max(0, pctLoja))}%`, height: '100%', background: C.volt, transition: 'width 0.5s' }} />
+                </div>
+                <div style={{ fontSize: 13, opacity: 0.92, lineHeight: 1.45 }}>
+                    {saldo >= metaLoja
+                        ? 'Você já juntou o suficiente pra sua loja física! Fala com seu pai pra dar o próximo passo. 🚀'
+                        : `Você já tem ${fmt(saldo)} no caixa. Faltam ${fmt(faltam)} pra abrir sua loja. Cada venda te deixa mais perto — bora!`}
+                </div>
+            </Card>
+
+            {/* ALERTAS DO MENTOR */}
+            {alertas.length > 0 && (
+                <div style={{ marginBottom: 16 }}>
+                    {alertas.map((al: Alerta, i: number) => (
+                        <Card key={i} style={{ marginBottom: 8, background: alertaBg[al.tone], border: `1px solid ${alertaBg[al.tone]}` }}>
+                            <div style={{ fontSize: 13, color: alertaInk[al.tone], lineHeight: 1.45 }}><span style={{ marginRight: 6 }}>{al.icon}</span>{al.text}</div>
+                        </Card>
+                    ))}
+                </div>
+            )}
 
             {(baixoEstoque.length > 0 || esgotados.length > 0) && (
                 <Card style={{ background: '#FFF8EC', border: `1px solid #F3E2BC`, marginBottom: 16 }}>
@@ -249,25 +328,64 @@ function Clientes({ data, setModal, setClienteStatus, delCliente }: any) {
 
 function Caixa({ data, setModal, delDespesa }: any) {
     const mk = monthKey();
-    const receitas = data.vendas.filter((v: Venda) => monthKey(v.data) === mk).reduce((s: number, v: Venda) => s + v.valor, 0);
-    const custos = data.vendas.filter((v: Venda) => monthKey(v.data) === mk).reduce((s: number, v: Venda) => s + v.custo, 0);
-    const despesas = data.despesas.filter((d: Despesa) => monthKey(d.data) === mk);
-    const totDespesas = despesas.reduce((s: number, d: Despesa) => s + d.valor, 0);
-    const saldo = receitas - custos - totDespesas;
+    const saldo = caixaAtual(data);                 // dinheiro de verdade, acumulado = banco
+    const entradasTotais = somaVendas(data);
+    const saidasTotais = somaDespesas(data);
+
+    // Movimento SÓ deste mês (separado do saldo — não zera o caixa ao virar o mês)
+    const despesasMes = data.despesas.filter((d: Despesa) => monthKey(d.data) === mk);
+    const entradasMes = data.vendas.filter((v: Venda) => monthKey(v.data) === mk).reduce((s: number, v: Venda) => s + v.valor, 0);
+    const saidasMes = despesasMes.reduce((s: number, d: Despesa) => s + d.valor, 0);
+    const resultadoMes = entradasMes - saidasMes;
+
+    // Histórico por mês (o dado nunca some)
+    const hist: Record<string, { e: number; s: number }> = {};
+    data.vendas.forEach((v: Venda) => { const k = monthKey(v.data); (hist[k] = hist[k] || { e: 0, s: 0 }).e += v.valor; });
+    data.despesas.forEach((d: Despesa) => { const k = monthKey(d.data); (hist[k] = hist[k] || { e: 0, s: 0 }).s += d.valor; });
+    const meses = Object.keys(hist).sort((a, b) => b.localeCompare(a));
 
     return (
         <div>
+            {/* SALDO ACUMULADO = BANCO */}
+            <div style={{ background: `linear-gradient(150deg, ${C.voltDark} 0%, #10614C 100%)`, borderRadius: 20, padding: '22px 20px', color: '#fff', marginBottom: 12 }}>
+                <div style={{ fontSize: 13, opacity: 0.8 }}>Seu dinheiro hoje 💰</div>
+                <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 38, fontWeight: 700, margin: '4px 0 4px' }}>{fmt(saldo)}</div>
+                <div style={{ fontSize: 12.5, opacity: 0.75, marginBottom: 14 }}>Tem que ser igual ao que está no seu banco.</div>
+                <button onClick={() => setModal({ type: 'saldoBanco' })} style={{ background: 'rgba(255,255,255,0.14)', border: 'none', color: '#fff', borderRadius: 10, padding: '10px 14px', fontSize: 13.5, fontWeight: 700, cursor: 'pointer', width: '100%' }}>🏦 Conferir com o banco</button>
+            </div>
+
+            {/* Explicação (mentor) */}
+            <Card style={{ marginBottom: 12, background: '#EEF3FF', border: '1px solid #D6E0FB' }}>
+                <div style={{ fontSize: 13, color: '#28407A', lineHeight: 1.5 }}>
+                    <b>O que é o caixa?</b> É o dinheiro que você tem de verdade: tudo que <b>entrou</b> de vendas menos tudo que <b>saiu</b> de despesas, desde o começo. Ele <b>não zera</b> quando vira o mês.
+                </div>
+            </Card>
+
+            {/* Composição do saldo */}
             <Card style={{ marginBottom: 14 }}>
-                <div style={{ fontSize: 13, color: C.inkSoft, fontWeight: 600 }}>Resultado do mês</div>
-                <div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 32, fontWeight: 700, color: saldo >= 0 ? C.volt : C.red, margin: '4px 0 10px' }}>{fmt(saldo)}</div>
-                {[['Receita de vendas', fmt(receitas), C.ink], ['Custo das scooters vendidas', '− ' + fmt(custos), C.inkSoft], ['Despesas operacionais', '− ' + fmt(totDespesas), C.inkSoft]].map(([l, v, col]: any) => (
-                    <div key={l} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, padding: '6px 0', borderTop: `1px solid ${C.line}` }}>
+                {[['Saldo inicial (abertura)', fmt(data.saldoInicial), C.inkSoft], ['Tudo que entrou (vendas)', '+ ' + fmt(entradasTotais), C.volt], ['Tudo que saiu (despesas)', '− ' + fmt(saidasTotais), C.red]].map(([l, v, col]: any) => (
+                    <div key={l} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, padding: '7px 0', borderBottom: `1px solid ${C.line}` }}>
                         <span style={{ color: C.inkSoft }}>{l}</span><span style={{ fontWeight: 600, color: col }}>{v}</span>
                     </div>
                 ))}
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 15, paddingTop: 9 }}>
+                    <span style={{ fontWeight: 700, color: C.ink }}>Caixa hoje</span><span style={{ fontWeight: 700, color: saldo >= 0 ? C.voltDark : C.red }}>{fmt(saldo)}</span>
+                </div>
             </Card>
+
+            {/* Movimento do mês (separado, não é o saldo) */}
+            <Card style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 13, color: C.inkSoft, fontWeight: 600, marginBottom: 8 }}>Movimento deste mês</div>
+                <div style={{ display: 'flex', gap: 10 }}>
+                    <div style={{ flex: 1 }}><div style={{ fontSize: 11.5, color: C.inkSoft }}>Entrou</div><div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 18, fontWeight: 700, color: C.volt }}>{fmt(entradasMes)}</div></div>
+                    <div style={{ flex: 1 }}><div style={{ fontSize: 11.5, color: C.inkSoft }}>Saiu</div><div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 18, fontWeight: 700, color: C.red }}>{fmt(saidasMes)}</div></div>
+                    <div style={{ flex: 1 }}><div style={{ fontSize: 11.5, color: C.inkSoft }}>Resultado</div><div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 18, fontWeight: 700, color: resultadoMes >= 0 ? C.volt : C.red }}>{fmt(resultadoMes)}</div></div>
+                </div>
+            </Card>
+
             <Btn onClick={() => setModal({ type: 'despesa' })} kind="dark" style={{ marginBottom: 14 }}>+ Lançar despesa</Btn>
-            {despesas.map((d: Despesa) => (
+            {despesasMes.length === 0 && <Card style={{ marginBottom: 14 }}><span style={{ fontSize: 13.5, color: C.inkSoft }}>Nenhuma despesa neste mês. Toda saída de dinheiro (frete, peça, anúncio) tem que ser lançada aqui pra bater com o banco.</span></Card>}
+            {despesasMes.map((d: Despesa) => (
                 <Card key={d.id} style={{ marginBottom: 8, padding: 14 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                         <div><div style={{ fontWeight: 600, fontSize: 14.5, color: C.ink }}>{d.desc}</div><div style={{ fontSize: 12.5, color: C.inkSoft }}>{new Date(d.data + 'T12:00').toLocaleDateString('pt-BR')}</div></div>
@@ -276,6 +394,24 @@ function Caixa({ data, setModal, delDespesa }: any) {
                     <RowActions onEdit={() => setModal({ type: 'despesa', edit: d })} onDelete={() => delDespesa(d.id)} delMsg={`Excluir a despesa "${d.desc}"?`} />
                 </Card>
             ))}
+
+            {/* Histórico por mês */}
+            {meses.length > 0 && (
+                <Card style={{ marginTop: 4 }}>
+                    <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 8, color: C.ink }}>Histórico por mês</div>
+                    {meses.map((k) => {
+                        const [y, m] = k.split('-');
+                        const nome = new Date(Number(y), Number(m) - 1).toLocaleDateString('pt-BR', { month: 'short', year: 'numeric' });
+                        const res = hist[k].e - hist[k].s;
+                        return (
+                            <div key={k} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderTop: `1px solid ${C.line}` }}>
+                                <span style={{ fontSize: 13.5, color: C.ink, textTransform: 'capitalize' }}>{nome}</span>
+                                <span style={{ fontSize: 12.5, color: C.inkSoft }}>+{fmt(hist[k].e)} · −{fmt(hist[k].s)} · <b style={{ color: res >= 0 ? C.volt : C.red }}>{fmt(res)}</b></span>
+                            </div>
+                        );
+                    })}
+                </Card>
+            )}
         </div>
     );
 }
@@ -291,7 +427,7 @@ function FormScooter({ edit, onSubmit, close }: any) {
             <Field label="Custo de compra (R$)"><input style={inputStyle} type="number" inputMode="numeric" value={f.custo} onChange={(e) => setF({ ...f, custo: e.target.value })} /></Field>
             <Field label="Preço de venda (R$)"><input style={inputStyle} type="number" inputMode="numeric" value={f.preco} onChange={(e) => setF({ ...f, preco: e.target.value })} /></Field>
             <Field label="Quantidade em estoque"><input style={inputStyle} type="number" inputMode="numeric" value={f.qtd} onChange={(e) => setF({ ...f, qtd: e.target.value })} /></Field>
-            <Btn disabled={!f.modelo || !f.preco} onClick={async () => { await onSubmit({ modelo: f.modelo, custo: +f.custo || 0, preco: +f.preco || 0, qtd: +f.qtd || 0 }); close(); }}>{edit ? 'Salvar alterações' : 'Salvar modelo'}</Btn>
+            <SubmitBtn disabled={!f.modelo || !f.preco} onClick={async () => { await onSubmit({ modelo: f.modelo, custo: +f.custo || 0, preco: +f.preco || 0, qtd: +f.qtd || 0 }); close(); }}>{edit ? 'Salvar alterações' : 'Salvar modelo'}</SubmitBtn>
         </div>
     );
 }
@@ -326,11 +462,11 @@ function FormVenda({ data, edit, onSubmit, close }: any) {
             </Field>
             <Field label="Data"><input style={inputStyle} type="date" value={f.data} onChange={(e) => setF({ ...f, data: e.target.value })} /></Field>
             {!edit && sel && f.valor && <div style={{ fontSize: 14, color: C.voltDark, background: '#E8F9F3', borderRadius: 10, padding: '10px 14px', marginBottom: 14, fontWeight: 600 }}>Lucro estimado: {fmt((+f.valor || 0) - sel.custo)}</div>}
-            <Btn disabled={!podeSalvar} onClick={async () => {
+            <SubmitBtn disabled={!podeSalvar} onClick={async () => {
                 if (edit) await onSubmit({ cliente: f.cliente, valor: +f.valor, pagamento: f.pagamento, data: f.data });
                 else await onSubmit({ scooterId: f.scooterId, cliente: f.cliente, valor: +f.valor, pagamento: f.pagamento, data: f.data });
                 close();
-            }}>{edit ? 'Salvar alterações' : 'Registrar venda'}</Btn>
+            }}>{edit ? 'Salvar alterações' : 'Registrar venda'}</SubmitBtn>
         </div>
     );
 }
@@ -344,7 +480,7 @@ function FormCliente({ edit, onSubmit, close }: any) {
             <Field label="Nome"><input style={inputStyle} value={f.nome} onChange={(e) => setF({ ...f, nome: e.target.value })} /></Field>
             <Field label="WhatsApp (DDD + número)"><input style={inputStyle} inputMode="tel" value={f.whats} onChange={(e) => setF({ ...f, whats: e.target.value })} placeholder="47999998888" /></Field>
             <Field label="Interesse"><input style={inputStyle} value={f.interesse} onChange={(e) => setF({ ...f, interesse: e.target.value })} placeholder="Ex.: modelo 800W, cor preta" /></Field>
-            <Btn disabled={!f.nome} onClick={async () => { await onSubmit(f); close(); }}>{edit ? 'Salvar alterações' : 'Salvar cliente'}</Btn>
+            <SubmitBtn disabled={!f.nome} onClick={async () => { await onSubmit(f); close(); }}>{edit ? 'Salvar alterações' : 'Salvar cliente'}</SubmitBtn>
         </div>
     );
 }
@@ -358,7 +494,7 @@ function FormDespesa({ edit, onSubmit, close }: any) {
             <Field label="Descrição"><input style={inputStyle} value={f.desc} onChange={(e) => setF({ ...f, desc: e.target.value })} placeholder="Ex.: frete, anúncio, contador" /></Field>
             <Field label="Valor (R$)"><input style={inputStyle} type="number" inputMode="numeric" value={f.valor} onChange={(e) => setF({ ...f, valor: e.target.value })} /></Field>
             <Field label="Data"><input style={inputStyle} type="date" value={f.data} onChange={(e) => setF({ ...f, data: e.target.value })} /></Field>
-            <Btn disabled={!f.desc || !f.valor} onClick={async () => { await onSubmit({ desc: f.desc, valor: +f.valor, data: f.data }); close(); }}>{edit ? 'Salvar alterações' : 'Lançar despesa'}</Btn>
+            <SubmitBtn disabled={!f.desc || !f.valor} onClick={async () => { await onSubmit({ desc: f.desc, valor: +f.valor, data: f.data }); close(); }}>{edit ? 'Salvar alterações' : 'Lançar despesa'}</SubmitBtn>
         </div>
     );
 }
@@ -368,7 +504,43 @@ function FormMeta({ data, setMeta, close }: any) {
     return (
         <div>
             <Field label="Meta de faturamento mensal (R$)"><input style={inputStyle} type="number" inputMode="numeric" value={v} onChange={(e) => setV(e.target.value)} /></Field>
-            <Btn onClick={async () => { await setMeta(+v || 0); close(); }}>Salvar meta</Btn>
+            <SubmitBtn onClick={async () => { await setMeta(+v || 0); close(); }}>Salvar meta</SubmitBtn>
+        </div>
+    );
+}
+
+// Conferir com o banco: Renato digita quanto tem na conta → app ajusta o saldo
+// inicial pra o caixa bater exatamente. Ensina ele a reconciliar com o banco.
+function FormSaldoBanco({ data, setSaldoInicial, close }: any) {
+    const entradas = somaVendas(data);
+    const saidas = somaDespesas(data);
+    const saldoApp = data.saldoInicial + entradas - saidas;
+    const [v, setV] = useState(String(Math.round(saldoApp)));
+    const banco = +v || 0;
+    const novoInicial = banco - (entradas - saidas);
+    return (
+        <div>
+            <div style={{ fontSize: 13.5, color: C.ink, background: '#EEF3FF', border: '1px solid #D6E0FB', borderRadius: 10, padding: '12px 14px', marginBottom: 14, lineHeight: 1.5 }}>
+                O app está mostrando <b>{fmt(saldoApp)}</b> no caixa. Abra o seu banco e veja quanto tem <b>de verdade</b>. Se for diferente, digita o valor certo aqui embaixo que eu faço o caixa bater.
+            </div>
+            <Field label="Quanto tem hoje na sua conta (R$)"><input style={inputStyle} type="number" inputMode="numeric" value={v} onChange={(e) => setV(e.target.value)} /></Field>
+            {banco !== Math.round(saldoApp) && (
+                <div style={{ fontSize: 13, color: C.inkSoft, marginBottom: 14 }}>Diferença de <b style={{ color: C.amber }}>{fmt(Math.abs(banco - saldoApp))}</b> — provavelmente uma venda ou despesa que faltou lançar. Confere depois!</div>
+            )}
+            <SubmitBtn onClick={async () => { await setSaldoInicial(novoInicial); close(); }}>Fazer o caixa bater com o banco</SubmitBtn>
+        </div>
+    );
+}
+
+function FormMetaLoja({ data, setMetaLoja, close }: any) {
+    const [v, setV] = useState(String(data.metaLoja));
+    return (
+        <div>
+            <div style={{ fontSize: 13.5, color: C.ink, background: '#E8F9F3', border: '1px solid #BFead9', borderRadius: 10, padding: '12px 14px', marginBottom: 14, lineHeight: 1.5 }}>
+                Esse é o seu grande objetivo: quanto você quer <b>juntar no caixa</b> pra abrir a sua loja física. O app vai te mostrar o quanto falta a cada venda.
+            </div>
+            <Field label="Meta pra abrir a loja (R$)"><input style={inputStyle} type="number" inputMode="numeric" value={v} onChange={(e) => setV(e.target.value)} /></Field>
+            <SubmitBtn onClick={async () => { await setMetaLoja(+v || 0); close(); }}>Salvar meta da loja</SubmitBtn>
         </div>
     );
 }
@@ -390,7 +562,7 @@ export default function ScootersApp({ adminBadge = false }: { adminBadge?: boole
             const r = await fetch('/api/scooters', { cache: 'no-store' });
             const j = await r.json();
             if (!r.ok || !j.success) throw new Error(j?.error || `HTTP ${r.status}`);
-            setData({ scooters: j.scooters, vendas: j.vendas, clientes: j.clientes, despesas: j.despesas, meta: j.meta, isAdmin: j.isAdmin });
+            setData({ scooters: j.scooters, vendas: j.vendas, clientes: j.clientes, despesas: j.despesas, meta: j.meta, saldoInicial: j.saldoInicial ?? 0, metaLoja: j.metaLoja ?? 50000, isAdmin: j.isAdmin });
         } catch (e: any) { setErr(e?.message || 'erro'); }
     }, []);
 
@@ -419,6 +591,8 @@ export default function ScootersApp({ adminBadge = false }: { adminBadge?: boole
     const editDespesa = (id: string, b: any) => call(`/api/scooters/despesas/${id}`, 'PATCH', b);
     const delDespesa = (id: string) => call(`/api/scooters/despesas/${id}`, 'DELETE');
     const setMeta = (meta: number) => call('/api/scooters/config', 'PATCH', { meta });
+    const setSaldoInicial = (saldo_inicial: number) => call('/api/scooters/config', 'PATCH', { saldo_inicial });
+    const setMetaLoja = (meta_loja: number) => call('/api/scooters/config', 'PATCH', { meta_loja });
 
     const logout = async () => {
         if (!confirm('Sair da conta?')) return;
@@ -438,6 +612,8 @@ export default function ScootersApp({ adminBadge = false }: { adminBadge?: boole
         cliente: isEdit ? 'Editar cliente' : 'Novo cliente',
         despesa: isEdit ? 'Editar despesa' : 'Lançar despesa',
         meta: 'Meta mensal',
+        saldoBanco: 'Conferir com o banco',
+        metaLoja: 'Meta da loja física',
     };
 
     return (
@@ -480,6 +656,8 @@ export default function ScootersApp({ adminBadge = false }: { adminBadge?: boole
                     {modal.type === 'cliente' && <FormCliente edit={modal.edit} onSubmit={(b: any) => (modal.edit ? editCliente(modal.edit.id, b) : addCliente(b))} close={() => setModal(null)} />}
                     {modal.type === 'despesa' && <FormDespesa edit={modal.edit} onSubmit={(b: any) => (modal.edit ? editDespesa(modal.edit.id, b) : addDespesa(b))} close={() => setModal(null)} />}
                     {modal.type === 'meta' && <FormMeta data={data} setMeta={setMeta} close={() => setModal(null)} />}
+                    {modal.type === 'saldoBanco' && <FormSaldoBanco data={data} setSaldoInicial={setSaldoInicial} close={() => setModal(null)} />}
+                    {modal.type === 'metaLoja' && <FormMetaLoja data={data} setMetaLoja={setMetaLoja} close={() => setModal(null)} />}
                 </Sheet>
             )}
         </div>
