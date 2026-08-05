@@ -13,7 +13,9 @@ export async function GET() {
         supabaseAdmin.from('scooters_vendas').select('*').eq('owner_email', OWNER).order('data', { ascending: false }),
         supabaseAdmin.from('scooters_clientes').select('*').eq('owner_email', OWNER).order('created_at', { ascending: true }),
         supabaseAdmin.from('scooters_despesas').select('*').eq('owner_email', OWNER).order('data', { ascending: false }),
-        supabaseAdmin.from('scooters_config').select('meta').eq('owner_email', OWNER).maybeSingle(),
+        // select('*') é resiliente: se saldo_inicial/meta_loja ainda não existirem
+        // (migration 20260805 não aplicada), voltam undefined → usamos os defaults.
+        supabaseAdmin.from('scooters_config').select('*').eq('owner_email', OWNER).maybeSingle(),
     ]);
 
     return NextResponse.json({
@@ -24,6 +26,8 @@ export async function GET() {
         clientes: (clientes.data || []).map((c) => ({ id: c.id, nome: c.nome, whats: c.whats, interesse: c.interesse, status: c.status })),
         despesas: (despesas.data || []).map((d) => ({ id: d.id, desc: d.descricao, valor: Number(d.valor), data: d.data })),
         meta: Number(config.data?.meta ?? 30000),
+        saldoInicial: Number(config.data?.saldo_inicial ?? 0),
+        metaLoja: Number(config.data?.meta_loja ?? 50000),
     });
 }
 
