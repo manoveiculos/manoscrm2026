@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/services/supabaseClients';
 import { runEliteCloser } from '@/lib/services/ai-closer-service';
 import { runGenerateProposal } from '@/lib/services/proposal-service';
-import { notifyLeadArrival } from '@/lib/services/vendorNotifyService';
+import { distribuirLead } from '@/lib/services/slaEngine';
 
 /**
  * Facebook Lead Ads Webhook (CORRIGIDO: Auditoria Forense 2026-04-18)
@@ -156,10 +156,9 @@ export async function POST(req: NextRequest) {
                             });
                         }
 
-                        // 4. Notificar (in-app). notifyLeadArrival só empurra se houver
-                        // dono; na pesca é no-op (aviso fica no Inbox + sininho).
-                        notifyLeadArrival(newLead.id).catch(e =>
-                            console.warn('[Webhook] notifyLeadArrival falhou:', e?.message)
+                        // 4. Motor de distribuição: round-robin + SLA 10min (ou standby).
+                        distribuirLead('leads_compra', newLead.id).catch(e =>
+                            console.warn('[Webhook] distribuirLead falhou:', e?.message)
                         );
 
                         // (Fase 1) AI SDR de primeiro contato REMOVIDO: zero IA falando

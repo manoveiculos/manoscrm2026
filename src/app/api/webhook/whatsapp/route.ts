@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@/lib/supabase/admin';
-import { notifyLeadArrival } from '@/lib/services/vendorNotifyService';
+import { distribuirLead } from '@/lib/services/slaEngine';
 import { detectClosingIntent, lossReasonFor } from '@/lib/services/conversationIntent';
 
 // Handler para Verificação do Webhook (GET)
@@ -144,13 +144,12 @@ export async function POST(req: NextRequest) {
             // Re-alimenta o existingLead para as lógicas de status abaixo
             existingLead = { ...newLead, native_id: newLead.id, table_name: 'leads_distribuicao_crm_26' };
 
-            // (Fase 1) AI SDR de primeiro contato REMOVIDO: zero IA falando com
-            // cliente. O lead cai na pesca e aguarda o vendedor humano.
+            // (Fase 1) AI SDR de primeiro contato REMOVIDO: zero IA falando com cliente.
 
-            // 📲 Aviso in-app: notifyLeadArrival só empurra se houver dono; na
-            // pesca é no-op. O lead novo aparece no /inbox + sininho.
-            notifyLeadArrival(String(leadId)).catch(e =>
-                console.warn('[Webhook WA] notifyLeadArrival falhou:', e?.message)
+            // 🎯 Motor de distribuição: round-robin pro próximo vendedor disponível
+            // + SLA 10min (ou standby fora do horário). Notifica o dono internamente.
+            distribuirLead('leads_distribuicao_crm_26', leadId).catch(e =>
+                console.warn('[Webhook WA] distribuirLead falhou (não-bloqueante):', e?.message)
             );
         } else if (existingLead) {
             // BOIA: toda msg inbound atualiza atualizado_em → lead sobe pro topo do /inbox

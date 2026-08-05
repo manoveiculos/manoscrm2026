@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/admin';
 import { notifyConsultant } from '@/lib/services/consultantNotifier';
-import { assignNextConsultant } from '@/lib/services/autoAssignService';
 import { withHeartbeat } from '@/lib/services/cronHeartbeat';
 
 /**
@@ -197,23 +196,9 @@ async function processLead(lead: LeadSla, results: any) {
 
     if (!isNew || !lead.consultantId) return;
 
-    // Nível 3: reatribuir após 30min
-    if (minsSinceCreated > 30 && !(await getOpenLevel(lead.id, 3))) {
-        const oldConsultantId = lead.consultantId;
-        const newId = await assignNextConsultant(lead.id, lead.table as any).catch(() => null);
-        if (newId && newId !== oldConsultantId) {
-            await notifyConsultant({
-                consultantId: oldConsultantId,
-                leadId: lead.id,
-                level: 3,
-                title: `Você perdeu o lead ${lead.name}`,
-                message: `Lead atribuído a outro vendedor por inatividade (>30min sem resposta).`,
-            });
-            await recordEscalation(lead.id, lead.table, oldConsultantId, 3, 'Reatribuído por SLA 30min');
-            results.reassigned++;
-        }
-        return;
-    }
+    // Nível 3: reatribuição APOSENTADA — o motor de distribuição (slaEngine, SLA
+    // 10min) é o ÚNICO que reatribui agora. Deixar aqui causaria duplo-repasse.
+    if (minsSinceCreated > 30) return;
 
     // Nível 2: modal bloqueante após 15min
     if (minsSinceCreated > 15 && !(await getOpenLevel(lead.id, 2))) {
