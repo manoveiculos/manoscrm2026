@@ -20,6 +20,13 @@ export interface HorarioConfig { seg_sex: [number, number]; sab: [number, number
 
 export const TZ = 'America/Sao_Paulo';
 export const SLA_SECONDS = 600; // 10 minutos
+// Lead esperando mais que isso (em horário comercial) sem NINGUÉM com check-in
+// → cai pra qualquer vendedor ativo. Check-in é preferência, não desculpa pro
+// lead apodrecer na fila.
+export const FALLBACK_SECONDS = 600; // 10 minutos
+// Máximo de leads do BACKLOG que um vendedor recebe por tick (1/min). Lead novo
+// não passa por aqui — isso só regula o despejo da fila acumulada.
+export const MAX_DESPEJO_POR_VENDEDOR = 3;
 const DEFAULT_HORAS: HorarioConfig = { seg_sex: [8, 18], sab: [8, 12], tz: TZ };
 const pad = (n: number) => String(n).padStart(2, '0');
 
@@ -90,16 +97,28 @@ const uidOf = (table: string, id: string | number) => `${table}:${id}`;
 const realIdOf = (table: string, native: string) => (table === 'leads_distribuicao_crm_26' ? parseInt(native) : native);
 
 // ---------- Roleta: próximo vendedor com check-in hoje ----------
-async function pickNextDisponivel(admin: any, excluir: string[] = []): Promise<{ id: string; name: string } | null> {
-    const { data } = await admin
+/**
+ * Próximo da fila entre quem fez check-in hoje. Com `fallback`, se ninguém fez
+ * check-in a roleta cai pra qualquer vendedor ativo — usado quando o lead já
+ * esperou FALLBACK_SECONDS ou já furou o SLA. Melhor um lead com dono que não
+ * bateu ponto do que um lead sem dono nenhum.
+ */
+async function pickNextDisponivel(admin: any, excluir: string[] = [], fallback = false): Promise<{ id: string; name: string } | null> {
+    const fila = () => admin
         .from('consultants_manos_crm')
         .select('id, name')
         .eq('is_active', true)
         .eq('role', 'vendedor')
-        .eq('disponivel_em', hojeISO())
         .order('last_lead_assigned_at', { ascending: true, nullsFirst: true })
         .limit(30);
-    const cand = (data || []).filter((c: any) => !excluir.includes(c.id));
+
+    const { data } = await fila().eq('disponivel_em', hojeISO());
+    const disponiveis = (data || []).filter((c: any) => !excluir.includes(c.id));
+    if (disponiveis.length > 0) return disponiveis[0];
+    if (!fallback) return null;
+
+    const { data: todos } = await fila();
+    const cand = (todos || []).filter((c: any) => !excluir.includes(c.id));
     return cand[0] || null;
 }
 
@@ -170,21 +189,67 @@ async function alertAdminEsgotado(admin: any, d: any) {
     } catch { /* best-effort */ }
 }
 
-/** Tick do motor (cron 1/min): despejo de pendentes + verificação de SLA + escalonamento. */
-export async function tickSla(): Promise<{ ok: boolean; closed?: boolean; distribuidos?: number; escalados?: number; esgotados?: number }> {
+/**
+ * Rede de segurança: lead inserido direto no banco (n8n) não passa pelas rotas
+ * do app, então nunca chamou distribuirLead(). Sem isso ele nasce órfão e fica
+ * invisível pra todo vendedor (o /inbox filtra pelo dono). A RPC varre os ativos
+ * sem linha na roleta e enfileira. Roda a cada tick — barato e idempotente.
+ */
+async function enfileirarOrfaos(admin: any): Promise<number> {
+    try {
+        const { data, error } = await admin.rpc('fn_enfileirar_orfaos_distribuicao', { p_limit: 200 });
+        if (error) { console.warn('[slaEngine] enfileirarOrfaos:', error.message); return 0; }
+        return Number(data) || 0;
+    } catch (e: any) {
+        console.warn('[slaEngine] enfileirarOrfaos falhou:', e?.message);
+        return 0;
+    }
+}
+
+/** Tick do motor (cron 1/min): resgate de órfãos + despejo de pendentes + SLA + escalonamento. */
+export async function tickSla(): Promise<{ ok: boolean; closed?: boolean; resgatados?: number; distribuidos?: number; escalados?: number; esgotados?: number }> {
     const admin = createClient();
     const { horas, feriados } = await loadHorario(admin);
     const now = new Date();
-    if (!isOpenNow(now, horas, feriados)) return { ok: true, closed: true };
+
+    // Fora do horário o resgate continua rodando: o lead entra na fila como
+    // 'aguardando' e o 1º tick da abertura já o despeja com dono.
+    const resgatados = await enfileirarOrfaos(admin);
+    if (!isOpenNow(now, horas, feriados)) return { ok: true, closed: true, resgatados };
 
     let distribuidos = 0, escalados = 0, esgotados = 0;
 
-    // 1) Despejo: distribui standby + aguardando (o 1º tick após abrir esvazia o standby)
-    const { data: pendentes } = await admin.from('lead_distribuicao').select('*').in('status', ['standby', 'aguardando']).limit(50);
+    // 1) Despejo: distribui standby + aguardando (o 1º tick após abrir esvazia o standby).
+    //    Mais antigo primeiro — quem esperou mais tem direito ao fallback do check-in.
+    const { data: pendentes } = await admin.from('lead_distribuicao').select('*')
+        .in('status', ['standby', 'aguardando'])
+        .order('criado_em', { ascending: true })
+        .limit(50);
+
+    // Teto por tick: sem isso, o primeiro que bate ponto de manhã leva o backlog
+    // inteiro na cara (na abertura de 10/08 seriam 11 leads num vendedor só).
+    // Com teto, o backlog escoa em alguns minutos e se espalha conforme o time
+    // vai chegando — o tick roda 1x/min, então não atrasa lead novo.
+    const atribuidosNoTick = new Map<string, number>();
+    let semCheckin = false; // ninguém bateu ponto hoje: só tenta quem já pode usar fallback
     for (const p of pendentes || []) {
-        const prox = await pickNextDisponivel(admin);
-        if (!prox) break; // ninguém disponível agora
+        const espera = businessSecondsBetween(new Date(p.criado_em), now, horas, feriados);
+        const podeFallback = espera >= FALLBACK_SECONDS;
+        if (semCheckin && !podeFallback) continue;
+
+        const saturados = [...atribuidosNoTick.entries()]
+            .filter(([, n]) => n >= MAX_DESPEJO_POR_VENDEDOR)
+            .map(([id]) => id);
+        const prox = await pickNextDisponivel(admin, saturados, podeFallback);
+        if (!prox) {
+            // Todo mundo já pegou sua cota neste tick → o resto vai no próximo (1min).
+            if (saturados.length > 0) break;
+            if (podeFallback) break; // não há vendedor ativo nenhum — nada a fazer agora
+            semCheckin = true;
+            continue;
+        }
         await atribuirA(admin, p.table_name, p.native_id, prox, now, [prox.id], 0);
+        atribuidosNoTick.set(prox.id, (atribuidosNoTick.get(prox.id) || 0) + 1);
         distribuidos++;
     }
 
@@ -195,10 +260,11 @@ export async function tickSla(): Promise<{ ok: boolean; closed?: boolean; distri
         if (businessSecondsBetween(new Date(d.distribuido_em), now, horas, feriados) < SLA_SECONDS) continue;
         await logEscalation(admin, d); // registra quem furou
         const tentados: string[] = Array.isArray(d.tentados) ? d.tentados : [];
-        const prox = await pickNextDisponivel(admin, tentados);
+        // Já furou o SLA: aceita vendedor sem check-in antes de dar o lead por esgotado.
+        const prox = await pickNextDisponivel(admin, tentados, true);
         if (prox) { await atribuirA(admin, d.table_name, d.native_id, prox, now, [...tentados, prox.id], (d.ciclos || 0) + 1); escalados++; }
         else { await admin.from('lead_distribuicao').update({ status: 'esgotado', atualizado_em: now.toISOString() }).eq('lead_uid', d.lead_uid); await alertAdminEsgotado(admin, d); esgotados++; }
     }
 
-    return { ok: true, distribuidos, escalados, esgotados };
+    return { ok: true, resgatados, distribuidos, escalados, esgotados };
 }

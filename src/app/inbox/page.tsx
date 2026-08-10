@@ -248,6 +248,27 @@ export default function InboxPage() {
         });
         const next = (data as InboxLead[]) || [];
 
+        // REDE DE SEGURANÇA: lead sem dono é invisível pro vendedor — o filtro
+        // acima é por assigned_consultant_id e as policies de RLS também. Se o
+        // motor de distribuição falhar, o lead some da vista de todo mundo menos
+        // do admin (foi o que deixou 11 leads parados até 3 dias). Esta rota
+        // server-side traz os órfãos +15min pra ninguém ficar olhando fila vazia
+        // enquanto tem cliente esperando.
+        if (!adminMode && cid && viewMode === 'active') {
+            try {
+                const res = await fetch('/api/inbox/orfaos');
+                const json = await res.json();
+                if (json?.success && Array.isArray(json.leads)) {
+                    const jaTem = new Set(next.map(l => l.uid));
+                    for (const o of json.leads as InboxLead[]) {
+                        if (!jaTem.has(o.uid)) next.push({ ...o, _orfao: true } as any);
+                    }
+                }
+            } catch (orfaoErr) {
+                console.warn('[Inbox] resgate de órfãos falhou:', orfaoErr);
+            }
+        }
+
         // Buscar veículo_interesse real e carro_troca das tabelas base para evitar recriar views
         try {
             const crm26Ids = next.filter(l => l.table_name === 'leads_distribuicao_crm_26').map(l => parseInt(l.native_id, 10)).filter(id => !isNaN(id));
@@ -577,12 +598,13 @@ export default function InboxPage() {
     }, [supabase, consultantId, fetchLeads, filter]);
 
     const groups = useMemo(() => {
-        const buckets = { 
+        const buckets = {
+            resgate: [] as InboxLead[],
             fishing: [] as InboxLead[],
-            reversao: [] as InboxLead[], 
-            waitingReply: [] as InboxLead[], 
-            inConversation: [] as InboxLead[], 
-            cooling: [] as InboxLead[], 
+            reversao: [] as InboxLead[],
+            waitingReply: [] as InboxLead[],
+            inConversation: [] as InboxLead[],
+            cooling: [] as InboxLead[],
             zombie: [] as InboxLead[]
         };
 
@@ -592,7 +614,10 @@ export default function InboxPage() {
             // passa a ser gerido no /atendimento (Kanban). Decisão do dono
             // (2026-07-11): "em atendimento não fica no inbox; só não atendidos".
             if (!lead.atendimento_iniciado_em) {
-                buckets.fishing.push(lead);
+                // Órfão resgatado (sem dono há +15min) vai numa seção própria —
+                // é lead que a distribuição deixou passar, não fila normal.
+                if ((lead as any)._orfao) buckets.resgate.push(lead);
+                else buckets.fishing.push(lead);
             }
         }
 
@@ -695,8 +720,14 @@ export default function InboxPage() {
             <AgendaStrip />
 
             {filter !== 'archived' && (
-                <div className="flex items-center gap-3 mb-5 text-xs text-gray-400">
+                <div className="flex items-center gap-3 mb-5 text-xs text-gray-400 flex-wrap">
                     <span>🎣 <strong className="text-amber-400">{groups.fishing.length}</strong> seus leads aguardando</span>
+                    {groups.resgate.length > 0 && (
+                        <>
+                            <span className="text-zinc-600">·</span>
+                            <span className="text-red-400">⚠️ <strong>{groups.resgate.length}</strong> sem dono — pegue agora</span>
+                        </>
+                    )}
                     <span className="text-zinc-600">·</span>
                     <span className="text-zinc-500">Leads em atendimento agora ficam no <strong className="text-zinc-300">Atendimento</strong></span>
                 </div>
@@ -736,7 +767,7 @@ export default function InboxPage() {
                         ))}
                     </ul>
                 )
-            ) : (groups.fishing.length + counts.waitingReply + counts.inConversation + counts.cooling + counts.zombie === 0) ? (
+            ) : (groups.resgate.length + groups.fishing.length + counts.waitingReply + counts.inConversation + counts.cooling + counts.zombie === 0) ? (
                 <div className="text-gray-400 text-center py-12">
                     <p className="text-lg">Nada na fila.</p>
                     <p className="text-sm mt-1">Boa hora pra prospectar.</p>
@@ -744,6 +775,30 @@ export default function InboxPage() {
             ) : (
                 <PTR onRefresh={() => fetchLeads(consultantId, 'active', isAdmin)}>
                     <div className="space-y-12 pb-20">
+                        {/* Resgate: órfãos que a distribuição não entregou a ninguém.
+                            Em regime normal fica vazia (o motor distribui em ≤1min). */}
+                        {groups.resgate.length > 0 && (
+                            <Section
+                                title="⚠️ SEM DONO — PEGUE AGORA"
+                                subtitle="Ninguém recebeu esses leads. Quem clicar, leva."
+                                icon={<AlertTriangle className="w-5 h-5 text-red-400 animate-pulse" />}
+                                accent="border-red-500 ring-2 ring-red-500/30 shadow-lg shadow-red-500/20"
+                                leads={groups.resgate}
+                                lastMessages={lastMessages}
+                                emptyText=""
+                                expandedUid={expandedUid}
+                                onToggle={setExpandedUid}
+                                onArchive={handleArchive}
+                                onCaptureSuccess={handleCaptureSuccess}
+                                consultantsMap={consultantsMap}
+                                supabase={supabase}
+                                router={router}
+                                consultantId={consultantId}
+                                isAdmin={isAdmin}
+                                isFishing={true}
+                            />
+                        )}
+
                         {/* Fila de Pesca (V4) */}
                         {groups.fishing.length > 0 && (
                             <Section
@@ -768,7 +823,7 @@ export default function InboxPage() {
                         )}
 
                         <NextActionCard
-                            lead={groups.fishing[0] || null}
+                            lead={groups.resgate[0] || groups.fishing[0] || null}
                             lastMessages={lastMessages}
                             consultantId={consultantId}
                         />
