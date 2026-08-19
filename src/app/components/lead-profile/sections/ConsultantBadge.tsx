@@ -28,6 +28,7 @@ export const ConsultantBadge: React.FC<ConsultantBadgeProps> = ({ lead, isAdmin,
     const [mounted, setMounted] = useState(false);
     const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({});
     const buttonRef = useRef<HTMLButtonElement>(null);
+    const dropdownRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => { setMounted(true); }, []);
 
@@ -55,7 +56,16 @@ export const ConsultantBadge: React.FC<ConsultantBadgeProps> = ({ lead, isAdmin,
                 const res = await fetch('/api/lead/consultants');
                 const json = await res.json();
                 if (json?.success && Array.isArray(json.consultants)) {
-                    setAllConsultants(json.consultants);
+                    // Time da roleta primeiro: em ordem alfabética pura, Victor,
+                    // Sergio e Wilson caem no fim da lista — quem transfere na
+                    // pressa nem chega neles.
+                    const ordenada = [...json.consultants].sort((a: Consultant, b: Consultant) => {
+                        const pa = a.recebe_leads ? 0 : 1;
+                        const pb = b.recebe_leads ? 0 : 1;
+                        if (pa !== pb) return pa - pb;
+                        return (a.name || '').localeCompare(b.name || '', 'pt-BR');
+                    });
+                    setAllConsultants(ordenada);
                 }
             } catch (e) {
                 console.error('[ConsultantBadge] falha ao listar consultores:', e);
@@ -68,12 +78,17 @@ export const ConsultantBadge: React.FC<ConsultantBadgeProps> = ({ lead, isAdmin,
         if (!buttonRef.current) return;
         const rect = buttonRef.current.getBoundingClientRect();
         const viewportHeight = window.innerHeight;
-        const dropdownHeight = 300;
+        const dropdownHeight = 380; // cabeçalho + max-h-80 da lista
         const openUpward = rect.bottom + dropdownHeight > viewportHeight;
+        // Abrindo pra cima, o topo pode ficar negativo e os primeiros nomes
+        // saem da tela — justamente os do time de vendas, que vêm primeiro.
+        const top = openUpward
+            ? Math.max(8, rect.top - dropdownHeight)
+            : Math.min(rect.bottom + 6, viewportHeight - dropdownHeight - 8);
 
         setDropdownStyle({
             position: 'fixed',
-            top: openUpward ? rect.top - dropdownHeight : rect.bottom + 6,
+            top: Math.max(8, top),
             left: Math.max(0, rect.right - 208),
             width: 208,
             zIndex: 99999,
@@ -86,9 +101,17 @@ export const ConsultantBadge: React.FC<ConsultantBadgeProps> = ({ lead, isAdmin,
         setShowMenu(prev => !prev);
     };
 
+    // Fecha ao rolar a PÁGINA (o menu é position:fixed e ficaria solto no ar).
+    // O listener é capture, então também pega o scroll de dentro do próprio
+    // dropdown — sem esta checagem, tentar rolar a lista fechava o menu e nunca
+    // se chegava nos últimos nomes da ordem alfabética.
     useEffect(() => {
         if (!showMenu) return;
-        const close = () => setShowMenu(false);
+        const close = (e?: Event) => {
+            const alvo = e?.target as Node | null;
+            if (alvo && dropdownRef.current?.contains(alvo)) return; // scroll interno: deixa rolar
+            setShowMenu(false);
+        };
         window.addEventListener('scroll', close, true);
         window.addEventListener('resize', close);
         return () => {
@@ -172,6 +195,7 @@ export const ConsultantBadge: React.FC<ConsultantBadgeProps> = ({ lead, isAdmin,
                                 onClick={() => setShowMenu(false)}
                             />
                             <motion.div
+                                ref={dropdownRef}
                                 key="consultant-dropdown"
                                 initial={{ opacity: 0, y: 6, scale: 0.97 }}
                                 animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -183,7 +207,7 @@ export const ConsultantBadge: React.FC<ConsultantBadgeProps> = ({ lead, isAdmin,
                                 <div className="px-3 py-2 border-b border-white/[0.06]">
                                     <p className="text-[10px] text-white/30 uppercase tracking-widest font-semibold">Alterar consultor</p>
                                 </div>
-                                <div className="max-h-60 overflow-y-auto">
+                                <div className="max-h-80 overflow-y-auto overscroll-contain">
                                     {allConsultants.length === 0 ? (
                                         <p className="px-4 py-3 text-[11px] text-white/30">Carregando...</p>
                                     ) : (
