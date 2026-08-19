@@ -3,8 +3,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, LayoutDashboard, History, Edit3, Car, Trash2, Loader2 } from 'lucide-react';
+import { X, LayoutDashboard, History, Edit3, Car, Trash2, Loader2, Inbox } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { getTableForLead, stripPrefix } from '@/lib/services/leadRouter';
 
 import { useLeadData } from './hooks/useLeadData';
 import { useLeadTimeline } from './hooks/useLeadTimeline';
@@ -667,6 +668,17 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
                                     onScoreUpdated={recalculateStrategy}
                                 />
                                 <div className="flex items-center gap-2">
+                                    {/* Abre a tela cheia do lead (/lead/:uid) — de lá saem
+                                        conversa, encaminhar, venda e perda. O modal é resumo;
+                                        o trabalho de verdade acontece no inbox do lead. */}
+                                    <a
+                                        href={`/lead/${encodeURIComponent(`${getTableForLead(String(lead.id))}:${stripPrefix(String(lead.id))}`)}`}
+                                        title="Abrir inbox deste lead"
+                                        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-blue-500/25 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20 hover:text-blue-200 transition-all text-[11px] font-semibold"
+                                    >
+                                        <Inbox size={13} />
+                                        <span>Abrir Inbox</span>
+                                    </a>
                                     <ConsultantBadge
                                         lead={lead}
                                         isAdmin={isManagement}

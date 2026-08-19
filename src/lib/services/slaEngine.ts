@@ -4,8 +4,9 @@ import { createClient } from '@/lib/supabase/admin';
  * Motor de Distribuição Round-Robin + SLA 10min.
  *
  * Regras:
- *  - Lead novo em horário comercial → vai pro próximo vendedor DISPONÍVEL (check-in
- *    do dia), com 10min de horário-comercial pra iniciar o atendimento.
+ *  - Lead novo em horário comercial → vai pro próximo vendedor DISPONÍVEL (está
+ *    no time da roleta via recebe_leads E fez check-in do dia), com 10min de
+ *    horário-comercial pra iniciar o atendimento.
  *  - Não iniciou em 10min → repassa pro próximo, reinicia o relógio, loga o evento.
  *  - Deu a volta na roleta (todos falharam) → status 'esgotado' + alerta admin.
  *  - Fora do horário → 'standby'. Aberto sem ninguém disponível → 'aguardando'.
@@ -20,13 +21,22 @@ export interface HorarioConfig { seg_sex: [number, number]; sab: [number, number
 
 export const TZ = 'America/Sao_Paulo';
 export const SLA_SECONDS = 600; // 10 minutos
-// Lead esperando mais que isso (em horário comercial) sem NINGUÉM com check-in
-// → cai pra qualquer vendedor ativo. Check-in é preferência, não desculpa pro
-// lead apodrecer na fila.
+// Lead esperando mais que isso (em horário comercial) sem NINGUÉM do time com
+// check-in → cai pra qualquer um do time (recebe_leads). Check-in é preferência,
+// não desculpa pro lead apodrecer na fila.
 export const FALLBACK_SECONDS = 600; // 10 minutos
 // Máximo de leads do BACKLOG que um vendedor recebe por tick (1/min). Lead novo
 // não passa por aqui — isso só regula o despejo da fila acumulada.
 export const MAX_DESPEJO_POR_VENDEDOR = 3;
+// Rede de proteção para a janela entre o deploy e a migration que cria
+// consultants_manos_crm.recebe_leads. Sem a coluna, cair no rodízio antigo por
+// role mandaria lead pra fora do time de vendas de novo. A fonte de verdade é
+// a flag no banco; isto só cobre o intervalo. Victor, Sergio, Wilson.
+const TIME_ROLETA_FALLBACK = [
+    '8ad0074f-238b-4a64-a6b9-ef8d7d6f669e',
+    '2cc340eb-7dba-4d49-9800-375d34a1df8f',
+    'e892b130-5c57-4f66-bd29-e2fe2174bb11',
+];
 const DEFAULT_HORAS: HorarioConfig = { seg_sex: [8, 18], sab: [8, 12], tz: TZ };
 const pad = (n: number) => String(n).padStart(2, '0');
 
@@ -98,26 +108,43 @@ const realIdOf = (table: string, native: string) => (table === 'leads_distribuic
 
 // ---------- Roleta: próximo vendedor com check-in hoje ----------
 /**
- * Próximo da fila entre quem fez check-in hoje. Com `fallback`, se ninguém fez
- * check-in a roleta cai pra qualquer vendedor ativo — usado quando o lead já
- * esperou FALLBACK_SECONDS ou já furou o SLA. Melhor um lead com dono que não
- * bateu ponto do que um lead sem dono nenhum.
+ * Próximo da fila entre quem está no time da roleta (recebe_leads) E fez check-in
+ * hoje. Com `fallback`, se ninguém do time bateu ponto, aceita qualquer um do
+ * time — usado quando o lead já esperou FALLBACK_SECONDS ou já furou o SLA.
+ * Melhor um lead com dono que não bateu ponto do que um lead sem dono nenhum.
+ * O fallback NUNCA sai do time: quem tem recebe_leads=false não recebe, ponto.
  */
 async function pickNextDisponivel(admin: any, excluir: string[] = [], fallback = false): Promise<{ id: string; name: string } | null> {
-    const fila = () => admin
-        .from('consultants_manos_crm')
-        .select('id, name')
-        .eq('is_active', true)
-        .eq('role', 'vendedor')
-        .order('last_lead_assigned_at', { ascending: true, nullsFirst: true })
-        .limit(30);
+    // recebe_leads é a ÚNICA porta de entrada da roleta. Papel 'vendedor' não
+    // basta: em 9 dias o rodízio por role mandou 32 de 49 leads pra quem não
+    // estava vendendo. Quem entra/sai do time vira um UPDATE nessa flag.
+    //
+    // usarFlag=false só acontece se o deploy subir antes da migration: aí a
+    // coluna não existe e caímos no time fixo, NUNCA no rodízio antigo por role
+    // (que é justamente o bug). Volta pra flag assim que a migration passa.
+    const fila = (usarFlag: boolean) => {
+        const q = admin
+            .from('consultants_manos_crm')
+            .select('id, name')
+            .eq('is_active', true)
+            .order('last_lead_assigned_at', { ascending: true, nullsFirst: true })
+            .limit(30);
+        return usarFlag ? q.eq('recebe_leads', true) : q.in('id', TIME_ROLETA_FALLBACK);
+    };
 
-    const { data } = await fila().eq('disponivel_em', hojeISO());
+    let usarFlag = true;
+    let { data, error } = await fila(true).eq('disponivel_em', hojeISO());
+    if (error) {
+        console.warn('[slaEngine] recebe_leads indisponível, usando time fixo:', error.message);
+        usarFlag = false;
+        ({ data } = await fila(false).eq('disponivel_em', hojeISO()));
+    }
+
     const disponiveis = (data || []).filter((c: any) => !excluir.includes(c.id));
     if (disponiveis.length > 0) return disponiveis[0];
     if (!fallback) return null;
 
-    const { data: todos } = await fila();
+    const { data: todos } = await fila(usarFlag);
     const cand = (todos || []).filter((c: any) => !excluir.includes(c.id));
     return cand[0] || null;
 }
