@@ -8,8 +8,9 @@ import { createClient } from '@/lib/supabase/client';
 interface Consultant {
     id: string;
     name: string;
-    email: string;
+    email?: string;
     role?: string;
+    recebe_leads?: boolean;
 }
 
 interface ConsultantBadgeProps {
@@ -45,14 +46,20 @@ export const ConsultantBadge: React.FC<ConsultantBadgeProps> = ({ lead, isAdmin,
         fetchConsultant();
     }, [lead.assigned_consultant_id]);
 
+    // Lista pela rota server-side (service_role): a RLS de consultants_manos_crm
+    // pode esconder gente do client e o dropdown ficava incompleto.
     useEffect(() => {
         if (!isAdmin || !showMenu) return;
         const fetchAll = async () => {
-            const { data } = await supabase
-                .from('consultants_manos_crm')
-                .select('id, name, email, role')
-                .order('name');
-            if (data) setAllConsultants(data);
+            try {
+                const res = await fetch('/api/lead/consultants');
+                const json = await res.json();
+                if (json?.success && Array.isArray(json.consultants)) {
+                    setAllConsultants(json.consultants);
+                }
+            } catch (e) {
+                console.error('[ConsultantBadge] falha ao listar consultores:', e);
+            }
         };
         fetchAll();
     }, [isAdmin, showMenu]);
@@ -90,25 +97,39 @@ export const ConsultantBadge: React.FC<ConsultantBadgeProps> = ({ lead, isAdmin,
         };
     }, [showMenu]);
 
+    /**
+     * Transferência via /api/lead/transfer (service_role no servidor).
+     *
+     * Antes isto dava UPDATE direto do client em leads_master/leads_manos_crm —
+     * nunca em leads_distribuicao_crm_26, que é onde está a maior parte dos
+     * leads. Como o erro não era checado, a UI dizia "trocado" e nada tinha
+     * mudado no banco. A rota resolve a tabela certa, sincroniza a roleta e
+     * devolve erro de verdade quando não encontra o lead.
+     */
     const handleSelect = async (c: Consultant) => {
         setSaving(true);
         try {
-            const cleanLeadId = lead.id.toString().replace(/^(main_|crm26_|dist_|lead_|crm25_)/, '');
-            const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(cleanLeadId);
-            const tables = isUUID
-                ? ['leads_master', 'leads_manos_crm']
-                : ['leads_manos_crm', 'leads_master'];
+            const res = await fetch('/api/lead/transfer', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    lead_id: lead.id,
+                    lead_table: lead.source_table || lead.table_name || undefined,
+                    target_consultant_id: c.id,
+                }),
+            });
+            const data = await res.json().catch(() => ({}));
 
-            for (const table of tables) {
-                await supabase
-                    .from(table)
-                    .update({ assigned_consultant_id: c.id })
-                    .eq('id', cleanLeadId);
+            if (!res.ok || !data.success) {
+                alert(`Não foi possível transferir: ${data.error || 'tente novamente'}`);
+                return;
             }
 
             setConsultant(c);
             setShowMenu(false);
             onUpdate?.(c.id, c.name);
+        } catch (e: any) {
+            alert(`Erro de conexão ao transferir: ${e?.message || 'tente novamente'}`);
         } finally {
             setSaving(false);
         }
@@ -178,7 +199,9 @@ export const ConsultantBadge: React.FC<ConsultantBadgeProps> = ({ lead, isAdmin,
                                                 </div>
                                                 <div className="flex-1 min-w-0">
                                                     <p className="text-white/80 font-medium truncate">{c.name}</p>
-                                                    <p className="text-white/30 text-[10px] truncate">{c.role || 'consultor'}</p>
+                                                    <p className="text-white/30 text-[10px] truncate">
+                                                        {c.recebe_leads ? '🎯 na roleta' : (c.role || 'consultor')}
+                                                    </p>
                                                 </div>
                                                 {consultant?.id === c.id && (
                                                     <Check size={11} className="text-red-400 shrink-0" />

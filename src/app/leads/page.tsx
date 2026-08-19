@@ -353,10 +353,23 @@ function LeadsContent() {
             const currentLead = leads.find(l => l.id === leadId);
             const previousConsultantId = currentLead?.assigned_consultant_id;
 
-            await leadService.updateLeadDetails(undefined, leadId, {
-                assigned_consultant_id: newConsultantId,
-                primeiro_vendedor: consultant?.name
+            // Via /api/lead/transfer: o updateLeadDetails do client escrevia na
+            // tabela errada (leads_master pra id sem prefixo) e a RLS derrubava
+            // em silêncio. A rota resolve a tabela e sincroniza a roleta.
+            const res = await fetch('/api/lead/transfer', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    lead_id: leadId,
+                    lead_table: (currentLead as any)?.source_table || undefined,
+                    target_consultant_id: newConsultantId,
+                }),
             });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || !data.success) {
+                alert(`Não foi possível transferir: ${data.error || 'tente novamente'}`);
+                return;
+            }
 
             setLeads(prev => prev.map(l => l.id === leadId ? {
                 ...l,
