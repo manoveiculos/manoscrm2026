@@ -5,7 +5,6 @@ import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, LayoutDashboard, History, Edit3, Car, Trash2, Loader2, Inbox } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
-import { getTableForLead, stripPrefix } from '@/lib/services/leadRouter';
 
 import { useLeadData } from './hooks/useLeadData';
 import { useLeadTimeline } from './hooks/useLeadTimeline';
@@ -132,8 +131,28 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
     const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
     const [editedTemplates, setEditedTemplates] = useState<Record<string, string>>({});
     const [isDeleting, setIsDeleting] = useState(false);
+    const [openingInbox, setOpeningInbox] = useState(false);
     // Controla auto-trigger único por sessão do modal
     const hasAutoTriggered = useRef(false);
+
+    /** Resolve o uid canônico do lead e abre a tela cheia (/lead/:uid). */
+    const openLeadInbox = useCallback(async () => {
+        if (!lead?.id) return;
+        setOpeningInbox(true);
+        try {
+            const res = await fetch(`/api/lead/resolve-uid?id=${encodeURIComponent(String(lead.id))}`);
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || !data.success || !data.uid) {
+                alert(`Não foi possível abrir o inbox: ${data.error || 'lead não localizado'}`);
+                return;
+            }
+            window.location.href = `/lead/${encodeURIComponent(data.uid)}`;
+        } catch (e: any) {
+            alert(`Erro ao abrir o inbox: ${e?.message || 'tente novamente'}`);
+        } finally {
+            setOpeningInbox(false);
+        }
+    }, [lead?.id]);
 
     // Client-side rendering check for Portal
     const [mounted, setMounted] = useState(false);
@@ -670,15 +689,23 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
                                 <div className="flex items-center gap-2">
                                     {/* Abre a tela cheia do lead (/lead/:uid) — de lá saem
                                         conversa, encaminhar, venda e perda. O modal é resumo;
-                                        o trabalho de verdade acontece no inbox do lead. */}
-                                    <a
-                                        href={`/lead/${encodeURIComponent(`${getTableForLead(String(lead.id))}:${stripPrefix(String(lead.id))}`)}`}
+                                        o trabalho de verdade acontece no inbox do lead.
+
+                                        Passa pelo resolve-uid porque a listagem serve leads da
+                                        view `leads` (espelho leads_master), e a tela do lead lê
+                                        de leads_unified, que não tem o espelho. Montar o uid
+                                        direto aqui dava "Lead não encontrado". */}
+                                    <button
+                                        onClick={openLeadInbox}
+                                        disabled={openingInbox}
                                         title="Abrir inbox deste lead"
-                                        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-blue-500/25 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20 hover:text-blue-200 transition-all text-[11px] font-semibold"
+                                        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-blue-500/25 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20 hover:text-blue-200 disabled:opacity-50 transition-all text-[11px] font-semibold"
                                     >
-                                        <Inbox size={13} />
+                                        {openingInbox
+                                            ? <Loader2 size={13} className="animate-spin" />
+                                            : <Inbox size={13} />}
                                         <span>Abrir Inbox</span>
-                                    </a>
+                                    </button>
                                     <ConsultantBadge
                                         lead={lead}
                                         isAdmin={isManagement}
