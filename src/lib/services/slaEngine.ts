@@ -28,6 +28,10 @@ export const FALLBACK_SECONDS = 600; // 10 minutos
 // Máximo de leads do BACKLOG que um vendedor recebe por tick (1/min). Lead novo
 // não passa por aqui — isso só regula o despejo da fila acumulada.
 export const MAX_DESPEJO_POR_VENDEDOR = 3;
+// Leads 'esgotado' devolvidos à fila por tick (1/min). Baixo de propósito: o
+// backlog escoa ao longo do dia em vez de cair de uma vez no time. Com 3, um
+// acúmulo de 69 leads leva ~23 minutos para voltar todo à roleta.
+export const MAX_RECICLAGEM_POR_TICK = 3;
 // Rede de proteção para a janela entre o deploy e a migration que cria
 // consultants_manos_crm.recebe_leads. Sem a coluna, cair no rodízio antigo por
 // role mandaria lead pra fora do time de vendas de novo. A fonte de verdade é
@@ -233,8 +237,68 @@ async function enfileirarOrfaos(admin: any): Promise<number> {
     }
 }
 
-/** Tick do motor (cron 1/min): resgate de órfãos + despejo de pendentes + SLA + escalonamento. */
-export async function tickSla(): Promise<{ ok: boolean; closed?: boolean; resgatados?: number; distribuidos?: number; escalados?: number; esgotados?: number }> {
+/**
+ * Recicla leads que ficaram em 'esgotado' — o status que o motor dá quando o
+ * lead deu a volta na roleta inteira e ninguém aceitou.
+ *
+ * O buraco: o tick varre 'standby', 'aguardando' e 'distribuido'. Nunca
+ * 'esgotado'. Então o lead ficava num limbo permanente — sem dono e sem
+ * ninguém para movê-lo. Em 20/08/2026 havia 69 leads assim, e a checagem no
+ * banco mostrou os 69 VIVOS e sem atendimento nenhum: clientes reais que o
+ * sistema tinha desistido de entregar.
+ *
+ * Dois limites evitam que a reciclagem vire moto-perpétuo:
+ *  - um lead só volta à fila uma vez por dia (atualizado_em < hoje);
+ *  - teto por tick, para o backlog escoar aos poucos em vez de cair de uma vez
+ *    na cabeça do time.
+ * Roda DEPOIS do despejo, então lead novo sempre tem preferência sobre lead
+ * que já foi recusado por todo mundo.
+ */
+async function reciclarEsgotados(admin: any, now: Date): Promise<number> {
+    const inicioDoDia = `${spYMD(now).iso}T00:00:00-03:00`;
+
+    const { data: esgotados, error } = await admin
+        .from('lead_distribuicao')
+        .select('lead_uid')
+        .eq('status', 'esgotado')
+        .lt('atualizado_em', inicioDoDia)
+        .order('atualizado_em', { ascending: true })
+        .limit(MAX_RECICLAGEM_POR_TICK);
+
+    if (error || !esgotados?.length) return 0;
+
+    // Só volta pra fila quem ainda está vivo e sem atendimento. Lead encerrado,
+    // arquivado ou já em conversa não se mexe.
+    const uids = esgotados.map((e: any) => e.lead_uid);
+    const { data: vivos } = await admin
+        .from('leads_unified_active')
+        .select('uid')
+        .in('uid', uids)
+        .is('atendimento_iniciado_em', null)
+        .neq('descarte_financeiro', true);
+
+    const paraReciclar = (vivos || []).map((v: any) => v.uid);
+    if (!paraReciclar.length) return 0;
+
+    const { error: updErr } = await admin
+        .from('lead_distribuicao')
+        .update({
+            status: 'aguardando',
+            assigned_consultant_id: null,
+            distribuido_em: null,
+            tentados: [],
+            ciclos: 0,
+            atualizado_em: now.toISOString(),
+        })
+        .in('lead_uid', paraReciclar);
+
+    if (updErr) { console.warn('[slaEngine] reciclarEsgotados:', updErr.message); return 0; }
+    console.log(`[slaEngine] ${paraReciclar.length} lead(s) esgotado(s) devolvidos à fila`);
+    return paraReciclar.length;
+}
+
+/** Tick do motor (cron 1/min): resgate de órfãos + despejo de pendentes + SLA + escalonamento + reciclagem. */
+export async function tickSla(): Promise<{ ok: boolean; closed?: boolean; resgatados?: number; distribuidos?: number; escalados?: number; esgotados?: number; reciclados?: number }> {
     const admin = createClient();
     const { horas, feriados } = await loadHorario(admin);
     const now = new Date();
@@ -293,5 +357,10 @@ export async function tickSla(): Promise<{ ok: boolean; closed?: boolean; resgat
         else { await admin.from('lead_distribuicao').update({ status: 'esgotado', atualizado_em: now.toISOString() }).eq('lead_uid', d.lead_uid); await alertAdminEsgotado(admin, d); esgotados++; }
     }
 
-    return { ok: true, resgatados, distribuidos, escalados, esgotados };
+    // 3) Reciclagem: lead que esgotou a roleta volta pra fila no dia seguinte.
+    //    Por último de propósito — lead novo tem preferência sobre lead que já
+    //    passou por todo mundo.
+    const reciclados = await reciclarEsgotados(admin, now);
+
+    return { ok: true, resgatados, distribuidos, escalados, esgotados, reciclados };
 }
