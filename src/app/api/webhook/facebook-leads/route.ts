@@ -9,6 +9,28 @@ import { distribuirLead } from '@/lib/services/slaEngine';
  * - Usa supabaseAdmin para contornar RLS
  * - Grava na tabela leads_compra
  * - Retorna 500 em falha para forçar reenvio do Meta
+ *
+ * ┌─ QUEM CHAMA ESTA ROTA ────────────────────────────────────────────┐
+ * │ O n8n, NÃO o Facebook direto. A cadeia é:                         │
+ * │                                                                    │
+ * │   Facebook (app ManosN8N, assinatura leadgen)                     │
+ * │     → n8n  https://n8n.drivvoo.com/webhook/facebook-crm2026       │
+ * │       → CRM  /api/webhook/facebook-leads   ← você está aqui       │
+ * │                                                                    │
+ * │ O n8n é intermediário PROPOSITAL (decisão do dono, 2026-08-19):   │
+ * │ é onde o fluxo fica visível e editável sem deploy. Ele repassa o  │
+ * │ corpo CRU do Facebook — é por isso que o parse abaixo espera o    │
+ * │ formato nativo (object:"page" + entry[].changes[]).               │
+ * │                                                                    │
+ * │ Se alguém trocar a URL de callback no app do Facebook para apontar │
+ * │ direto pra cá, continua funcionando. Mas se mexerem no n8n para   │
+ * │ ele NORMALIZAR o payload antes de repassar, o formato deixa de    │
+ * │ bater e o lead para de entrar — veja o log de payload não         │
+ * │ reconhecido abaixo, que existe justamente pra isso não virar um   │
+ * │ sumiço silencioso.                                                 │
+ * │                                                                    │
+ * │ Doc do fluxo: docs/integracao-meta-lead-ads.md                    │
+ * └────────────────────────────────────────────────────────────────────┘
  */
 
 export async function GET(req: NextRequest) {
@@ -29,8 +51,19 @@ export async function POST(req: NextRequest) {
     try {
         const payload = await req.json();
 
+        // Payload fora do formato nativo do Facebook. Antes isto respondia 200
+        // mudo — se o n8n passasse a normalizar o corpo, os leads sumiriam sem
+        // deixar rastro nenhum. Agora fica registrado o que chegou.
         if (payload.object !== 'page') {
-            return NextResponse.json({ received: true });
+            console.warn(
+                '[Webhook FB] Payload não reconhecido (esperado object:"page" vindo cru do Facebook via n8n). ' +
+                'Chaves recebidas: ' + Object.keys(payload || {}).join(', ')
+            );
+            return NextResponse.json({
+                received: true,
+                ignored: true,
+                reason: 'payload fora do formato nativo do Facebook (object != page)',
+            });
         }
 
         const META_TOKEN = process.env.META_ACCESS_TOKEN || process.env.NEXT_PUBLIC_META_ACCESS_TOKEN;
