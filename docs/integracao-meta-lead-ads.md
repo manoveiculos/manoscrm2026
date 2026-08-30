@@ -133,9 +133,104 @@ Sem essa permissão a notificação chega, mas a busca no Graph falha e o webhoo
 
 ---
 
+## A volta: CRM → n8n → CAPI
+
+A entrada (acima) já roda. Esta é a **saída** — o CRM devolvendo ao Meta o que
+aconteceu com o lead depois. É isso que faz a campanha otimizar por lead que
+presta em vez de lead barato.
+
+```
+CRM  (vendedor mexe no lead)
+  │  POST  N8N_CAPI_WEBHOOK_URL      ← env do CRM, ainda a definir
+  ▼
+n8n  monta o payload e assina com o token
+  │  POST  graph.facebook.com/v21.0/1397712305554437/events
+  ▼
+Meta dataset "Formulario Leads CRM"
+```
+
+### O que o CRM manda para o n8n
+
+Contrato fixo — o n8n pode ser montado contra isto antes de o CRM existir:
+
+```json
+{
+  "evento": "QualifiedLead",
+  "lead": {
+    "uid": "leads_compra:8f3c...",
+    "leadgen_id": "1234567890123456",
+    "campaign_id": "120210000000000000",
+    "campaign_name": "MANOS_LEADS_HAVALH6GT_FRIA_20260830",
+    "nome": "Fulano de Tal"
+  },
+  "custom_data": {
+    "value": 228900,
+    "currency": "BRL"
+  },
+  "event_time": 1755691200,
+  "teste": false
+}
+```
+
+`nome` vai só para você identificar a execução no n8n — **não** deve ser
+repassado ao Meta. `teste: true` marca disparo manual feito pela aba de admin.
+
+### O que o n8n manda para o Meta
+
+```json
+POST https://graph.facebook.com/v21.0/1397712305554437/events
+
+{
+  "data": [{
+    "event_name": "QualifiedLead",
+    "event_time": 1755691200,
+    "action_source": "system_generated",
+    "user_data": {
+      "lead_id": 1234567890123456
+    },
+    "custom_data": {
+      "value": 228900,
+      "currency": "BRL",
+      "event_source": "crm",
+      "lead_event_source": "Manos CRM"
+    }
+  }],
+  "access_token": "<token do usuário de sistema>"
+}
+```
+
+**Os quatro detalhes que quebram a integração em silêncio:**
+
+1. `lead_id` **numérico**, não string. Como string o Meta aceita com 200 e
+   descarta a correspondência.
+2. `action_source` tem de ser `system_generated`. Qualquer outro valor faz o
+   evento ser tratado como web e exigir `fbp`/`fbc`/IP, que não existem aqui.
+3. `custom_data.event_source: "crm"` + `lead_event_source` são o que marcam o
+   evento como vindo de CRM. Sem eles o evento entra, mas não alimenta a meta
+   de leads qualificados.
+4. Para lead de formulário, **`lead_id` sozinho basta** — não mande telefone
+   nem e-mail. Menos dado pessoal trafegando, mesma atribuição (o match é
+   determinístico, não estatístico).
+
+### Eventos previstos
+
+| Evento | Quando | Serve para |
+|---|---|---|
+| `QualifiedLead` | regra de qualificação atingida | **é o que a campanha otimiza** |
+| `Schedule` | visita agendada | sinal forte, volume baixo |
+| `Purchase` | venda fechada, com valor real | atribuição de receita |
+| `DisqualifiedLead` | perdido / descarte | ensina o algoritmo o que evitar |
+
+> Não use `Lead` na volta: o evento nativo do Lead Ads já dispara na entrada, e
+> o dataset ainda tem um `lead` minúsculo vindo do site — três coisas com o
+> mesmo nome viram relatório impossível de ler.
+
+---
+
 ## Histórico
 
 | Data | O que mudou |
 |---|---|
 | 2026-08-19 | Cadeia validada ponta a ponta. CRM passa a gravar os IDs do Meta (`20260819_meta_leadgen_ids`), com proteção contra reentrega duplicada |
 | 2026-08-19 | Dataset `1397712305554437` confirmado como já vinculado à Página — não é preciso criar outro |
+| 2026-08-20 | Contrato da volta (CRM → n8n → CAPI) definido, para o nó do n8n ser montado em paralelo |
