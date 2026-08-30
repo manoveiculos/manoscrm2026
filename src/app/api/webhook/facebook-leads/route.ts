@@ -50,7 +50,19 @@ export async function POST(req: NextRequest) {
                 const leadgenId = change.value?.leadgen_id;
                 if (!leadgenId) continue;
 
-                const leadUrl = `https://graph.facebook.com/v19.0/${leadgenId}?fields=id,created_time,field_data,campaign_id,ad_id,form_id,platform&access_token=${META_TOKEN}`;
+                // Idempotência: o Meta reenvia a notificação quando não recebe 200.
+                // Sem esta checagem a reentrega criaria o mesmo lead de novo.
+                const { data: jaExiste } = await supabaseAdmin
+                    .from('leads_compra')
+                    .select('id')
+                    .eq('meta_leadgen_id', String(leadgenId))
+                    .maybeSingle();
+                if (jaExiste) {
+                    console.log(`[Webhook] Lead ${leadgenId} já importado (id ${jaExiste.id}) — ignorando reentrega.`);
+                    continue;
+                }
+
+                const leadUrl = `https://graph.facebook.com/v19.0/${leadgenId}?fields=id,created_time,field_data,campaign_id,adset_id,ad_id,form_id,platform&access_token=${META_TOKEN}`;
                 const leadRes = await fetch(leadUrl).catch(() => null);
                 
                 if (!leadRes || !leadRes.ok) {
@@ -99,18 +111,54 @@ export async function POST(req: NextRequest) {
 
                 // 1. Criar Lead no CRM (Tabela leads_compra via Admin para furar RLS)
                 try {
-                    const { data: newLead, error: insertError } = await supabaseAdmin
+                    const camposBase = {
+                        nome: name || 'Lead Meta Form',
+                        telefone: cleanPhone,
+                        origem: finalSource,
+                        veiculo_original: interest || campaignName,
+                        status: 'novo',
+                        criado_em: leadData.created_time || new Date().toISOString(),
+                    };
+
+                    // Identidade Meta — sem isso o evento da CAPI chega ao Meta sem
+                    // dono e a campanha não aprende com a venda.
+                    const camposMeta = {
+                        meta_leadgen_id: String(leadgenId),
+                        meta_campaign_id: leadData.campaign_id || null,
+                        meta_campaign_name: campaignName,
+                        meta_adset_id: leadData.adset_id || null,
+                        meta_ad_id: leadData.ad_id || null,
+                        meta_form_id: leadData.form_id || null,
+                        meta_platform: platform,
+                        // field_data cru: preserva as respostas de qualificação
+                        // (troca, forma de pagamento, prazo) que o parser acima
+                        // não mapeia em coluna própria.
+                        meta_raw: leadData.field_data || null,
+                    };
+
+                    let { data: newLead, error: insertError } = await supabaseAdmin
                         .from('leads_compra')
-                        .insert({
-                            nome: name || 'Lead Meta Form',
-                            telefone: cleanPhone,
-                            origem: finalSource,
-                            veiculo_original: interest || campaignName,
-                            status: 'novo',
-                            criado_em: leadData.created_time || new Date().toISOString(),
-                        })
+                        .insert({ ...camposBase, ...camposMeta })
                         .select()
                         .single();
+
+                    // Se a migration 20260819_meta_leadgen_ids ainda não passou, as
+                    // colunas não existem e o insert falha (PGRST204 / 42703). Perder
+                    // o lead por causa disso seria muito pior que perder os ids, então
+                    // grava sem eles e deixa o aviso no log.
+                    if (insertError && /column|schema cache|42703|PGRST204/i.test(
+                        `${insertError.message} ${insertError.code || ''}`
+                    )) {
+                        console.warn(
+                            `[Webhook] Colunas meta_* ausentes (aplicar 20260819_meta_leadgen_ids). ` +
+                            `Gravando lead ${leadgenId} SEM os ids do Meta — a CAPI não vai atribuir este lead.`
+                        );
+                        ({ data: newLead, error: insertError } = await supabaseAdmin
+                            .from('leads_compra')
+                            .insert(camposBase)
+                            .select()
+                            .single());
+                    }
 
                     if (insertError) {
                         console.error('[Webhook] Erro ao inserir lead no Supabase (leads_compra):', insertError.message, insertError.details, insertError.code);
