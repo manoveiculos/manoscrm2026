@@ -38,6 +38,7 @@ interface InboxLead {
     updated_at: string | null;
     created_at: string;
     proxima_acao: string | null;
+    first_contact_at?: string | null;
     first_contact_channel?: string | null;
     onboarded_at?: string | null;
     assigned_consultant_id?: string | null;
@@ -90,6 +91,28 @@ function bucketFor(lead: InboxLead): Bucket {
     if (criadoHoje) return 'active';
 
     return 'cooling';
+}
+
+/**
+ * O vendedor já falou com este cliente?
+ *
+ * Clicar em "Iniciar Atendimento" (atendimento_iniciado_em) é só UM dos jeitos.
+ * Na prática o time atende direto pelo WhatsApp, e quem registra isso é a
+ * extensão: quando ela vê mensagem SAINDO para o cliente, grava first_contact_at
+ * com channel 'vendor_whatsapp'.
+ *
+ * A Inbox olhava só o clique no botão, então lead atendido de verdade continuava
+ * na fila para sempre — foi o que o time reclamou em 08/09. Aqui vale qualquer
+ * evidência de contato humano.
+ *
+ * `ai_sdr` NÃO conta: a IA ter mandado mensagem não substitui o vendedor. E só
+ * mensagem de ENTRADA também não conta — cliente que escreveu e ninguém
+ * respondeu é justamente quem mais precisa estar na fila.
+ */
+function jaFoiAtendido(lead: InboxLead): boolean {
+    if (lead.atendimento_iniciado_em) return true;
+    if (lead.first_contact_at && lead.first_contact_channel !== 'ai_sdr') return true;
+    return false;
 }
 
 /** Lead "acabou de chegar": menos de 15min E sem interação humana. */
@@ -226,7 +249,7 @@ export default function InboxPage() {
 
         const query = supabase
             .from(sourceView)
-            .select('uid, table_name, native_id, name, phone, vehicle_interest, source, ai_score, ai_classification, status, updated_at, created_at, proxima_acao, first_contact_channel, assigned_consultant_id, atendimento_iniciado_em, atendimento_iniciado_por, flagged_reversao, ultima_interacao_humana, descarte_financeiro, diagnostico_atendimento' + (viewMode === 'archived' ? ', archived_at' : ''))
+            .select('uid, table_name, native_id, name, phone, vehicle_interest, source, ai_score, ai_classification, status, updated_at, created_at, proxima_acao, first_contact_at, first_contact_channel, assigned_consultant_id, atendimento_iniciado_em, atendimento_iniciado_por, flagged_reversao, ultima_interacao_humana, descarte_financeiro, diagnostico_atendimento' + (viewMode === 'archived' ? ', archived_at' : ''))
             .limit(adminMode ? 500 : 300);
 
         // ROUND-ROBIN (motor de distribuição): vendedor vê SÓ os leads dele. Nada
@@ -634,7 +657,11 @@ export default function InboxPage() {
             // Assim que o vendedor inicia o atendimento, o lead sai da Inbox e
             // passa a ser gerido no /atendimento (Kanban). Decisão do dono
             // (2026-07-11): "em atendimento não fica no inbox; só não atendidos".
-            if (!lead.atendimento_iniciado_em) {
+            //
+            // "Atendido" inclui quem o vendedor tratou direto no WhatsApp sem
+            // clicar no botão — ver jaFoiAtendido(). Olhar só o clique deixava
+            // lead já atendido preso na fila para sempre.
+            if (!jaFoiAtendido(lead)) {
                 // Órfão resgatado (sem dono há +15min) vai numa seção própria —
                 // é lead que a distribuição deixou passar, não fila normal.
                 if ((lead as any)._orfao) buckets.resgate.push(lead);
