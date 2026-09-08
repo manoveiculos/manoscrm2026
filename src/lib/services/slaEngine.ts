@@ -295,11 +295,15 @@ async function reciclarEsgotados(admin: any, now: Date): Promise<number> {
     // arquivo, não a fila de quem está atendendo cliente de hoje.
     const idadeLimite = new Date(now.getTime() - RECICLAGEM_IDADE_MAX_DIAS * 24 * 3600 * 1000).toISOString();
     const uids = esgotados.map((e: any) => e.lead_uid);
+    // "Sem atendimento" não é só "ninguém clicou no botão": se a extensão já
+    // registrou o vendedor falando com o cliente (first_contact_at com channel
+    // que não seja a IA), o lead foi atendido e não volta pra fila de ninguém.
     const { data: vivos } = await admin
         .from('leads_unified_active')
         .select('uid')
         .in('uid', uids)
         .is('atendimento_iniciado_em', null)
+        .or('first_contact_at.is.null,first_contact_channel.eq.ai_sdr')
         .neq('descarte_financeiro', true)
         .gte('created_at', idadeLimite);
 

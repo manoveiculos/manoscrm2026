@@ -45,6 +45,9 @@ export async function GET() {
         .select('uid, table_name, native_id, name, phone, vehicle_interest, source, ai_score, ai_classification, status, updated_at, created_at, proxima_acao, first_contact_channel, assigned_consultant_id, atendimento_iniciado_em, atendimento_iniciado_por, flagged_reversao, ultima_interacao_humana, descarte_financeiro, diagnostico_atendimento')
         .is('assigned_consultant_id', null)
         .is('atendimento_iniciado_em', null)
+        // Vendedor que já falou com o cliente pelo WhatsApp (registrado pela
+        // extensão) atendeu o lead, mesmo sem clicar no botão. Não é órfão.
+        .or('first_contact_at.is.null,first_contact_channel.eq.ai_sdr')
         .neq('descarte_financeiro', true)
         .lt('created_at', cutoff)
         .order('created_at', { ascending: true })
