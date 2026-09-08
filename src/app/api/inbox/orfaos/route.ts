@@ -54,5 +54,22 @@ export async function GET() {
         .limit(50);
 
     if (error) return NextResponse.json({ success: false, error: error.message }, { status: 500 });
-    return NextResponse.json({ success: true, leads: data || [] });
+
+    // Lead 'esgotado' não é órfão: é lead que a equipe INTEIRA já recusou. Ele
+    // perde o dono de propósito (para sair da Inbox de quem foi tentado por
+    // último), e sem este filtro reapareceria aqui — agora para todo mundo, o
+    // que seria pior que o problema original. O lugar dele é o painel do admin.
+    const candidatos = data || [];
+    if (candidatos.length === 0) return NextResponse.json({ success: true, leads: [] });
+
+    const { data: foraDoRodizio } = await admin
+        .from('lead_distribuicao')
+        .select('lead_uid')
+        .in('lead_uid', candidatos.map((l: any) => l.uid))
+        .eq('status', 'esgotado');
+
+    const excluir = new Set((foraDoRodizio || []).map((d: any) => d.lead_uid));
+    const leads = candidatos.filter((l: any) => !excluir.has(l.uid));
+
+    return NextResponse.json({ success: true, leads });
 }

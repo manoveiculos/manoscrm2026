@@ -187,6 +187,25 @@ async function atribuirA(admin: any, table: string, native: string, cons: { id: 
     try { const { notifyLeadArrival } = await import('./vendorNotifyService'); await notifyLeadArrival(String(native)); } catch { /* push best-effort */ }
 }
 
+/**
+ * Espelha o dono da roleta na tabela do lead.
+ *
+ * Existem DOIS lugares que dizem de quem é o lead: lead_distribuicao (o que o
+ * motor enxerga) e leads_*.assigned_consultant_id (o que a Inbox enxerga). Só
+ * atribuirA() mantinha os dois juntos; as outras transições mexiam só na roleta.
+ *
+ * O estrago: ao esgotar, o lead saía do rodízio mas continuava com dono na
+ * tabela — e a Inbox filtra por assigned_consultant_id. O lead então ficava
+ * depositado para sempre na Inbox do último vendedor tentado, sem nada que o
+ * tirasse de lá. Era a fábrica dos 34 leads parados na fila do Sergio.
+ */
+async function sincronizarDono(admin: any, table: string, native: string, consultantId: string | null) {
+    const upd: any = { assigned_consultant_id: consultantId };
+    if (table === 'leads_distribuicao_crm_26' && consultantId === null) upd.vendedor = null;
+    await admin.from(table).update(upd).eq('id', realIdOf(table, native))
+        .then(null, (e: any) => console.warn('[slaEngine] sincronizarDono:', e?.message));
+}
+
 async function setStatus(admin: any, table: string, native: string, status: string) {
     await admin.from('lead_distribuicao').upsert({
         lead_uid: uidOf(table, native), table_name: table, native_id: String(native),
@@ -327,7 +346,12 @@ async function reciclarEsgotados(admin: any, now: Date): Promise<number> {
                 atualizado_em: now.toISOString(),
             })
             .eq('lead_uid', uid);
-        if (updErr) console.warn(`[slaEngine] reciclarEsgotados ${uid}:`, updErr.message);
+        if (updErr) { console.warn(`[slaEngine] reciclarEsgotados ${uid}:`, updErr.message); continue; }
+
+        // Volta pra fila = volta a NÃO ter dono. Sem isto o lead reaparecia na
+        // Inbox do vendedor antigo enquanto esperava a próxima distribuição.
+        const idx = uid.indexOf(':');
+        if (idx > 0) await sincronizarDono(admin, uid.slice(0, idx), uid.slice(idx + 1), null);
     }
 
     console.log(`[slaEngine] ${paraReciclar.length} lead(s) esgotado(s) devolvidos à fila`);
@@ -391,7 +415,16 @@ export async function tickSla(): Promise<{ ok: boolean; closed?: boolean; resgat
         // Já furou o SLA: aceita vendedor sem check-in antes de dar o lead por esgotado.
         const prox = await pickNextDisponivel(admin, tentados, true);
         if (prox) { await atribuirA(admin, d.table_name, d.native_id, prox, now, [...tentados, prox.id], (d.ciclos || 0) + 1); escalados++; }
-        else { await admin.from('lead_distribuicao').update({ status: 'esgotado', atualizado_em: now.toISOString() }).eq('lead_uid', d.lead_uid); await alertAdminEsgotado(admin, d); esgotados++; }
+        else {
+            await admin.from('lead_distribuicao')
+                .update({ status: 'esgotado', assigned_consultant_id: null, atualizado_em: now.toISOString() })
+                .eq('lead_uid', d.lead_uid);
+            // Sai da Inbox do último tentado. Sem isto o lead ficava lá para
+            // sempre: fora do rodízio pro motor, mas ainda "dele" pra tela.
+            await sincronizarDono(admin, d.table_name, d.native_id, null);
+            await alertAdminEsgotado(admin, d);
+            esgotados++;
+        }
     }
 
     // 3) Reciclagem: lead que esgotou a roleta volta pra fila no dia seguinte.
