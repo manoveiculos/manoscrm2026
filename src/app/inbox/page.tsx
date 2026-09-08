@@ -99,8 +99,23 @@ function isJustArrived(lead: InboxLead): boolean {
     return ageMs < 15 * 60 * 1000;
 }
 
+/** Dias inteiros desde que o lead entrou. Idade REAL, sempre por created_at. */
+function diasDeVida(lead: InboxLead): number {
+    return Math.floor((Date.now() - new Date(lead.created_at).getTime()) / 86400000);
+}
+
 /** Badge de SLA: tempo restante até estourar (em min) */
 function slaInfo(lead: InboxLead): { text: string; color: string } {
+    // Lead com mais de um dia: o cronômetro de minutos não diz mais nada útil.
+    // Mostrava "SLA ESTOUROU 384MIN" num lead de 20 dias, o que fazia o vendedor
+    // achar que tinha acabado de furar um prazo — quando na verdade era fila
+    // represada voltando. Idade real é a informação honesta aqui.
+    const dias = diasDeVida(lead);
+    if (dias >= 1) {
+        if (dias < 7) return { text: `${dias}d na fila`, color: 'bg-amber-800 text-amber-100' };
+        return { text: `${dias}d encalhado`, color: 'bg-zinc-700 text-zinc-300' };
+    }
+
     const min = ageMinutes(lead.updated_at, lead.created_at);
     if (lead.status === 'novo' || lead.status === 'received') {
         // SLA inicial: 5min push, 15min modal, 30min reassign
@@ -149,14 +164,20 @@ function getLeadState(lead: InboxLead, lastInbound?: LastMessage, lastOutbound?:
     return 'AGUARDANDO_CLIENTE';
 }
 
-function stateLabel(state: LeadState, lastReturn?: string): string {
+function stateLabel(state: LeadState, lastReturn?: string, dias = 0): string {
     switch (state) {
         case 'IA_TOCOU': return '🤖 IA já respondeu — aguardando cliente';
         case 'AGUARDANDO_VENDEDOR': return '🔥 CLIENTE ESPERANDO — responda agora';
-        case 'AGUARDANDO_CLIENTE': 
+        case 'AGUARDANDO_CLIENTE':
             if (lastReturn) return `📅 Você marcou retorno pra ${lastReturn}`;
             return '⏳ Sem resposta há algum tempo';
-        case 'NUNCA_TOCADO': return '🆕 Novo lead — ninguém atendeu ainda';
+        case 'NUNCA_TOCADO':
+            // Chamar de "novo" um lead de 20 dias foi metade da confusão do time:
+            // o card dizia "novo" e o badge dizia "SLA estourou", nos dois casos
+            // mentindo sobre um lead que só estava voltando pra fila.
+            if (dias >= 7) return `📦 Lead parado há ${dias} dias — nunca foi atendido`;
+            if (dias >= 1) return `⏳ Entrou há ${dias}d — ainda sem atendimento`;
+            return '🆕 Novo lead — ninguém atendeu ainda';
         default: return '';
     }
 }
@@ -1079,11 +1100,18 @@ const LeadCard = memo(function LeadCard({ lead, messages, isExpanded, onToggle, 
     const state = getLeadState(lead, messages?.inbound, messages?.outbound);
     const showMask = isFishing && !isAdmin;
     
+    // Lead de outro dia não é urgência de agora. Pintar de laranja pulsante um
+    // lead de 20 dias treinava o time a ignorar o laranja — o alarme só serve
+    // enquanto for raro e verdadeiro.
+    const leadAntigo = diasDeVida(lead) >= 1;
+
     const stateColors: Record<LeadState, string> = {
         AGUARDANDO_VENDEDOR: 'border-red-600 bg-red-950/5 ring-1 ring-red-500/20 shadow-[0_0_15px_rgba(239,68,68,0.1)]',
         AGUARDANDO_CLIENTE: 'border-zinc-800 bg-zinc-900/30 opacity-90',
         IA_TOCOU: 'border-emerald-600/30 bg-emerald-950/5',
-        NUNCA_TOCADO: 'border-orange-500 bg-orange-950/5 ring-1 ring-orange-500/20',
+        NUNCA_TOCADO: leadAntigo
+            ? 'border-zinc-700 bg-zinc-900/40'
+            : 'border-orange-500 bg-orange-950/5 ring-1 ring-orange-500/20',
     };
 
     // Intent flag: lead marcado pela IA como "já comprou" / "pediu pra parar" / etc.
@@ -1212,7 +1240,7 @@ const LeadCard = memo(function LeadCard({ lead, messages, isExpanded, onToggle, 
                 <div className="mb-4">
                     <div className={`text-[12px] font-bold flex items-center gap-2 ${state === 'AGUARDANDO_VENDEDOR' ? 'text-red-400' : 'text-gray-400'}`}>
                         <div className={`w-2 h-2 rounded-full ${state === 'AGUARDANDO_VENDEDOR' ? 'bg-red-500 animate-pulse' : 'bg-zinc-700'}`} />
-                        {stateLabel(state)}
+                        {stateLabel(state, undefined, diasDeVida(lead))}
                     </div>
                 </div>
 
@@ -1301,8 +1329,8 @@ const LeadCard = memo(function LeadCard({ lead, messages, isExpanded, onToggle, 
                     </div>
                 )}
 
-                {/* Efeito de pulsação customizado */}
-                {(state === 'AGUARDANDO_VENDEDOR' || state === 'NUNCA_TOCADO') && !isExpanded && (
+                {/* Efeito de pulsação customizado — só para urgência real de hoje */}
+                {(state === 'AGUARDANDO_VENDEDOR' || (state === 'NUNCA_TOCADO' && !leadAntigo)) && !isExpanded && (
                     <div className={`absolute top-0 left-0 w-full h-1 ${state === 'AGUARDANDO_VENDEDOR' ? 'bg-red-500 animate-pulse' : 'bg-orange-500 animate-pulse'}`} />
                 )}
             </div>

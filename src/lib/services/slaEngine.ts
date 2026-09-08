@@ -32,6 +32,14 @@ export const MAX_DESPEJO_POR_VENDEDOR = 3;
 // backlog escoa ao longo do dia em vez de cair de uma vez no time. Com 3, um
 // acúmulo de 69 leads leva ~23 minutos para voltar todo à roleta.
 export const MAX_RECICLAGEM_POR_TICK = 3;
+// Quantas vezes um lead pode voltar de 'esgotado' para a fila. Sem teto ele
+// reaparecia todo dia para sempre — foi a reclamação do time em 08/09 ("lead
+// velho aparece do nada"). Se a equipe inteira recusou 2 vezes, insistir só
+// atrapalha quem está atendendo lead novo: vira decisão de gestão.
+export const MAX_RECICLAGENS = 2;
+// Idade máxima do lead para valer a pena reciclar. Acima disso o cliente já
+// resolveu a vida dele; o lugar é o arquivo, não a fila do vendedor.
+export const RECICLAGEM_IDADE_MAX_DIAS = 10;
 // Rede de proteção para a janela entre o deploy e a migration que cria
 // consultants_manos_crm.recebe_leads. Sem a coluna, cair no rodízio antigo por
 // role mandaria lead pra fora do time de vendas de novo. A fonte de verdade é
@@ -156,9 +164,17 @@ async function pickNextDisponivel(admin: any, excluir: string[] = [], fallback =
 // Atribui o lead a um vendedor: grava dono na tabela do lead + linha de distribuição + notifica.
 async function atribuirA(admin: any, table: string, native: string, cons: { id: string; name: string }, now: Date, tentados: string[], ciclos: number) {
     const realId = realIdOf(table, native);
+    // NÃO tocar em updated_at/atualizado_em do lead. Distribuir não é atividade
+    // DO lead — é atividade do motor, e ela já fica registrada em
+    // lead_distribuicao.atualizado_em logo abaixo.
+    //
+    // Escrever o timestamp aqui recriava o "zumbi imortal" que o zombie-triage
+    // documenta: ele arquiva por updated_at > 15 dias, então cada redistribuição
+    // rejuvenescia o lead e o arquivamento nunca chegava. Combinado com a
+    // reciclagem de 'esgotado', o lead voltava pra Inbox todo dia, para sempre —
+    // era o "lead velho que aparece do nada" que o time reclamou em 08/09.
     const upd: any = { assigned_consultant_id: cons.id };
-    if (table === 'leads_distribuicao_crm_26') { upd.vendedor = cons.name; upd.atualizado_em = now.toISOString(); }
-    else { upd.updated_at = now.toISOString(); }
+    if (table === 'leads_distribuicao_crm_26') upd.vendedor = cons.name;
     await admin.from(table).update(upd).eq('id', realId);
 
     await admin.from('lead_distribuicao').upsert({
@@ -257,42 +273,59 @@ async function enfileirarOrfaos(admin: any): Promise<number> {
 async function reciclarEsgotados(admin: any, now: Date): Promise<number> {
     const inicioDoDia = `${spYMD(now).iso}T00:00:00-03:00`;
 
-    const { data: esgotados, error } = await admin
+    let { data: esgotados, error } = await admin
         .from('lead_distribuicao')
-        .select('lead_uid')
+        .select('lead_uid, reciclagens')
         .eq('status', 'esgotado')
         .lt('atualizado_em', inicioDoDia)
+        .lt('reciclagens', MAX_RECICLAGENS)
         .order('atualizado_em', { ascending: true })
         .limit(MAX_RECICLAGEM_POR_TICK);
 
-    if (error || !esgotados?.length) return 0;
+    // Se a migration 20260908 ainda não passou, a coluna não existe. Nesse caso
+    // NÃO recicla nada: sem o contador o lead volta pra sempre, que é o bug.
+    if (error) {
+        console.warn('[slaEngine] reciclagem suspensa até a migration 20260908 (coluna reciclagens):', error.message);
+        return 0;
+    }
+    if (!esgotados?.length) return 0;
 
-    // Só volta pra fila quem ainda está vivo e sem atendimento. Lead encerrado,
-    // arquivado ou já em conversa não se mexe.
+    // Só volta pra fila quem ainda está vivo, sem atendimento e AINDA RECENTE.
+    // Lead de mês passado não interessa mais a ninguém — o lugar dele é o
+    // arquivo, não a fila de quem está atendendo cliente de hoje.
+    const idadeLimite = new Date(now.getTime() - RECICLAGEM_IDADE_MAX_DIAS * 24 * 3600 * 1000).toISOString();
     const uids = esgotados.map((e: any) => e.lead_uid);
     const { data: vivos } = await admin
         .from('leads_unified_active')
         .select('uid')
         .in('uid', uids)
         .is('atendimento_iniciado_em', null)
-        .neq('descarte_financeiro', true);
+        .neq('descarte_financeiro', true)
+        .gte('created_at', idadeLimite);
 
     const paraReciclar = (vivos || []).map((v: any) => v.uid);
     if (!paraReciclar.length) return 0;
 
-    const { error: updErr } = await admin
-        .from('lead_distribuicao')
-        .update({
-            status: 'aguardando',
-            assigned_consultant_id: null,
-            distribuido_em: null,
-            tentados: [],
-            ciclos: 0,
-            atualizado_em: now.toISOString(),
-        })
-        .in('lead_uid', paraReciclar);
+    // Incrementa o contador de cada um (o update em lote não soma por linha).
+    const contador = new Map<string, number>(
+        esgotados.map((e: any) => [e.lead_uid, e.reciclagens || 0])
+    );
+    for (const uid of paraReciclar) {
+        const { error: updErr } = await admin
+            .from('lead_distribuicao')
+            .update({
+                status: 'aguardando',
+                assigned_consultant_id: null,
+                distribuido_em: null,
+                tentados: [],
+                ciclos: 0,
+                reciclagens: (contador.get(uid) || 0) + 1,
+                atualizado_em: now.toISOString(),
+            })
+            .eq('lead_uid', uid);
+        if (updErr) console.warn(`[slaEngine] reciclarEsgotados ${uid}:`, updErr.message);
+    }
 
-    if (updErr) { console.warn('[slaEngine] reciclarEsgotados:', updErr.message); return 0; }
     console.log(`[slaEngine] ${paraReciclar.length} lead(s) esgotado(s) devolvidos à fila`);
     return paraReciclar.length;
 }
