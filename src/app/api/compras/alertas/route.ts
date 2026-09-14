@@ -39,11 +39,7 @@ export async function GET() {
       .select('*')
       .not('nome_cliente', 'ilike', '[EXCLUIDO]%');
 
-    // Se não for admin, filtra apenas pelos alertas que o próprio usuário criou
-    if (!isAdmin) {
-      query = query.eq('criado_por', user.email);
-    }
-
+    // Retorna todos os alertas ativos cadastrados na Central de Compras
     const { data: alerts, error } = await query.order('criado_em', { ascending: false });
 
     if (error) {
@@ -89,12 +85,14 @@ export async function POST(request: Request) {
     } = body;
 
     // Validações básicas de campos obrigatórios
-    if (!nome_cliente || !telefone_cliente || !marca || !modelo) {
+    if (!nome_cliente || !telefone_cliente || !modelo) {
       return NextResponse.json(
-        { success: false, error: 'Por favor, preencha todos os campos obrigatórios.' },
+        { success: false, error: 'Por favor, preencha o comprador, telefone e modelo desejado.' },
         { status: 400 }
       );
     }
+
+    const finalMarca = (marca && marca.trim() !== '') ? marca.toUpperCase().trim() : 'MULTIMARCAS';
 
     // Limpa a máscara do WhatsApp para salvar apenas números e caracteres limpos
     const cleanPhone = telefone_cliente.replace(/[^\d]/g, '');
@@ -105,7 +103,7 @@ export async function POST(request: Request) {
         {
           nome_cliente: nome_cliente.trim(),
           telefone_cliente: cleanPhone,
-          marca: marca.toUpperCase().trim(),
+          marca: finalMarca,
           modelo: modelo.trim(),
           valor_minimo: valor_minimo ? Number(valor_minimo) : null,
           valor_maximo: valor_maximo ? Number(valor_maximo) : null,

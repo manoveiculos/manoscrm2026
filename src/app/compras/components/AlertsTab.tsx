@@ -105,8 +105,8 @@ export default function AlertsTab() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!nome || !telefone || !marca || !modelo) {
-      setError('Por favor, preencha todos os campos obrigatórios.');
+    if (!nome || !telefone || !modelo) {
+      setError('Por favor, preencha o comprador, WhatsApp e o modelo desejado.');
       return;
     }
 
