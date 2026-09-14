@@ -9,9 +9,11 @@ export function getTableForLead(leadId: string): string {
     if (leadId.startsWith('leads_compra:')) return 'leads_compra';
     if (leadId.startsWith('leads_manos_crm:')) return 'leads_manos_crm';
     if (leadId.startsWith('leads_distribuicao_crm_26:')) return 'leads_distribuicao_crm_26';
+    if (leadId.startsWith('leadsfacebook:')) return 'leadsfacebook';
     if (leadId.startsWith('leads_master:')) return 'leads_master';
     // Formato legado (prefixo curto)
     if (leadId.startsWith('compra_')) return 'leads_compra';
+    if (leadId.startsWith('fb_')) return 'leadsfacebook';
     if (leadId.startsWith('main_')) return 'leads_manos_crm';
     if (leadId.startsWith('crm26_')) return 'leads_distribuicao_crm_26';
     if (leadId.startsWith('dist_')) return 'leads_distribuicao';
@@ -24,7 +26,7 @@ export function stripPrefix(leadId: string): string {
     // Formato novo "tabela:id"
     if (leadId.includes(':')) return leadId.split(':').slice(1).join(':');
     // Formato legado
-    return leadId.replace(/^(compra_|main_|crm26_|dist_|master_)/, '');
+    return leadId.replace(/^(compra_|fb_|main_|crm26_|dist_|master_)/, '');
 }
 
 export function isUUID(id: string): boolean {

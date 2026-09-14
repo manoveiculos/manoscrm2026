@@ -64,6 +64,10 @@ interface Lead {
     created_at: string | null;
     atendimento_iniciado_em: string | null;
     carro_troca?: string | null;
+    cidade?: string | null;
+    momento_compra?: string | null;
+    forma_pagamento?: string | null;
+    observacoes?: string | null;
 }
 
 function formatLeadEntryDate(iso: string | null): { date: string; time: string; ago: string } | null {
@@ -571,6 +575,41 @@ export default function LeadDetailPage() {
                                 </div>
                             ) : null;
                         })()}
+
+                    {/* Bloco de Formulário Facebook Lead Ads se houver dados preenchidos */}
+                    {(lead.cidade || lead.momento_compra || lead.forma_pagamento || lead.observacoes) && (
+                        <div className="mt-4 p-3 bg-blue-950/40 border border-blue-800/60 rounded-xl space-y-2 text-xs">
+                            <div className="text-blue-400 font-bold uppercase tracking-wider text-[11px] flex items-center gap-1.5 border-b border-blue-900/60 pb-1.5">
+                                <span>📘 Formulário Facebook Ads</span>
+                            </div>
+                            {lead.cidade && (
+                                <div>
+                                    <span className="text-zinc-500 block text-[10px]">📍 Cidade / Região</span>
+                                    <span className="text-blue-200 font-semibold">{lead.cidade}</span>
+                                </div>
+                            )}
+                            {lead.momento_compra && (
+                                <div>
+                                    <span className="text-zinc-500 block text-[10px]">⏱️ Quando pretende comprar?</span>
+                                    <span className="text-purple-200 font-semibold">{lead.momento_compra}</span>
+                                </div>
+                            )}
+                            {lead.forma_pagamento && (
+                                <div>
+                                    <span className="text-zinc-500 block text-[10px]">💳 Forma de pagamento</span>
+                                    <span className="text-emerald-200 font-semibold">{lead.forma_pagamento}</span>
+                                </div>
+                            )}
+                            {lead.observacoes && (
+                                <div className="pt-1 border-t border-blue-900/40">
+                                    <span className="text-zinc-500 block text-[10px] mb-1">📝 Resumo do Formulário</span>
+                                    <div className="text-zinc-300 font-mono text-[11px] bg-black/40 p-2 rounded leading-relaxed whitespace-pre-line">
+                                        {lead.observacoes}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
 
                     {lead.proxima_acao && (
                         <div className="mt-4 p-3 bg-blue-900/30 border border-blue-800 rounded text-sm">

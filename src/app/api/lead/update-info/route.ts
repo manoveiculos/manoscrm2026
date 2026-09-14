@@ -14,6 +14,7 @@ const COLMAP: Record<string, { name: string; vehicle?: string }> = {
     leads_distribuicao_crm_26: { name: 'nome', vehicle: 'interesse' },
     leads_compra: { name: 'nome' },
     leads_master: { name: 'nome' },
+    leadsfacebook: { name: 'nome', vehicle: 'vehicle_interest' },
 };
 
 export async function POST(req: NextRequest) {

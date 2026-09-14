@@ -21,7 +21,7 @@ import { createClient } from '@/lib/supabase/admin';
  *   - Pode ser desarquivado depois (archive=false)
  */
 
-const VALID_TABLES = new Set(['leads_manos_crm', 'leads_compra', 'leads_distribuicao_crm_26', 'leads_master']);
+const VALID_TABLES = new Set(['leads_manos_crm', 'leads_compra', 'leads_distribuicao_crm_26', 'leads_master', 'leadsfacebook']);
 
 export async function POST(req: NextRequest) {
     try {

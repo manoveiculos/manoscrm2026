@@ -1,4 +1,5 @@
 import { supabase as browserSupabase, supabaseAdmin as adminSupabase } from '@/lib/supabase';
+import { createClient as adminCreateClient } from '@/lib/supabase/admin';
 import { SupabaseClient } from '@supabase/supabase-js';
 
 let activeClient: SupabaseClient = browserSupabase;
@@ -11,6 +12,7 @@ export const supabase = new Proxy({} as SupabaseClient, {
 });
 
 export const supabaseAdmin = adminSupabase;
+export const createClient = adminCreateClient;
 
 export function setGlobalClient(client: SupabaseClient) {
     activeClient = client;

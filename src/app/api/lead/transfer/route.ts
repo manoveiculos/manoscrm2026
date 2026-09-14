@@ -81,7 +81,7 @@ export async function POST(req: NextRequest) {
         }
 
         // Determina a tabela correta do lead
-        const table = (lead_table && ['leads_compra', 'leads_manos_crm', 'leads_distribuicao_crm_26', 'leads_master'].includes(lead_table))
+        const table = (lead_table && ['leads_compra', 'leads_manos_crm', 'leads_distribuicao_crm_26', 'leads_master', 'leadsfacebook'].includes(lead_table))
             ? lead_table
             : getTableForLead(lead_id);
         const cleanId = stripPrefix(lead_id);

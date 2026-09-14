@@ -233,7 +233,7 @@ export async function updateLeadStatus(leadId: string, status: LeadStatus, oldSt
     };
 
     if (notes) {
-        if (table === 'leads_manos_crm') {
+        if (table === 'leads_manos_crm' || table === 'leadsfacebook') {
             updatePayload.observacoes = notes;
         } else {
             updatePayload.notas = notes;
@@ -253,7 +253,7 @@ export async function updateLeadDetails(leadId: string, details: Partial<Lead>) 
     const table = getTableForLead(leadId);
     const realIdRaw = stripPrefix(leadId);
     const realId = table === 'leads_distribuicao_crm_26' ? parseInt(realIdRaw) : realIdRaw;
-    const payload = table === 'leads_manos_crm' ? details : mapToCRM26(details);
+    const payload = (table === 'leads_manos_crm' || table === 'leadsfacebook') ? details : mapToCRM26(details);
     
     const useUpdatedAt = table !== 'leads_distribuicao_crm_26';
     const nowIso = new Date().toISOString();

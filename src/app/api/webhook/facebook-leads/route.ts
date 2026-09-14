@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/services/supabaseClients';
+import { createClient } from '@/lib/supabase/admin';
 import { runEliteCloser } from '@/lib/services/ai-closer-service';
 import { runGenerateProposal } from '@/lib/services/proposal-service';
 import { distribuirLead } from '@/lib/services/slaEngine';
+
+const supabaseAdmin = createClient();
 
 /**
  * Facebook Lead Ads Webhook (CORRIGIDO: Auditoria Forense 2026-04-18)
@@ -86,12 +88,12 @@ export async function POST(req: NextRequest) {
                 // Idempotência: o Meta reenvia a notificação quando não recebe 200.
                 // Sem esta checagem a reentrega criaria o mesmo lead de novo.
                 const { data: jaExiste } = await supabaseAdmin
-                    .from('leads_compra')
+                    .from('leadsfacebook')
                     .select('id')
-                    .eq('meta_leadgen_id', String(leadgenId))
+                    .eq('fb_lead_id', String(leadgenId))
                     .maybeSingle();
                 if (jaExiste) {
-                    console.log(`[Webhook] Lead ${leadgenId} já importado (id ${jaExiste.id}) — ignorando reentrega.`);
+                    console.log(`[Webhook] Lead ${leadgenId} já importado em leadsfacebook (id ${jaExiste.id}) — ignorando reentrega.`);
                     continue;
                 }
 
@@ -105,11 +107,13 @@ export async function POST(req: NextRequest) {
 
                 const leadData = await leadRes.json();
 
-                // Parse field_data
+                // Parse field_data de qualificação do formulário Meta
                 let phone = '';
                 let name = '';
                 let city = '';
                 let interest = '';
+                let momento = '';
+                let pagamento = '';
 
                 if (leadData.field_data) {
                     leadData.field_data.forEach((field: any) => {
@@ -119,6 +123,8 @@ export async function POST(req: NextRequest) {
                         else if (n.includes('full_name') || n.includes('nome') || n === 'name') name = v;
                         else if (n.includes('city') || n.includes('cidade')) city = v;
                         else if (n.includes('vehicle') || n.includes('veiculo') || n.includes('interesse') || n.includes('model')) interest = v;
+                        else if (n.includes('quando') || n.includes('pretende') || n.includes('tempo') || n.includes('momento')) momento = v;
+                        else if (n.includes('pagar') || n.includes('pagamento') || n.includes('forma')) pagamento = v;
                     });
                 }
 
@@ -140,112 +146,56 @@ export async function POST(req: NextRequest) {
                 }
 
                 const platform = leadData.platform || 'facebook';
-                const finalSource = platform.toLowerCase() === 'instagram' ? 'Instagram' : campaignName;
+                const finalSource = platform.toLowerCase() === 'instagram' ? 'Instagram Ads' : campaignName;
 
-                // 1. Criar Lead no CRM (Tabela leads_compra via Admin para furar RLS)
+                // Monta resumo amigável formatado das observações
+                const obs = [
+                    '📘 **Lead do Facebook Ads**',
+                    city ? `📍 **Cidade:** ${city}` : null,
+                    interest ? `🚘 **Interesse:** ${interest}` : null,
+                    momento ? `⏱️ **Comprar:** ${momento}` : null,
+                    pagamento ? `💳 **Pagamento:** ${pagamento}` : null,
+                ].filter(Boolean).join('\n');
+
+                // 1. Criar Lead na tabela public.leadsfacebook (sem vendedor pré-atribuído -> assigned_consultant_id = NULL)
                 try {
-                    const camposBase = {
-                        nome: name || 'Lead Meta Form',
-                        telefone: cleanPhone,
-                        origem: finalSource,
-                        veiculo_original: interest || campaignName,
-                        status: 'novo',
-                        criado_em: leadData.created_time || new Date().toISOString(),
-                    };
-
-                    // Identidade Meta — sem isso o evento da CAPI chega ao Meta sem
-                    // dono e a campanha não aprende com a venda.
-                    const camposMeta = {
-                        meta_leadgen_id: String(leadgenId),
-                        meta_campaign_id: leadData.campaign_id || null,
-                        meta_campaign_name: campaignName,
-                        meta_adset_id: leadData.adset_id || null,
-                        meta_ad_id: leadData.ad_id || null,
-                        meta_form_id: leadData.form_id || null,
-                        meta_platform: platform,
-                        // field_data cru: preserva as respostas de qualificação
-                        // (troca, forma de pagamento, prazo) que o parser acima
-                        // não mapeia em coluna própria.
-                        meta_raw: leadData.field_data || null,
-                    };
-
-                    let { data: newLead, error: insertError } = await supabaseAdmin
-                        .from('leads_compra')
-                        .insert({ ...camposBase, ...camposMeta })
+                    const { data: newLead, error: insertError } = await supabaseAdmin
+                        .from('leadsfacebook')
+                        .insert({
+                            fb_lead_id: String(leadgenId),
+                            nome: name || 'Lead Meta Form',
+                            phone: cleanPhone,
+                            cidade: city || null,
+                            momento_compra: momento || null,
+                            vehicle_interest: interest || campaignName,
+                            forma_pagamento: pagamento || null,
+                            source: finalSource,
+                            status: 'received',
+                            assigned_consultant_id: null, // Lead entra na Fila Geral (Pesca) sem consultor pré-definido
+                            observacoes: obs,
+                            ai_summary: obs,
+                            raw_payload: leadData,
+                            created_at: leadData.created_time || new Date().toISOString(),
+                            updated_at: new Date().toISOString(),
+                        })
                         .select()
                         .single();
 
-                    // Se a migration 20260819_meta_leadgen_ids ainda não passou, as
-                    // colunas não existem e o insert falha (PGRST204 / 42703). Perder
-                    // o lead por causa disso seria muito pior que perder os ids, então
-                    // grava sem eles e deixa o aviso no log.
-                    if (insertError && /column|schema cache|42703|PGRST204/i.test(
-                        `${insertError.message} ${insertError.code || ''}`
-                    )) {
-                        console.warn(
-                            `[Webhook] Colunas meta_* ausentes (aplicar 20260819_meta_leadgen_ids). ` +
-                            `Gravando lead ${leadgenId} SEM os ids do Meta — a CAPI não vai atribuir este lead.`
-                        );
-                        ({ data: newLead, error: insertError } = await supabaseAdmin
-                            .from('leads_compra')
-                            .insert(camposBase)
-                            .select()
-                            .single());
-                    }
-
                     if (insertError) {
-                        console.error('[Webhook] Erro ao inserir lead no Supabase (leads_compra):', insertError.message, insertError.details, insertError.code);
+                        console.error('[Webhook] Erro ao inserir lead no Supabase (leadsfacebook):', insertError.message, insertError.details, insertError.code);
                         return NextResponse.json({ error: 'Erro no banco' }, { status: 500 });
                     }
 
                     if (newLead && newLead.id) {
-                        const fullId = `compra_` + newLead.id;
+                        const fullId = `leadsfacebook:` + newLead.id;
+                        console.log(`[Webhook] Lead Facebook recebido com sucesso na Fila Geral (Pesca): ${fullId}`);
 
-                        // 2. PESCA PURA (Fase 1): lead entra SEM dono. Vendedor disponível
-                        // "chama" no /inbox. Sem atribuição automática.
-
-                        // 3. Elite Closer (IA de ANÁLISE/score — não fala com cliente) com Fallback
-                        console.log(`[Webhook] Iniciando análise Elite Closer para lead: ${fullId}`);
+                        // Elite Closer (IA de ANÁLISE/score — não fala com cliente)
                         const analysis = await runEliteCloser(fullId, [], 'SISTEMA').catch(async (e) => {
                             console.error('[Webhook] Elite Closer falhou:', e);
-                            
-                            // Marcar ai_pending para reprocessamento pelo cron
-                            await supabaseAdmin.from('leads_compra')
-                                .update({ ai_pending: true })
-                                .eq('id', newLead.id);
-                            
-                            await supabaseAdmin.from('notification_failures').insert({
-                                lead_id: newLead.id,
-                                channel: 'elite_closer_webhook',
-                                error_message: `runEliteCloser falhou: ${e?.message || 'Erro desconhecido'}`,
-                                resolved: false
-                            });
-                            
                             return null;
                         });
 
-                        // Fallback adicional se retornar nulo sem estourar exceção
-                        if (!analysis) {
-                            await supabaseAdmin.from('leads_compra')
-                                .update({ ai_pending: true }).eq('id', newLead.id);
-                            
-                            await supabaseAdmin.from('notification_failures').insert({
-                                lead_id: newLead.id,
-                                channel: 'elite_closer_webhook',
-                                error_message: 'runEliteCloser retornou null no webhook',
-                                resolved: false
-                            });
-                        }
-
-                        // 4. Motor de distribuição: round-robin + SLA 10min (ou standby).
-                        distribuirLead('leads_compra', newLead.id).catch(e =>
-                            console.warn('[Webhook] distribuirLead falhou:', e?.message)
-                        );
-
-                        // (Fase 1) AI SDR de primeiro contato REMOVIDO: zero IA falando
-                        // com cliente. Lead aguarda o vendedor humano.
-
-                        // 5. Gerar Proposta Automática se o Score for > 60
                         if (analysis && analysis.urgencyScore > 60) {
                             console.log(`[Webhook] Score alto detectado (${analysis.urgencyScore}). Gerando proposta automática...`);
                             await runGenerateProposal(fullId).catch(e => {

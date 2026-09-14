@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { createClient } from '@/lib/supabase/client';
 import { parseUid } from '@/lib/services/unifiedLead';
-import { Flame, Snowflake, Thermometer, Clock, Phone, Wifi, Bell, X, AlertTriangle, MessageCircle, Zap, PhoneOff } from 'lucide-react';
+import { Flame, Snowflake, Thermometer, Clock, Phone, Wifi, Bell, X, AlertTriangle, MessageCircle, Zap, PhoneOff, Trash2, Archive } from 'lucide-react';
 import AgendaStrip from '@/app/agenda/_components/AgendaStrip';
 import { CheckinBanner } from '@/components/v2/CheckinBanner';
 
@@ -239,223 +239,100 @@ export default function InboxPage() {
     }, []);
 
     const fetchLeads = useCallback(async (cid: string | null, viewMode: 'active' | 'archived' = 'active', adminMode: boolean = false) => {
-        const sourceView = viewMode === 'archived' ? 'leads_unified' : 'leads_unified_active';
+        if (viewMode === 'archived') {
+            const { data: rawData, error: leadsErr } = await supabase
+                .from('leads_unified')
+                .select('uid, table_name, native_id, name, phone, vehicle_interest, source, ai_score, ai_classification, status, updated_at, created_at, proxima_acao, first_contact_at, first_contact_channel, assigned_consultant_id, atendimento_iniciado_em, atendimento_iniciado_por, flagged_reversao, ultima_interacao_humana, descarte_financeiro, diagnostico_atendimento, archived_at')
+                .not('archived_at', 'is', null)
+                .order('updated_at', { ascending: false })
+                .limit(300);
 
-        if (!cid && !adminMode && viewMode === 'active') {
-            setLeads([]);
-            setLastMessages(new Map());
+            if (leadsErr) {
+                console.error('[Inbox] fetchLeads arquivados erro:', leadsErr.message);
+            }
+            setLeads((rawData as InboxLead[]) || []);
             return;
         }
 
-        const query = supabase
-            .from(sourceView)
-            .select('uid, table_name, native_id, name, phone, vehicle_interest, source, ai_score, ai_classification, status, updated_at, created_at, proxima_acao, first_contact_at, first_contact_channel, assigned_consultant_id, atendimento_iniciado_em, atendimento_iniciado_por, flagged_reversao, ultima_interacao_humana, descarte_financeiro, diagnostico_atendimento' + (viewMode === 'archived' ? ', archived_at' : ''))
-            .limit(adminMode ? 500 : 300);
-
-        // ROUND-ROBIN (motor de distribuição): vendedor vê SÓ os leads dele. Nada
-        // de fila geral — cada lead tem um dono, distribuído pelo slaEngine.
-        if (cid && !adminMode) {
-            query.eq('assigned_consultant_id', cid);
-        }
-
-        // ADMIN: mostra apenas leads SEM vendedor designado (fila livre, sem dono)
-        if (adminMode && viewMode === 'active') {
-            query.is('assigned_consultant_id', null);
-        }
-
-        if (viewMode === 'active') query.eq('descarte_financeiro', false);
-
-        if (filter === 'today' && viewMode === 'active') {
-            const todayStart = new Date();
-            todayStart.setHours(0, 0, 0, 0);
-            query.gte('created_at', todayStart.toISOString());
-            query.order('created_at', { ascending: false });
-        } else if (filter === 'priority' && viewMode === 'active') {
-            query.order('flagged_reversao', { ascending: false });
-            query.order('created_at', { ascending: false });
-        } else {
-            query.order('updated_at', { ascending: false, nullsFirst: false });
-        }
-
-        if (viewMode === 'archived') query.not('archived_at', 'is', null);
-
-        const { data: rawData, error: leadsErr } = await query;
-        if (leadsErr) {
-            console.error('[Inbox] fetchLeads erro:', leadsErr.message, leadsErr.details);
-        }
-
-        // Para admin: já filtrado no banco (sem vendedor). Para vendedores: filtra pela ownership.
-        const data = adminMode ? (rawData || []) : (rawData || []).filter((l: any) => {
-            if (l.flagged_reversao) return true;
-            if (!l.atendimento_iniciado_em || !l.atendimento_iniciado_por) return true;
-            return l.atendimento_iniciado_por === cid;
-        });
-        const next = (data as InboxLead[]) || [];
-
-        // REDE DE SEGURANÇA: lead sem dono é invisível pro vendedor — o filtro
-        // acima é por assigned_consultant_id e as policies de RLS também. Se o
-        // motor de distribuição falhar, o lead some da vista de todo mundo menos
-        // do admin (foi o que deixou 11 leads parados até 3 dias). Esta rota
-        // server-side traz os órfãos +15min pra ninguém ficar olhando fila vazia
-        // enquanto tem cliente esperando.
-        if (!adminMode && cid && viewMode === 'active') {
-            try {
-                const res = await fetch('/api/inbox/orfaos');
-                const json = await res.json();
-                if (json?.success && Array.isArray(json.leads)) {
-                    const jaTem = new Set(next.map(l => l.uid));
-                    for (const o of json.leads as InboxLead[]) {
-                        if (!jaTem.has(o.uid)) next.push({ ...o, _orfao: true } as any);
-                    }
-                }
-            } catch (orfaoErr) {
-                console.warn('[Inbox] resgate de órfãos falhou:', orfaoErr);
-            }
-        }
-
-        // Buscar veículo_interesse real e carro_troca das tabelas base para evitar recriar views
+        // Fila Geral (Pesca): Busca leads ATIVOS sem consultor e sem atendimento iniciado
         try {
-            const crm26Ids = next.filter(l => l.table_name === 'leads_distribuicao_crm_26').map(l => parseInt(l.native_id, 10)).filter(id => !isNaN(id));
-            const manosIds = next.filter(l => l.table_name === 'leads_manos_crm').map(l => l.native_id);
-            const compraIds = next.filter(l => l.table_name === 'leads_compra').map(l => l.native_id);
-            
-            const promises: Promise<any>[] = [];
-            if (crm26Ids.length > 0) {
-                promises.push(supabase.from('leads_distribuicao_crm_26').select('id, interesse, carro_troca').in('id', crm26Ids));
-            }
-            if (manosIds.length > 0) {
-                promises.push(supabase.from('leads_manos_crm').select('id, vehicle_interest, carro_troca').in('id', manosIds));
-            }
-            if (compraIds.length > 0) {
-                promises.push(supabase.from('leads_compra').select('id, veiculo_original, carro_troca').in('id', compraIds));
-            }
-            
-            if (promises.length > 0) {
-                const results = await Promise.all(promises);
-                const infoMap = new Map<string, { interest: string | null, troca: string | null }>();
-                
-                let idx = 0;
-                if (crm26Ids.length > 0) {
-                    const res = results[idx++];
-                    if (res.data) {
-                        res.data.forEach((item: any) => {
-                            infoMap.set(`leads_distribuicao_crm_26:${item.id}`, {
-                                interest: item.interesse || null,
-                                troca: item.carro_troca || null
-                            });
-                        });
-                    }
+            const res = await fetch(`/api/inbox/pesca?filter=${filter}`);
+            const data = await res.json();
+            if (data.success && Array.isArray(data.leads)) {
+                const next = data.leads as InboxLead[];
+                knownIdsRef.current = new Set(next.map(l => l.uid));
+                if (!initialLoadDoneRef.current) {
+                    firstLoadAtRef.current = Date.now();
                 }
-                if (manosIds.length > 0) {
-                    const res = results[idx++];
-                    if (res.data) {
-                        res.data.forEach((item: any) => {
-                            infoMap.set(`leads_manos_crm:${item.id}`, {
-                                interest: item.vehicle_interest || null,
-                                troca: item.carro_troca || null
-                            });
-                        });
+                initialLoadDoneRef.current = true;
+                setLeads(next);
+
+                // Buscar últimas mensagens para os leads da Fila Geral
+                const leadIds = next.map(l => l.native_id).slice(0, 100);
+                if (leadIds.length > 0) {
+                    const cutoff30d = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
+                    const numericIds = leadIds.filter(id => /^\d+$/.test(String(id))).map(id => parseInt(String(id), 10));
+                    const uuidIds = leadIds.filter(id => !/^\d+$/.test(String(id))).map(id => String(id));
+                    const queries: Promise<any>[] = [];
+
+                    if (numericIds.length > 0) {
+                        queries.push(
+                            supabase.from('whatsapp_messages')
+                                .select('lead_id, message_text, direction, created_at')
+                                .in('lead_id', numericIds)
+                                .gte('created_at', cutoff30d)
+                                .order('created_at', { ascending: false })
+                                .limit(200)
+                        );
                     }
+                    if (uuidIds.length > 0) {
+                        queries.push(
+                            supabase.from('whatsapp_messages')
+                                .select('lead_id, message_text, direction, created_at')
+                                .in('lead_id', uuidIds)
+                                .gte('created_at', cutoff30d)
+                                .order('created_at', { ascending: false })
+                                .limit(200)
+                        );
+                    }
+
+                    Promise.allSettled(queries).then(results => {
+                        const allMsgs: any[] = [];
+                        for (const r of results) {
+                            if (r.status === 'fulfilled' && r.value.data) allMsgs.push(...r.value.data);
+                        }
+                        const msgMap = new Map<string, { inbound?: LastMessage, outbound?: LastMessage }>();
+                        for (const m of allMsgs as LastMessage[]) {
+                            const leadKey = String(m.lead_id);
+                            const current = msgMap.get(leadKey) || {};
+                            if (m.direction === 'inbound' && !current.inbound) current.inbound = m;
+                            if (m.direction === 'outbound' && !current.outbound) current.outbound = m;
+                            msgMap.set(leadKey, current);
+                        }
+                        setLastMessages(msgMap);
+                    });
                 }
-                if (compraIds.length > 0) {
-                    const res = results[idx++];
-                    if (res.data) {
-                        res.data.forEach((item: any) => {
-                            infoMap.set(`leads_compra:${item.id}`, {
-                                interest: item.veiculo_original || null,
-                                troca: item.carro_troca || null
-                            });
-                        });
+
+                // Notificação sonora para leads novos
+                const cutoff = firstLoadAtRef.current;
+                const truelyNew = next.filter(l => new Date(l.created_at).getTime() > cutoff);
+                if (truelyNew.length > 0) {
+                    if (soundEnabled && typeof document !== 'undefined' && document.visibilityState === 'visible') {
+                        audioRef.current?.play().catch(() => {});
                     }
+                    setToasts(prev => [
+                        ...prev,
+                        ...truelyNew.slice(0, 5).map(l => ({ uid: l.uid, name: l.name, vehicle: l.vehicle_interest })),
+                    ]);
                 }
-                
-                next.forEach(l => {
-                    const info = infoMap.get(`${l.table_name}:${l.native_id}`);
-                    if (info) {
-                        if (info.interest) l.vehicle_interest = info.interest;
-                        (l as any).carro_troca = info.troca;
-                    }
-                });
+            } else {
+                setLeads([]);
             }
-        } catch (fetchInfoErr) {
-            console.error('[Inbox] erro ao buscar info especifica dos leads:', fetchInfoErr);
+        } catch (err) {
+            console.error('[Inbox] Erro ao buscar Fila Geral (Pesca):', err);
+            setLeads([]);
         }
-
-        knownIdsRef.current = new Set(next.map(l => l.uid));
-        if (!initialLoadDoneRef.current) {
-            firstLoadAtRef.current = Date.now();
-        }
-        initialLoadDoneRef.current = true;
-        setLeads(next);
-
-        const leadIds = next.map(l => l.native_id).slice(0, 100);
-        if (leadIds.length > 0) {
-            const cutoff30d = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
-            const numericIds = leadIds.filter(id => /^\d+$/.test(String(id))).map(id => parseInt(String(id), 10));
-            const uuidIds = leadIds.filter(id => !/^\d+$/.test(String(id))).map(id => String(id));
-            const queries: Promise<any>[] = [];
-
-            if (numericIds.length > 0) {
-                queries.push(
-                    supabase.from('whatsapp_messages')
-                        .select('lead_id, message_text, direction, created_at')
-                        .in('lead_id', numericIds)
-                        .gte('created_at', cutoff30d)
-                        .order('created_at', { ascending: false })
-                        .limit(200)
-                );
-            }
-            if (uuidIds.length > 0) {
-                queries.push(
-                    supabase.from('whatsapp_messages')
-                        .select('lead_id, message_text, direction, created_at')
-                        .in('lead_id', uuidIds)
-                        .gte('created_at', cutoff30d)
-                        .order('created_at', { ascending: false })
-                        .limit(200)
-                );
-            }
-
-            Promise.allSettled(queries).then(results => {
-                const allMsgs: any[] = [];
-                for (const r of results) {
-                    if (r.status === 'fulfilled') {
-                        if (r.value.error) console.warn('[Inbox] msg fetch erro:', r.value.error.message);
-                        if (r.value.data) allMsgs.push(...r.value.data);
-                    }
-                }
-                const msgMap = new Map<string, { inbound?: LastMessage, outbound?: LastMessage }>();
-                for (const m of allMsgs as LastMessage[]) {
-                    const leadKey = String(m.lead_id);
-                    const current = msgMap.get(leadKey) || {};
-                    if (m.direction === 'inbound' && !current.inbound) current.inbound = m;
-                    if (m.direction === 'outbound' && !current.outbound) current.outbound = m;
-                    msgMap.set(leadKey, current);
-                }
-                setLastMessages(msgMap);
-            });
-        }
-
-        const cutoff = firstLoadAtRef.current;
-        const truelyNew = next.filter(l => new Date(l.created_at).getTime() > cutoff);
-        
-        if (truelyNew.length > 0) {
-            // Notificação Sonora (V4): Apenas para leads que caem na Fila Geral (sem dono)
-            const fishingLeads = truelyNew.filter(l => !l.assigned_consultant_id);
-            if (fishingLeads.length > 0 && soundEnabled && typeof document !== 'undefined' && document.visibilityState === 'visible') {
-                audioRef.current?.play().catch(() => {});
-            }
-            
-            setToasts(prev => [
-                ...prev,
-                ...truelyNew.slice(0, 5).map(l => ({ uid: l.uid, name: l.name, vehicle: l.vehicle_interest })),
-            ]);
-            
-            if (typeof document !== 'undefined' && document.hidden) {
-                unreadRef.current += truelyNew.length;
-            }
-        }
-    }, [supabase, soundEnabled, filter, isAdmin, consultantId]);
+    }, [supabase, soundEnabled, filter]);
 
     const handleArchive = async (uid: string, e: React.MouseEvent) => {
         e.preventDefault();
@@ -486,6 +363,55 @@ export default function InboxPage() {
             }
         } catch (err) {
             console.error('Erro ao arquivar lead:', err);
+        }
+    };
+
+    const handleDeletePermanent = async (uid: string, e: React.MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        const ok = confirm('⚠️ ATENÇÃO (ADMIN): Deseja EXCLUIR DEFINITIVAMENTE este lead?\n\nEsta ação apagará o lead e seu histórico permanentemente, e adicionará o telefone à lista de bloqueio.');
+        if (!ok) return;
+
+        try {
+            const res = await fetch('/api/lead/permanent-delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    lead_id: uid,
+                    reason: 'removido manualmente pelo admin no inbox',
+                    deleted_by: consultantId
+                }),
+            });
+            const data = await res.json();
+            if (res.ok && data.success) {
+                alert('✅ Lead excluído com sucesso.');
+                fetchLeads(consultantId, filter === 'archived' ? 'archived' : 'active', isAdmin);
+            } else {
+                alert('Erro ao excluir lead: ' + (data.error || 'Erro desconhecido'));
+            }
+        } catch (err) {
+            console.error('Erro ao excluir lead:', err);
+            alert('Erro ao excluir lead.');
+        }
+    };
+
+    const handleAdminRemove = async (uid: string, e: React.MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        const choice = prompt(
+            "🛑 REMOVER LEAD (ADMIN)\n\n" +
+            "Escolha a opção de remoção:\n\n" +
+            "1 - ARQUIVAR (Remove do Inbox, mantém histórico)\n" +
+            "2 - EXCLUIR DEFINITIVAMENTE (Apaga todos os dados e bloqueia telefone)\n\n" +
+            "Digite 1 ou 2:"
+        );
+        
+        if (choice === '1') {
+            await handleArchive(uid, e);
+        } else if (choice === '2') {
+            await handleDeletePermanent(uid, e);
         }
     };
 
@@ -622,7 +548,7 @@ export default function InboxPage() {
     }, []);
 
     useEffect(() => {
-        const tables = ['leads_manos_crm', 'leads_compra', 'leads_distribuicao_crm_26'];
+        const tables = ['leads_manos_crm', 'leads_compra', 'leads_distribuicao_crm_26', 'leadsfacebook'];
         const channel = supabase.channel('inbox-live');
         let debounceTimer: ReturnType<typeof setTimeout> | null = null;
         const scheduleRefetch = () => {
@@ -837,6 +763,8 @@ export default function InboxPage() {
                                 expandedUid={expandedUid}
                                 onToggle={setExpandedUid}
                                 onArchive={handleArchive}
+                                onDeletePermanent={handleDeletePermanent}
+                                onAdminRemove={handleAdminRemove}
                                 onCaptureSuccess={handleCaptureSuccess}
                                 consultantsMap={consultantsMap}
                                 supabase={supabase}
@@ -860,6 +788,8 @@ export default function InboxPage() {
                                 expandedUid={expandedUid}
                                 onToggle={setExpandedUid}
                                 onArchive={handleArchive}
+                                onDeletePermanent={handleDeletePermanent}
+                                onAdminRemove={handleAdminRemove}
                                 onCaptureSuccess={handleCaptureSuccess}
                                 consultantsMap={consultantsMap}
                                 supabase={supabase}
@@ -888,6 +818,8 @@ export default function InboxPage() {
                                 expandedUid={expandedUid}
                                 onToggle={setExpandedUid}
                                 onArchive={handleArchive}
+                                onDeletePermanent={handleDeletePermanent}
+                                onAdminRemove={handleAdminRemove}
                                 consultantsMap={consultantsMap}
                                 supabase={supabase}
                                 router={router}
@@ -908,10 +840,13 @@ export default function InboxPage() {
                                 expandedUid={expandedUid}
                                 onToggle={setExpandedUid}
                                 onArchive={handleArchive}
+                                onDeletePermanent={handleDeletePermanent}
+                                onAdminRemove={handleAdminRemove}
                                 consultantsMap={consultantsMap}
                                 supabase={supabase}
                                 router={router}
                                 consultantId={consultantId}
+                                isAdmin={isAdmin}
                             />
                         )}
 
@@ -927,10 +862,13 @@ export default function InboxPage() {
                                 expandedUid={expandedUid}
                                 onToggle={setExpandedUid}
                                 onArchive={handleArchive}
+                                onDeletePermanent={handleDeletePermanent}
+                                onAdminRemove={handleAdminRemove}
                                 consultantsMap={consultantsMap}
                                 supabase={supabase}
                                 router={router}
                                 consultantId={consultantId}
+                                isAdmin={isAdmin}
                             />
                         )}
 
@@ -946,10 +884,13 @@ export default function InboxPage() {
                                 expandedUid={expandedUid}
                                 onToggle={setExpandedUid}
                                 onArchive={handleArchive}
+                                onDeletePermanent={handleDeletePermanent}
+                                onAdminRemove={handleAdminRemove}
                                 consultantsMap={consultantsMap}
                                 supabase={supabase}
                                 router={router}
                                 consultantId={consultantId}
+                                isAdmin={isAdmin}
                             />
                         )}
 
@@ -965,6 +906,8 @@ export default function InboxPage() {
                                 expandedUid={expandedUid}
                                 onToggle={setExpandedUid}
                                 onArchive={handleArchive}
+                                onDeletePermanent={handleDeletePermanent}
+                                onAdminRemove={handleAdminRemove}
                                 consultantsMap={consultantsMap}
                                 supabase={supabase}
                                 router={router}
@@ -1009,6 +952,8 @@ interface SectionProps {
     expandedUid: string | null;
     onToggle: (uid: string | null) => void;
     onArchive: (uid: string, e: React.MouseEvent) => void;
+    onDeletePermanent?: (uid: string, e: React.MouseEvent) => void;
+    onAdminRemove?: (uid: string, e: React.MouseEvent) => void;
     onCaptureSuccess?: (uid: string) => void;
     consultantsMap?: Map<string, string>;
     supabase: any;
@@ -1085,7 +1030,7 @@ function NextActionCard({ lead, lastMessages, consultantId }: {
     );
 }
 
-const Section = memo(function Section({ title, subtitle, icon, accent, leads, lastMessages, emptyText, expandedUid, onToggle, onArchive, onCaptureSuccess, consultantsMap, supabase, router, consultantId, isAdmin, isFishing }: SectionProps) {
+const Section = memo(function Section({ title, subtitle, icon, accent, leads, lastMessages, emptyText, expandedUid, onToggle, onArchive, onDeletePermanent, onAdminRemove, onCaptureSuccess, consultantsMap, supabase, router, consultantId, isAdmin, isFishing }: SectionProps) {
     return (
         <section>
             <div className={`flex items-center gap-3 mb-4 pl-3 border-l-4 ${accent}`}>
@@ -1107,6 +1052,8 @@ const Section = memo(function Section({ title, subtitle, icon, accent, leads, la
                             isExpanded={expandedUid === lead.uid}
                             onToggle={() => onToggle(expandedUid === lead.uid ? null : lead.uid)}
                             onArchive={(e) => onArchive(lead.uid, e)}
+                            onDeletePermanent={onDeletePermanent ? (e) => onDeletePermanent(lead.uid, e) : undefined}
+                            onAdminRemove={onAdminRemove ? (e) => onAdminRemove(lead.uid, e) : undefined}
                             onCaptureSuccess={onCaptureSuccess}
                             consultantName={lead.assigned_consultant_id ? consultantsMap?.get(lead.assigned_consultant_id) : undefined}
                             supabase={supabase}
@@ -1122,7 +1069,7 @@ const Section = memo(function Section({ title, subtitle, icon, accent, leads, la
     );
 });
 
-const LeadCard = memo(function LeadCard({ lead, messages, isExpanded, onToggle, onArchive, onCaptureSuccess, consultantName, supabase, router, consultantId, isAdmin, isFishing }: { lead: InboxLead; messages?: { inbound?: LastMessage, outbound?: LastMessage }; isExpanded: boolean; onToggle: () => void; onArchive: (e: React.MouseEvent) => void; onCaptureSuccess?: (uid: string) => void; consultantName?: string; supabase: any; router: any; consultantId: string | null; isAdmin?: boolean; isFishing?: boolean }) {
+const LeadCard = memo(function LeadCard({ lead, messages, isExpanded, onToggle, onArchive, onDeletePermanent, onAdminRemove, onCaptureSuccess, consultantName, supabase, router, consultantId, isAdmin, isFishing }: { lead: InboxLead; messages?: { inbound?: LastMessage, outbound?: LastMessage }; isExpanded: boolean; onToggle: () => void; onArchive: (e: React.MouseEvent) => void; onDeletePermanent?: (e: React.MouseEvent) => void; onAdminRemove?: (e: React.MouseEvent) => void; onCaptureSuccess?: (uid: string) => void; consultantName?: string; supabase: any; router: any; consultantId: string | null; isAdmin?: boolean; isFishing?: boolean }) {
     const sla = slaInfo(lead);
     const state = getLeadState(lead, messages?.inbound, messages?.outbound);
     const showMask = isFishing && !isAdmin;
@@ -1191,11 +1138,26 @@ const LeadCard = memo(function LeadCard({ lead, messages, isExpanded, onToggle, 
                 
                 <div className="flex justify-between items-start gap-4 mb-2">
                     <h3 className="font-black text-white text-xl md:text-2xl break-words leading-tight flex-1">{lead.name || 'Sem nome'}</h3>
-                    {lead.ai_score != null && (
-                        <div className={`px-2 py-1 rounded-lg font-black text-xs ${lead.ai_score >= 80 ? 'bg-red-600 text-white' : 'bg-zinc-800 text-gray-400'}`}>
-                            {lead.ai_score}
-                        </div>
-                    )}
+                    <div className="flex items-center gap-2 shrink-0">
+                        {isAdmin && onAdminRemove && (
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onAdminRemove(e);
+                                }}
+                                title="Admin: Remover lead do inbox"
+                                className="px-2.5 py-1 rounded-lg bg-red-950/80 border border-red-700/80 text-red-300 hover:bg-red-900 hover:text-white transition-all active:scale-95 flex items-center gap-1.5 text-xs font-bold shadow-sm"
+                            >
+                                <Trash2 className="w-3.5 h-3.5" />
+                                <span className="hidden sm:inline">Remover</span>
+                            </button>
+                        )}
+                        {lead.ai_score != null && (
+                            <div className={`px-2 py-1 rounded-lg font-black text-xs ${lead.ai_score >= 80 ? 'bg-red-600 text-white' : 'bg-zinc-800 text-gray-400'}`}>
+                                {lead.ai_score}
+                            </div>
+                        )}
+                    </div>
                 </div>
 
                 <div className="flex items-center gap-2 flex-wrap mb-4">
@@ -1252,6 +1214,27 @@ const LeadCard = memo(function LeadCard({ lead, messages, isExpanded, onToggle, 
                                 )}
                             </div>
 
+                            {/* Respostas do formulário Meta Facebook Ads */}
+                            {((lead as any).cidade || (lead as any).momento_compra || (lead as any).forma_pagamento) && (
+                                <div className="flex flex-wrap gap-1.5 text-[11px] font-medium">
+                                    {(lead as any).cidade && (
+                                        <span className="bg-blue-950/60 border border-blue-800/60 text-blue-200 px-2 py-0.5 rounded-md">
+                                            📍 {(lead as any).cidade}
+                                        </span>
+                                    )}
+                                    {(lead as any).momento_compra && (
+                                        <span className="bg-purple-950/60 border border-purple-800/60 text-purple-200 px-2 py-0.5 rounded-md">
+                                            ⏱️ Prazo: {(lead as any).momento_compra}
+                                        </span>
+                                    )}
+                                    {(lead as any).forma_pagamento && (
+                                        <span className="bg-emerald-950/60 border border-emerald-800/60 text-emerald-200 px-2 py-0.5 rounded-md">
+                                            💳 Pagamento: {(lead as any).forma_pagamento}
+                                        </span>
+                                    )}
+                                </div>
+                            )}
+
                             {lastMsgText ? (
                                 <p className="text-sm md:text-base text-gray-200 italic leading-relaxed bg-black/20 p-3 rounded-xl border border-white/5 break-words">
                                     <MessageCircle className="inline w-4 h-4 mr-2 text-blue-400 shrink-0 font-normal" />
@@ -1285,45 +1268,56 @@ const LeadCard = memo(function LeadCard({ lead, messages, isExpanded, onToggle, 
                     <div className="mt-6 pt-6 border-t border-zinc-800 animate-in fade-in slide-in-from-top-2 duration-300">
                         <div className="grid grid-cols-2 gap-3">
                             {isFishing ? (
-                                <button
-                                    onClick={async (e) => {
-                                        e.stopPropagation();
-                                        if (!consultantId) {
-                                            alert('Erro: ID do vendedor não identificado.');
-                                            return;
-                                        }
-                                        try {
-                                            const res = await fetch('/api/lead/start-atendimento', {
-                                                method: 'POST',
-                                                headers: { 'Content-Type': 'application/json' },
-                                                body: JSON.stringify({ 
-                                                    lead_id: lead.native_id, 
-                                                    lead_table: lead.table_name,
-                                                    consultant_id: consultantId
-                                                }),
-                                            });
-                                            const data = await res.json();
-                                            if (data.success) {
-                                                if (onCaptureSuccess) onCaptureSuccess(lead.uid);
-                                                router.push(`/lead/${encodeURIComponent(lead.uid)}`);
-                                            } else {
-                                                alert(`Ops! ${data.error || 'Não foi possível capturar o lead.'}`);
+                                <>
+                                    <button
+                                        onClick={async (e) => {
+                                            e.stopPropagation();
+                                            if (!consultantId) {
+                                                alert('Erro: ID do vendedor não identificado.');
+                                                return;
                                             }
-                                        } catch (err) {
-                                            console.error('Erro na captura:', err);
-                                        }
-                                    }}
-                                    className="col-span-2 min-h-[64px] bg-amber-500 hover:bg-amber-400 text-black font-black py-4 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-[0.98] shadow-lg shadow-amber-900/20"
-                                >
-                                    <Zap className="w-5 h-5 fill-current" /> CAPTURAR LEAD AGORA
-                                </button>
+                                            try {
+                                                const res = await fetch('/api/lead/start-atendimento', {
+                                                    method: 'POST',
+                                                    headers: { 'Content-Type': 'application/json' },
+                                                    body: JSON.stringify({ 
+                                                        lead_id: lead.native_id, 
+                                                        lead_table: lead.table_name,
+                                                        consultant_id: consultantId
+                                                    }),
+                                                });
+                                                const data = await res.json();
+                                                if (data.success) {
+                                                    if (onCaptureSuccess) onCaptureSuccess(lead.uid);
+                                                    router.push(`/lead/${encodeURIComponent(lead.uid)}`);
+                                                } else {
+                                                    alert(`Ops! ${data.error || 'Não foi possível capturar o lead.'}`);
+                                                }
+                                            } catch (err) {
+                                                console.error('Erro na captura:', err);
+                                            }
+                                        }}
+                                        className={`${isAdmin ? 'col-span-2 md:col-span-1' : 'col-span-2'} min-h-[64px] bg-amber-500 hover:bg-amber-400 text-black font-black py-4 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-[0.98] shadow-lg shadow-amber-900/20`}
+                                    >
+                                        <Zap className="w-5 h-5 fill-current" /> CAPTURAR LEAD AGORA
+                                    </button>
+                                    {isAdmin && (
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                if (onAdminRemove) onAdminRemove(e);
+                                            }}
+                                            className="col-span-2 md:col-span-1 min-h-[64px] bg-red-950/80 hover:bg-red-900 border border-red-700/80 text-red-300 font-bold py-4 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
+                                        >
+                                            <Trash2 className="w-5 h-5 text-red-400" /> REMOVER LEAD (ADMIN)
+                                        </button>
+                                    )}
+                                </>
                             ) : (
                                 <>
                                     <button
                                         onClick={async (e) => {
                                             e.stopPropagation();
-                                            // Passa pela API (claim atômico) — NUNCA update direto no
-                                            // cliente, senão dois vendedores roubam o mesmo lead.
                                             try {
                                                 const res = await fetch('/api/lead/start-atendimento', {
                                                     method: 'POST',
@@ -1350,6 +1344,17 @@ const LeadCard = memo(function LeadCard({ lead, messages, isExpanded, onToggle, 
                                         className="col-span-2 md:col-span-1 min-h-[56px] flex items-center justify-center bg-zinc-800 hover:bg-zinc-700 text-gray-300 rounded-2xl font-bold transition-all active:scale-95">
                                         ARQUIVAR
                                     </button>
+                                    {isAdmin && onDeletePermanent && (
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                onDeletePermanent(e);
+                                            }}
+                                            className="col-span-2 min-h-[48px] flex items-center justify-center bg-red-950/60 hover:bg-red-900/80 border border-red-800/80 text-red-400 rounded-2xl font-bold text-xs transition-all active:scale-95 gap-2"
+                                        >
+                                            <Trash2 className="w-4 h-4" /> EXCLUIR DEFINITIVAMENTE (ADMIN)
+                                        </button>
+                                    )}
                                 </>
                             )}
                         </div>

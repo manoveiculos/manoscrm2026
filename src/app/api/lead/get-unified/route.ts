@@ -136,6 +136,21 @@ export async function GET(req: NextRequest) {
                     if (bData.veiculo_original) realInterest = bData.veiculo_original;
                     if (bData.carro_troca) realTroca = bData.carro_troca;
                 }
+            } else if (lead.table_name === 'leadsfacebook') {
+                const { data: bData } = await admin
+                    .from('leadsfacebook')
+                    .select('cidade, momento_compra, vehicle_interest, forma_pagamento, observacoes, ai_summary, raw_payload')
+                    .eq('id', lead.id)
+                    .maybeSingle();
+                if (bData) {
+                    if (bData.vehicle_interest) realInterest = bData.vehicle_interest;
+                    lead.cidade = bData.cidade;
+                    lead.momento_compra = bData.momento_compra;
+                    lead.forma_pagamento = bData.forma_pagamento;
+                    lead.observacoes = bData.observacoes;
+                    if (bData.ai_summary) lead.ai_summary = bData.ai_summary;
+                    lead.raw_payload = bData.raw_payload;
+                }
             }
         } catch (err) {
             console.warn('[GetUnifiedBFF] Erro ao buscar dados base do lead:', err);
@@ -169,14 +184,16 @@ export async function GET(req: NextRequest) {
 
         const uidSet = new Set<string>([String(leadId)]);
         if (!phoneIsMasked && phoneSuffix.length >= 8) {
-            const [dist, manos, compra] = await Promise.all([
+            const [dist, manos, compra, fb] = await Promise.all([
                 admin.from('leads_distribuicao_crm_26').select('id').ilike('telefone', `%${phoneSuffix}%`).limit(10),
                 admin.from('leads_manos_crm').select('id').ilike('phone', `%${phoneSuffix}%`).limit(10),
                 admin.from('leads_compra').select('id').ilike('telefone', `%${phoneSuffix}%`).limit(10),
+                admin.from('leadsfacebook').select('id').ilike('phone', `%${phoneSuffix}%`).limit(10),
             ]);
             (dist.data || []).forEach((r: any) => uidSet.add(String(r.id)));
             (manos.data || []).forEach((r: any) => uidSet.add(String(r.id)));
             (compra.data || []).forEach((r: any) => uidSet.add(String(r.id)));
+            (fb.data || []).forEach((r: any) => uidSet.add(String(r.id)));
         }
 
         const twinIds = Array.from(uidSet);

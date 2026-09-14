@@ -70,26 +70,34 @@ export async function POST(request: NextRequest) {
 
     // 4. Executa o algoritmo de matching inteligente
     const alertasCorrespondentes = alertas.filter(alerta => {
-      // A. Filtro de Marca
-      const marcaAlerta = (alerta.marca || '').trim().toUpperCase();
-      const marcaVeiculo = (veiculo.marca || '').trim().toUpperCase();
-      if (marcaAlerta !== 'TODAS' && marcaAlerta !== 'OUTROS' && marcaAlerta !== '' && marcaAlerta !== marcaVeiculo) {
+      const normText = (s: string | null | undefined) => (s || '').trim().toLowerCase().replace(/l{2}/g, 'l');
+      
+      const marcaAlerta = normText(alerta.marca);
+      const marcaVeiculo = normText(veiculo.marca);
+      const modeloVeiculo = normText(veiculo.modelo);
+
+      // A. Filtro de Marca (resiliente: aceita marca exata, TODAS/OUTROS/vazio, ou se o alerta informou modelo como marca)
+      const marcaValida =
+        !marcaAlerta ||
+        marcaAlerta === 'todas' ||
+        marcaAlerta === 'outros' ||
+        marcaAlerta === marcaVeiculo ||
+        modeloVeiculo.includes(marcaAlerta) ||
+        marcaVeiculo.includes(marcaAlerta);
+
+      if (!marcaValida) {
         return false;
       }
 
       // B. Filtro de Modelo / Palavra-Chave (suporta buscas por múltiplas palavras-chave separadas por vírgula)
       if (alerta.modelo) {
-        const palavrasChave = alerta.modelo.split(',').map((termo: string) => termo.trim().toLowerCase());
-        const modeloVeiculo = (veiculo.modelo || '').toLowerCase();
+        const palavrasChave = alerta.modelo.split(',').map((termo: string) => normText(termo));
         
         // Verifica se pelo menos uma das palavras-chave está contida no modelo do carro
-        const bateModelo = palavrasChave.some((termo: string) => termo !== '' && modeloVeiculo.includes(termo));
+        const bateModelo = palavrasChave.some((termo: string) => termo !== '' && (modeloVeiculo.includes(termo) || termo.includes(modeloVeiculo)));
         if (!bateModelo) {
           return false;
         }
-      } else {
-        // Se o alerta não tiver modelo, assume que não quer filtrar por modelo
-        return false;
       }
 
       // C. Filtro de Faixa de Preço (Mínimo e Máximo)

@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export const maxDuration = 30;
 
-type LeadTable = 'leads_manos_crm' | 'leads_compra' | 'leads_distribuicao_crm_26' | 'leads_master';
+type LeadTable = 'leads_manos_crm' | 'leads_compra' | 'leads_distribuicao_crm_26' | 'leads_master' | 'leadsfacebook';
 
 interface TableSchema {
     statusSold: string;
@@ -35,9 +35,14 @@ const SCHEMA: Record<LeadTable, TableSchema> = {
         updatedAtCol: 'updated_at', wonAtCol: 'won_at',
         lostAtCol: 'lost_at', lossReasonCol: 'motivo_perda',
     },
+    leadsfacebook: {
+        statusSold: 'vendido', statusLost: 'perdido',
+        updatedAtCol: 'updated_at', wonAtCol: null,
+        lostAtCol: null, lossReasonCol: 'observacoes',
+    },
 };
 
-const VALID_TABLES = new Set<LeadTable>(['leads_manos_crm', 'leads_compra', 'leads_distribuicao_crm_26', 'leads_master']);
+const VALID_TABLES = new Set<LeadTable>(['leads_manos_crm', 'leads_compra', 'leads_distribuicao_crm_26', 'leads_master', 'leadsfacebook']);
 
 // Motivos de perda que descartam o lead da fila de reversão da IA
 // (lead sem crédito não vai virar via reengajamento).

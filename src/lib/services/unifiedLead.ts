@@ -9,7 +9,8 @@ export type LeadTable =
     | 'leads_manos_crm'
     | 'leads_compra'
     | 'leads_distribuicao_crm_26'
-    | 'leads_master';
+    | 'leads_master'
+    | 'leadsfacebook';
 
 export interface ParsedUid {
     table: LeadTable;
@@ -21,6 +22,7 @@ const VALID_TABLES = new Set<LeadTable>([
     'leads_compra',
     'leads_distribuicao_crm_26',
     'leads_master',
+    'leadsfacebook',
 ]);
 
 export function parseUid(uid: string): ParsedUid | null {
@@ -61,6 +63,10 @@ export const FIELD_ALIASES: Record<LeadTable, Record<string, string>> = {
     },
     leads_master: {
         name: 'name', phone: 'phone', vehicleInterest: 'vehicle_interest',
+        source: 'source', createdAt: 'created_at', updatedAt: 'updated_at',
+    },
+    leadsfacebook: {
+        name: 'nome', phone: 'phone', vehicleInterest: 'vehicle_interest',
         source: 'source', createdAt: 'created_at', updatedAt: 'updated_at',
     },
 };
