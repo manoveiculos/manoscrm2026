@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
     Sparkles, Phone, User, Car, Bell, Trash2, AlertTriangle, CheckCircle2,
     Activity, ToggleLeft, ToggleRight, Search, X, Send, RefreshCw, Clock,
-    ShieldAlert, Radio, History, UserCheck,
+    ShieldAlert, Radio, History, UserCheck, Pencil,
 } from 'lucide-react';
 import { tentarNormalizarCelular } from '@/lib/compras/alertas/telefone';
 
@@ -95,6 +95,7 @@ export default function AlertsTab() {
     const [successMsg, setSuccessMsg] = useState<string | null>(null);
     const [mostrarHistorico, setMostrarHistorico] = useState(false);
     const [testando, setTestando] = useState<string | null>(null);
+    const [editingId, setEditingId] = useState<string | null>(null);
 
     // Filtros
     const [searchTerm, setSearchTerm] = useState('');
@@ -186,9 +187,31 @@ export default function AlertsTab() {
     };
 
     const limparFormulario = () => {
+        setEditingId(null);
         setNome(''); setTelefone(''); setClienteFinal(''); setMarca(''); setModelo('');
         setValorMinimo(''); setValorMaximo(''); setAnoMinimo(''); setAnoMaximo('');
         setCor(''); setCambio(''); setCombustivel(''); setKmMinimo(''); setKmMaximo('');
+    };
+
+    const handleIniciarEdicao = (alerta: AlertaCliente) => {
+        setEditingId(alerta.id);
+        setNome(alerta.nome_cliente || '');
+        setTelefone(formatPhoneNumber(alerta.telefone_cliente || ''));
+        setClienteFinal(alerta.cliente_final || '');
+        setMarca(alerta.marca === 'TODAS' ? '' : alerta.marca || '');
+        setModelo(alerta.modelo || '');
+
+        setValorMinimo(alerta.valor_minimo ? formatCurrencyInput(String(Math.round(alerta.valor_minimo * 100))) : '');
+        setValorMaximo(alerta.valor_maximo ? formatCurrencyInput(String(Math.round(alerta.valor_maximo * 100))) : '');
+        setAnoMinimo(alerta.ano_minimo ? String(alerta.ano_minimo) : '');
+        setAnoMaximo(alerta.ano_maximo ? String(alerta.ano_maximo) : '');
+        setCor(alerta.cor || '');
+        setCambio(alerta.cambio || '');
+        setCombustivel(alerta.combustivel || '');
+        setKmMinimo(alerta.km_minimo ? String(alerta.km_minimo) : '');
+        setKmMaximo(alerta.km_maximo ? String(alerta.km_maximo) : '');
+
+        document.getElementById('form-monitoramento')?.scrollIntoView({ behavior: 'smooth' });
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -212,32 +235,42 @@ export default function AlertsTab() {
         };
 
         try {
+            const method = editingId ? 'PUT' : 'POST';
+            const payload = {
+                id: editingId || undefined,
+                nome_cliente: nome,
+                telefone_cliente: telefoneValidado.nacional,
+                cliente_final: clienteFinal,
+                marca, modelo,
+                valor_minimo: parseCurrency(valorMinimo),
+                valor_maximo: parseCurrency(valorMaximo),
+                ano_minimo: anoMinimo ? Number(anoMinimo) : null,
+                ano_maximo: anoMaximo ? Number(anoMaximo) : null,
+                cor, cambio, combustivel,
+                km_minimo: kmMinimo ? Number(kmMinimo) : null,
+                km_maximo: kmMaximo ? Number(kmMaximo) : null,
+            };
+
             const res = await fetch('/api/compras/alertas', {
-                method: 'POST',
+                method,
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    nome_cliente: nome,
-                    telefone_cliente: telefoneValidado.nacional,
-                    cliente_final: clienteFinal,
-                    marca, modelo,
-                    valor_minimo: parseCurrency(valorMinimo),
-                    valor_maximo: parseCurrency(valorMaximo),
-                    ano_minimo: anoMinimo ? Number(anoMinimo) : null,
-                    ano_maximo: anoMaximo ? Number(anoMaximo) : null,
-                    cor, cambio, combustivel,
-                    km_minimo: kmMinimo ? Number(kmMinimo) : null,
-                    km_maximo: kmMaximo ? Number(kmMaximo) : null,
-                }),
+                body: JSON.stringify(payload),
             });
             const data = await res.json();
-            if (!res.ok || !data.success) throw new Error(data.error || 'Erro ao criar alerta.');
+            if (!res.ok || !data.success) throw new Error(data.error || (editingId ? 'Erro ao atualizar alerta.' : 'Erro ao criar alerta.'));
 
-            setAlerts(prev => [data.alert, ...prev]);
-            setSuccessMsg(`Monitorando ${modelo}. O aviso vai para ${telefoneValidado.formatado} assim que o carro aparecer.`);
+            if (editingId) {
+                setAlerts(prev => prev.map(a => (a.id === editingId ? { ...a, ...data.alert } : a)));
+                setSuccessMsg(`Monitoramento de ${modelo} atualizado com sucesso!`);
+            } else {
+                setAlerts(prev => [data.alert, ...prev]);
+                setSuccessMsg(`Monitorando ${modelo}. O aviso vai para ${telefoneValidado.formatado} assim que o carro aparecer.`);
+            }
+
             limparFormulario();
             setTimeout(() => setSuccessMsg(null), 6000);
         } catch (err: any) {
-            setError(err.message || 'Falha ao ativar monitoramento.');
+            setError(err.message || (editingId ? 'Falha ao atualizar monitoramento.' : 'Falha ao ativar monitoramento.'));
         } finally {
             setSubmitting(false);
         }
@@ -265,6 +298,7 @@ export default function AlertsTab() {
             const data = await res.json();
             if (!res.ok || !data.success) throw new Error(data.error);
             setAlerts(prev => prev.filter(a => a.id !== id));
+            if (editingId === id) limparFormulario();
         } catch {
             setError('Não foi possível remover o alerta.');
         }
@@ -409,16 +443,36 @@ export default function AlertsTab() {
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
                 {/* ── Formulário ─────────────────────────────────────────── */}
-                <section className="lg:col-span-5">
+                <section className="lg:col-span-5" id="form-monitoramento">
                     <div className="glass-panel border border-zinc-850 rounded-2xl p-6 flex flex-col gap-5">
-                        <div className="flex items-center gap-2.5">
-                            <div className="p-2 bg-primary/10 border border-primary/20 rounded-xl text-primary">
-                                <Bell className="w-5 h-5" />
+                        <div className="flex items-center justify-between gap-2.5">
+                            <div className="flex items-center gap-2.5">
+                                <div className="p-2 bg-primary/10 border border-primary/20 rounded-xl text-primary">
+                                    {editingId ? <Pencil className="w-5 h-5 text-amber-400" /> : <Bell className="w-5 h-5" />}
+                                </div>
+                                <div>
+                                    <h2 className="font-bold text-white text-lg flex items-center gap-2">
+                                        {editingId ? 'Editar Monitoramento' : 'Novo Monitoramento'}
+                                        {editingId && (
+                                            <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full border border-amber-500/30 bg-amber-950/30 text-amber-400 uppercase tracking-wider">
+                                                Modo Edição
+                                            </span>
+                                        )}
+                                    </h2>
+                                    <p className="text-xs text-zinc-400 mt-0.5">
+                                        {editingId ? 'Altere as condições do alerta ativo' : 'O aviso cai no WhatsApp assim que o carro aparecer nos grupos'}
+                                    </p>
+                                </div>
                             </div>
-                            <div>
-                                <h2 className="font-bold text-white text-lg">Novo Monitoramento</h2>
-                                <p className="text-xs text-zinc-400 mt-0.5">O aviso cai no WhatsApp assim que o carro aparecer nos grupos</p>
-                            </div>
+                            {editingId && (
+                                <button
+                                    type="button" onClick={limparFormulario}
+                                    className="p-1.5 rounded-lg border border-zinc-800 bg-zinc-950 text-zinc-400 hover:text-white transition-colors cursor-pointer text-xs flex items-center gap-1 font-semibold"
+                                    title="Cancelar edição"
+                                >
+                                    <X className="w-4 h-4" /> Cancelar
+                                </button>
+                            )}
                         </div>
 
                         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
@@ -558,9 +612,11 @@ export default function AlertsTab() {
 
                             <button
                                 type="submit" disabled={submitting || telefoneRuim}
-                                className="w-full mt-2 py-3.5 px-6 rounded-xl bg-primary hover:bg-primary/95 text-white font-bold text-sm transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                                className={`w-full mt-2 py-3.5 px-6 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
+                                    editingId ? 'bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white shadow-lg shadow-amber-950/40' : 'bg-primary hover:bg-primary/95 text-white'
+                                }`}
                             >
-                                {submitting ? 'Ativando...' : 'Ativar Monitoramento 24h'}
+                                {submitting ? (editingId ? 'Salvando...' : 'Ativando...') : (editingId ? 'Salvar Alterações' : 'Ativar Monitoramento 24h')}
                                 <Sparkles className="w-4 h-4" />
                             </button>
                         </form>
@@ -621,11 +677,14 @@ export default function AlertsTab() {
                             {filteredAlerts.map(alerta => {
                                 const telOk = !!tentarNormalizarCelular(alerta.telefone_cliente);
                                 const disparos = alerta.disparos || { enviados: 0, falhas: 0, ultimo: null };
+                                const isEditingThis = editingId === alerta.id;
                                 return (
                                     <div
                                         key={alerta.id}
                                         className={`glass-panel border rounded-2xl p-5 flex flex-col justify-between gap-4 transition-all relative overflow-hidden ${
-                                            alerta.ativo ? 'border-zinc-850 bg-zinc-900/10' : 'border-zinc-900/60 bg-zinc-950/20 opacity-50'
+                                            isEditingThis
+                                                ? 'ring-2 ring-amber-500 border-amber-500/50 bg-amber-950/20'
+                                                : alerta.ativo ? 'border-zinc-850 bg-zinc-900/10' : 'border-zinc-900/60 bg-zinc-950/20 opacity-50'
                                         }`}
                                     >
                                         {alerta.ativo && <div className="absolute top-0 right-0 w-2 h-2 bg-emerald-500 rounded-full m-3 animate-pulse" />}
@@ -713,6 +772,18 @@ export default function AlertsTab() {
 
                                             <div className="flex items-center gap-2">
                                                 <button
+                                                    type="button" onClick={() => handleIniciarEdicao(alerta)}
+                                                    className={`inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-1.5 rounded-lg border transition-all cursor-pointer ${
+                                                        isEditingThis
+                                                            ? 'border-amber-500 bg-amber-500 text-black font-extrabold'
+                                                            : 'border-zinc-800 bg-zinc-950 text-amber-400 hover:text-amber-300 hover:border-amber-700/50'
+                                                    }`}
+                                                    title="Editar as regras deste alerta"
+                                                >
+                                                    <Pencil className="w-3 h-3" />
+                                                    {isEditingThis ? 'Editando' : 'Editar'}
+                                                </button>
+                                                <button
                                                     type="button" onClick={() => handleTestar(alerta.id)} disabled={testando === alerta.id}
                                                     className="inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-1.5 rounded-lg border border-zinc-800 bg-zinc-950 text-zinc-300 hover:text-white hover:border-zinc-700 transition-all cursor-pointer disabled:opacity-50"
                                                     title="Enviar um WhatsApp de teste agora"
@@ -738,3 +809,4 @@ export default function AlertsTab() {
         </div>
     );
 }
+

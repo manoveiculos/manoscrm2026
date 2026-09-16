@@ -64,6 +64,7 @@ export interface CustoAdicional {
     valor: number;
     comprovante_url?: string | null;
     data_custo?: string;
+    loja_pagadora?: string | null;
 }
 
 export interface FechamentoLucro {
@@ -722,7 +723,7 @@ export async function ajustarApuracaoVeiculo(payload: {
     imposto_nf?: number;
     pct_alexandre?: number;
     pct_ivo?: number;
-    custos?: Array<{ id?: string; categoria: CustoAdicional['categoria']; descricao: string; valor: number; data_custo?: string }>;
+    custos?: Array<{ id?: string; categoria: CustoAdicional['categoria']; descricao: string; valor: number; data_custo?: string; loja_pagadora?: string }>;
 }) {
     const client = supabaseAdmin || supabase;
 
@@ -774,7 +775,8 @@ export async function ajustarApuracaoVeiculo(payload: {
                     categoria: c.categoria,
                     descricao: c.descricao.trim(),
                     valor: Number(c.valor),
-                    data_custo: c.data_custo || undefined
+                    data_custo: c.data_custo || undefined,
+                    loja_pagadora: c.loja_pagadora || veiculo.loja_atual || 'manos'
                 })
                 .eq('id', c.id)
                 .eq('veiculo_id', veiculo.id);
@@ -790,7 +792,7 @@ export async function ajustarApuracaoVeiculo(payload: {
                     descricao: c.descricao.trim(),
                     valor: Number(c.valor),
                     data_custo: c.data_custo || hojeIso(),
-                    loja_pagadora: veiculo.loja_atual || 'manos'
+                    loja_pagadora: c.loja_pagadora || veiculo.loja_atual || 'manos'
                 }))
             );
             if (error) throw new Error(`Erro ao adicionar gasto: ${error.message}`);
@@ -942,7 +944,7 @@ export async function aprovarOperacao(payload: { veiculo_id: string; socio: Nome
     if ((veiculo.contratos_venda || []).length === 0 || !fechamento) {
         throw new Error('Só dá pra aprovar depois que a venda estiver registrada.');
     }
-    if (veiculo.aprovado_alexandre_em && veiculo.aprovado_ivo_em) {
+    if (payload.acao === 'aprovar' && veiculo.aprovado_alexandre_em && veiculo.aprovado_ivo_em) {
         throw new Error('Operação já aprovada pelos dois sócios. Está travada.');
     }
 

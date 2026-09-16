@@ -57,7 +57,7 @@ export default function DivisaoDeLucroPage() {
                 console.warn('Aviso de sessão auth:', aErr);
             }
 
-            let isPermitido = true;
+            let isPermitido = false;
             if (email) {
                 isPermitido = await verificarAcessoSocio(email);
             }

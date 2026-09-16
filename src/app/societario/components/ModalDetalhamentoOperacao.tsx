@@ -1,9 +1,10 @@
 'use client';
 
 import React, { useState } from 'react';
-import { X, Save, Car, ArrowRightLeft, Calculator, FileText, CheckCircle2, UserCheck, Wallet, Wrench, Plus, Trash2, Lock, ShieldCheck, Landmark } from 'lucide-react';
+import { X, Save, Car, ArrowRightLeft, Calculator, FileText, CheckCircle2, UserCheck, Wallet, Wrench, Plus, Trash2, Lock, ShieldCheck, Landmark, Printer } from 'lucide-react';
 import { calcularFechamento, comissaoAutomatica, CustoAdicional, NOME_LOJA, PCT_COMISSAO_VENDA } from '@/lib/services/societarioService';
 import { origemDaCompra, type NomeSocio } from '@/lib/services/societarioAcerto';
+import { RelatorioNegociacaoPdf } from './RelatorioNegociacaoPdf';
 
 interface ModalDetalhamentoOperacaoProps {
     veiculo: any | null;
@@ -21,6 +22,7 @@ interface LinhaGasto {
     descricao: string;
     valor: string;
     data_custo: string;
+    loja_pagadora: string;
 }
 
 const CATEGORIAS: { valor: Categoria; rotulo: string }[] = [
@@ -46,7 +48,7 @@ function retratoEdicao(comissao: number, imposto: number, pctA: number, pctI: nu
         pctI: Number(pctI) || 0,
         gastos: gastos
             .filter((g) => g.id || g.descricao.trim() || g.valor.trim())
-            .map((g) => [g.id ?? null, g.categoria, g.descricao.trim(), Number(g.valor) || 0, g.data_custo])
+            .map((g) => [g.id ?? null, g.categoria, g.descricao.trim(), Number(g.valor) || 0, g.data_custo, g.loja_pagadora])
     });
 }
 
@@ -72,7 +74,8 @@ export function ModalDetalhamentoOperacao({ veiculo, socioAtual, onClose, onSave
             categoria: c.categoria,
             descricao: c.descricao || '',
             valor: String(c.valor ?? ''),
-            data_custo: c.data_custo || hoje()
+            data_custo: c.data_custo || hoje(),
+            loja_pagadora: c.loja_pagadora || veiculo?.loja_atual || 'manos'
         }))
     );
     const [retratoInicial] = useState(() => retratoEdicao(comissaoInicial, impostoInicial, pctAlexandreInicial, pctIvoInicial, gastos));
@@ -83,6 +86,7 @@ export function ModalDetalhamentoOperacao({ veiculo, socioAtual, onClose, onSave
     const [salvando, setSalvando] = useState(false);
     const [aprovando, setAprovando] = useState(false);
     const [erro, setErro] = useState('');
+    const [exibirPdf, setExibirPdf] = useState(false);
 
     if (!veiculo) return null;
 
@@ -120,7 +124,7 @@ export function ModalDetalhamentoOperacao({ veiculo, socioAtual, onClose, onSave
     const adicionarGasto = () => {
         setGastos((atual) => [
             ...atual,
-            { chave: `novo-${Date.now()}`, categoria: 'oficina', descricao: '', valor: '', data_custo: hoje() }
+            { chave: `novo-${Date.now()}`, categoria: 'oficina', descricao: '', valor: '', data_custo: hoje(), loja_pagadora: veiculo?.loja_atual || 'manos' }
         ]);
     };
 
@@ -147,7 +151,8 @@ export function ModalDetalhamentoOperacao({ veiculo, socioAtual, onClose, onSave
                         categoria: g.categoria,
                         descricao: g.descricao.trim(),
                         valor: Number(g.valor),
-                        data_custo: g.data_custo
+                        data_custo: g.data_custo,
+                        loja_pagadora: g.loja_pagadora
                     })),
                     ...(vendido
                         ? { comissao_vendedor: comissaoVendedor, imposto_nf: impostoNf, pct_alexandre: pctAlexandre, pct_ivo: pctIvo }
@@ -233,13 +238,36 @@ export function ModalDetalhamentoOperacao({ veiculo, socioAtual, onClose, onSave
                         </div>
                     </div>
 
-                    <button
-                        onClick={onClose}
-                        className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
-                    >
-                        <X className="w-5 h-5" />
-                    </button>
+                    <div className="flex items-center gap-3">
+                        <button
+                            onClick={() => setExibirPdf(true)}
+                            className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs flex items-center gap-2 shadow-lg shadow-emerald-950/30 transition-all"
+                            title="Gerar e imprimir relatório detalhado em PDF"
+                        >
+                            <Printer className="w-4 h-4" />
+                            <span>Imprimir PDF</span>
+                        </button>
+
+                        <button
+                            onClick={onClose}
+                            className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
+                        >
+                            <X className="w-5 h-5" />
+                        </button>
+                    </div>
                 </div>
+
+                {exibirPdf && (
+                    <RelatorioNegociacaoPdf
+                        veiculo={veiculo}
+                        comissaoVendedorEdicao={comissaoVendedor}
+                        impostoNfEdicao={impostoNf}
+                        pctAlexandreEdicao={pctAlexandre}
+                        pctIvoEdicao={pctIvo}
+                        gastosEdicao={gastos}
+                        onClose={() => setExibirPdf(false)}
+                    />
+                )}
 
                 {/* Conteúdo Modal */}
                 <div className="p-6 space-y-6 max-h-[75vh] overflow-y-auto">
@@ -274,31 +302,32 @@ export function ModalDetalhamentoOperacao({ veiculo, socioAtual, onClose, onSave
                                 </div>
                             </div>
 
-                            {!travada && (
+                            {(!travada || minhaAprovacao) && (
                                 <div className="flex flex-wrap items-center gap-3">
                                     {!socioAtual ? (
-                                        <span className="text-[11px] text-slate-500">Entre com o login do Alexandre ou do Ivo pra aprovar.</span>
+                                        <span className="text-[11px] text-slate-500">Entre com o login do Alexandre ou do Ivo pra aprovar ou destravar.</span>
                                     ) : minhaAprovacao ? (
                                         <button
                                             onClick={() => handleAprovacao('desfazer')}
                                             disabled={aprovando}
-                                            className="px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-slate-300 hover:text-white text-xs font-semibold disabled:opacity-50"
+                                            className="px-3 py-2 rounded-lg bg-rose-950/80 hover:bg-rose-900 border border-rose-500/30 text-rose-300 hover:text-white text-xs font-bold disabled:opacity-50 flex items-center gap-1.5 transition-all cursor-pointer"
+                                            title="Destravar operação e remover minha aprovação"
                                         >
-                                            {aprovando ? 'Salvando...' : 'Desfazer minha aprovação'}
+                                            {aprovando ? 'Salvando...' : 'Desfazer minha aprovação (Destravar)'}
                                         </button>
                                     ) : (
                                         <button
                                             onClick={() => handleAprovacao('aprovar')}
                                             disabled={aprovando || alteracaoNaoSalva}
-                                            className="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 disabled:opacity-50"
+                                            className="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 disabled:opacity-50 transition-all cursor-pointer"
                                         >
                                             <CheckCircle2 className="w-4 h-4" /> {aprovando ? 'Aprovando...' : `Aprovar como ${socioAtual}`}
                                         </button>
                                     )}
-                                    <span className="text-[11px] text-slate-500">
+                                    <span className="text-[11px] text-slate-400">
                                         {alteracaoNaoSalva
                                             ? 'Salve as alterações antes de aprovar.'
-                                            : 'Pode alterar até os dois aprovarem. Qualquer alteração zera as aprovações.'}
+                                            : 'Qualquer alteração zera as aprovações. É possível destravar para correções a qualquer momento.'}
                                     </span>
                                 </div>
                             )}
@@ -454,7 +483,7 @@ export function ModalDetalhamentoOperacao({ veiculo, socioAtual, onClose, onSave
                         )}
 
                         {gastos.map((g) => (
-                            <div key={g.chave} className="grid grid-cols-2 md:grid-cols-[130px_1fr_130px_140px_36px] gap-2 items-center text-xs">
+                            <div key={g.chave} className="grid grid-cols-2 md:grid-cols-[110px_1fr_110px_120px_100px_36px] gap-2 items-center text-xs">
                                 <select
                                     value={g.categoria}
                                     onChange={(e) => alterarGasto(g.chave, 'categoria', e.target.value)}
@@ -489,6 +518,15 @@ export function ModalDetalhamentoOperacao({ veiculo, socioAtual, onClose, onSave
                                     disabled={travada}
                                     className="bg-slate-900 border border-slate-800 rounded-lg p-2 text-white focus:border-orange-500 focus:outline-none disabled:opacity-60"
                                 />
+                                <select
+                                    value={g.loja_pagadora}
+                                    onChange={(e) => alterarGasto(g.chave, 'loja_pagadora', e.target.value)}
+                                    disabled={travada}
+                                    className="bg-slate-900 border border-slate-800 rounded-lg p-2 text-white focus:border-orange-500 focus:outline-none disabled:opacity-60"
+                                >
+                                    <option value="manos">Manos</option>
+                                    <option value="v3">V3</option>
+                                </select>
                                 {!travada && (
                                     <button
                                         type="button"
