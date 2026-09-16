@@ -1,277 +1,249 @@
 import { NextResponse } from 'next/server';
 import { createClient as createSupabaseAdmin } from '@/lib/supabase/admin';
 import { createClient as createSupabaseServer } from '@/lib/supabase/server';
+import { normalizarCelular } from '@/lib/compras/alertas/telefone';
 
 const supabaseAdmin = createSupabaseAdmin();
 
 export const dynamic = 'force-dynamic';
 
-// Função auxiliar para validar usuário e verificar se é admin
+const ADMINS_FIXOS = ['alexandre_gorges@hotmail.com', 'alexandre.gorges@gmail.com'];
+
 async function getAuthContext() {
-  const supabaseServer = await createSupabaseServer();
-  const { data: { user }, error: authError } = await supabaseServer.auth.getUser();
-  
-  if (authError || !user) {
-    return { errorResponse: NextResponse.json({ success: false, error: 'Não autorizado.' }, { status: 401 }) };
-  }
+    const supabaseServer = await createSupabaseServer();
+    const { data: { user }, error: authError } = await supabaseServer.auth.getUser();
 
-  const { data: consultant } = await supabaseServer
-    .from('consultants_manos_crm')
-    .select('role')
-    .or(`user_id.eq.${user.id},auth_id.eq.${user.id}`)
-    .maybeSingle();
+    if (authError || !user) {
+        return { errorResponse: NextResponse.json({ success: false, error: 'Não autorizado.' }, { status: 401 }) };
+    }
 
-  const isAdmin = consultant?.role === 'admin' || user.email === 'alexandre_gorges@hotmail.com';
+    const { data: consultant } = await supabaseServer
+        .from('consultants_manos_crm')
+        .select('role, name, phone, personal_whatsapp')
+        .or(`user_id.eq.${user.id},auth_id.eq.${user.id}`)
+        .maybeSingle();
 
-  return { user, isAdmin };
+    const isAdmin = consultant?.role === 'admin' || ADMINS_FIXOS.includes(user.email || '');
+
+    return { user, isAdmin, consultant };
 }
 
-// GET: Lista os alertas cadastrados no banco (oculta os marcados com [EXCLUIDO])
-// Admin vê todos; Consultores comuns veem apenas os próprios alertas criados por eles.
+// GET: lista alertas + histórico resumido de avisos de cada um
 export async function GET() {
-  try {
-    const authContext = await getAuthContext();
-    if ('errorResponse' in authContext) return authContext.errorResponse;
-    const { user, isAdmin } = authContext;
+    try {
+        const authContext = await getAuthContext();
+        if ('errorResponse' in authContext) return authContext.errorResponse;
+        const { consultant, user } = authContext;
 
-    let query = supabaseAdmin
-      .from('alertas_clientes')
-      .select('*')
-      .not('nome_cliente', 'ilike', '[EXCLUIDO]%');
+        const { data: alerts, error } = await supabaseAdmin
+            .from('alertas_clientes')
+            .select('*')
+            .not('nome_cliente', 'ilike', '[EXCLUIDO]%')
+            .order('criado_em', { ascending: false });
 
-    // Se não for admin, filtra apenas pelos alertas que o próprio usuário criou
-    if (!isAdmin) {
-      query = query.eq('criado_por', user.email);
-    }
-
-    const { data: alerts, error } = await query.order('criado_em', { ascending: false });
-
-    if (error) {
-      console.error('[API Alertas] Erro ao buscar alertas no Supabase:', error);
-      throw error;
-    }
-
-    return NextResponse.json({
-      success: true,
-      alerts: alerts || []
-    });
-  } catch (err: any) {
-    console.error('[API Alertas] Erro no método GET:', err.message);
-    return NextResponse.json(
-      { success: false, error: 'Erro ao carregar a lista de alertas.' },
-      { status: 500 }
-    );
-  }
-}
-
-// POST: Cria um novo alerta de monitoramento
-export async function POST(request: Request) {
-  try {
-    const authContext = await getAuthContext();
-    if ('errorResponse' in authContext) return authContext.errorResponse;
-    const { user } = authContext;
-
-    const body = await request.json();
-    const { 
-      nome_cliente, 
-      telefone_cliente, 
-      marca, 
-      modelo, 
-      valor_minimo,
-      valor_maximo,
-      ano_minimo,
-      ano_maximo,
-      cor,
-      cambio,
-      combustivel,
-      km_minimo,
-      km_maximo
-    } = body;
-
-    // Validações básicas de campos obrigatórios
-    if (!nome_cliente || !telefone_cliente || !marca || !modelo) {
-      return NextResponse.json(
-        { success: false, error: 'Por favor, preencha todos os campos obrigatórios.' },
-        { status: 400 }
-      );
-    }
-
-    // Limpa a máscara do WhatsApp para salvar apenas números e caracteres limpos
-    const cleanPhone = telefone_cliente.replace(/[^\d]/g, '');
-
-    const { data: newAlert, error } = await supabaseAdmin
-      .from('alertas_clientes')
-      .insert([
-        {
-          nome_cliente: nome_cliente.trim(),
-          telefone_cliente: cleanPhone,
-          marca: marca.toUpperCase().trim(),
-          modelo: modelo.trim(),
-          valor_minimo: valor_minimo ? Number(valor_minimo) : null,
-          valor_maximo: valor_maximo ? Number(valor_maximo) : null,
-          ano_minimo: ano_minimo ? Number(ano_minimo) : null,
-          ano_maximo: ano_maximo ? Number(ano_maximo) : null,
-          cor: cor && cor.trim() !== '' ? cor.trim() : null,
-          cambio: cambio && cambio.trim() !== '' && cambio !== 'TODOS' ? cambio.trim() : null,
-          combustivel: combustivel && combustivel.trim() !== '' && combustivel !== 'TODOS' ? combustivel.trim() : null,
-          km_minimo: km_minimo ? Number(km_minimo) : null,
-          km_maximo: km_maximo ? Number(km_maximo) : null,
-          ativo: true,
-          criado_por: user.email // Salva o e-mail de quem criou o alerta
+        if (error) {
+            console.error('[API Alertas] Erro ao buscar alertas:', error);
+            throw error;
         }
-      ])
-      .select()
-      .single();
 
-    if (error) {
-      console.error('[API Alertas] Erro ao inserir alerta no Supabase:', error);
-      throw error;
+        // Resumo de disparos por alerta — é isso que responde "chegou ou não chegou?"
+        const ids = (alerts || []).map(a => a.id);
+        const resumo: Record<string, { enviados: number; falhas: number; ultimo: string | null }> = {};
+
+        if (ids.length > 0) {
+            const { data: disparos } = await supabaseAdmin
+                .from('alertas_disparos')
+                .select('alerta_id, status, criado_em')
+                .in('alerta_id', ids)
+                .order('criado_em', { ascending: false })
+                .limit(1000);
+
+            for (const d of disparos || []) {
+                const r = resumo[d.alerta_id] || { enviados: 0, falhas: 0, ultimo: null };
+                if (d.status === 'enviado') {
+                    r.enviados += 1;
+                    if (!r.ultimo) r.ultimo = d.criado_em;
+                } else if (['falhou', 'telefone_invalido', 'bloqueado_limite'].includes(d.status)) {
+                    r.falhas += 1;
+                }
+                resumo[d.alerta_id] = r;
+            }
+        }
+
+        return NextResponse.json({
+            success: true,
+            alerts: (alerts || []).map(a => ({
+                ...a,
+                disparos: resumo[a.id] || { enviados: 0, falhas: 0, ultimo: null },
+            })),
+            usuario: {
+                email: user.email,
+                nome: consultant?.name || null,
+                whatsapp: consultant?.personal_whatsapp || consultant?.phone || null,
+            },
+        });
+    } catch (err: any) {
+        console.error('[API Alertas] Erro no GET:', err.message);
+        return NextResponse.json({ success: false, error: 'Erro ao carregar a lista de alertas.' }, { status: 500 });
     }
-
-    return NextResponse.json({
-      success: true,
-      alert: newAlert
-    });
-  } catch (err: any) {
-    console.error('[API Alertas] Erro no método POST:', err.message);
-    return NextResponse.json(
-      { success: false, error: 'Erro ao salvar o alerta no banco de dados.' },
-      { status: 500 }
-    );
-  }
 }
 
-// PATCH: Liga / Desliga o alerta (alterna o estado 'ativo')
+// POST: cria um novo monitoramento
+export async function POST(request: Request) {
+    try {
+        const authContext = await getAuthContext();
+        if ('errorResponse' in authContext) return authContext.errorResponse;
+        const { user } = authContext;
+
+        const body = await request.json();
+        const {
+            nome_cliente, telefone_cliente, cliente_final, marca, modelo,
+            valor_minimo, valor_maximo, ano_minimo, ano_maximo,
+            cor, cambio, combustivel, km_minimo, km_maximo,
+        } = body;
+
+        if (!nome_cliente || !telefone_cliente || !modelo) {
+            return NextResponse.json(
+                { success: false, error: 'Preencha quem recebe o aviso, o WhatsApp e o modelo desejado.' },
+                { status: 400 },
+            );
+        }
+
+        // O aviso é a razão de existir do cadastro: número ruim = alerta natimorto.
+        let telefone: string;
+        try {
+            telefone = normalizarCelular(telefone_cliente).nacional;
+        } catch (e: any) {
+            return NextResponse.json(
+                { success: false, error: `WhatsApp inválido: ${e.message}` },
+                { status: 400 },
+            );
+        }
+
+        // Marca em branco = qualquer marca. Antes virava "MULTIMARCAS", que o
+        // motor não reconhecia como curinga e derrubava o alerta inteiro.
+        const finalMarca = marca && marca.trim() !== '' ? marca.toUpperCase().trim() : 'TODAS';
+
+        const { data: newAlert, error } = await supabaseAdmin
+            .from('alertas_clientes')
+            .insert([{
+                nome_cliente: nome_cliente.trim(),
+                telefone_cliente: telefone,
+                cliente_final: cliente_final && cliente_final.trim() !== '' ? cliente_final.trim() : null,
+                marca: finalMarca,
+                modelo: modelo.trim(),
+                valor_minimo: valor_minimo ? Number(valor_minimo) : null,
+                valor_maximo: valor_maximo ? Number(valor_maximo) : null,
+                ano_minimo: ano_minimo ? Number(ano_minimo) : null,
+                ano_maximo: ano_maximo ? Number(ano_maximo) : null,
+                cor: cor && cor.trim() !== '' ? cor.trim() : null,
+                cambio: cambio && cambio.trim() !== '' && cambio !== 'TODOS' ? cambio.trim() : null,
+                combustivel: combustivel && combustivel.trim() !== '' && combustivel !== 'TODOS' ? combustivel.trim() : null,
+                km_minimo: km_minimo ? Number(km_minimo) : null,
+                km_maximo: km_maximo ? Number(km_maximo) : null,
+                ativo: true,
+                criado_por: user.email,
+            }])
+            .select()
+            .single();
+
+        if (error) {
+            console.error('[API Alertas] Erro ao inserir alerta:', error);
+            throw error;
+        }
+
+        return NextResponse.json({
+            success: true,
+            alert: { ...newAlert, disparos: { enviados: 0, falhas: 0, ultimo: null } },
+        });
+    } catch (err: any) {
+        console.error('[API Alertas] Erro no POST:', err.message);
+        return NextResponse.json({ success: false, error: 'Erro ao salvar o alerta no banco de dados.' }, { status: 500 });
+    }
+}
+
+// PATCH: liga/desliga o alerta
 export async function PATCH(request: Request) {
-  try {
-    const authContext = await getAuthContext();
-    if ('errorResponse' in authContext) return authContext.errorResponse;
-    const { user, isAdmin } = authContext;
+    try {
+        const authContext = await getAuthContext();
+        if ('errorResponse' in authContext) return authContext.errorResponse;
+        const { user, isAdmin } = authContext;
 
-    const body = await request.json();
-    const { id, ativo } = body;
+        const { id, ativo } = await request.json();
 
-    if (!id || ativo === undefined) {
-      return NextResponse.json(
-        { success: false, error: 'Dados insuficientes para atualizar o alerta.' },
-        { status: 400 }
-      );
+        if (!id || ativo === undefined) {
+            return NextResponse.json({ success: false, error: 'Dados insuficientes para atualizar o alerta.' }, { status: 400 });
+        }
+
+        const { data: alertData, error: fetchError } = await supabaseAdmin
+            .from('alertas_clientes')
+            .select('criado_por')
+            .eq('id', id)
+            .single();
+
+        if (fetchError || !alertData) {
+            return NextResponse.json({ success: false, error: 'Alerta não localizado no banco.' }, { status: 404 });
+        }
+
+        if (!isAdmin && alertData.criado_por !== user.email) {
+            return NextResponse.json({ success: false, error: 'Você não tem permissão para alterar este alerta.' }, { status: 403 });
+        }
+
+        const { data: updatedAlert, error } = await supabaseAdmin
+            .from('alertas_clientes')
+            .update({ ativo: Boolean(ativo) })
+            .eq('id', id)
+            .select()
+            .single();
+
+        if (error) throw error;
+
+        return NextResponse.json({ success: true, alert: updatedAlert });
+    } catch (err: any) {
+        console.error('[API Alertas] Erro no PATCH:', err.message);
+        return NextResponse.json({ success: false, error: 'Erro ao atualizar o status do alerta.' }, { status: 500 });
     }
-
-    // Busca o alerta para validar permissão
-    const { data: alertData, error: fetchError } = await supabaseAdmin
-      .from('alertas_clientes')
-      .select('criado_por')
-      .eq('id', id)
-      .single();
-
-    if (fetchError || !alertData) {
-      return NextResponse.json(
-        { success: false, error: 'Alerta não localizado no banco.' },
-        { status: 404 }
-      );
-    }
-
-    // Se não for admin, impede de alterar alertas de outros usuários
-    if (!isAdmin && alertData.criado_por !== user.email) {
-      return NextResponse.json(
-        { success: false, error: 'Você não tem permissão para alterar este alerta.' },
-        { status: 403 }
-      );
-    }
-
-    const { data: updatedAlert, error } = await supabaseAdmin
-      .from('alertas_clientes')
-      .update({ ativo: Boolean(ativo) })
-      .eq('id', id)
-      .select()
-      .single();
-
-    if (error) {
-      console.error('[API Alertas] Erro ao atualizar status no Supabase:', error);
-      throw error;
-    }
-
-    return NextResponse.json({
-      success: true,
-      alert: updatedAlert
-    });
-  } catch (err: any) {
-    console.error('[API Alertas] Erro no método PATCH:', err.message);
-    return NextResponse.json(
-      { success: false, error: 'Erro ao atualizar o status do alerta.' },
-      { status: 500 }
-    );
-  }
 }
 
-// DELETE: Executa Soft Delete no alerta (prefixa nome com [EXCLUIDO] e desativa)
+// DELETE: soft delete
 export async function DELETE(request: Request) {
-  try {
-    const authContext = await getAuthContext();
-    if ('errorResponse' in authContext) return authContext.errorResponse;
-    const { user, isAdmin } = authContext;
+    try {
+        const authContext = await getAuthContext();
+        if ('errorResponse' in authContext) return authContext.errorResponse;
+        const { user, isAdmin } = authContext;
 
-    const { searchParams } = new URL(request.url);
-    const id = searchParams.get('id');
+        const id = new URL(request.url).searchParams.get('id');
+        if (!id) {
+            return NextResponse.json({ success: false, error: 'ID do alerta não informado.' }, { status: 400 });
+        }
 
-    if (!id) {
-      return NextResponse.json(
-        { success: false, error: 'ID do alerta não informado para remoção.' },
-        { status: 400 }
-      );
+        const { data: alertData, error: fetchError } = await supabaseAdmin
+            .from('alertas_clientes')
+            .select('nome_cliente, criado_por')
+            .eq('id', id)
+            .single();
+
+        if (fetchError || !alertData) {
+            return NextResponse.json({ success: false, error: 'Alerta não localizado no banco.' }, { status: 404 });
+        }
+
+        if (!isAdmin && alertData.criado_por !== user.email) {
+            return NextResponse.json({ success: false, error: 'Você não tem permissão para remover este alerta.' }, { status: 403 });
+        }
+
+        const originalName = alertData.nome_cliente || '';
+        const newName = originalName.startsWith('[EXCLUIDO] ') ? originalName : `[EXCLUIDO] ${originalName}`;
+
+        const { error: updateError } = await supabaseAdmin
+            .from('alertas_clientes')
+            .update({ nome_cliente: newName, ativo: false })
+            .eq('id', id);
+
+        if (updateError) throw updateError;
+
+        return NextResponse.json({ success: true, message: 'Alerta removido com sucesso.' });
+    } catch (err: any) {
+        console.error('[API Alertas] Erro no DELETE:', err.message);
+        return NextResponse.json({ success: false, error: 'Erro ao remover o alerta.' }, { status: 500 });
     }
-
-    // 1. Busca o alerta para saber o nome_cliente e o criado_por
-    const { data: alertData, error: fetchError } = await supabaseAdmin
-      .from('alertas_clientes')
-      .select('nome_cliente, criado_por')
-      .eq('id', id)
-      .single();
-
-    if (fetchError || !alertData) {
-      return NextResponse.json(
-        { success: false, error: 'Alerta não localizado no banco.' },
-        { status: 404 }
-      );
-    }
-
-    // Se não for admin, impede de remover alertas de outros usuários
-    if (!isAdmin && alertData.criado_por !== user.email) {
-      return NextResponse.json(
-        { success: false, error: 'Você não tem permissão para remover este alerta.' },
-        { status: 403 }
-      );
-    }
-
-    // 2. Faz o update com a marcação de Soft Delete
-    const originalName = alertData.nome_cliente || '';
-    const newName = originalName.startsWith('[EXCLUIDO] ')
-      ? originalName
-      : `[EXCLUIDO] ${originalName}`;
-
-    const { error: updateError } = await supabaseAdmin
-      .from('alertas_clientes')
-      .update({
-        nome_cliente: newName,
-        ativo: false
-      })
-      .eq('id', id);
-
-    if (updateError) {
-      console.error('[API Alertas] Erro ao aplicar soft-delete no Supabase:', updateError);
-      throw updateError;
-    }
-
-    return NextResponse.json({
-      success: true,
-      message: 'Alerta removido com sucesso (soft-delete).'
-    });
-  } catch (err: any) {
-    console.error('[API Alertas] Erro no método DELETE:', err.message);
-    return NextResponse.json(
-      { success: false, error: 'Erro ao remover o alerta.' },
-      { status: 500 }
-    );
-  }
 }
