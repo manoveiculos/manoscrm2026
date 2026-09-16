@@ -88,11 +88,11 @@ export async function middleware(request: NextRequest) {
         const isRestrictedBuyer = user.email?.toLowerCase() === 'ivo@acesso.com' || isPaulo;
 
         // Paulo tem seu próprio ecossistema mobile em /repasse (além do /compras).
-        // Demais compradores restritos (ex: Ivo) só acessam /compras.
+        // Ivo acessa /compras e a Divisão de Lucro (é sócio; as APIs conferem a whitelist de sócios).
         if (isRestrictedBuyer) {
             const allowed = isPaulo
                 ? (path.startsWith('/repasse') || path.startsWith('/compras'))
-                : path.startsWith('/compras');
+                : (path.startsWith('/compras') || path.startsWith('/divisaodelucro'));
             if (!allowed) {
                 const homeUrl = new URL(isPaulo ? '/repasse' : '/compras', request.url);
                 const redirectResponse = NextResponse.redirect(homeUrl);
