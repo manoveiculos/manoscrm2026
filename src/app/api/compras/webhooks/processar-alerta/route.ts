@@ -1,257 +1,254 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/admin';
 import { sendWhatsApp } from '@/lib/services/whatsappSender';
+import { avaliarMatch, type AlertaMatch, type VeiculoMatch } from '@/lib/compras/alertas/matcher';
+import { montarMensagemAlerta } from '@/lib/compras/alertas/mensagem';
+import { normalizarCelular } from '@/lib/compras/alertas/telefone';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
 const supabaseAdmin = createClient();
 
-// Webhook URL de destino do n8n
-const N8N_WEBHOOK_URL = 'https://n8n.drivvoo.com/webhook/d1911d38-9289-4771-b4e4-d0e25590cf65';
-
-// Token de segurança para autenticar requisições de webhook do Supabase
 const ADMIN_SECRET_KEY = process.env.ADMIN_SECRET_KEY || 'manos_intel_secret_key';
+const CRON_SECRET = process.env.CRON_SECRET;
 
-// Função para validar a segurança da chamada
-function isAuthorized(request: NextRequest) {
-  const authHeader = request.headers.get('Authorization');
-  const { searchParams } = new URL(request.url);
-  
-  const token = searchParams.get('admin_key') || (authHeader ? authHeader.replace('Bearer ', '') : null);
-  return token === ADMIN_SECRET_KEY;
+/** Anti-ban: intervalo mínimo entre dois avisos para o MESMO número. */
+const GAP_MINIMO_MS = 60_000;
+/** Circuit breaker: teto de avisos por número por dia. */
+const TETO_DIARIO_POR_NUMERO = 20;
+
+/**
+ * Aceita as duas formas de autenticação:
+ *  - Authorization: Bearer <CRON_SECRET>  (usado pelo trigger do banco)
+ *  - ?admin_key=<ADMIN_SECRET_KEY>        (compatibilidade com chamadas antigas)
+ */
+function autorizado(request: NextRequest): boolean {
+    const header = request.headers.get('Authorization') || '';
+    const bearer = header.replace(/^Bearer\s+/i, '').trim();
+    const queryKey = new URL(request.url).searchParams.get('admin_key');
+
+    if (CRON_SECRET && bearer === CRON_SECRET) return true;
+    if (bearer && bearer === ADMIN_SECRET_KEY) return true;
+    if (queryKey && queryKey === ADMIN_SECRET_KEY) return true;
+    return false;
+}
+
+/** Impressão digital do anúncio: o mesmo carro é repostado nos grupos o dia inteiro. */
+function digitalDoVeiculo(v: VeiculoMatch): string {
+    return [
+        (v.marca || '').toLowerCase().trim(),
+        (v.modelo || '').toLowerCase().trim(),
+        v.ano_modelo || '',
+        v.km ?? '',
+        v.preco_pedido ?? '',
+    ].join('|');
+}
+
+interface ResultadoDisparo {
+    alerta_id: string;
+    destinatario: string;
+    status: string;
+    erro?: string;
 }
 
 export async function POST(request: NextRequest) {
-  try {
-    // 1. Autorização básica da chamada
-    if (!isAuthorized(request)) {
-      console.warn('[Webhook Alertas] Chamada não autorizada bloqueada.');
-      return NextResponse.json({ success: false, error: 'Não autorizado.' }, { status: 401 });
-    }
-
-    const body = await request.json();
-    
-    // Suporta tanto o payload padrão do Database Webhook do Supabase (que vem com { record })
-    // quanto uma chamada HTTP direta com o objeto do veículo no root.
-    const veiculo = body.record || body;
-
-    if (!veiculo || !veiculo.marca || !veiculo.modelo) {
-      console.error('[Webhook Alertas] Dados do veículo inválidos ou ausentes no payload:', body);
-      return NextResponse.json(
-        { success: false, error: 'Dados do veículo inválidos ou ausentes.' },
-        { status: 400 }
-      );
-    }
-
-    console.log(`[Webhook Alertas] Processando novo veículo inserido: ${veiculo.marca} ${veiculo.modelo} (ID: ${veiculo.id})`);
-
-    // 2. Extrai o ano do veículo (ex: "2019/2020" -> 2019)
-    const anoMatch = veiculo.ano_modelo ? String(veiculo.ano_modelo).match(/\d{4}/) : null;
-    const anoVeiculo = anoMatch ? parseInt(anoMatch[0], 10) : null;
-
-    // 3. Busca todos os alertas ativos na tabela 'alertas_clientes'
-    const { data: alertas, error: alertasError } = await supabaseAdmin
-      .from('alertas_clientes')
-      .select('*')
-      .eq('ativo', true);
-
-    if (alertasError) {
-      console.error('[Webhook Alertas] Erro ao buscar alertas no banco:', alertasError);
-      return NextResponse.json(
-        { success: false, error: 'Erro ao buscar alertas ativos no banco.' },
-        { status: 500 }
-      );
-    }
-
-    if (!alertas || alertas.length === 0) {
-      console.log('[Webhook Alertas] Nenhum alerta ativo cadastrado no sistema.');
-      return NextResponse.json({ success: true, matchesCount: 0, messages: 'Nenhum alerta ativo cadastrado.' });
-    }
-
-    // 4. Executa o algoritmo de matching inteligente
-    const alertasCorrespondentes = alertas.filter(alerta => {
-      const normText = (s: string | null | undefined) => (s || '').trim().toLowerCase().replace(/l{2}/g, 'l');
-      
-      const marcaAlerta = normText(alerta.marca);
-      const marcaVeiculo = normText(veiculo.marca);
-      const modeloVeiculo = normText(veiculo.modelo);
-
-      // A. Filtro de Marca (resiliente: aceita marca exata, TODAS/OUTROS/vazio, ou se o alerta informou modelo como marca)
-      const marcaValida =
-        !marcaAlerta ||
-        marcaAlerta === 'todas' ||
-        marcaAlerta === 'outros' ||
-        marcaAlerta === marcaVeiculo ||
-        modeloVeiculo.includes(marcaAlerta) ||
-        marcaVeiculo.includes(marcaAlerta);
-
-      if (!marcaValida) {
-        return false;
-      }
-
-      // B. Filtro de Modelo / Palavra-Chave (suporta buscas por múltiplas palavras-chave separadas por vírgula)
-      if (alerta.modelo) {
-        const palavrasChave = alerta.modelo.split(',').map((termo: string) => normText(termo));
-        
-        // Verifica se pelo menos uma das palavras-chave está contida no modelo do carro
-        const bateModelo = palavrasChave.some((termo: string) => termo !== '' && (modeloVeiculo.includes(termo) || termo.includes(modeloVeiculo)));
-        if (!bateModelo) {
-          return false;
-        }
-      }
-
-      // C. Filtro de Faixa de Preço (Mínimo e Máximo)
-      const precoPedido = Number(veiculo.preco_pedido || 0);
-      const valorMin = alerta.valor_minimo ? Number(alerta.valor_minimo) : 0;
-      const valorMax = alerta.valor_maximo ? Number(alerta.valor_maximo) : 0;
-      
-      if (valorMin > 0 && precoPedido < valorMin) return false;
-      if (valorMax > 0 && precoPedido > valorMax) return false;
-
-      // D. Filtro de Ano Modelo
-      if (anoVeiculo) {
-        const anoMin = alerta.ano_minimo ? Number(alerta.ano_minimo) : 0;
-        const anoMax = alerta.ano_maximo ? Number(alerta.ano_maximo) : 0;
-        
-        if (anoMin > 0 && anoVeiculo < anoMin) return false;
-        if (anoMax > 0 && anoVeiculo > anoMax) return false;
-      }
-
-      // E. Filtro de Quilometragem Máxima
-      const kmVeiculo = Number(veiculo.km || 0);
-      const kmMax = alerta.km_maximo ? Number(alerta.km_maximo) : 0;
-      
-      if (kmMax > 0 && kmVeiculo > kmMax) return false;
-
-      return true;
-    });
-
-    console.log(`[Webhook Alertas] Encontrados ${alertasCorrespondentes.length} compradores interessados para ${veiculo.marca} ${veiculo.modelo}.`);
-
-    if (alertasCorrespondentes.length === 0) {
-      return NextResponse.json({
-        success: true,
-        matchesCount: 0,
-        message: 'Nenhum comprador correspondente encontrado para este veículo.'
-      });
-    }
-
-    // 5. Normaliza a classificação de relevância do veículo para o padrão "ALTA" ou "MEDIA"
-    const rawRelevancia = veiculo.classificacao_relevancia || 'MEDIA';
-    const classificacaoRelevancia = rawRelevancia
-      .toUpperCase()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '') // Remove acentos (MÉDIA -> MEDIA)
-      .trim();
-
-    // 6. Looping de Disparo de WhatsApp Direto (Totalmente Independentes)
-    const resultadosDisparos = [];
-
-    for (const alerta of alertasCorrespondentes) {
-      // Formatar o valor em R$
-      const formattedPrice = new Intl.NumberFormat('pt-BR', {
-        style: 'currency',
-        currency: 'BRL',
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
-      }).format(veiculo.preco_pedido || 0);
-
-      // Formatar a quilometragem
-      const formattedKm = new Intl.NumberFormat('pt-BR').format(Number(veiculo.km || 0));
-
-      const msgText = `Olá! Boas notícias. 🚗✨
-
-O carro que teu cliente ${alerta.nome_cliente} precisa acabou de ser anunciado no CRM da Manos:
-
-🔹 ${veiculo.marca.toUpperCase()} ${veiculo.modelo}
-📅 Ano: ${anoVeiculo || veiculo.ano_modelo || 'Não informado'}
-🛣️ KM: ${formattedKm} km
-💰 Valor: ${formattedPrice}
-
-👉 Acesse para conferir: manoscrm.com.br
-
-Corra para dar uma olhada antes que outra pessoa compre!`;
-
-      try {
-        // Disparar o webhook para o n8n com informações do alerta, veículo, grupo do anúncio, quem anunciou e valor da tabela fipe
-        try {
-          console.log(`[Webhook Alertas] Disparando webhook n8n para alerta ${alerta.id}`);
-          const webhookRes = await fetch(N8N_WEBHOOK_URL, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              alerta_id: alerta.id,
-              nome_comprador_vendedor: alerta.nome_cliente,
-              telefone_comprador_vendedor: alerta.telefone_cliente,
-              criado_por: alerta.criado_por || null,
-              veiculo: {
-                id: veiculo.id,
-                marca: veiculo.marca,
-                modelo: veiculo.modelo,
-                ano_modelo: veiculo.ano_modelo || null,
-                km: veiculo.km || null,
-                preco_pedido: veiculo.preco_pedido || null,
-                preco_fipe: veiculo.preco_fipe || null,
-                grupo_anuncio: veiculo.nome_grupo || null,
-                quem_anunciou_nome: veiculo.nome_anunciante || null,
-                quem_anunciou_contato: veiculo.numero_anunciante || null,
-                texto_original: veiculo.texto_bruto_original || null
-              }
-            })
-          });
-          if (!webhookRes.ok) {
-            console.warn(`[Webhook Alertas] n8n retornou status ${webhookRes.status}`);
-          }
-        } catch (webhookErr: any) {
-          console.error(`[Webhook Alertas] Erro ao disparar webhook do n8n para o alerta ${alerta.id}:`, webhookErr.message);
+    try {
+        if (!autorizado(request)) {
+            console.warn('[Alertas Compra] Chamada não autorizada bloqueada.');
+            return NextResponse.json({ success: false, error: 'Não autorizado.' }, { status: 401 });
         }
 
-        console.log(`[Webhook Alertas] Disparando mensagem de WhatsApp direta para comprador ${alerta.nome_cliente} (${alerta.telefone_cliente})`);
-        
-        const sendResult = await sendWhatsApp({
-          toPhone: alerta.telefone_cliente,
-          message: msgText,
-          kind: 'vendor_alert',
-          skipDedup: true
-        });
+        const body = await request.json();
+        const veiculo: VeiculoMatch & Record<string, any> = body.record || body;
 
-        if (!sendResult.ok) {
-          throw new Error(sendResult.error || 'Erro no envio do WhatsApp');
+        if (!veiculo || (!veiculo.marca && !veiculo.modelo)) {
+            return NextResponse.json(
+                { success: false, error: 'Dados do veículo inválidos ou ausentes.' },
+                { status: 400 },
+            );
         }
 
-        resultadosDisparos.push({
-          alerta_id: alerta.id,
-          nome_cliente: alerta.nome_cliente,
-          status: 'success'
+        // Oferta que o parser marcou como inválida (sem preço, texto truncado) não
+        // vira aviso — o vendedor perde a confiança no sino e passa a ignorar.
+        if (veiculo.oferta_valida === false) {
+            return NextResponse.json({ success: true, matchesCount: 0, message: 'Oferta marcada como inválida.' });
+        }
+
+        const { data: alertas, error: alertasError } = await supabaseAdmin
+            .from('alertas_clientes')
+            .select('*')
+            .eq('ativo', true)
+            .not('nome_cliente', 'ilike', '[EXCLUIDO]%');
+
+        if (alertasError) {
+            console.error('[Alertas Compra] Erro ao buscar alertas:', alertasError);
+            return NextResponse.json({ success: false, error: 'Erro ao buscar alertas ativos.' }, { status: 500 });
+        }
+
+        const correspondentes = (alertas || []).filter(
+            (a: AlertaMatch) => avaliarMatch(a, veiculo).match,
+        ) as AlertaMatch[];
+
+        console.log(
+            `[Alertas Compra] ${veiculo.marca} ${veiculo.modelo} → ${correspondentes.length} alerta(s) de ${alertas?.length || 0} ativos.`,
+        );
+
+        if (correspondentes.length === 0) {
+            return NextResponse.json({ success: true, matchesCount: 0, message: 'Nenhum vendedor aguardando este carro.' });
+        }
+
+        const digital = digitalDoVeiculo(veiculo);
+        const agora = Date.now();
+        const resultados: ResultadoDisparo[] = [];
+
+        for (const alerta of correspondentes) {
+            // ── 1. Telefone precisa ser entregável ──────────────────────────
+            let destino: string;
+            let exibicao: string;
+            try {
+                const tel = normalizarCelular(alerta.telefone_cliente);
+                destino = tel.e164;
+                exibicao = tel.formatado;
+            } catch (e: any) {
+                await registrarDisparo({
+                    alerta,
+                    veiculo,
+                    digital,
+                    telefone: alerta.telefone_cliente,
+                    status: 'telefone_invalido',
+                    erro: e?.message || 'telefone inválido',
+                });
+                resultados.push({
+                    alerta_id: alerta.id,
+                    destinatario: alerta.nome_cliente,
+                    status: 'telefone_invalido',
+                    erro: e?.message,
+                });
+                continue;
+            }
+
+            // ── 2. Dedup: mesmo carro, mesmo alerta, últimas 24h ────────────
+            const { data: jaAvisado } = await supabaseAdmin
+                .from('alertas_disparos')
+                .select('id')
+                .eq('alerta_id', alerta.id)
+                .eq('veiculo_digital', digital)
+                .in('status', ['enviado', 'pendente'])
+                .gte('criado_em', new Date(agora - 24 * 60 * 60 * 1000).toISOString())
+                .limit(1);
+
+            if (jaAvisado && jaAvisado.length > 0) {
+                resultados.push({ alerta_id: alerta.id, destinatario: alerta.nome_cliente, status: 'duplicado' });
+                continue;
+            }
+
+            // ── 3. Circuit breaker + gap anti-ban ───────────────────────────
+            const { count: enviadosHoje } = await supabaseAdmin
+                .from('alertas_disparos')
+                .select('id', { count: 'exact', head: true })
+                .eq('telefone', destino)
+                .eq('status', 'enviado')
+                .gte('criado_em', new Date(agora - 24 * 60 * 60 * 1000).toISOString());
+
+            if ((enviadosHoje || 0) >= TETO_DIARIO_POR_NUMERO) {
+                await registrarDisparo({
+                    alerta, veiculo, digital, telefone: destino,
+                    status: 'bloqueado_limite',
+                    erro: `Teto de ${TETO_DIARIO_POR_NUMERO} avisos em 24h atingido.`,
+                });
+                resultados.push({ alerta_id: alerta.id, destinatario: alerta.nome_cliente, status: 'bloqueado_limite' });
+                continue;
+            }
+
+            const { data: ultimo } = await supabaseAdmin
+                .from('alertas_disparos')
+                .select('enviado_em')
+                .eq('telefone', destino)
+                .eq('status', 'enviado')
+                .order('enviado_em', { ascending: false })
+                .limit(1);
+
+            const ultimoEnvio = ultimo?.[0]?.enviado_em ? new Date(ultimo[0].enviado_em).getTime() : 0;
+            const mensagem = montarMensagemAlerta(alerta, veiculo);
+
+            if (ultimoEnvio && agora - ultimoEnvio < GAP_MINIMO_MS) {
+                // Cedo demais pro mesmo número: enfileira. O cron drena respeitando o gap.
+                await registrarDisparo({
+                    alerta, veiculo, digital, telefone: destino,
+                    status: 'pendente',
+                    mensagem,
+                });
+                resultados.push({ alerta_id: alerta.id, destinatario: alerta.nome_cliente, status: 'pendente' });
+                continue;
+            }
+
+            // ── 4. Dispara ──────────────────────────────────────────────────
+            const envio = await sendWhatsApp({
+                toPhone: destino,
+                message: mensagem,
+                kind: 'vendor_alert',
+                skipDedup: true,
+            });
+
+            await registrarDisparo({
+                alerta, veiculo, digital, telefone: destino,
+                status: envio.ok ? 'enviado' : 'falhou',
+                erro: envio.ok ? undefined : `${envio.provider}: ${envio.error}`,
+                mensagem,
+                enviadoEm: envio.ok ? new Date().toISOString() : undefined,
+            });
+
+            resultados.push({
+                alerta_id: alerta.id,
+                destinatario: `${alerta.nome_cliente} (${exibicao})`,
+                status: envio.ok ? 'enviado' : 'falhou',
+                erro: envio.ok ? undefined : envio.error,
+            });
+        }
+
+        return NextResponse.json({
+            success: true,
+            veiculo: `${veiculo.marca} ${veiculo.modelo}`,
+            matchesCount: correspondentes.length,
+            dispatches: resultados,
         });
-      } catch (err: any) {
-        // Tratamento de erro isolado por disparo para que o fluxo principal não quebre
-        console.error(`[Webhook Alertas] Falha ao enviar WhatsApp para o alerta ${alerta.id} (Cliente: ${alerta.nome_cliente}):`, err.message);
-        
-        resultadosDisparos.push({
-          alerta_id: alerta.id,
-          nome_cliente: alerta.nome_cliente,
-          status: 'failed',
-          error: err.message
-        });
-      }
+    } catch (erro: any) {
+        console.error('[Alertas Compra] Erro crítico:', erro);
+        return NextResponse.json(
+            { success: false, error: 'Erro crítico interno ao processar o alerta.' },
+            { status: 500 },
+        );
     }
+}
 
-    // Retorna o resultado consolidado do cruzamento e disparos
-    return NextResponse.json({
-      success: true,
-      veiculo: `${veiculo.marca} ${veiculo.modelo}`,
-      matchesCount: alertasCorrespondentes.length,
-      dispatches: resultadosDisparos
-    });
-
-  } catch (globalError: any) {
-    console.error('[Webhook Alertas] Erro crítico no processamento de alertas:', globalError);
-    return NextResponse.json(
-      { success: false, error: 'Erro crítico interno no servidor ao processar o alerta.' },
-      { status: 500 }
-    );
-  }
+async function registrarDisparo(args: {
+    alerta: AlertaMatch;
+    veiculo: VeiculoMatch & Record<string, any>;
+    digital: string;
+    telefone: string;
+    status: string;
+    erro?: string;
+    mensagem?: string;
+    enviadoEm?: string;
+}) {
+    try {
+        await supabaseAdmin.from('alertas_disparos').insert({
+            alerta_id: args.alerta.id,
+            veiculo_id: args.veiculo.id ?? null,
+            veiculo_digital: args.digital,
+            veiculo_descricao: `${args.veiculo.marca || ''} ${args.veiculo.modelo || ''}`.trim(),
+            veiculo_ano: args.veiculo.ano_modelo ?? null,
+            veiculo_km: args.veiculo.km ?? null,
+            veiculo_preco: args.veiculo.preco_pedido ?? null,
+            destinatario: args.alerta.nome_cliente,
+            telefone: args.telefone,
+            status: args.status,
+            erro: args.erro ?? null,
+            mensagem: args.mensagem ?? null,
+            enviado_em: args.enviadoEm ?? null,
+        });
+    } catch (e) {
+        console.error('[Alertas Compra] Falha ao registrar disparo:', e);
+    }
 }
