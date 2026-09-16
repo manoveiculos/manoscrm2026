@@ -162,6 +162,94 @@ export async function POST(request: Request) {
     }
 }
 
+// PUT: atualiza todos os campos de um monitoramento existente
+export async function PUT(request: Request) {
+    try {
+        const authContext = await getAuthContext();
+        if ('errorResponse' in authContext) return authContext.errorResponse;
+        const { user, isAdmin } = authContext;
+
+        const body = await request.json();
+        const {
+            id, nome_cliente, telefone_cliente, cliente_final, marca, modelo,
+            valor_minimo, valor_maximo, ano_minimo, ano_maximo,
+            cor, cambio, combustivel, km_minimo, km_maximo,
+        } = body;
+
+        if (!id) {
+            return NextResponse.json({ success: false, error: 'ID do alerta não informado.' }, { status: 400 });
+        }
+
+        if (!nome_cliente || !telefone_cliente || !modelo) {
+            return NextResponse.json(
+                { success: false, error: 'Preencha quem recebe o aviso, o WhatsApp e o modelo desejado.' },
+                { status: 400 },
+            );
+        }
+
+        const { data: alertData, error: fetchError } = await supabaseAdmin
+            .from('alertas_clientes')
+            .select('criado_por')
+            .eq('id', id)
+            .single();
+
+        if (fetchError || !alertData) {
+            return NextResponse.json({ success: false, error: 'Alerta não localizado no banco.' }, { status: 404 });
+        }
+
+        if (!isAdmin && alertData.criado_por !== user.email) {
+            return NextResponse.json({ success: false, error: 'Você não tem permissão para editar este alerta.' }, { status: 403 });
+        }
+
+        let telefone: string;
+        try {
+            telefone = normalizarCelular(telefone_cliente).nacional;
+        } catch (e: any) {
+            return NextResponse.json(
+                { success: false, error: `WhatsApp inválido: ${e.message}` },
+                { status: 400 },
+            );
+        }
+
+        const finalMarca = marca && marca.trim() !== '' ? marca.toUpperCase().trim() : 'TODAS';
+
+        const { data: updatedAlert, error } = await supabaseAdmin
+            .from('alertas_clientes')
+            .update({
+                nome_cliente: nome_cliente.trim(),
+                telefone_cliente: telefone,
+                cliente_final: cliente_final && cliente_final.trim() !== '' ? cliente_final.trim() : null,
+                marca: finalMarca,
+                modelo: modelo.trim(),
+                valor_minimo: valor_minimo ? Number(valor_minimo) : null,
+                valor_maximo: valor_maximo ? Number(valor_maximo) : null,
+                ano_minimo: ano_minimo ? Number(ano_minimo) : null,
+                ano_maximo: ano_maximo ? Number(ano_maximo) : null,
+                cor: cor && cor.trim() !== '' ? cor.trim() : null,
+                cambio: cambio && cambio.trim() !== '' && cambio !== 'TODOS' ? cambio.trim() : null,
+                combustivel: combustivel && combustivel.trim() !== '' && combustivel !== 'TODOS' ? combustivel.trim() : null,
+                km_minimo: km_minimo ? Number(km_minimo) : null,
+                km_maximo: km_maximo ? Number(km_maximo) : null,
+            })
+            .eq('id', id)
+            .select()
+            .single();
+
+        if (error) {
+            console.error('[API Alertas] Erro no PUT:', error);
+            throw error;
+        }
+
+        return NextResponse.json({
+            success: true,
+            alert: updatedAlert,
+        });
+    } catch (err: any) {
+        console.error('[API Alertas] Erro no PUT:', err.message);
+        return NextResponse.json({ success: false, error: 'Erro ao atualizar o alerta no banco de dados.' }, { status: 500 });
+    }
+}
+
 // PATCH: liga/desliga o alerta
 export async function PATCH(request: Request) {
     try {

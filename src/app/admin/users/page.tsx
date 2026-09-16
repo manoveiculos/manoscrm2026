@@ -5,7 +5,7 @@ import {
     AlertCircle, CheckCircle2, Loader2, Save, Trash2, 
     UserCheck, UserX, Search, Shield, ShieldAlert, Key, 
     Phone, Mail, Check, X, ShieldCheck, UserCheck2, RefreshCw,
-    UserMinus, Info
+    UserMinus, Info, Lock, Copy, Eye, EyeOff, Sparkles
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -45,6 +45,64 @@ export default function UsersPage() {
     const [activeTab, setActiveTab] = useState<TabType>('pending');
     const [search, setSearch] = useState('');
     const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+    // Estado para o modal de redefinição de senha
+    const [resetModalUser, setResetModalUser] = useState<Consultant | null>(null);
+    const [newPasswordInput, setNewPasswordInput] = useState('');
+    const [confirmPasswordInput, setConfirmPasswordInput] = useState('');
+    const [showPassword, setShowPassword] = useState(false);
+    const [resettingPassword, setResettingPassword] = useState(false);
+    const [passwordResetSuccess, setPasswordResetSuccess] = useState<string | null>(null);
+    const [passwordResetError, setPasswordResetError] = useState<string | null>(null);
+    const [copied, setCopied] = useState(false);
+
+    function generateSecurePassword() {
+        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%';
+        let pwd = 'Manos@';
+        for (let i = 0; i < 6; i++) {
+            pwd += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        setNewPasswordInput(pwd);
+        setConfirmPasswordInput(pwd);
+        setPasswordResetError(null);
+    }
+
+    async function handleResetPassword() {
+        if (!resetModalUser) return;
+        if (!newPasswordInput || newPasswordInput.length < 6) {
+            setPasswordResetError('A nova senha deve possuir no mínimo 6 caracteres.');
+            return;
+        }
+        if (newPasswordInput !== confirmPasswordInput) {
+            setPasswordResetError('As senhas digitadas não coincidem.');
+            return;
+        }
+
+        setResettingPassword(true);
+        setPasswordResetError(null);
+        setPasswordResetSuccess(null);
+
+        try {
+            const res = await fetch('/api/admin/consultants/reset-password', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'x-admin-secret': secret },
+                body: JSON.stringify({
+                    auth_id: resetModalUser.auth_id || resetModalUser.user_id,
+                    id: resetModalUser.id,
+                    new_password: newPasswordInput
+                })
+            });
+
+            const json = await res.json();
+            if (!res.ok) throw new Error(json?.error || `HTTP ${res.status}`);
+
+            setPasswordResetSuccess(`Senha alterada com sucesso!`);
+        } catch (err: any) {
+            setPasswordResetError(err?.message || 'Erro ao alterar senha.');
+        } finally {
+            setResettingPassword(false);
+        }
+    }
 
     async function load() {
         if (!secret) {
@@ -505,6 +563,24 @@ export default function UsersPage() {
                                                                 </button>
                                                             )}
 
+                                                            {/* Botão Trocar Senha */}
+                                                            <button
+                                                                onClick={() => {
+                                                                    setResetModalUser(c);
+                                                                    setNewPasswordInput('');
+                                                                    setConfirmPasswordInput('');
+                                                                    setPasswordResetError(null);
+                                                                    setPasswordResetSuccess(null);
+                                                                    setCopied(false);
+                                                                }}
+                                                                disabled={deleting !== null || saving !== null}
+                                                                className="px-2.5 py-1.5 bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500/20 text-amber-400 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 text-xs font-bold"
+                                                                title="Redefinir Senha de Acesso"
+                                                            >
+                                                                <Key size={14} />
+                                                                <span className="hidden sm:inline">Senha</span>
+                                                            </button>
+
                                                             {/* Excluir Permanente */}
                                                             <button
                                                                 onClick={() => setConfirmDeleteId(c.id)}
@@ -569,6 +645,151 @@ export default function UsersPage() {
                                     Excluir Registro
                                 </button>
                             </div>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
+
+            {/* Modal de Redefinição de Senha por Admin */}
+            <AnimatePresence>
+                {resetModalUser && (
+                    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[999] flex items-center justify-center p-4">
+                        <motion.div
+                            initial={{ opacity: 0, scale: 0.95 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.95 }}
+                            className="bg-[#141418] border border-white/10 rounded-3xl p-6 max-w-md w-full shadow-2xl relative overflow-hidden space-y-5"
+                        >
+                            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-amber-500 to-amber-700" />
+                            
+                            <div className="flex justify-between items-start">
+                                <div className="flex gap-3 items-center">
+                                    <div className="w-10 h-10 rounded-2xl bg-amber-500/10 text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/20">
+                                        <Key size={20} />
+                                    </div>
+                                    <div>
+                                        <h3 className="text-base font-black text-white">Redefinir Senha de Acesso</h3>
+                                        <p className="text-xs text-zinc-400 font-bold">{resetModalUser.name}</p>
+                                        <p className="text-[11px] font-mono text-zinc-500">{resetModalUser.email || 'Sem e-mail'}</p>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => setResetModalUser(null)}
+                                    className="p-1.5 rounded-lg text-zinc-500 hover:text-white hover:bg-white/5 transition-all cursor-pointer"
+                                >
+                                    <X size={18} />
+                                </button>
+                            </div>
+
+                            {passwordResetSuccess ? (
+                                <div className="space-y-4 pt-2">
+                                    <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 p-4 rounded-2xl text-xs space-y-2">
+                                        <div className="flex items-center gap-2 font-bold text-sm">
+                                            <CheckCircle2 size={18} /> Senha Alterada com Sucesso!
+                                        </div>
+                                        <p className="text-zinc-300">
+                                            A senha de <strong>{resetModalUser.name}</strong> foi atualizada no Supabase Auth.
+                                        </p>
+                                        <div className="pt-2">
+                                            <span className="text-[10px] uppercase font-bold text-zinc-400 block">Nova Senha Definida:</span>
+                                            <div className="flex items-center justify-between bg-black/40 p-2.5 rounded-xl border border-white/10 mt-1 font-mono text-sm text-white">
+                                                <span>{newPasswordInput}</span>
+                                                <button
+                                                    onClick={() => {
+                                                        navigator.clipboard.writeText(newPasswordInput);
+                                                        setCopied(true);
+                                                        setTimeout(() => setCopied(false), 2000);
+                                                    }}
+                                                    className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold flex items-center gap-1 transition-all cursor-pointer"
+                                                >
+                                                    {copied ? <Check size={12} /> : <Copy size={12} />}
+                                                    {copied ? 'Copiado!' : 'Copiar'}
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex justify-end">
+                                        <button
+                                            onClick={() => setResetModalUser(null)}
+                                            className="w-full py-2.5 bg-zinc-800 hover:bg-zinc-700 text-white font-bold text-xs rounded-xl uppercase tracking-wider transition-all cursor-pointer"
+                                        >
+                                            Fechar
+                                        </button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="space-y-4 pt-2">
+                                    {passwordResetError && (
+                                        <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-xl text-xs flex items-center gap-2">
+                                            <AlertCircle size={16} className="shrink-0" />
+                                            <span>{passwordResetError}</span>
+                                        </div>
+                                    )}
+
+                                    <div className="space-y-3">
+                                        <div>
+                                            <div className="flex justify-between items-center mb-1">
+                                                <label className="text-[10px] font-black uppercase tracking-wider text-zinc-400">Nova Senha</label>
+                                                <button
+                                                    type="button"
+                                                    onClick={generateSecurePassword}
+                                                    className="text-[10px] font-bold text-amber-400 hover:text-amber-300 flex items-center gap-1 transition-all cursor-pointer"
+                                                >
+                                                    <Sparkles size={11} /> Gerar Senha Segura
+                                                </button>
+                                            </div>
+                                            <div className="relative">
+                                                <input
+                                                    type={showPassword ? "text" : "password"}
+                                                    value={newPasswordInput}
+                                                    onChange={e => setNewPasswordInput(e.target.value)}
+                                                    placeholder="Mínimo 6 caracteres"
+                                                    className="w-full bg-[#0C0C0F] border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white placeholder-zinc-600 focus:border-amber-500/50 outline-none font-mono"
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setShowPassword(!showPassword)}
+                                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white cursor-pointer"
+                                                >
+                                                    {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        <div>
+                                            <label className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block mb-1">Confirmar Nova Senha</label>
+                                            <input
+                                                type={showPassword ? "text" : "password"}
+                                                value={confirmPasswordInput}
+                                                onChange={e => setConfirmPasswordInput(e.target.value)}
+                                                placeholder="Repita a nova senha"
+                                                className="w-full bg-[#0C0C0F] border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white placeholder-zinc-600 focus:border-amber-500/50 outline-none font-mono"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="flex justify-end gap-2 pt-3">
+                                        <button
+                                            type="button"
+                                            onClick={() => setResetModalUser(null)}
+                                            disabled={resettingPassword}
+                                            className="px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-300 font-bold text-xs uppercase tracking-wider transition-all cursor-pointer"
+                                        >
+                                            Cancelar
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={handleResetPassword}
+                                            disabled={resettingPassword || !newPasswordInput}
+                                            className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 disabled:opacity-50 text-white font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-lg shadow-amber-950/20 transition-all cursor-pointer"
+                                        >
+                                            {resettingPassword ? <Loader2 size={14} className="animate-spin" /> : <Lock size={14} />}
+                                            {resettingPassword ? 'Alterando...' : 'Salvar Nova Senha'}
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
                         </motion.div>
                     </div>
                 )}
