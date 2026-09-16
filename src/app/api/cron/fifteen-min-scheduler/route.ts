@@ -22,6 +22,9 @@ export async function GET(req: NextRequest) {
     const tasks = [
         { name: 'sla-watcher', path: '/api/cron/sla-watcher' },
         { name: 'agenda-lembretes', path: '/api/cron/agenda-lembretes' },
+        // Rede de segurança da fila anti-ban dos alertas de compra: o pg_cron
+        // drena de minuto em minuto, mas se ele cair o aviso não fica preso.
+        { name: 'alertas-pendentes', path: '/api/cron/alertas-pendentes' },
     ];
 
     const results: Record<string, string> = {};
