@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/admin';
 import { distribuirLead } from '@/lib/services/slaEngine';
+import { trackVehicleAddToCart } from '@/lib/services/metaCatalogEvents';
 
 /**
  * WEBHOOK UNIVERSAL (Fase E)
@@ -13,7 +14,49 @@ import { distribuirLead } from '@/lib/services/slaEngine';
  * - vehicle / veiculo / interesse
  * - source / origem
  * - message / mensagem / resumo
+ * - vehicle_id / retailer_id  → dispara AddToCart no catálogo (opcional)
+ *
+ * AddToCart (Meta CAPI): quando o payload traz o ID do veículo, este webhook é o
+ * ponto server-side do clique em "Tenho interesse" / WhatsApp na página daquele
+ * veículo. Dispara tanto em lead novo quanto em re-entrada (o clique aconteceu
+ * de novo), e nunca bloqueia a entrada do lead.
  */
+
+/**
+ * Dispara AddToCart sem travar o webhook.
+ *
+ * SÓ dispara quando o payload traz o ID do veículo. Lead de portal (OLX,
+ * Webmotors) que só tem o texto do interesse NÃO é clique na página de um
+ * veículo nosso — dispararia AddToCart à toa e inflaria o evento.
+ */
+function dispararAddToCart(req: NextRequest, body: any, vehicle: string, externalId?: string | number) {
+    const vehicleId = body.vehicle_id ?? body.vehicleId ?? body.retailer_id ?? body.content_id ?? null;
+    if (!vehicleId) return;
+
+    const ud = body.user_data || {};
+    const xff = req.headers.get('x-forwarded-for');
+
+    trackVehicleAddToCart({
+        vehicleId,
+        vehicleInterest: vehicle || null,
+        value: body.value !== undefined && body.value !== null ? Number(body.value) : null,
+        currency: body.currency || 'BRL',
+        eventSourceUrl: body.event_source_url || body.url || undefined,
+        eventId: body.event_id || undefined,
+        testEventCode: body.test_event_code || undefined,
+        web: {
+            client_ip_address: ud.client_ip_address || body.client_ip_address ||
+                (xff ? xff.split(',')[0].trim() : undefined) || req.headers.get('x-real-ip') || undefined,
+            client_user_agent: ud.client_user_agent || body.client_user_agent || req.headers.get('user-agent') || undefined,
+            fbp: ud.fbp || body.fbp,
+            fbc: ud.fbc || body.fbc,
+            email: body.email || body.user_data?.email,
+            phone: body.phone || body.telefone || body.celular,
+            name: body.name || body.nome,
+            externalId,
+        },
+    }).catch(e => console.warn('[Webhook Universal] AddToCart CAPI falhou:', e?.message));
+}
 
 export async function POST(req: NextRequest) {
     const admin = createClient();
@@ -58,6 +101,8 @@ export async function POST(req: NextRequest) {
 
             await admin.from(table).update(upd).eq('id', nativeId);
 
+            dispararAddToCart(req, body, vehicle, match.native_id);
+
             return NextResponse.json({
                 success: true,
                 duplicated: true,
@@ -91,6 +136,9 @@ export async function POST(req: NextRequest) {
         distribuirLead('leads_manos_crm', newLead.id).catch(e =>
             console.warn('[Webhook Universal] distribuirLead falhou:', e?.message)
         );
+
+        // 4. AddToCart no catálogo (só quando o payload identifica o veículo).
+        dispararAddToCart(req, body, vehicle, newLead.id);
 
         return NextResponse.json({
             success: true,

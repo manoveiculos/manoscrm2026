@@ -1,5 +1,6 @@
 import { sendMetaConversion, MetaLeadData, MetaConversionOptions } from '@/lib/meta-service';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { resolveCatalogVehicle } from '@/lib/services/metaCatalog';
 
 /**
  * SERVIÇO DE ORQUESTRAÇÃO DA META CONVERSIONS API (v26.0)
@@ -61,15 +62,53 @@ export async function trackProposalSubmitted(leadData: MetaLeadData, estimatedVa
 
 /**
  * 6. Evento: Purchase (Venda concluída / Negócio ganho)
+ *
+ * Enriquecido com os dados de catálogo (content_type / content_ids / value /
+ * currency) SEM tirar nada do user_data — o advanced matching (em, ph, fn, ln,
+ * ct, st, external_id, fbp, fbc) continua sendo montado pelo sendMetaConversion
+ * a partir do leadData.
+ *
+ * content_ids = retailer_id do feed. Ordem de resolução:
+ *   1. vehicleId explícito (já é o retailer_id);
+ *   2. match do vehicle_interest no feed vivo da Altimus;
+ *   3. nada → Purchase vai SEM content_ids (nunca com ID inventado).
+ *
+ * Atenção: veículo vendido sai do feed da Altimus. Se a venda for lançada dias
+ * depois, o passo 2 falha — por isso vale passar o vehicleId explícito quando
+ * o CRM souber qual carro foi.
  */
-export async function trackDealWon(leadData: MetaLeadData, saleValue?: number, testEventCode?: string) {
-    const val = Number(saleValue) || 0;
-    return await sendMetaConversion(leadData, 'Purchase', {
+export async function trackDealWon(
+    leadData: MetaLeadData,
+    saleValue?: number,
+    testEventCode?: string,
+    vehicleId?: string | number | null,
+    actionSource: string = 'website'
+) {
+    const resolved = await resolveCatalogVehicle({
+        vehicleId,
+        vehicleInterest: leadData?.vehicle_interest || leadData?.interesse || null
+    });
+
+    const val = Number(saleValue) || resolved?.price || 0;
+
+    const options: MetaConversionOptions = {
         lead_event_source: 'Manos CRM - Venda Concluída',
+        action_source: actionSource,
         value: val,
         currency: 'BRL',
         test_event_code: testEventCode
-    });
+    };
+
+    // content_type e content_ids andam juntos (ou nenhum dos dois).
+    if (resolved) {
+        options.content_type = 'product';
+        options.content_ids = [resolved.retailerId];
+    } else {
+        console.warn('[meta-capi] Purchase sem content_ids: retailer_id não determinado ' +
+            `(lead=${leadData?.id ?? 'n/a'}, interesse="${leadData?.vehicle_interest || leadData?.interesse || ''}").`);
+    }
+
+    return await sendMetaConversion(leadData, 'Purchase', options);
 }
 
 /**
@@ -92,7 +131,8 @@ export async function dispatchMetaConversionForStatusChange(
     newStatus: string,
     saleValue?: number,
     motivoPerda?: string,
-    testEventCode?: string
+    testEventCode?: string,
+    vehicleId?: string | number | null
 ) {
     if (!leadData) return;
 
@@ -115,7 +155,7 @@ export async function dispatchMetaConversionForStatusChange(
         return await trackProposalSubmitted(leadData, saleValue, testEventCode);
     } 
     else if (['vendido', 'closed', 'venda realizada', 'comprado', 'fechado'].includes(s)) {
-        return await trackDealWon(leadData, saleValue, testEventCode);
+        return await trackDealWon(leadData, saleValue, testEventCode, vehicleId);
     } 
     else if (['perdido', 'lost', 'lost_redistributed', 'descarte', 'desqualificado', 'trash'].includes(s)) {
         return await trackLeadDisqualified(leadData, motivoPerda, testEventCode);

@@ -10,7 +10,9 @@ export async function GET() {
         },
         servers: [
             {
-                url: process.env.NEXT_PUBLIC_APP_URL || "https://crm.manosveiculos.com.br",
+                // crm.manosveiculos.com.br NAO existe (NXDOMAIN) — o dominio real
+                // do CRM em producao e manoscrm.com.br.
+                url: process.env.NEXT_PUBLIC_APP_URL || "https://manoscrm.com.br",
                 description: "Servidor de Produção Manos CRM"
             }
         ],

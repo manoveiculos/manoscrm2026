@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { supabaseAdmin, supabaseAdminUsingServiceRole } from '@/lib/supabaseAdmin';
 
 /**
  * Normaliza o telefone para o formato E.164 exigido pela Meta:
@@ -344,7 +344,11 @@ async function logMetaConversionAudit(data: {
 }) {
     if (typeof window !== 'undefined') return;
     try {
-        await supabaseAdmin.from('meta_conversions_log').insert([{
+        // ATENCAO: o supabase-js NAO lanca excecao quando a RLS rejeita — ele
+        // devolve { error }. Antes isso nao era lido e o log morria em silencio:
+        // eventos chegavam na Meta e a meta_conversions_log ficava vazia, o que
+        // cega o painel /admin/meta-conversions. Agora o erro e conferido.
+        const { error } = await supabaseAdmin.from('meta_conversions_log').insert([{
             lead_id: data.lead_id || null,
             fb_lead_id: data.fb_lead_id || null,
             event_name: data.event_name,
@@ -357,7 +361,30 @@ async function logMetaConversionAudit(data: {
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
         }]);
-    } catch (err) {
-        // Silencioso em caso de tabela inexistente antes da migração rodar
+
+        if (error) {
+            const code = (error as any).code || '';
+            const msg = error.message || String(error);
+
+            // 42501 = insufficient_privilege (RLS). A tabela so tem policy de
+            // INSERT pra service_role — cair na chave anon derruba todo log.
+            const pareceRls = code === '42501' || /row-level security|permission denied/i.test(msg);
+
+            if (pareceRls && !supabaseAdminUsingServiceRole) {
+                console.error(
+                    `❌ [meta-capi] Log de auditoria BLOQUEADO pela RLS em meta_conversions_log ` +
+                    `(evento ${data.event_name}). O supabaseAdmin nao esta usando a service role key: ` +
+                    `defina SUPABASE_SERVICE_ROLE_KEY no ambiente. O evento FOI enviado pra Meta, ` +
+                    `mas o painel /admin/meta-conversions vai continuar vazio.`
+                );
+            } else if (code === '42P01') {
+                console.error(`❌ [meta-capi] Tabela meta_conversions_log nao existe — migration nao rodou.`);
+            } else {
+                console.error(`❌ [meta-capi] Falha ao gravar log de auditoria (${data.event_name}) [${code}]: ${msg}`);
+            }
+        }
+    } catch (err: any) {
+        // Nunca deixa o log derrubar o envio do evento.
+        console.error(`❌ [meta-capi] Excecao ao gravar log de auditoria (${data.event_name}):`, err?.message || err);
     }
 }
