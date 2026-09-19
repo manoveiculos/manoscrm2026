@@ -1,21 +1,24 @@
 import { createHash } from 'crypto';
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
 /**
- * Normaliza o telefone para o formato exigido pela Meta:
+ * Normaliza o telefone para o formato E.164 exigido pela Meta:
  * 1. Remove tudo que não for número.
- * 2. Garante o prefixo DDI 55 (Brasil).
+ * 2. Garante o prefixo DDI 55 (Brasil) se não houver DDI.
  */
 export function normalizePhone(phone: string): string {
     if (!phone) return "";
 
-    // Remove tudo que não for número
     let digits = phone.replace(/\D/g, '');
+    if (!digits) return "";
 
-    // Se começar com 55 e tiver mais de 10 dígitos, assume que já tem DDI
-    // Se não tiver 55, adiciona
+    // Se começar com 0, remove o zero
+    if (digits.startsWith('0')) {
+        digits = digits.substring(1);
+    }
+
+    // Se não tiver 55 e tiver 10 ou 11 dígitos (DDD + Número), adiciona 55
     if (!digits.startsWith('55') || digits.length < 12) {
-        // Se começar com 0, remove o zero (comum em alguns formatos)
-        if (digits.startsWith('0')) digits = digits.substring(1);
         digits = '55' + digits;
     }
 
@@ -25,55 +28,201 @@ export function normalizePhone(phone: string): string {
 /**
  * Gera hash SHA256 em minúsculo conforme exigência da Meta.
  */
-export function hashData(data: string): string {
+export function hashData(data: string | undefined | null): string {
     if (!data) return "";
-    return createHash('sha256').update(data.toLowerCase().trim()).digest('hex');
+    const clean = String(data).toLowerCase().trim();
+    if (!clean) return "";
+    return createHash('sha256').update(clean).digest('hex');
 }
 
 /**
- * Envia um evento de conversão para a Meta (Conversions API).
- * @param leadData Dados do lead (nome, telefone, email, lead_id, etc)
- * @param eventName Nome do evento (ex: 'Lead', 'Contact', 'Purchase')
+ * Separa nome completo em Primeiro Nome e Sobrenome para Advanced Matching (fn, ln)
  */
-export async function sendMetaConversion(leadData: any, eventName: string = 'Lead', extraCustomData?: Record<string, any>) {
-    const pixelId = process.env.META_PIXEL_ID || process.env.NEXT_PUBLIC_META_PIXEL_ID;
+export function extractFirstAndLastName(fullName: string): { firstName: string; lastName: string } {
+    if (!fullName) return { firstName: '', lastName: '' };
+    const parts = fullName.trim().split(/\s+/);
+    const firstName = parts[0] || '';
+    const lastName = parts.slice(1).join(' ') || '';
+    return { firstName, lastName };
+}
+
+/**
+ * Normaliza a sigla do estado para 2 letras minúsculas (ex: SC -> sc)
+ */
+export function normalizeState(state: string): string {
+    if (!state) return '';
+    const clean = state.trim().toLowerCase();
+    // Se for nome completo, extrai primeira e última ou mapeamentos comuns
+    if (clean === 'santa catarina') return 'sc';
+    if (clean === 'são paulo' || clean === 'sao paulo') return 'sp';
+    if (clean === 'paraná' || clean === 'parana') return 'pr';
+    if (clean === 'rio de janeiro') return 'rj';
+    if (clean === 'rio grande do sul') return 'rs';
+    if (clean.length === 2) return clean;
+    return clean.slice(0, 2);
+}
+
+export interface MetaLeadData {
+    id?: string | number;
+    lead_id?: string | number;       // Meta Lead Ads ID (fb_lead_id / leadgen_id)
+    fb_lead_id?: string | number;    // Alias para lead_id da Meta
+    name?: string;
+    nome?: string;
+    phone?: string;
+    telefone?: string;
+    whatsapp?: string;
+    email?: string;
+    city?: string;
+    cidade?: string;
+    state?: string;
+    estado?: string;
+    uf?: string;
+    country?: string;
+    vehicle_interest?: string;
+    interesse?: string;
+    source?: string;
+    origem?: string;
+    fbp?: string;
+    fbc?: string;
+    client_ip_address?: string;
+    client_user_agent?: string;
+}
+
+export interface MetaConversionOptions {
+    lead_event_source?: string;
+    event_id?: string;
+    value?: number;
+    currency?: string;
+    test_event_code?: string;
+    lead_quality?: string;
+    reason?: string;
+    [key: string]: any;
+}
+
+/**
+ * Envia um evento de conversão para a Meta (Conversions API Graph API v26.0).
+ * @param leadData Dados do lead (nome, telefone, email, lead_id, etc)
+ * @param eventName Nome do evento (ex: 'Lead', 'QualifiedLead', 'Schedule', 'InPersonMeeting', 'SubmitApplication', 'Purchase', 'DisqualifiedLead')
+ * @param extraOptions Opções customizadas (valor, moeda, event_id, test_event_code, etc)
+ */
+export async function sendMetaConversion(
+    leadData: MetaLeadData,
+    eventName: string = 'Lead',
+    extraOptions?: MetaConversionOptions
+) {
+    const pixelId = process.env.META_PIXEL_ID || process.env.NEXT_PUBLIC_META_PIXEL_ID || '995826668986455';
     const accessToken = process.env.META_ACCESS_TOKEN || process.env.NEXT_PUBLIC_META_ACCESS_TOKEN;
+    const apiVersion = process.env.META_API_VERSION || 'v26.0';
 
     if (!pixelId || !accessToken) {
         console.error('❌ Erro Meta: META_PIXEL_ID ou META_ACCESS_TOKEN não configurados no .env.local');
-        return;
+        return { success: false, error: 'Credenciais ausentes no .env.local' };
     }
 
+    const leadIdStr = leadData.id ? String(leadData.id) : undefined;
+    const rawFbLeadId = leadData.lead_id || leadData.fb_lead_id;
+    const fbLeadIdNum = rawFbLeadId ? (Number(rawFbLeadId) || String(rawFbLeadId)) : undefined;
+
+    // Advanced Matching Parameters
+    const rawPhone = leadData.phone || leadData.telefone || leadData.whatsapp;
+    const normalizedPhone = rawPhone ? normalizePhone(rawPhone) : "";
+    const hashedPhone = normalizedPhone ? hashData(normalizedPhone) : null;
+    
+    const rawEmail = leadData.email;
+    const hashedEmail = rawEmail ? hashData(rawEmail) : null;
+
+    const rawName = leadData.name || leadData.nome || "";
+    const { firstName, lastName } = extractFirstAndLastName(rawName);
+    const hashedFn = firstName ? hashData(firstName) : null;
+    const hashedLn = lastName ? hashData(lastName) : null;
+
+    const rawCity = leadData.city || leadData.cidade || "";
+    const hashedCity = rawCity ? hashData(rawCity.replace(/\s+/g, '')) : null;
+
+    const rawState = leadData.state || leadData.estado || leadData.uf || "";
+    const normalizedSt = rawState ? normalizeState(rawState) : "";
+    const hashedSt = normalizedSt ? hashData(normalizedSt) : null;
+
+    const countryCode = (leadData.country || "br").toLowerCase();
+    const hashedCountry = hashData(countryCode);
+
+    const hashedExternalId = leadIdStr ? hashData(leadIdStr) : null;
+
+    // User Data Object
+    const userData: Record<string, any> = {};
+
+    if (hashedPhone) userData.ph = [hashedPhone];
+    if (hashedEmail) userData.em = [hashedEmail];
+    if (hashedFn) userData.fn = [hashedFn];
+    if (hashedLn) userData.ln = [hashedLn];
+    if (hashedCity) userData.ct = [hashedCity];
+    if (hashedSt) userData.st = [hashedSt];
+    if (hashedCountry) userData.country = [hashedCountry];
+    if (hashedExternalId) userData.external_id = [hashedExternalId];
+
+    // Meta Lead Ads ID (Atribuição de 100% se proveniente de Instant Forms)
+    if (fbLeadIdNum) {
+        userData.lead_id = fbLeadIdNum;
+    }
+
+    // Web tracking cookies se presentes
+    if (leadData.fbp) userData.fbp = leadData.fbp;
+    if (leadData.fbc) userData.fbc = leadData.fbc;
+    if (leadData.client_ip_address) userData.client_ip_address = leadData.client_ip_address;
+    if (leadData.client_user_agent) userData.client_user_agent = leadData.client_user_agent;
+
+    // Gerador determinístico de event_id para deduplicação com Pixel Web
+    const nowSec = Math.floor(Date.now() / 1000);
+    const eventId = extraOptions?.event_id || (leadIdStr ? `lead_${leadIdStr}_${eventName}_${nowSec}` : `evt_${nowSec}_${Math.random().toString(36).substring(2, 7)}`);
+
+    // Custom Data Payload
+    const customData: Record<string, any> = {
+        event_source: "crm",
+        lead_event_source: extraOptions?.lead_event_source || "Manos CRM",
+        vehicle_interest: leadData.vehicle_interest || leadData.interesse,
+        source: leadData.source || leadData.origem,
+    };
+
+    if (extraOptions?.value !== undefined) {
+        customData.value = Number(extraOptions.value) || 0;
+        customData.currency = extraOptions.currency || "BRL";
+    }
+
+    if (extraOptions?.lead_quality) customData.lead_quality = extraOptions.lead_quality;
+    if (extraOptions?.reason) customData.reason = extraOptions.reason;
+
+    // Mesclar outras opções customizadas se fornecidas
+    if (extraOptions) {
+        Object.keys(extraOptions).forEach(key => {
+            if (!['lead_event_source', 'event_id', 'value', 'currency', 'test_event_code', 'lead_quality', 'reason'].includes(key)) {
+                customData[key] = extraOptions[key];
+            }
+        });
+    }
+
+    const payload: Record<string, any> = {
+        data: [
+            {
+                event_name: eventName,
+                event_time: nowSec,
+                action_source: "system_generated",
+                event_id: eventId,
+                user_data: userData,
+                custom_data: customData
+            }
+        ]
+    };
+
+    // Suporte a test_event_code da aba "Testar Eventos" no Meta Events Manager
+    const testCode = extraOptions?.test_event_code || process.env.META_TEST_EVENT_CODE;
+    if (testCode) {
+        payload.test_event_code = testCode;
+    }
+
+    const metaUrl = `https://graph.facebook.com/${apiVersion}/${pixelId}/events`;
+
     try {
-        const rawPhone = leadData.phone || leadData.telefone || leadData.whatsapp;
-        const normalizedPhone = rawPhone ? normalizePhone(rawPhone) : "";
-        const hashedPhone = normalizedPhone ? hashData(normalizedPhone) : null;
-        const hashedEmail = leadData.email ? hashData(leadData.email) : null;
-
-        const payload = {
-            data: [
-                {
-                    event_name: eventName,
-                    event_time: Math.floor(Date.now() / 1000),
-                    action_source: "system_generated",
-                    user_data: {
-                        ph: hashedPhone ? [hashedPhone] : undefined,
-                        em: hashedEmail ? [hashedEmail] : undefined,
-                        lead_id: leadData.lead_id ? Number(leadData.lead_id) || leadData.lead_id : undefined,
-                        external_id: leadData.id ? [hashData(String(leadData.id))] : undefined
-                    },
-                    custom_data: {
-                        event_source: "crm",
-                        lead_event_source: extraCustomData?.lead_event_source || "Manos CRM",
-                        vehicle_interest: leadData.vehicle_interest || leadData.interesse,
-                        source: leadData.source || leadData.origem,
-                        ...extraCustomData
-                    }
-                }
-            ]
-        };
-
-        const response = await fetch(`https://graph.facebook.com/v25.0/${pixelId}/events`, {
+        const response = await fetch(metaUrl, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -82,16 +231,81 @@ export async function sendMetaConversion(leadData: any, eventName: string = 'Lea
             body: JSON.stringify(payload)
         });
 
+        const statusHttp = response.status;
         const result = await response.json();
 
-        if (result.error) {
-            console.error(`❌ Erro Meta Conversions API [${eventName}]:`, result.error.message);
-        } else {
-            console.log(`✅ Evento [${eventName}] enviado para Meta | Lead: ${leadData.name || leadData.nome || 'N/A'}`);
-        }
+        const isSuccess = response.ok && !result.error;
+        const errorMessage = result.error ? (result.error.message || JSON.stringify(result.error)) : null;
 
-        return result;
-    } catch (error) {
-        console.error(`❌ Falha ao disparar evento para Meta [${eventName}]:`, error);
+        // Registrar Log de Auditoria no Supabase Assincronamente
+        logMetaConversionAudit({
+            lead_id: leadIdStr,
+            fb_lead_id: fbLeadIdNum ? String(fbLeadIdNum) : undefined,
+            event_name: eventName,
+            event_id: eventId,
+            status: isSuccess ? 'SUCCESS' : 'FAILED',
+            response_code: statusHttp,
+            response_payload: result,
+            payload_sent: payload,
+            error_message: errorMessage
+        }).catch(err => console.warn('⚠️ Non-blocking audit log insert warning:', err));
+
+        if (!isSuccess) {
+            console.error(`❌ Erro Meta Conversions API [${eventName}] (${statusHttp}):`, errorMessage);
+            return { success: false, statusHttp, error: errorMessage, result };
+        } else {
+            console.log(`✅ Evento [${eventName}] enviado com sucesso para Meta (v26.0) | Lead ID: ${leadIdStr || 'N/A'} | Event ID: ${eventId}`);
+            return { success: true, statusHttp, eventId, result };
+        }
+    } catch (error: any) {
+        const errMsg = error.message || 'Falha de rede/desconhecida ao contactar a Meta Graph API';
+        console.error(`❌ Falha na chamada da Meta Conversions API [${eventName}]:`, error);
+
+        // Registrar falha de rede no log de auditoria
+        logMetaConversionAudit({
+            lead_id: leadIdStr,
+            fb_lead_id: fbLeadIdNum ? String(fbLeadIdNum) : undefined,
+            event_name: eventName,
+            event_id: eventId,
+            status: 'FAILED',
+            response_code: 500,
+            payload_sent: payload,
+            error_message: errMsg
+        }).catch(() => {});
+
+        return { success: false, error: errMsg };
+    }
+}
+
+/**
+ * Função interna para gravar log de auditoria na tabela public.meta_conversions_log
+ */
+async function logMetaConversionAudit(data: {
+    lead_id?: string;
+    fb_lead_id?: string;
+    event_name: string;
+    event_id: string;
+    status: 'SUCCESS' | 'FAILED' | 'PENDING';
+    response_code?: number;
+    response_payload?: any;
+    payload_sent: any;
+    error_message?: string | null;
+}) {
+    try {
+        await supabaseAdmin.from('meta_conversions_log').insert([{
+            lead_id: data.lead_id || null,
+            fb_lead_id: data.fb_lead_id || null,
+            event_name: data.event_name,
+            event_id: data.event_id,
+            status: data.status,
+            response_code: data.response_code || null,
+            response_payload: data.response_payload || null,
+            payload_sent: data.payload_sent,
+            error_message: data.error_message || null,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+        }]);
+    } catch (err) {
+        // Silencioso em caso de tabela inexistente antes da migração rodar
     }
 }

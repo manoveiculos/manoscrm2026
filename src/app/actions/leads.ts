@@ -3,6 +3,7 @@
 import { createClient } from '@/lib/supabase/admin';
 import { LeadStatus, Lead, Sale, Purchase } from '@/lib/types';
 import { sendMetaConversion } from '@/lib/meta-service';
+import { dispatchMetaConversionForStatusChange } from '@/lib/services/metaConversionService';
 import { dataService } from '@/lib/dataService';
 import { revalidatePath } from 'next/cache';
 import { cacheInvalidate } from '@/lib/services/cacheLayer';
@@ -226,41 +227,38 @@ export async function updateLeadStatusAction(
         }
     }
 
-    // DISPATCH META CONVERSION
-    if (table === 'leads_manos_crm' || table === 'leads_distribuicao_crm_26') {
-        try {
-            const { data: leadData } = await adminClient
-                .from(table)
-                .select('id, phone, telefone, status')
-                .eq('id', realId)
-                .single();
-            if (leadData && (leadData.phone || leadData.telefone)) {
-                let eventName: string | null = null;
-                let extraData: any = undefined;
-                const s = String(status).toUpperCase().trim();
+    // DISPATCH META CONVERSION (v26.0 Advanced Matching)
+    try {
+        const selectFields = table === 'leads_distribuicao_crm_26' 
+            ? 'id, fb_lead_id, nome, telefone, cidade, interesse' 
+            : 'id, fb_lead_id, name, nome, phone, telefone, email, city, cidade, state, estado, vehicle_interest, interesse, source, origem';
 
-                if (['AGUARDANDO', 'EM ATENDIMENTO', 'NEW', 'RECEIVED', 'ATTEMPT', 'CONTACTED', 'CONFIRMED'].includes(s)) {
-                    eventName = 'Lead';
-                } else if (['AGENDAMENTO', 'SCHEDULED'].includes(s)) {
-                    eventName = 'Schedule';
-                } else if (['VISITA E TEST DRIVE', 'VISITED', 'TEST_DRIVE', 'VISITOU'].includes(s)) {
-                    eventName = 'StoreVisit';
-                } else if (['NEGOCIAÇÃO', 'PROPOSTA ENVIADA', 'PROPOSED', 'NEGOTIATION'].includes(s)) {
-                    eventName = 'Contact';
-                } else if (['VENDIDO', 'COMPRA REALIZADA', 'CLOSED', 'COMPRADO', 'FECHADO', 'VENDA'].includes(s)) {
-                    eventName = 'Purchase';
-                } else if (['PERDA / SEM CONTATO', 'PERDIDO / DESCARTE', 'LOST', 'LOST_REDISTRIBUTED', 'POST_SALE', 'TRASH'].includes(s)) {
-                    eventName = 'DisqualifiedLead';
-                    extraData = { lead_quality: "disqualified", reason: s };
-                }
+        const { data: fullLead } = await adminClient
+            .from(table)
+            .select(selectFields)
+            .eq('id', realId)
+            .maybeSingle();
 
-                if (eventName) {
-                    await sendMetaConversion(leadData, eventName, extraData);
-                }
-            }
-        } catch (metaErr) {
-            console.warn("Non-blocking Meta CAPI error:", metaErr);
+        if (fullLead) {
+            const normalizedLead: any = {
+                id: leadId,
+                fb_lead_id: (fullLead as any).fb_lead_id || (fullLead as any).lead_id,
+                name: (fullLead as any).name || (fullLead as any).nome,
+                phone: (fullLead as any).phone || (fullLead as any).telefone,
+                email: (fullLead as any).email,
+                city: (fullLead as any).city || (fullLead as any).cidade,
+                state: (fullLead as any).state || (fullLead as any).estado,
+                vehicle_interest: (fullLead as any).vehicle_interest || (fullLead as any).interesse,
+                source: (fullLead as any).source || (fullLead as any).origem
+            };
+
+            const isSale = ['vendido', 'closed', 'venda realizada', 'comprado', 'fechado'].includes(String(status).toLowerCase());
+            const saleVal = isSale ? (resumo_fechamento ? parseFloat(resumo_fechamento.replace(/[^\d.,]/g, '').replace(',', '.')) : 0) : undefined;
+
+            await dispatchMetaConversionForStatusChange(normalizedLead, status, saleVal, motivo_perda);
         }
+    } catch (metaErr) {
+        console.warn("Non-blocking Meta CAPI error:", metaErr);
     }
     
     // ATENÇÃO: Limpa cache local da API Node e FORÇA o re-render da /pipeline do Next.js

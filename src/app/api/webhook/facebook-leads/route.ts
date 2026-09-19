@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/admin';
 import { runEliteCloser } from '@/lib/services/ai-closer-service';
 import { runGenerateProposal } from '@/lib/services/proposal-service';
 import { distribuirLead } from '@/lib/services/slaEngine';
+import { trackLeadCreated } from '@/lib/services/metaConversionService';
 
 const supabaseAdmin = createClient();
 
@@ -189,6 +190,17 @@ export async function POST(req: NextRequest) {
                     if (newLead && newLead.id) {
                         const fullId = `leadsfacebook:` + newLead.id;
                         console.log(`[Webhook] Lead Facebook recebido com sucesso na Fila Geral (Pesca): ${fullId}`);
+
+                        // DISPATCH META CAPI (Lead Event com fb_lead_id do Instant Form)
+                        trackLeadCreated({
+                            id: fullId,
+                            fb_lead_id: leadgenId,
+                            name: newLead.nome,
+                            phone: newLead.phone,
+                            city: newLead.cidade,
+                            vehicle_interest: newLead.vehicle_interest,
+                            source: newLead.source
+                        }).catch(e => console.warn('[Webhook] Meta CAPI non-blocking error:', e));
 
                         // Elite Closer (IA de ANÁLISE/score — não fala com cliente)
                         const analysis = await runEliteCloser(fullId, [], 'SISTEMA').catch(async (e) => {

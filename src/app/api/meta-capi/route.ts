@@ -1,69 +1,44 @@
 import { NextRequest, NextResponse } from 'next/server';
-import crypto from 'crypto';
-
-/**
- * Helper to hash data to SHA256 as required by Meta
- */
-function hashData(data: string | undefined): string | null {
-    if (!data) return null;
-    // Remove whitespace and convert to lowercase as per Meta recommendations
-    const cleanData = data.trim().toLowerCase();
-    return crypto.createHash('sha256').update(cleanData).digest('hex');
-}
+import { sendMetaConversion } from '@/lib/meta-service';
 
 export async function POST(req: NextRequest) {
-    const PIXEL_ID = process.env.META_PIXEL_ID || process.env.NEXT_PUBLIC_META_PIXEL_ID;
-    const ACCESS_TOKEN = process.env.META_ACCESS_TOKEN || process.env.NEXT_PUBLIC_META_ACCESS_TOKEN;
-
-    if (!PIXEL_ID || !ACCESS_TOKEN) {
-        return NextResponse.json({ error: 'Meta implementation: Missing credentials in environment' }, { status: 500 });
-    }
-
     try {
-        const { eventName, userData, customData } = await req.json();
+        const body = await req.json();
+        const { eventName, userData, customData, testEventCode } = body;
 
-        // 1. Format User Data (Hashed)
-        const hashedUserData: any = {
-            external_id: [hashData(userData.externalId)], // External ID is also usually hashed for consistency
-        };
-
-        if (userData.email) hashedUserData.em = [hashData(userData.email)];
-        if (userData.phone) hashedUserData.ph = [hashData(userData.phone)];
-
-        // 2. Build Event Payload
-        const payload = {
-            data: [{
-                event_name: eventName,
-                event_time: Math.floor(Date.now() / 1000),
-                action_source: 'system_generated',
-                user_data: hashedUserData,
-                custom_data: {
-                    event_source: 'crm',
-                    lead_event_source: 'Manos CRM',
-                    ...customData,
-                    currency: 'BRL', // Default for this CRM
-                }
-            }]
-        };
-
-        // 3. Send to Meta Graph API
-        const response = await fetch(`https://graph.facebook.com/v25.0/${PIXEL_ID}/events?access_token=${ACCESS_TOKEN}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-
-        const result = await response.json();
-
-        if (result.error) {
-            console.error('Meta API Error:', result.error);
-            return NextResponse.json({ error: result.error.message }, { status: 400 });
+        if (!eventName || !userData) {
+            return NextResponse.json({ error: 'eventName e userData são obrigatórios' }, { status: 400 });
         }
 
-        return NextResponse.json({ success: true, fb_result: result });
+        const result = await sendMetaConversion(
+            {
+                id: userData.externalId || userData.id,
+                lead_id: userData.lead_id || userData.fb_lead_id,
+                name: userData.name || userData.nome,
+                phone: userData.phone || userData.telefone,
+                email: userData.email,
+                city: userData.city || userData.cidade,
+                state: userData.state || userData.estado,
+                vehicle_interest: userData.vehicle_interest || customData?.vehicle_interest,
+                source: userData.source || customData?.source,
+                fbp: userData.fbp,
+                fbc: userData.fbc
+            },
+            eventName,
+            {
+                ...customData,
+                test_event_code: testEventCode
+            }
+        );
+
+        if (!result.success) {
+            return NextResponse.json({ error: result.error, result: result.result }, { status: 400 });
+        }
+
+        return NextResponse.json({ success: true, eventId: result.eventId, fb_result: result.result });
 
     } catch (err: any) {
-        console.error('CAPI Route Error:', err);
-        return NextResponse.json({ error: err.message }, { status: 500 });
+        console.error('API /api/meta-capi error:', err);
+        return NextResponse.json({ error: err.message || 'Erro interno ao processar conversão Meta' }, { status: 500 });
     }
 }

@@ -5,6 +5,7 @@ import { logHistory, getLeadMessages } from './interactionService';
 import { resolveConsultantIdByName, markConsultantAsAssigned } from './consultantService';
 import { Lead, LeadStatus, AIClassification } from '@/lib/types';
 import { sendMetaConversion } from '@/lib/meta-service';
+import { trackLeadCreated } from '@/lib/services/metaConversionService';
 
 /**
  * SERVIÇO DE CRUD DE LEADS
@@ -211,6 +212,24 @@ export async function createLead(leadData: Partial<Lead>) {
 
     const { data, error } = await supabase.from('leads_manos_crm').insert([payload]).select().single();
     if (error) throw error;
+
+    // DISPATCH META CAPI (Lead Creation)
+    if (data) {
+        try {
+            await trackLeadCreated({
+                id: `main_${data.id}`,
+                name: data.name,
+                phone: data.phone,
+                email: data.email,
+                source: data.source,
+                vehicle_interest: data.vehicle_interest,
+                fb_lead_id: data.fb_lead_id || data.lead_id
+            });
+        } catch (metaErr) {
+            console.warn("Non-blocking Meta CAPI error on createLead:", metaErr);
+        }
+    }
+
     cacheInvalidate('leads_');
     return data;
 }
