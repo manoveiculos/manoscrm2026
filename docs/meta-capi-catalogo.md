@@ -301,13 +301,21 @@ Isso exige uma coluna nova no lead (ex.: `meta_content_id`) — **não** foi cri
 porque migration é decisão do dono. Enquanto não existir, `Purchase` acerta o
 `content_ids` só quando o carro ainda está no estoque ou quando o ID é passado na mão.
 
-## 7. `action_source` do Purchase
+## 7. `action_source` por evento
 
-Os 3 eventos saem com `action_source: "website"`, como pedido. Vale saber: a venda do
-carro é fechada na loja e lançada no CRM, então o valor tecnicamente exato seria
-`physical_store` (ou `system_generated`) — `website` sem sinal de navegador derruba a
-qualidade do match no diagnóstico da Meta. Por isso o parâmetro ficou trocável:
+| Evento | `action_source` | Por quê |
+|---|---|---|
+| `ViewContent` | `website` | veio do navegador, tem UA e URL da página |
+| `AddToCart` | `website` | idem |
+| `Purchase` | `physical_store` | fecha na loja e é lançado no CRM — não existe navegador |
+
+O `Purchase` era `website` na primeira versão. A [doc da Meta](https://developers.facebook.com/documentation/ads-commerce/conversions-api/parameters)
+exige `client_user_agent` e `event_source_url` em evento `website`, e a venda lançada no
+CRM não tem nenhum dos dois: marcar como `website` seria declarar uma origem que não
+existe e derrubar a qualidade do sinal.
+
+Continua trocável, caso a venda passe a ter contexto de navegador:
 
 ```ts
-trackDealWon(lead, valor, testCode, vehicleId, 'physical_store');
+trackDealWon(lead, valor, testCode, vehicleId, 'website');
 ```
