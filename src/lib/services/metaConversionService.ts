@@ -92,8 +92,12 @@ export async function trackDealWon(
     vehicleId?: string | number | null,
     actionSource: string = 'physical_store'
 ) {
+    // Prioriza meta_content_id já salvo no lead ou vehicleId explícito.
+    // Fallback para resolvedor por texto vivo no feed apenas quando ambos estiverem vazios.
+    const explicitVehicleId = vehicleId || leadData?.meta_content_id || null;
+
     const resolved = await resolveCatalogVehicle({
-        vehicleId,
+        vehicleId: explicitVehicleId,
         vehicleInterest: leadData?.vehicle_interest || leadData?.interesse || null
     });
 
@@ -101,7 +105,7 @@ export async function trackDealWon(
 
     const options: MetaConversionOptions = {
         lead_event_source: 'Manos CRM - Venda Concluída',
-        action_source: actionSource,
+        action_source: actionSource || 'physical_store',
         value: val,
         currency: 'BRL',
         test_event_code: testEventCode
@@ -113,7 +117,7 @@ export async function trackDealWon(
         options.content_ids = [resolved.retailerId];
     } else {
         console.warn('[meta-capi] Purchase sem content_ids: retailer_id não determinado ' +
-            `(lead=${leadData?.id ?? 'n/a'}, interesse="${leadData?.vehicle_interest || leadData?.interesse || ''}").`);
+            `(lead=${leadData?.id ?? 'n/a'}, meta_content_id="${leadData?.meta_content_id || ''}", interesse="${leadData?.vehicle_interest || leadData?.interesse || ''}").`);
     }
 
     return await sendMetaConversion(leadData, 'Purchase', options);
@@ -140,7 +144,8 @@ export async function dispatchMetaConversionForStatusChange(
     saleValue?: number,
     motivoPerda?: string,
     testEventCode?: string,
-    vehicleId?: string | number | null
+    vehicleId?: string | number | null,
+    actionSource?: string
 ) {
     if (!leadData) return;
 
@@ -163,7 +168,7 @@ export async function dispatchMetaConversionForStatusChange(
         return await trackProposalSubmitted(leadData, saleValue, testEventCode);
     } 
     else if (['vendido', 'closed', 'venda realizada', 'comprado', 'fechado'].includes(s)) {
-        return await trackDealWon(leadData, saleValue, testEventCode, vehicleId);
+        return await trackDealWon(leadData, saleValue, testEventCode, vehicleId, actionSource);
     } 
     else if (['perdido', 'lost', 'lost_redistributed', 'descarte', 'desqualificado', 'trash'].includes(s)) {
         return await trackLeadDisqualified(leadData, motivoPerda, testEventCode);

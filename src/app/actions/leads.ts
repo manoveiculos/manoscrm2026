@@ -230,8 +230,8 @@ export async function updateLeadStatusAction(
     // DISPATCH META CONVERSION (v26.0 Advanced Matching)
     try {
         const selectFields = table === 'leads_distribuicao_crm_26' 
-            ? 'id, fb_lead_id, nome, telefone, cidade, interesse' 
-            : 'id, fb_lead_id, name, nome, phone, telefone, email, city, cidade, state, estado, vehicle_interest, interesse, source, origem';
+            ? 'id, fb_lead_id, nome, telefone, cidade, interesse, meta_content_id' 
+            : 'id, fb_lead_id, name, nome, phone, telefone, email, city, cidade, state, estado, vehicle_interest, interesse, source, origem, meta_content_id';
 
         const { data: fullLead } = await adminClient
             .from(table)
@@ -249,6 +249,7 @@ export async function updateLeadStatusAction(
                 city: (fullLead as any).city || (fullLead as any).cidade,
                 state: (fullLead as any).state || (fullLead as any).estado,
                 vehicle_interest: (fullLead as any).vehicle_interest || (fullLead as any).interesse,
+                meta_content_id: (fullLead as any).meta_content_id,
                 source: (fullLead as any).source || (fullLead as any).origem
             };
 

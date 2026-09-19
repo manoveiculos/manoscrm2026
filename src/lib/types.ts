@@ -70,6 +70,7 @@ export interface Lead {
   campaign_id?: string;
   creative_id?: string;
   vehicle_interest?: string;
+  meta_content_id?: string;
   region?: string;
   estimated_ticket?: number;
   ai_score?: number;

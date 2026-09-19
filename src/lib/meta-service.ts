@@ -81,6 +81,7 @@ export interface MetaLeadData {
     country?: string;
     vehicle_interest?: string;
     interesse?: string;
+    meta_content_id?: string;
     source?: string;
     origem?: string;
     fbp?: string;

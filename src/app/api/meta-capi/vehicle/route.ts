@@ -107,23 +107,23 @@ export async function POST(req: NextRequest) {
     try {
         // FALHA FECHADO. Este endpoint escreve no pixel de anuncios: sem trava,
         // qualquer um que descubra a URL injeta Purchase e estraga a otimizacao
-        // das campanhas. Por isso o segredo nao e opcional em producao.
+        // das campanhas. Por isso o segredo e OBRIGATORIO em todos os ambientes.
         const secret = process.env.META_CAPI_SITE_SECRET;
         if (!secret) {
-            if (process.env.NODE_ENV === 'production') {
-                console.error('❌ [meta-capi] META_CAPI_SITE_SECRET nao configurada — endpoint recusando tudo.');
-                return NextResponse.json(
-                    {
-                        error: 'Endpoint desabilitado',
-                        detail: 'META_CAPI_SITE_SECRET nao esta configurada no servidor. ' +
-                            'Defina a variavel na Vercel e envie o mesmo valor no header X-Meta-Capi-Secret.',
-                    },
-                    { status: 503, headers }
-                );
-            }
-            console.warn('⚠️ [meta-capi] Sem META_CAPI_SITE_SECRET — liberado apenas porque nao e producao.');
-        } else if ((req.headers.get('x-meta-capi-secret') || '') !== secret) {
-            return NextResponse.json({ error: 'Nao autorizado' }, { status: 401, headers });
+            console.error('❌ [meta-capi] META_CAPI_SITE_SECRET nao configurada — endpoint recusando tudo.');
+            return NextResponse.json(
+                {
+                    error: 'Endpoint desabilitado',
+                    detail: 'META_CAPI_SITE_SECRET nao esta configurada no servidor. ' +
+                        'Defina a variavel e envie o mesmo valor no header X-Meta-Capi-Secret.',
+                },
+                { status: 503, headers }
+            );
+        }
+
+        const incomingSecret = req.headers.get('x-meta-capi-secret') || '';
+        if (incomingSecret !== secret) {
+            return NextResponse.json({ error: 'Nao autorizado - header X-Meta-Capi-Secret invalido' }, { status: 401, headers });
         }
 
         const body = await req.json();

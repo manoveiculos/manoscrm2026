@@ -14,8 +14,8 @@ import { trackLeadCreated } from '@/lib/services/metaConversionService';
  * VIEW_COLS  → view "leads" (unificada legada) que NÃO tem primeiro_vendedor.
  *              Antes de adicionar coluna nova aqui, conferir o schema da view.
  */
-const LEAN_COLS = 'id,name,phone,email,source,origem,status,ai_score,ai_classification,ai_summary,vehicle_interest,assigned_consultant_id,created_at,updated_at,proxima_acao,valor_investimento,observacoes,carro_troca,region,source_table,primeiro_vendedor';
-const VIEW_COLS = 'id,name,phone,email,source,origem,status,ai_score,ai_classification,ai_summary,vehicle_interest,assigned_consultant_id,created_at,updated_at,proxima_acao,valor_investimento,observacoes,carro_troca,region,source_table';
+const LEAN_COLS = 'id,name,phone,email,source,origem,status,ai_score,ai_classification,ai_summary,vehicle_interest,meta_content_id,assigned_consultant_id,created_at,updated_at,proxima_acao,valor_investimento,observacoes,carro_troca,region,source_table,primeiro_vendedor';
+const VIEW_COLS = 'id,name,phone,email,source,origem,status,ai_score,ai_classification,ai_summary,vehicle_interest,meta_content_id,assigned_consultant_id,created_at,updated_at,proxima_acao,valor_investimento,observacoes,carro_troca,region,source_table';
 
 export async function getLeads(consultantId?: string, leadId?: string) {
     const cacheKey = `leads_${consultantId || 'all'}_${leadId || 'none'}`;
@@ -374,6 +374,7 @@ function mapToCRM26(details: any) {
     }
     
     if (details.vehicle_interest) obj.interesse = details.vehicle_interest;
+    if (details.meta_content_id) obj.meta_content_id = details.meta_content_id;
     if (details.valor_investimento) obj.valor_investimento = details.valor_investimento;
     if (details.assigned_consultant_id) obj.assigned_consultant_id = details.assigned_consultant_id;
     if (details.cpf) obj.cpf = details.cpf;

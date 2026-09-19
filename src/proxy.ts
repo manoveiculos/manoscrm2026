@@ -17,6 +17,20 @@ export async function middleware(request: NextRequest) {
     const isApi = path.startsWith('/api');
 
     /**
+     * Resposta de API nunca pode ser cacheada por intermediario.
+     *
+     * O dominio de producao fica atras de um CDN (Server: hcdn / Hostinger) e as
+     * rotas nao mandavam Cache-Control nenhum — ou seja, o CDN decidia sozinho.
+     * Uma resposta autenticada guardada em cache pode ser entregue pra outra
+     * pessoa; com /api/billing/records isso seria dado de cliente vazando por
+     * cache mesmo com a rota ja protegida na origem.
+     */
+    if (isApi) {
+        supabaseResponse.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+        supabaseResponse.headers.set('Pragma', 'no-cache');
+    }
+
+    /**
      * Rotas /api que NAO passam pela sessao do Supabase.
      *
      * Ate 19/09/2026 o matcher excluia /api inteiro, entao NENHUMA rota de API
@@ -83,7 +97,7 @@ export async function middleware(request: NextRequest) {
         // com HTML e pareceria sucesso. Responde 401 JSON.
         return NextResponse.json(
             { error: 'Nao autenticado', detail: 'Esta rota exige sessao. Faca login no CRM.' },
-            { status: 401 }
+            { status: 401, headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, private' } }
         );
     }
 
@@ -110,7 +124,7 @@ export async function middleware(request: NextRequest) {
                 if (isApi) {
                     return NextResponse.json(
                         { error: 'Nao autorizado', detail: 'Usuario sem consultor ativo.' },
-                        { status: 403 }
+                        { status: 403, headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, private' } }
                     );
                 }
                 // Usuário não autorizado ou não ativo: desloga e redireciona

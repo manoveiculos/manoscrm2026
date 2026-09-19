@@ -76,7 +76,7 @@ export const leadService = {
         // Colunas lean para pipeline (evita select('*') com 50+ colunas)
         // Colunas que EXISTEM na VIEW 'leads' (fix_view_include_master.sql)
         // Não incluir: plataforma_meta, consultant_name, primeiro_vendedor, churn_probability, next_step, cidade
-        const LEAN_COLS = 'id,name,phone,email,source,origem,status,ai_score,ai_classification,ai_summary,vehicle_interest,assigned_consultant_id,created_at,updated_at,proxima_acao,valor_investimento,observacoes,carro_troca,region,source_table';
+        const LEAN_COLS = 'id,name,phone,email,source,origem,status,ai_score,ai_classification,ai_summary,vehicle_interest,meta_content_id,assigned_consultant_id,created_at,updated_at,proxima_acao,valor_investimento,observacoes,carro_troca,region,source_table';
 
         try {
             const client = this.getClient(supabase);
@@ -363,7 +363,7 @@ export const leadService = {
         // carro_troca, ai_summary, etc). Sem cache — sempre lê fresco da VIEW.
         const { data, error } = await client
             .from('leads')
-            .select('id, name, phone, email, source, origem, status, ai_score, ai_classification, ai_summary, vehicle_interest, assigned_consultant_id, created_at, updated_at, proxima_acao, valor_investimento, observacoes, carro_troca, region, source_table, ai_reason')
+            .select('id, name, phone, email, source, origem, status, ai_score, ai_classification, ai_summary, vehicle_interest, meta_content_id, assigned_consultant_id, created_at, updated_at, proxima_acao, valor_investimento, observacoes, carro_troca, region, source_table, ai_reason')
             .eq('id', leadId)
             .maybeSingle();
 
