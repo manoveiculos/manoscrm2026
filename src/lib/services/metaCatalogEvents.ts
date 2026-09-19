@@ -120,9 +120,18 @@ async function sendCatalogEvent(eventName: 'ViewContent' | 'AddToCart' | 'Purcha
 
     // content_type sem content_ids gera aviso no diagnostico da Meta — os dois
     // andam juntos ou nenhum vai.
+    //
+    // Alem de content_ids mandamos `contents`, que a doc da Meta descreve como a
+    // forma detalhada (id + quantity + item_price). Carro e sempre quantity 1.
+    // Os dois convivem: content_ids e o que casa com o retailer_id do feed,
+    // contents carrega o preco unitario do item.
     if (resolved) {
         options.content_type = 'product';
         options.content_ids = [resolved.retailerId];
+
+        const item: Record<string, any> = { id: resolved.retailerId, quantity: 1 };
+        if (value !== null) item.item_price = value;
+        options.contents = [item];
     }
     if (value !== null) {
         options.value = value;

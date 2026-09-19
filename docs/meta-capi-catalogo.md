@@ -68,6 +68,29 @@ Todos saem com:
 }
 ```
 
+### Obrigatórios num evento de site (doc da Meta)
+
+A [doc da Conversions API](https://developers.facebook.com/documentation/ads-commerce/conversions-api/parameters)
+lista três campos como obrigatórios quando `action_source: "website"`:
+
+| Campo | De onde vem |
+|---|---|
+| `action_source` | fixo `"website"` |
+| `client_user_agent` | o site repassa o UA **do visitante** (em chamada server-to-server, o header traz o UA do servidor dele — por isso o snippet manda explícito) |
+| `event_source_url` | URL da página do veículo |
+
+Faltando algum, o `meta-service` registra no log em vez de deixar passar batido. **Não
+fabricamos** user agent nem URL: dado inventado é pior que ausente.
+
+Além de `content_ids`, mandamos `contents` — a forma detalhada da doc:
+
+```json
+"content_ids": ["3563862"],
+"contents": [{ "id": "3563862", "quantity": 1, "item_price": 219900 }]
+```
+
+O `id` do `contents` é o mesmo `retailer_id` do `content_ids`. Carro é sempre `quantity: 1`.
+
 `em`, `ph`, `external_id` e `country` são SHA256 (e-mail em minúsculo/trim, telefone
 normalizado pra E.164 `55DDDNNNNNNNNN`). `fbp`/`fbc` vão crus, como a Meta exige.
 

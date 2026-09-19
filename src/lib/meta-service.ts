@@ -244,10 +244,21 @@ export async function sendMetaConversion(
 
     const actionSource = extraOptions?.action_source || "system_generated";
 
-    // A Meta exige client_user_agent quando action_source = 'website'. Sem ele o
-    // evento entra, mas a qualidade do match despenca — melhor gritar no log.
-    if (actionSource === 'website' && !userData.client_user_agent) {
-        console.warn(`[meta-capi] ${eventName} com action_source='website' sem client_user_agent — match de identidade vai ficar fraco.`);
+    // A doc da Meta lista tres campos como obrigatorios em evento de site:
+    // client_user_agent, action_source e event_source_url. O evento ate entra
+    // sem eles, mas fica fora de especificacao e o match despenca — entao a
+    // falta e registrada em vez de passar batido.
+    // NAO inventamos user agent nem URL: dado fabricado e pior que ausente.
+    if (actionSource === 'website') {
+        const faltando: string[] = [];
+        if (!userData.client_user_agent) faltando.push('client_user_agent');
+        if (!extraOptions?.event_source_url) faltando.push('event_source_url');
+        if (faltando.length > 0) {
+            console.warn(
+                `[meta-capi] ${eventName} com action_source='website' sem ${faltando.join(' e ')} — ` +
+                `a Meta lista esses campos como obrigatorios em evento de site.`
+            );
+        }
     }
 
     const eventPayload: Record<string, any> = {
