@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getMetaAccessToken } from '@/lib/metaConfig';
 import { createClient } from '@/lib/supabase/admin';
 import { runEliteCloser } from '@/lib/services/ai-closer-service';
 import { runGenerateProposal } from '@/lib/services/proposal-service';
@@ -69,7 +70,7 @@ export async function POST(req: NextRequest) {
             });
         }
 
-        const META_TOKEN = process.env.META_ACCESS_TOKEN || process.env.NEXT_PUBLIC_META_ACCESS_TOKEN;
+        const META_TOKEN = getMetaAccessToken();
         if (!META_TOKEN) {
             console.error('META_ACCESS_TOKEN not configured');
             return NextResponse.json({ error: 'Token missing' }, { status: 500 });

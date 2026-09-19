@@ -1,4 +1,5 @@
 import { sendMetaConversion, MetaLeadData, MetaConversionOptions } from '@/lib/meta-service';
+import { getMetaAccessToken, getMetaEventsUrl } from '@/lib/metaConfig';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { resolveCatalogVehicle } from '@/lib/services/metaCatalog';
 
@@ -189,11 +190,8 @@ export async function retryFailedConversionLog(logId: string) {
     const userData = eventData.user_data || {};
     const customData = eventData.custom_data || {};
 
-    const pixelId = process.env.META_PIXEL_ID || '995826668986455';
-    const accessToken = process.env.META_ACCESS_TOKEN;
-    const apiVersion = process.env.META_API_VERSION || 'v26.0';
-
-    const metaUrl = `https://graph.facebook.com/${apiVersion}/${pixelId}/events`;
+    const accessToken = getMetaAccessToken();
+    const metaUrl = getMetaEventsUrl();
 
     const response = await fetch(metaUrl, {
         method: 'POST',

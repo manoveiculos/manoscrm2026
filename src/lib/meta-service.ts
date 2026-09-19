@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import { getMetaPixelId, getMetaAccessToken, getMetaApiVersion } from '@/lib/metaConfig';
 import { supabaseAdmin, supabaseAdminUsingServiceRole } from '@/lib/supabaseAdmin';
 
 /**
@@ -142,9 +143,9 @@ export async function sendMetaConversion(
     eventName: string = 'Lead',
     extraOptions?: MetaConversionOptions
 ) {
-    const pixelId = process.env.META_PIXEL_ID || process.env.NEXT_PUBLIC_META_PIXEL_ID || '995826668986455';
-    const accessToken = process.env.META_ACCESS_TOKEN || process.env.NEXT_PUBLIC_META_ACCESS_TOKEN;
-    const apiVersion = process.env.META_API_VERSION || 'v26.0';
+    const pixelId = getMetaPixelId();
+    const accessToken = getMetaAccessToken();
+    const apiVersion = getMetaApiVersion();
 
     if (!pixelId || !accessToken) {
         console.error('❌ Erro Meta: META_PIXEL_ID ou META_ACCESS_TOKEN não configurados no .env.local');

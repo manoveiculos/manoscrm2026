@@ -14,9 +14,38 @@ export async function middleware(request: NextRequest) {
 
     const path = request.nextUrl.pathname;
     const isLoginPage = path === '/login';
-    const isPublicApi = path.startsWith('/api/auth') || path.startsWith('/api/webhook') || path.startsWith('/api/health') || path.startsWith('/api/extension') || path.startsWith('/api/cron');
+    const isApi = path.startsWith('/api');
+
+    /**
+     * Rotas /api que NAO passam pela sessao do Supabase.
+     *
+     * Ate 19/09/2026 o matcher excluia /api inteiro, entao NENHUMA rota de API
+     * exigia login — /api/billing/records devolvia 200 com dado de cliente pra
+     * qualquer um. Agora o padrao e fechado e esta lista e a excecao.
+     *
+     * So entra aqui quem tem autenticacao propria (segredo/token) ou e chamado
+     * por quem nao tem cookie de sessao: webhooks externos, crons, trigger do
+     * banco, extensao do Chrome e o site do veiculo.
+     */
+    const PUBLIC_API_PREFIXES = [
+        '/api/auth',                    // login
+        '/api/health',                  // healthcheck
+        '/api/webhook',                 // webhooks externos (Evolution, portais, Meta)
+        '/api/cron',                    // crons — validam CRON_SECRET
+        '/api/extension',               // extensao Chrome — valida EXTENSION_API_SECRET
+        '/api/lead/fipe-search',        // idem (chamada pela extensao)
+        '/api/lead/next-steps',         // idem (chamada pela extensao)
+        '/api/meta-agent',              // valida META_AGENT_CONNECTOR_TOKEN
+        '/api/meta-capi/vehicle',       // site do veiculo — valida META_CAPI_SITE_SECRET
+        '/api/compras/webhooks',        // trigger do Postgres
+        '/api/leads/rescue-stale',      // agendador externo, tem segredo proprio
+    ];
+    const isPublicApi = PUBLIC_API_PREFIXES.some(prefix => path === prefix || path.startsWith(prefix + '/'));
     const isEmbed = path === '/pipeline/embed';
-    const isStaticAsset = path.includes('.') || path.startsWith('/_next');
+    // Um ponto no caminho marcava "asset estatico" e pulava a autenticacao.
+    // Em /api isso seria uma porta dos fundos (ex: /api/algo.json), entao a
+    // regra do ponto nao vale pra API.
+    const isStaticAsset = (!isApi && path.includes('.')) || path.startsWith('/_next');
 
     // Se for um asset estático, API pública ou Embed, ignoramos
     if (isStaticAsset || isPublicApi || isEmbed) {
@@ -49,6 +78,15 @@ export async function middleware(request: NextRequest) {
     const { data: { user } } = await supabase.auth.getUser();
 
     // Lógica de Redirecionamento
+    if (!user && isApi) {
+        // Cliente de API nao entende redirect pra tela de login: receberia 200
+        // com HTML e pareceria sucesso. Responde 401 JSON.
+        return NextResponse.json(
+            { error: 'Nao autenticado', detail: 'Esta rota exige sessao. Faca login no CRM.' },
+            { status: 401 }
+        );
+    }
+
     if (!user && !isLoginPage) {
         // Redireciona para login se não estiver autenticado
         const loginUrl = new URL('/login', request.url);
@@ -69,6 +107,12 @@ export async function middleware(request: NextRequest) {
                 .maybeSingle();
 
             if (!consultant || consultant.status !== 'active') {
+                if (isApi) {
+                    return NextResponse.json(
+                        { error: 'Nao autorizado', detail: 'Usuario sem consultor ativo.' },
+                        { status: 403 }
+                    );
+                }
                 // Usuário não autorizado ou não ativo: desloga e redireciona
                 const loginUrl = new URL('/login?error=unauthorized', request.url);
                 const redirectResponse = NextResponse.redirect(loginUrl);
@@ -125,11 +169,13 @@ export default middleware;
 export const proxy = middleware;
 
 export const config = {
+    // ATENCAO: /api NAO e mais excluido do matcher. A excecao agora e a
+    // PUBLIC_API_PREFIXES no topo do arquivo — padrao fechado, excecao explicita.
     matcher: [
         /*
          * Corresponde a todos os caminhos, exceto arquivos estáticos conhecidos.
          * Usamos uma lógica mais abrangente para garantir segurança total.
          */
-        '/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+        '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
     ],
 };

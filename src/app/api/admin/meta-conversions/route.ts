@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getMetaPixelId, getMetaAccessToken } from '@/lib/metaConfig';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { sendMetaConversion } from '@/lib/meta-service';
 import {
@@ -13,8 +14,8 @@ import { retryFailedConversionLog } from '@/lib/services/metaConversionService';
 
 export async function GET(req: NextRequest) {
     try {
-        const pixelId = process.env.META_PIXEL_ID || process.env.NEXT_PUBLIC_META_PIXEL_ID || '995826668986455';
-        const accessTokenConfigured = Boolean(process.env.META_ACCESS_TOKEN || process.env.NEXT_PUBLIC_META_ACCESS_TOKEN);
+        const pixelId = getMetaPixelId();
+        const accessTokenConfigured = Boolean(getMetaAccessToken());
         const apiVersion = process.env.META_API_VERSION || 'v26.0';
 
         // Buscar logs mais recentes

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getMetaPixelId, getMetaAccessToken, getMetaApiVersion } from '@/lib/metaConfig';
 import {
     trackVehicleViewContent,
     trackVehicleAddToCart,
@@ -104,14 +105,25 @@ export async function POST(req: NextRequest) {
     const headers = corsHeaders(req);
 
     try {
-        // Trava opcional: se o segredo estiver configurado, passa a ser obrigatorio.
-        // Sem isso qualquer um consegue injetar Purchase no pixel e sujar a otimizacao.
+        // FALHA FECHADO. Este endpoint escreve no pixel de anuncios: sem trava,
+        // qualquer um que descubra a URL injeta Purchase e estraga a otimizacao
+        // das campanhas. Por isso o segredo nao e opcional em producao.
         const secret = process.env.META_CAPI_SITE_SECRET;
-        if (secret) {
-            const sent = req.headers.get('x-meta-capi-secret') || '';
-            if (sent !== secret) {
-                return NextResponse.json({ error: 'Nao autorizado' }, { status: 401, headers });
+        if (!secret) {
+            if (process.env.NODE_ENV === 'production') {
+                console.error('❌ [meta-capi] META_CAPI_SITE_SECRET nao configurada — endpoint recusando tudo.');
+                return NextResponse.json(
+                    {
+                        error: 'Endpoint desabilitado',
+                        detail: 'META_CAPI_SITE_SECRET nao esta configurada no servidor. ' +
+                            'Defina a variavel na Vercel e envie o mesmo valor no header X-Meta-Capi-Secret.',
+                    },
+                    { status: 503, headers }
+                );
             }
+            console.warn('⚠️ [meta-capi] Sem META_CAPI_SITE_SECRET — liberado apenas porque nao e producao.');
+        } else if ((req.headers.get('x-meta-capi-secret') || '') !== secret) {
+            return NextResponse.json({ error: 'Nao autorizado' }, { status: 401, headers });
         }
 
         const body = await req.json();
@@ -219,10 +231,11 @@ export async function GET(req: NextRequest) {
             : 'SUPABASE_SERVICE_ROLE_KEY ausente: os eventos vao pra Meta, mas o log de auditoria e rejeitado pela RLS e o painel /admin/meta-conversions fica vazio.',
         endpoint: 'POST /api/meta-capi/vehicle',
         events: CATALOG_EVENTS,
-        pixel_id: process.env.META_PIXEL_ID || '995826668986455',
-        api_version: process.env.META_API_VERSION || 'v26.0',
-        token_configurado: Boolean(process.env.META_ACCESS_TOKEN || process.env.NEXT_PUBLIC_META_ACCESS_TOKEN),
-        segredo_exigido: Boolean(process.env.META_CAPI_SITE_SECRET),
+        pixel_id: getMetaPixelId(),
+        api_version: getMetaApiVersion(),
+        token_configurado: Boolean(getMetaAccessToken()),
+        segredo_exigido: true,
+        segredo_configurado: Boolean(process.env.META_CAPI_SITE_SECRET),
         test_event_code_global: process.env.META_TEST_EVENT_CODE
             ? 'ATIVO (todos os eventos vao pro modo teste)'
             : 'inativo',

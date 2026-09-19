@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { verifyExtensionToken } from '@/lib/extensionAuth';
 import { getGeminiModel } from '@/lib/aiProviders';
 
 export async function POST(req: NextRequest) {
+    // Rota chamada pela extensao (origem cross-site, sem cookie de sessao):
+    // a protecao e o EXTENSION_API_SECRET. Antes nao verificava nada.
+    const unauthorized = verifyExtensionToken(req);
+    if (unauthorized) return unauthorized;
+
     try {
         const { brand, model: vehicleModel, year, query, fullQuery } = await req.json();
         const searchTarget = fullQuery || query || `${brand} ${vehicleModel} ${year}`;
