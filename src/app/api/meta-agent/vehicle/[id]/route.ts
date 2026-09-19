@@ -2,12 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { validateMetaAgentAuth } from '@/lib/metaAgentAuth';
 import { getInventory } from '@/lib/services/altimusInventory';
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
     const auth = validateMetaAgentAuth(req);
     if (!auth.valid) return auth.response!;
 
     try {
-        const vehicleId = (params.id || '').toLowerCase().trim();
+        const resolvedParams = await params;
+        const vehicleId = (resolvedParams.id || '').toLowerCase().trim();
         const allVehicles = await getInventory();
 
         const match = allVehicles.find(v => {
@@ -16,7 +17,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         });
 
         if (!match) {
-            return NextResponse.json({ error: `Veículo '${params.id}' não encontrado no estoque atual` }, { status: 404 });
+            return NextResponse.json({ error: `Veículo '${resolvedParams.id}' não encontrado no estoque atual` }, { status: 404 });
         }
 
         return NextResponse.json({

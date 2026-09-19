@@ -96,7 +96,39 @@ export interface MetaConversionOptions {
     test_event_code?: string;
     lead_quality?: string;
     reason?: string;
+    /**
+     * 'website' para eventos originados na navegacao do cliente (ViewContent,
+     * AddToCart, Purchase do site). Default 'system_generated' para os eventos
+     * de funil disparados pelo proprio CRM.
+     */
+    action_source?: string;
+    /** URL da pagina que originou o evento (obrigatorio de fato quando action_source = 'website'). */
+    event_source_url?: string;
+    /** 'product' para casar com o catalogo de veiculos. */
+    content_type?: string;
+    /**
+     * IDs do catalogo. REGRA DE OURO: tem que ser o retailer_id do feed
+     * (o <id> do XML da Altimus). Nunca um ID interno do CRM.
+     */
+    content_ids?: Array<string | number> | string | number;
     [key: string]: any;
+}
+
+/** Chaves que sao controle de evento e NAO devem vazar pra dentro de custom_data. */
+const RESERVED_OPTION_KEYS = [
+    'lead_event_source', 'event_id', 'value', 'currency', 'test_event_code',
+    'lead_quality', 'reason', 'action_source', 'event_source_url',
+    'content_type', 'content_ids',
+];
+
+/** Normaliza content_ids para array de string (formato que a Meta casa com o feed). */
+function normalizeContentIds(raw: MetaConversionOptions['content_ids']): string[] | null {
+    if (raw === undefined || raw === null) return null;
+    const arr = Array.isArray(raw) ? raw : [raw];
+    const out = arr
+        .map(v => (v === undefined || v === null ? '' : String(v).trim()))
+        .filter(Boolean);
+    return out.length > 0 ? out : null;
 }
 
 /**
@@ -183,9 +215,18 @@ export async function sendMetaConversion(
         source: leadData.source || leadData.origem,
     };
 
-    if (extraOptions?.value !== undefined) {
+    if (extraOptions?.value !== undefined && extraOptions.value !== null) {
         customData.value = Number(extraOptions.value) || 0;
         customData.currency = extraOptions.currency || "BRL";
+    }
+
+    // Dados de catalogo (ViewContent / AddToCart / Purchase de veiculo)
+    const contentIds = normalizeContentIds(extraOptions?.content_ids);
+    if (contentIds) {
+        customData.content_ids = contentIds;
+        customData.content_type = extraOptions?.content_type || 'product';
+    } else if (extraOptions?.content_type) {
+        customData.content_type = extraOptions.content_type;
     }
 
     if (extraOptions?.lead_quality) customData.lead_quality = extraOptions.lead_quality;
@@ -194,24 +235,34 @@ export async function sendMetaConversion(
     // Mesclar outras opções customizadas se fornecidas
     if (extraOptions) {
         Object.keys(extraOptions).forEach(key => {
-            if (!['lead_event_source', 'event_id', 'value', 'currency', 'test_event_code', 'lead_quality', 'reason'].includes(key)) {
+            if (!RESERVED_OPTION_KEYS.includes(key)) {
                 customData[key] = extraOptions[key];
             }
         });
     }
 
-    const payload: Record<string, any> = {
-        data: [
-            {
-                event_name: eventName,
-                event_time: nowSec,
-                action_source: "system_generated",
-                event_id: eventId,
-                user_data: userData,
-                custom_data: customData
-            }
-        ]
+    const actionSource = extraOptions?.action_source || "system_generated";
+
+    // A Meta exige client_user_agent quando action_source = 'website'. Sem ele o
+    // evento entra, mas a qualidade do match despenca — melhor gritar no log.
+    if (actionSource === 'website' && !userData.client_user_agent) {
+        console.warn(`[meta-capi] ${eventName} com action_source='website' sem client_user_agent — match de identidade vai ficar fraco.`);
+    }
+
+    const eventPayload: Record<string, any> = {
+        event_name: eventName,
+        event_time: nowSec,
+        action_source: actionSource,
+        event_id: eventId,
+        user_data: userData,
+        custom_data: customData
     };
+
+    if (extraOptions?.event_source_url) {
+        eventPayload.event_source_url = extraOptions.event_source_url;
+    }
+
+    const payload: Record<string, any> = { data: [eventPayload] };
 
     // Suporte a test_event_code da aba "Testar Eventos" no Meta Events Manager
     const testCode = extraOptions?.test_event_code || process.env.META_TEST_EVENT_CODE;
@@ -291,6 +342,7 @@ async function logMetaConversionAudit(data: {
     payload_sent: any;
     error_message?: string | null;
 }) {
+    if (typeof window !== 'undefined') return;
     try {
         await supabaseAdmin.from('meta_conversions_log').insert([{
             lead_id: data.lead_id || null,
