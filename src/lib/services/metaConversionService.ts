@@ -77,13 +77,20 @@ export async function trackProposalSubmitted(leadData: MetaLeadData, estimatedVa
  * Atenção: veículo vendido sai do feed da Altimus. Se a venda for lançada dias
  * depois, o passo 2 falha — por isso vale passar o vehicleId explícito quando
  * o CRM souber qual carro foi.
+ *
+ * action_source = 'physical_store': a venda fecha na loja e é lançada aqui no
+ * CRM, sem navegador envolvido. A doc da Conversions API exige
+ * client_user_agent e event_source_url em evento 'website', e este evento não
+ * tem nenhum dos dois — marcá-lo como 'website' seria declarar uma origem que
+ * não existe e derrubar a qualidade do sinal. Quem tem contexto de navegador
+ * (ViewContent/AddToCart, vindos do site) continua em 'website'.
  */
 export async function trackDealWon(
     leadData: MetaLeadData,
     saleValue?: number,
     testEventCode?: string,
     vehicleId?: string | number | null,
-    actionSource: string = 'website'
+    actionSource: string = 'physical_store'
 ) {
     const resolved = await resolveCatalogVehicle({
         vehicleId,
