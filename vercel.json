@@ -30,6 +30,9 @@
     },
     "src/app/api/lead/finish/route.ts": {
       "maxDuration": 60
+    },
+    "src/app/api/marketing/execute/route.ts": {
+      "maxDuration": 60
     }
   }
 }

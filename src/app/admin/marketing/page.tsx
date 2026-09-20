@@ -4,8 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import {
     Megaphone, FileSearch, Camera, Radar, Repeat, MessageCircle,
-    RefreshCw, CheckCircle2, XCircle, Clock, AlertTriangle, ChevronDown, Loader2,
+    RefreshCw, CheckCircle2, XCircle, Clock, AlertTriangle, ChevronDown, Loader2, Play,
 } from 'lucide-react';
+import { ExecuteModal } from './ExecuteModal';
 import {
     ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid,
 } from 'recharts';
@@ -78,6 +79,7 @@ export default function MarketingSquadPage() {
     const [loading, setLoading] = useState(true);
     const [busyId, setBusyId] = useState<string | null>(null);
     const [expanded, setExpanded] = useState<string | null>(null);
+    const [showExecute, setShowExecute] = useState(false);
     const lastFetchRef = useRef(0);
 
     const fetchFeed = useCallback(async () => {
@@ -156,6 +158,9 @@ export default function MarketingSquadPage() {
                         )}
                         <button onClick={() => fetchFeed()} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/[0.04] border border-white/[0.08] hover:bg-white/[0.08] transition-colors">
                             <RefreshCw className="w-3.5 h-3.5" /> Atualizar
+                        </button>
+                        <button onClick={() => setShowExecute(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-white font-bold transition-colors">
+                            <Play className="w-3.5 h-3.5" /> Executar
                         </button>
                     </div>
                 </div>
@@ -340,6 +345,10 @@ export default function MarketingSquadPage() {
                             </div>
                         )}
                     </>
+                )}
+
+                {showExecute && (
+                    <ExecuteModal onClose={() => setShowExecute(false)} onDone={() => fetchFeed()} />
                 )}
             </div>
         </div>
