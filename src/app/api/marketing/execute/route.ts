@@ -176,9 +176,17 @@ async function runVitrine(admin: ReturnType<typeof createAdminClient>, body: any
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ image_url: signedIn.signedUrl, instrucao: finalInstrucao }),
     });
-    const n8nJson = await n8nRes.json().catch(() => null);
-    if (!n8nRes.ok || !n8nJson?.foto_tratada_base64) {
-        const errMsg = n8nJson?.message || `webhook n8n respondeu ${n8nRes.status}`;
+    const rawText = await n8nRes.text();
+    let n8nJson: any = null;
+    try { n8nJson = JSON.parse(rawText); } catch { /* corpo não-JSON, tratado abaixo */ }
+    // n8n às vezes devolve o item cru ({...}), às vezes envolto em array ([{...}])
+    // dependendo de como o node "Respond to Webhook" serializa — aceita os dois.
+    const item = Array.isArray(n8nJson) ? n8nJson[0] : n8nJson;
+    const fotoBase64: string | undefined = item?.foto_tratada_base64 || item?.data?.foto_tratada_base64;
+
+    if (!n8nRes.ok || !fotoBase64) {
+        const errMsg = item?.message
+            || (rawText ? `n8n (${n8nRes.status}): ${rawText.slice(0, 300)}` : `webhook n8n respondeu ${n8nRes.status} sem corpo`);
         await admin.from('marketing_agent_runs').insert({
             squad: 'vitrine', skill_name: 'vitrine-trata-foto', run_type: 'tratamento_foto',
             status: 'error', title: 'Falha ao tratar foto', error_message: errMsg,
@@ -187,7 +195,7 @@ async function runVitrine(admin: ReturnType<typeof createAdminClient>, body: any
         throw new Error(errMsg);
     }
 
-    const outBuf = Buffer.from(n8nJson.foto_tratada_base64, 'base64');
+    const outBuf = Buffer.from(fotoBase64, 'base64');
     const outPath = storagePath.replace(/^vitrine\//, 'vitrine/outputs/').replace(/(\.[a-zA-Z0-9]+)?$/, '-tratada.jpg');
     const { error: upErr } = await admin.storage.from(BUCKET).upload(outPath, outBuf, { contentType: 'image/jpeg', upsert: true });
     if (upErr) throw new Error(upErr.message);
