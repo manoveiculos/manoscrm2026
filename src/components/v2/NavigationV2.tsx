@@ -28,6 +28,7 @@ import {
     Bike, // App de Scooters (Renato) — exclusivo Alexandre
     CalendarClock, // Agenda de Visitas
     PieChart, // Divisão de Lucro (sócios Alexandre e Ivo)
+    Megaphone, // Time de Marketing (squad de agentes de IA)
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
@@ -71,6 +72,7 @@ const NAV_ITEMS: NavItem[] = [
     { label: 'Saúde', icon: Activity, href: '/admin/health', adminOnly: true },
     { label: 'SDR Bench', icon: Bot, href: '/admin/sdr-bench', adminOnly: true },
     { label: 'War Room', icon: Activity, href: '/admin/live', adminOnly: true },
+    { label: 'Time de Marketing', icon: Megaphone, href: '/admin/marketing', adminOnly: true },
     { label: 'Configurações', icon: SlidersHorizontal, href: '/admin/config', adminOnly: true },
 ];
 
