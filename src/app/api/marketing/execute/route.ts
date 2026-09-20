@@ -136,7 +136,9 @@ async function runPerito(admin: ReturnType<typeof createAdminClient>, body: any)
     const valorTeto = extractNumber(resultText, /Teto:\s*R\$\s*([\d.,]+)/i);
     const fipeExtraida = fipe ? Number(fipe) : extractNumber(resultText, /FIPE:\s*R\$\s*([\d.,]+)/i);
     const firstLine = (resultText.split('\n').find(l => l.trim().length > 0) || 'Laudo analisado').trim();
-    const pendenteDado = /peça.*(FIPE|valor pedido)|não consegui montar a proposta|informe a FIPE/i.test(resultText);
+    // Sinal confiável de que NÃO saiu proposta calculada: sem "Abrir em: R$" no texto,
+    // não importa como o Claude fraseou o pedido de FIPE/valor.
+    const pendenteDado = valorAbrir === null;
 
     const { data: run, error: insErr } = await admin.from('marketing_agent_runs').insert({
         squad: 'perito',
