@@ -65,6 +65,21 @@ function metricLabel(key: string): string {
     return map[key] || key.replace(/_/g, ' ');
 }
 
+function parseRefUrl(ref: string | null | undefined): { isUrl: boolean; href: string; text: string } {
+    if (!ref) return { isUrl: false, href: '', text: '' };
+    const trimmed = ref.trim();
+    if (/^https?:\/\//i.test(trimmed) || /^mailto:/i.test(trimmed)) {
+        return { isUrl: true, href: trimmed, text: trimmed };
+    }
+    if (/^www\./i.test(trimmed)) {
+        return { isUrl: true, href: `https://${trimmed}`, text: trimmed };
+    }
+    if (/^[a-zA-Z0-9-]+\.[a-zA-Z]{2,}(\/.*)?$/.test(trimmed)) {
+        return { isUrl: true, href: `https://${trimmed}`, text: trimmed };
+    }
+    return { isUrl: false, href: '', text: trimmed };
+}
+
 const STATUS_STYLE: Record<string, { dot: string; label: string; text: string }> = {
     success: { dot: 'bg-emerald-500', label: 'ok', text: 'text-emerald-400' },
     error: { dot: 'bg-red-500', label: 'erro', text: 'text-red-400' },
@@ -72,6 +87,23 @@ const STATUS_STYLE: Record<string, { dot: string; label: string; text: string }>
     approved: { dot: 'bg-blue-500', label: 'aprovado', text: 'text-blue-400' },
     rejected: { dot: 'bg-zinc-500', label: 'rejeitado', text: 'text-zinc-400' },
 };
+
+const DEFAULT_SQUAD_INFO = {
+    label: 'Geral',
+    missao: 'Agente de marketing',
+    icon: Megaphone,
+    color: '#a1a1aa',
+};
+
+function getSquadInfo(squad?: string | null) {
+    if (!squad) return DEFAULT_SQUAD_INFO;
+    const key = squad.toLowerCase() as SquadKey;
+    if (SQUAD_INFO[key]) return SQUAD_INFO[key];
+    return {
+        ...DEFAULT_SQUAD_INFO,
+        label: squad.charAt(0).toUpperCase() + squad.slice(1),
+    };
+}
 
 export default function MarketingSquadPage() {
     const supabase = useMemo(() => createClient(), []);
@@ -130,7 +162,9 @@ export default function MarketingSquadPage() {
 
     const kpiBySquad = useMemo(() => {
         const m: Partial<Record<SquadKey, KpiRow>> = {};
-        for (const row of data?.kpis || []) m[row.squad] = row;
+        for (const row of data?.kpis || []) {
+            if (row?.squad) m[row.squad] = row;
+        }
         return m;
     }, [data]);
 
@@ -221,9 +255,10 @@ export default function MarketingSquadPage() {
                                 ) : (
                                     <div className="space-y-2 max-h-[600px] overflow-y-auto custom-scrollbar">
                                         {data!.pendingApprovals.map((run) => {
-                                            const info = SQUAD_INFO[run.squad];
+                                            const info = getSquadInfo(run.squad);
                                             const proposta = formatBRL(run.metrics?.valor_proposta);
                                             const fipe = formatBRL(run.metrics?.fipe);
+                                            const outRef = parseRefUrl(run.output_ref);
                                             return (
                                                 <div key={run.id} className="rounded-xl bg-black/30 border border-white/[0.06] p-3">
                                                     <div className="flex items-center gap-1.5 text-[10px] text-zinc-500 mb-1">
@@ -238,8 +273,12 @@ export default function MarketingSquadPage() {
                                                             {proposta && <>Proposta: {proposta}</>}{proposta && fipe && ' · '}{fipe && <>FIPE: {fipe}</>}
                                                         </p>
                                                     )}
-                                                    {run.output_ref && (
-                                                        <a href={run.output_ref} target="_blank" rel="noreferrer" className="text-[10px] text-blue-400 hover:underline block mt-1">Ver resultado →</a>
+                                                    {outRef.text && (
+                                                        outRef.isUrl ? (
+                                                            <a href={outRef.href} target="_blank" rel="noreferrer" className="text-[10px] text-blue-400 hover:underline block mt-1">Ver resultado →</a>
+                                                        ) : (
+                                                            <p className="text-[10px] text-zinc-400 mt-1 truncate" title={outRef.text}>Resultado: {outRef.text}</p>
+                                                        )
                                                     )}
                                                     <div className="flex gap-2 mt-2.5">
                                                         <button
@@ -272,10 +311,12 @@ export default function MarketingSquadPage() {
                                 ) : (
                                     <div className="space-y-1.5 max-h-[600px] overflow-y-auto custom-scrollbar">
                                         {data.recentRuns.map((run) => {
-                                            const info = SQUAD_INFO[run.squad];
+                                            const info = getSquadInfo(run.squad);
                                             const st = STATUS_STYLE[run.status] || STATUS_STYLE.success;
                                             const isOpen = expanded === run.id;
                                             const metricEntries = Object.entries(run.metrics || {});
+                                            const inRef = parseRefUrl(run.input_ref);
+                                            const outRef = parseRefUrl(run.output_ref);
                                             return (
                                                 <div key={run.id} className="rounded-xl hover:bg-white/[0.03] transition-colors">
                                                     <button
@@ -308,9 +349,21 @@ export default function MarketingSquadPage() {
                                                                     ))}
                                                                 </div>
                                                             )}
-                                                            <div className="flex gap-3">
-                                                                {run.input_ref && <a href={run.input_ref} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">Entrada →</a>}
-                                                                {run.output_ref && <a href={run.output_ref} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">Resultado →</a>}
+                                                            <div className="flex gap-3 flex-wrap">
+                                                                {inRef.text && (
+                                                                    inRef.isUrl ? (
+                                                                        <a href={inRef.href} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">Entrada →</a>
+                                                                    ) : (
+                                                                        <span className="text-zinc-400" title={inRef.text}>Entrada: {inRef.text}</span>
+                                                                    )
+                                                                )}
+                                                                {outRef.text && (
+                                                                    outRef.isUrl ? (
+                                                                        <a href={outRef.href} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">Resultado →</a>
+                                                                    ) : (
+                                                                        <span className="text-zinc-400" title={outRef.text}>Resultado: {outRef.text}</span>
+                                                                    )
+                                                                )}
                                                             </div>
                                                             {run.approved_by && (
                                                                 <p className="text-zinc-600">{run.status === 'approved' ? 'Aprovado' : 'Decidido'} por {run.approved_by} · {timeAgo(run.approved_at)}</p>
