@@ -20,6 +20,7 @@ interface PainelCaixaAcertoProps {
     veiculos: any[];
     retiradas: RetiradaSocio[];
     acertos: AcertoRegistrado[];
+    entradasSemVeiculo?: any[];
     socioAtual: NomeSocio | null;
     onAtualizar: () => void;
 }
@@ -63,7 +64,7 @@ function Linha({ rotulo, valor, sinal }: { rotulo: string; valor: number; sinal:
 }
 
 function CardEmpresa({ e }: { e: CaixaEmpresa }) {
-    const semMovimento = !e.recebidoVendas && !e.pagoCompras && !e.pagoGastos && !e.retiradas && !e.acertosRecebidos && !e.acertosPagos;
+    const semMovimento = !e.recebidoVendas && !e.pagoCompras && !e.pagoGastos && !e.pagoComissoesImpostos && !e.retiradas && !e.acertosRecebidos && !e.acertosPagos;
     return (
         <div className={`bg-slate-900/80 border ${COR[e.loja].borda} rounded-xl p-5 shadow-xl relative overflow-hidden space-y-3`}>
             <div className={`absolute top-0 left-0 w-1 h-full ${COR[e.loja].barra}`} />
@@ -86,7 +87,8 @@ function CardEmpresa({ e }: { e: CaixaEmpresa }) {
                     <>
                         <Linha rotulo="Recebido em vendas" valor={e.recebidoVendas} sinal="+" />
                         <Linha rotulo="Pago em compras" valor={e.pagoCompras} sinal="−" />
-                        <Linha rotulo="Gastos pagos" valor={e.pagoGastos} sinal="−" />
+                        <Linha rotulo="Gastos de oficina/preparo" valor={e.pagoGastos} sinal="−" />
+                        <Linha rotulo="Comissões e Impostos NF" valor={e.pagoComissoesImpostos} sinal="−" />
                         <Linha rotulo="Retiradas deste caixa" valor={e.retiradas} sinal="−" />
                         <Linha rotulo="Acertos recebidos" valor={e.acertosRecebidos} sinal="+" />
                         <Linha rotulo="Acertos pagos" valor={e.acertosPagos} sinal="−" />
@@ -97,14 +99,14 @@ function CardEmpresa({ e }: { e: CaixaEmpresa }) {
             <div className="grid grid-cols-2 gap-2 border-t border-slate-800 pt-2 text-[11px]">
                 <div><span className="block text-slate-500">Investido em estoque</span><span className="font-mono text-slate-200">{brl(e.estoqueCusto)}</span></div>
                 <div><span className="block text-slate-500">A receber de clientes</span><span className="font-mono text-slate-200">{brl(e.aReceberClientes)}</span></div>
-                <div><span className="block text-slate-500">Comissões de venda</span><span className="font-mono text-orange-300">{brl(e.comissoes)}</span></div>
+                <div><span className="block text-slate-500">Comissão ({brl(e.comissoes)}) + NF ({brl(e.impostosNf)})</span><span className="font-mono text-orange-300">{brl(e.pagoComissoesImpostos)}</span></div>
                 <div><span className="block text-slate-500">Lucro do {e.dono}</span><span className="font-mono text-purple-300">{brl(e.lucroDono)}</span></div>
             </div>
         </div>
     );
 }
 
-export function PainelCaixaAcerto({ acerto, veiculos, retiradas, acertos, socioAtual, onAtualizar }: PainelCaixaAcertoProps) {
+export function PainelCaixaAcerto({ acerto, veiculos, retiradas, acertos, entradasSemVeiculo, socioAtual, onAtualizar }: PainelCaixaAcertoProps) {
     const [verDetalhe, setVerDetalhe] = useState(false);
     const [formAcerto, setFormAcerto] = useState(false);
     const [valorAcerto, setValorAcerto] = useState('');
@@ -202,21 +204,22 @@ export function PainelCaixaAcerto({ acerto, veiculos, retiradas, acertos, socioA
 
     const registrarEntrada = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!veiculoSelecionado) return setErro('Escolha o veículo da entrada de compra.');
         const valor = Number(valorEntrada);
         if (!(valor > 0)) return setErro('Informe o valor da entrada de compra.');
         const ok = await enviar(
             'entrada',
             '/api/societario/entradas',
             {
-                veiculo_id: veiculoSelecionado.id,
+                veiculo_id: veiculoSelecionado ? veiculoSelecionado.id : null,
                 loja: caixaEntrada,
                 valor,
                 forma: formaEntrada,
                 data_pagamento: dataEntrada,
-                descricao: descEntrada || undefined
+                descricao: descEntrada || (veiculoSelecionado ? undefined : 'Adiantamento / Aquisição de Veículo')
             },
-            `Entrada de ${brl(valor)} do caixa ${NOME_EMPRESA[caixaEntrada]} lançada no ${veiculoSelecionado.placa || veiculoSelecionado.modelo}.`
+            veiculoSelecionado
+                ? `Entrada de ${brl(valor)} do caixa ${NOME_EMPRESA[caixaEntrada]} lançada no ${veiculoSelecionado.placa || veiculoSelecionado.modelo}.`
+                : `Entrada/Aporte de ${brl(valor)} do caixa ${NOME_EMPRESA[caixaEntrada]} lançada sem veículo vinculado.`
         );
         if (ok) {
             setValorEntrada('');
@@ -273,7 +276,17 @@ export function PainelCaixaAcerto({ acerto, veiculos, retiradas, acertos, socioA
                 urlExcluir: `/api/societario/entradas?id=${encodeURIComponent(String(p.id))}`,
                 travada: travada(v)
             }))
-        )
+        ),
+        ...(entradasSemVeiculo || []).map((p) => ({
+            chave: `e-sv-${p.id}`,
+            data: p.data_pagamento,
+            tipo: 'Entrada compra' as const,
+            quem: `caixa ${NOME_EMPRESA[p.loja as Loja] || p.loja} · Aquisição Futura`,
+            descricao: [p.forma, p.descricao || 'Aporte / Adiantamento de Compra'].filter(Boolean).join(' · '),
+            valor: Number(p.valor),
+            urlExcluir: `/api/societario/entradas?id=${encodeURIComponent(String(p.id))}`,
+            travada: false
+        }))
     ].sort((a, b) => (b.data || '').localeCompare(a.data || ''));
 
     const retiradaCruzada = LOJA_DO_SOCIO[titular] !== caixaRetirada;
@@ -548,7 +561,7 @@ export function PainelCaixaAcerto({ acerto, veiculos, retiradas, acertos, socioA
                                     }}
                                     className={inputBase}
                                 >
-                                    <option value="">-- Escolha o veículo --</option>
+                                    <option value="">-- Sem veículo vinculado (Adiantamento / Aquisição Futura) --</option>
                                     {veiculosParaEntrada.map((v) => (
                                         <option key={v.id} value={v.id}>
                                             {v.placa ? `[${v.placa}]` : '[Sem Placa]'} {v.marca} {v.modelo} — custo {brl(Number(v.custo_aquisicao_inicial || 0))}

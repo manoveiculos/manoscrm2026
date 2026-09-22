@@ -110,7 +110,7 @@ export interface AcertoRegistrado {
 
 export interface EntradaCompra {
     id?: string;
-    veiculo_id: string;
+    veiculo_id?: string | null;
     loja: Loja;
     valor: number;
     forma?: string | null;
@@ -256,6 +256,17 @@ export async function getSocietarioDashboardData() {
         console.error('Erro ao buscar acertos entre empresas:', acertosErr.message);
     }
 
+    // 3b. Entradas de compra sem veículo vinculado (aportes / adiantamentos de compra)
+    const { data: entradasSemVeiculo, error: entradasErr } = await client
+        .from('pagamentos_compra')
+        .select('*')
+        .is('veiculo_id', null)
+        .order('data_pagamento', { ascending: false });
+
+    if (entradasErr) {
+        console.error('Erro ao buscar entradas sem veículo:', entradasErr.message);
+    }
+
     // 4. Apuração dos KPIs
     let volumeVendas = 0;
     let custoAquisicaoTotal = 0;
@@ -326,11 +337,14 @@ export async function getSocietarioDashboardData() {
         }
     };
 
+    const entradasSemVeiculoList = entradasSemVeiculo || [];
+
     return {
         veiculos: veiculosList,
         retiradas: retiradasList,
         acertos: acertosList,
-        acerto: calcularAcertoEmpresas(veiculosList, retiradasList, acertosList),
+        entradasSemVeiculo: entradasSemVeiculoList,
+        acerto: calcularAcertoEmpresas(veiculosList, retiradasList, acertosList, entradasSemVeiculoList),
         kpis
     };
 }
@@ -850,9 +864,9 @@ export async function ajustarApuracaoVeiculo(payload: {
     return { fechamento };
 }
 
-// ── ENTRADA DE COMPRA: de qual caixa saiu o dinheiro de um carro ──
+// ── ENTRADA DE COMPRA: de qual caixa saiu o dinheiro de um carro (ou aporte sem veículo) ──
 export async function registrarEntradaCompra(payload: {
-    veiculo_id: string;
+    veiculo_id?: string | null;
     loja: Loja;
     valor: number;
     forma?: string;
@@ -862,37 +876,40 @@ export async function registrarEntradaCompra(payload: {
 }) {
     const client = supabaseAdmin || supabase;
 
-    if (!payload.veiculo_id) throw new Error('Escolha o veículo da entrada.');
     if (!LOJAS.includes(payload.loja)) throw new Error('Escolha de qual caixa saiu o dinheiro.');
     const valor = Number(payload.valor);
     if (!(valor > 0)) throw new Error('Informe o valor da entrada.');
 
-    const { data: veiculo, error } = await client
-        .from('veiculos')
-        .select('*, pagamentos_compra(valor)')
-        .eq('id', payload.veiculo_id)
-        .single();
+    const veiculoId = payload.veiculo_id?.trim() || null;
 
-    if (error) {
-        throw new Error(/pagamentos_compra/.test(error.message) ? AVISO_MIGRATION : 'Veículo não encontrado.');
-    }
-    if (!veiculo) {
-        throw new Error('Veículo não encontrado.');
-    }
-    if (veiculo.aprovado_alexandre_em && veiculo.aprovado_ivo_em) {
-        throw new Error('Operação aprovada pelos dois sócios: está travada e não aceita nova entrada.');
-    }
+    if (veiculoId) {
+        const { data: veiculo, error } = await client
+            .from('veiculos')
+            .select('*, pagamentos_compra(valor)')
+            .eq('id', veiculoId)
+            .single();
 
-    const custo = Number(veiculo.custo_aquisicao_inicial || 0);
-    const lancado = (veiculo.pagamentos_compra || []).reduce((s: number, p: any) => s + Number(p.valor || 0), 0);
-    if (lancado + valor > custo + 0.01) {
-        throw new Error(`Passa do custo da compra: ${brl(lancado)} já lançado de ${brl(custo)} (cabe mais ${brl(Math.max(custo - lancado, 0))}).`);
+        if (error) {
+            throw new Error(/pagamentos_compra/.test(error.message) ? AVISO_MIGRATION : 'Veículo não encontrado.');
+        }
+        if (!veiculo) {
+            throw new Error('Veículo não encontrado.');
+        }
+        if (veiculo.aprovado_alexandre_em && veiculo.aprovado_ivo_em) {
+            throw new Error('Operação aprovada pelos dois sócios: está travada e não aceita nova entrada.');
+        }
+
+        const custo = Number(veiculo.custo_aquisicao_inicial || 0);
+        const lancado = (veiculo.pagamentos_compra || []).reduce((s: number, p: any) => s + Number(p.valor || 0), 0);
+        if (lancado + valor > custo + 0.01) {
+            throw new Error(`Passa do custo da compra: ${brl(lancado)} já lançado de ${brl(custo)} (cabe mais ${brl(Math.max(custo - lancado, 0))}).`);
+        }
     }
 
     const { data, error: insErr } = await client
         .from('pagamentos_compra')
         .insert({
-            veiculo_id: payload.veiculo_id,
+            veiculo_id: veiculoId,
             loja: payload.loja,
             valor,
             forma: payload.forma || null,

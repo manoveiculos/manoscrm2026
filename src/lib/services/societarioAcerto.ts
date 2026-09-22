@@ -16,6 +16,7 @@ export interface CaixaEmpresa {
     recebidoVendas: number; // dinheiro das vendas (a troca não é dinheiro)
     pagoCompras: number; // entradas de compra desta empresa (carro de troca não sai do caixa)
     pagoGastos: number;
+    pagoComissoesImpostos: number; // comissões e impostos NF vinculados às vendas
     retiradas: number; // saques feitos deste caixa, de qualquer sócio
     acertosRecebidos: number;
     acertosPagos: number;
@@ -23,6 +24,7 @@ export interface CaixaEmpresa {
     estoqueCusto: number; // investido em carros ainda não vendidos (parte da compra + gastos)
     aReceberClientes: number; // saldo devedor dos compradores
     comissoes: number; // comissão de venda das vendas feitas por esta empresa
+    impostosNf: number; // imposto/provisionamento de NF das vendas feitas por esta empresa
     lucroDono: number; // parte do lucro que é do dono desta empresa
 }
 
@@ -41,7 +43,7 @@ export interface RepasseOperacao {
 }
 
 export interface MovimentoAcerto {
-    tipo: 'retirada' | 'acerto' | 'troca';
+    tipo: 'retirada' | 'acerto' | 'troca' | 'compra';
     data: string;
     descricao: string;
     pagou: Loja;
@@ -126,13 +128,14 @@ export function origemDaCompra(v: any): OrigemCompra {
  * Carro de troca não sai do caixa: a parte que a outra empresa assumir abate o acerto na hora.
  * Saque de um sócio no caixa da empresa do outro e acertos registrados também abatem.
  */
-export function calcularAcertoEmpresas(veiculos: any[], retiradas: any[], acertos: any[]): AcertoEmpresas {
+export function calcularAcertoEmpresas(veiculos: any[], retiradas: any[], acertos: any[], entradasSemVeiculo: any[] = []): AcertoEmpresas {
     const novaEmpresa = (loja: Loja): CaixaEmpresa => ({
         loja,
         dono: DONO_DA_LOJA[loja],
         recebidoVendas: 0,
         pagoCompras: 0,
         pagoGastos: 0,
+        pagoComissoesImpostos: 0,
         retiradas: 0,
         acertosRecebidos: 0,
         acertosPagos: 0,
@@ -140,6 +143,7 @@ export function calcularAcertoEmpresas(veiculos: any[], retiradas: any[], acerto
         estoqueCusto: 0,
         aReceberClientes: 0,
         comissoes: 0,
+        impostosNf: 0,
         lucroDono: 0,
     });
     const empresas: Record<Loja, CaixaEmpresa> = { manos: novaEmpresa('manos'), v3: novaEmpresa('v3') };
@@ -187,7 +191,9 @@ export function calcularAcertoEmpresas(veiculos: any[], retiradas: any[], acerto
         }
 
         if (!venda) {
-            for (const loja of LOJAS) empresas[loja].estoqueCusto += origem.aporte[loja] + gastosPor[loja];
+            for (const loja of LOJAS) {
+                empresas[loja].estoqueCusto += origem.aporte[loja] + gastosPor[loja];
+            }
             continue;
         }
 
@@ -202,7 +208,12 @@ export function calcularAcertoEmpresas(veiculos: any[], retiradas: any[], acerto
             : { manos: r2(lucro / 2), v3: r2(lucro / 2) };
         empresas.manos.lucroDono += cota.manos;
         empresas.v3.lucroDono += cota.v3;
-        empresas[vendedora].comissoes += n(fechamento?.comissao_vendedor);
+
+        const comissaoVendedor = n(fechamento?.comissao_vendedor);
+        const impostoNf = n(fechamento?.imposto_nf);
+        empresas[vendedora].comissoes += comissaoVendedor;
+        empresas[vendedora].impostosNf += impostoNf;
+        empresas[vendedora].pagoComissoesImpostos += comissaoVendedor + impostoNf;
 
         const outraEmpresa = outra(vendedora);
         const devidoAOutra = r2(origem.aporte[outraEmpresa] + gastosPor[outraEmpresa] + cota[outraEmpresa]);
@@ -264,9 +275,23 @@ export function calcularAcertoEmpresas(veiculos: any[], retiradas: any[], acerto
         manosDeveV3 += de === 'manos' ? -valor : valor;
     }
 
+    for (const e of entradasSemVeiculo) {
+        const loja = lojaValida(e.loja);
+        const valor = n(e.valor);
+        empresas[loja].pagoCompras += valor;
+        movimentos.push({
+            tipo: 'compra',
+            data: e.data_pagamento,
+            descricao: e.descricao || `Entrada de compra sem veículo (${NOME_EMPRESA[loja]})`,
+            pagou: loja,
+            recebeu: loja,
+            valor,
+        });
+    }
+
     for (const loja of LOJAS) {
         const e = empresas[loja];
-        e.caixa = e.recebidoVendas - e.pagoCompras - e.pagoGastos - e.retiradas + e.acertosRecebidos - e.acertosPagos;
+        e.caixa = e.recebidoVendas - e.pagoCompras - e.pagoGastos - e.pagoComissoesImpostos - e.retiradas + e.acertosRecebidos - e.acertosPagos;
         for (const campo of Object.keys(e) as (keyof CaixaEmpresa)[]) {
             if (typeof e[campo] === 'number') (e as any)[campo] = r2(e[campo] as number);
         }

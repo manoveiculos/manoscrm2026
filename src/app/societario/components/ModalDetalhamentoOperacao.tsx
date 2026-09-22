@@ -1,10 +1,11 @@
 'use client';
 
 import React, { useState } from 'react';
-import { X, Save, Car, ArrowRightLeft, Calculator, FileText, CheckCircle2, UserCheck, Wallet, Wrench, Plus, Trash2, Lock, ShieldCheck, Landmark, Printer } from 'lucide-react';
+import { X, Save, Car, ArrowRightLeft, Calculator, FileText, CheckCircle2, UserCheck, Wallet, Wrench, Plus, Trash2, Lock, ShieldCheck, Landmark, Printer, Sparkles } from 'lucide-react';
 import { calcularFechamento, comissaoAutomatica, CustoAdicional, NOME_LOJA, PCT_COMISSAO_VENDA } from '@/lib/services/societarioService';
 import { origemDaCompra, type NomeSocio } from '@/lib/services/societarioAcerto';
 import { RelatorioNegociacaoPdf } from './RelatorioNegociacaoPdf';
+import { AssistenteTributarioModal } from './AssistenteTributarioModal';
 
 interface ModalDetalhamentoOperacaoProps {
     veiculo: any | null;
@@ -87,6 +88,7 @@ export function ModalDetalhamentoOperacao({ veiculo, socioAtual, onClose, onSave
     const [aprovando, setAprovando] = useState(false);
     const [erro, setErro] = useState('');
     const [exibirPdf, setExibirPdf] = useState(false);
+    const [exibirAssistenteTributario, setExibirAssistenteTributario] = useState(false);
 
     if (!veiculo) return null;
 
@@ -588,7 +590,19 @@ export function ModalDetalhamentoOperacao({ veiculo, socioAtual, onClose, onSave
 
                                 {/* Imposto / Dedução NF */}
                                 <div>
-                                    <label className="block font-medium text-slate-300 mb-1">Imposto / Provisionamento NF (R$)</label>
+                                    <div className="flex items-center justify-between mb-1">
+                                        <label className="block font-medium text-slate-300">Imposto / Provisionamento NF (R$)</label>
+                                        {!travada && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setExibirAssistenteTributario(true)}
+                                                className="text-[11px] font-bold text-purple-400 hover:text-purple-300 flex items-center gap-1 transition-colors cursor-pointer"
+                                                title="Simular imposto com ICMS, PIS/COFINS e IRPJ/CSLL"
+                                            >
+                                                <Sparkles className="w-3.5 h-3.5" /> Assistente Tax NF
+                                            </button>
+                                        )}
+                                    </div>
                                     <input
                                         type="number"
                                         step="0.01"
@@ -600,6 +614,15 @@ export function ModalDetalhamentoOperacao({ veiculo, socioAtual, onClose, onSave
                                     />
                                 </div>
                             </div>
+
+                            {exibirAssistenteTributario && (
+                                <AssistenteTributarioModal
+                                    valorInicialSaida={valorVenda}
+                                    valorInicialEntrada={custoAquisicao}
+                                    onClose={() => setExibirAssistenteTributario(false)}
+                                    onAplicarImposto={(val) => setImpostoNf(val)}
+                                />
+                            )}
 
                             {/* Divisão Percentual */}
                             <div className="pt-2 border-t border-slate-800/80">

@@ -31,6 +31,7 @@ export default function DivisaoDeLucroPage() {
     const [veiculos, setVeiculos] = useState<any[]>([]);
     const [retiradas, setRetiradas] = useState<RetiradaSocio[]>([]);
     const [acertos, setAcertos] = useState<AcertoRegistrado[]>([]);
+    const [entradasSemVeiculo, setEntradasSemVeiculo] = useState<any[]>([]);
     const [acerto, setAcerto] = useState<AcertoEmpresas | null>(null);
     const [kpis, setKpis] = useState<KpisSocietarios>({
         volumeVendas: 0,
@@ -64,18 +65,23 @@ export default function DivisaoDeLucroPage() {
             setAutorizado(isPermitido);
 
             const res = await fetch('/api/societario/dados');
-            const data = await res.json();
-
-            if (data && data.success) {
-                const lista = data.veiculos || [];
-                setVeiculos(lista);
-                setRetiradas(data.retiradas || []);
-                setAcertos(data.acertos || []);
-                setAcerto(data.acerto || null);
-                setSocioAtual(data.socio?.nome || null);
-                setKpis(data.kpis);
-                // modal aberto passa a mostrar a versão recarregada do veículo
-                setVeiculoSelecionado((atual: any) => (atual ? lista.find((v: any) => v.id === atual.id) ?? atual : atual));
+            if (res.ok) {
+                const contentType = res.headers.get('content-type') || '';
+                if (contentType.includes('application/json')) {
+                    const data = await res.json();
+                    if (data && data.success) {
+                        const lista = data.veiculos || [];
+                        setVeiculos(lista);
+                        setRetiradas(data.retiradas || []);
+                        setAcertos(data.acertos || []);
+                        setEntradasSemVeiculo(data.entradasSemVeiculo || []);
+                        setAcerto(data.acerto || null);
+                        setSocioAtual(data.socio?.nome || null);
+                        setKpis(data.kpis);
+                        // modal aberto passa a mostrar a versão recarregada do veículo
+                        setVeiculoSelecionado((atual: any) => (atual ? lista.find((v: any) => v.id === atual.id) ?? atual : atual));
+                    }
+                }
             }
         } catch (err) {
             console.error('Erro ao carregar dados de divisão de lucro:', err);
@@ -184,6 +190,7 @@ export default function DivisaoDeLucroPage() {
                     veiculos={veiculos}
                     retiradas={retiradas}
                     acertos={acertos}
+                    entradasSemVeiculo={entradasSemVeiculo}
                     socioAtual={socioAtual}
                     onAtualizar={carregarDados}
                 />

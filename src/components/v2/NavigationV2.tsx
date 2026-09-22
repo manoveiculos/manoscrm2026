@@ -29,6 +29,7 @@ import {
     CalendarClock, // Agenda de Visitas
     PieChart, // Divisão de Lucro (sócios Alexandre e Ivo)
     Megaphone, // Time de Marketing (squad de agentes de IA)
+    Flame, // Painel de Alta Prioridade 48h
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
@@ -56,6 +57,7 @@ const NAV_ITEMS: NavItem[] = [
     { label: 'Atendimento', icon: PlayCircle, href: '/atendimento' },
     { label: 'Agenda', icon: CalendarClock, href: '/agenda' },
     { label: 'Leads', icon: LayoutDashboard, href: '/leads' },
+    { label: 'Painel 48h', icon: Flame, href: '/admin/prioridade48h', adminOnly: true },
     { label: 'Compras', icon: Radar, href: '/compras' },
     { label: 'Cobrança Acordos', icon: DollarSign, href: '/consultor/cobranca' },
     { label: 'Repasse', icon: Store, href: '/repasse', pauloOnly: true },
