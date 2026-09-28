@@ -4,17 +4,32 @@ import { useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import {
     X, Upload, FileText, Camera, Play, Loader2, Copy, Check, AlertTriangle,
-    Download, FileSearch, Radar, Repeat, MessageCircle,
+    Download, FileSearch, Clock, Ban,
 } from 'lucide-react';
 
-type Squad = 'perito' | 'vitrine' | 'sentinela' | 'captador' | 'recepcao';
+// Só Perito e Vitrine funcionam por upload manual (você manda um laudo/foto
+// e o agente processa na hora). Os outros squads não entram aqui — eles rodam
+// sozinhos no calendário (agendados) ou estão bloqueados esperando uma
+// configuração externa. Ver histórico de qualquer um deles: clique no card
+// dele no painel principal.
+type Squad = 'perito' | 'vitrine';
 
 const TABS: Array<{ key: Squad; label: string; icon: any; ready: boolean }> = [
     { key: 'perito', label: 'Perito', icon: FileSearch, ready: true },
     { key: 'vitrine', label: 'Vitrine', icon: Camera, ready: true },
-    { key: 'sentinela', label: 'Sentinela', icon: Radar, ready: false },
-    { key: 'captador', label: 'Captador', icon: Repeat, ready: false },
-    { key: 'recepcao', label: 'Recepção', icon: MessageCircle, ready: false },
+];
+
+const AUTOMATICOS: Array<{ label: string; freq: string }> = [
+    { label: 'Vitrine (carrossel diário)', freq: 'todo dia, automático' },
+    { label: 'Diretor de Arte', freq: 'a cada 2h' },
+    { label: 'Publisher (agenda + audita no Instagram)', freq: 'a cada 2h' },
+    { label: 'Tráfego (vigilante Meta Ads)', freq: '24h' },
+    { label: 'Sentinela (concorrência)', freq: 'agendado' },
+];
+
+const BLOQUEADOS: Array<{ label: string; motivo: string }> = [
+    { label: 'Captador', motivo: 'pausado — falta uma fonte de dados de leads de troca ativa' },
+    { label: 'Recepção', motivo: 'falta configurar o ManyChat' },
 ];
 
 const DEFAULT_INSTRUCAO = 'Uniformize o fundo e a iluminação da foto, mantendo o carro real exatamente como está, sem adicionar nem remover nada do veículo.';
@@ -120,7 +135,7 @@ export function ExecuteModal({ onClose, onDone }: { onClose: () => void; onDone:
                     </button>
                 </div>
 
-                {/* TABS */}
+                {/* TABS — só os squads que rodam por upload manual */}
                 <div className="flex gap-1.5 px-5 pt-4 flex-wrap">
                     {TABS.map((t) => {
                         const Icon = t.icon;
@@ -128,19 +143,37 @@ export function ExecuteModal({ onClose, onDone }: { onClose: () => void; onDone:
                         return (
                             <button
                                 key={t.key}
-                                disabled={!t.ready}
                                 onClick={() => switchSquad(t.key)}
                                 className={`flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full border transition-colors ${
                                     active ? 'bg-red-500/15 border-red-500/30 text-red-400'
-                                    : t.ready ? 'border-white/[0.08] text-zinc-400 hover:text-white hover:border-white/20'
-                                    : 'border-white/[0.04] text-zinc-700 cursor-not-allowed'
+                                    : 'border-white/[0.08] text-zinc-400 hover:text-white hover:border-white/20'
                                 }`}
                             >
                                 <Icon className="w-3.5 h-3.5" /> {t.label}
-                                {!t.ready && <span className="text-[9px] uppercase tracking-wider">em breve</span>}
                             </button>
                         );
                     })}
+                </div>
+
+                {/* Por que só esses dois — e onde ver os outros */}
+                <div className="mx-5 mt-3 rounded-xl bg-white/[0.02] border border-white/[0.06] p-3 space-y-2">
+                    <div>
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 flex items-center gap-1 mb-1"><Clock className="w-3 h-3" /> Rodam sozinhos (agendados)</p>
+                        <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+                            {AUTOMATICOS.map((a) => (
+                                <span key={a.label} className="text-[10px] text-zinc-500">{a.label} <span className="text-zinc-700">— {a.freq}</span></span>
+                            ))}
+                        </div>
+                    </div>
+                    <div>
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 flex items-center gap-1 mb-1"><Ban className="w-3 h-3" /> Bloqueados (falta configurar)</p>
+                        <div className="flex flex-wrap gap-x-3 gap-y-0.5">
+                            {BLOQUEADOS.map((b) => (
+                                <span key={b.label} className="text-[10px] text-zinc-500">{b.label} <span className="text-zinc-700">— {b.motivo}</span></span>
+                            ))}
+                        </div>
+                    </div>
+                    <p className="text-[10px] text-zinc-600">Pra ver o histórico de qualquer um deles, feche esta janela e clique no card do squad no painel.</p>
                 </div>
 
                 <div className="p-5 space-y-4">

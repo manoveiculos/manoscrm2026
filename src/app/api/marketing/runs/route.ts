@@ -4,8 +4,29 @@ import { requireSquadSecret } from '../_guard';
 
 export const dynamic = 'force-dynamic';
 
-const SQUADS = ['perito', 'vitrine', 'sentinela', 'captador', 'recepcao'] as const;
+const SQUADS = ['perito', 'vitrine', 'sentinela', 'captador', 'recepcao', 'trafego', 'publisher', 'diretor_arte'] as const;
 type Squad = typeof SQUADS[number];
+
+const STATUS_MIDIA = ['sucesso', 'fallback_aplicado', 'aguardando_ativo'] as const;
+
+/**
+ * Aceita o squad em qualquer grafia que os agentes mandarem — "Diretor de Arte",
+ * "diretor-arte", "Tráfego", "VITRINE"… — e devolve a chave canônica.
+ */
+function normalizeSquad(raw: unknown): Squad | null {
+    if (typeof raw !== 'string') return null;
+    const key = raw
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase().trim()
+        .replace(/[\s-]+/g, '_');
+    const aliases: Record<string, Squad> = {
+        diretor_de_arte: 'diretor_arte', diretorarte: 'diretor_arte', art_director: 'diretor_arte',
+        trafego_pago: 'trafego', gestor_de_trafego: 'trafego',
+        recepcao_24h: 'recepcao',
+    };
+    const canon = aliases[key] || key;
+    return (SQUADS as readonly string[]).includes(canon) ? (canon as Squad) : null;
+}
 
 /**
  * POST /api/marketing/runs
@@ -18,7 +39,7 @@ type Squad = typeof SQUADS[number];
  *
  * Body:
  * {
- *   "squad": "perito",                 // obrigatório — um de: perito|vitrine|sentinela|captador|recepcao
+ *   "squad": "perito",                 // obrigatório (ou squad_id/agent_type) — perito|vitrine|sentinela|captador|recepcao|trafego|publisher|diretor_arte
  *   "skill_name": "laudo-relampago",   // opcional — nome da skill que rodou
  *   "run_type": "laudo_proposta",      // obrigatório — identifica o tipo de execução
  *   "status": "success",               // opcional — success|error|pending_approval (default success)
@@ -43,11 +64,24 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ success: false, error: 'JSON inválido' }, { status: 400 });
     }
 
-    const { squad, skill_name, run_type, status, title, summary, input_ref, output_ref, metrics, requires_approval, error_message, duration_ms } = body || {};
+    const { skill_name, run_type, status, title, summary, input_ref, output_ref, metrics, requires_approval, error_message, duration_ms } = body || {};
+    // squad | squad_id | agent_type — qualquer um vale (agentes antigos e novos)
+    const squad = normalizeSquad(body?.squad ?? body?.squad_id ?? body?.agent_type);
 
-    if (!squad || !SQUADS.includes(squad)) {
-        return NextResponse.json({ success: false, error: `squad obrigatório — um de: ${SQUADS.join(', ')}` }, { status: 400 });
+    if (!squad) {
+        return NextResponse.json({ success: false, error: `squad (ou squad_id/agent_type) obrigatório — um de: ${SQUADS.join(', ')}` }, { status: 400 });
     }
+
+    // status da mídia e log estruturado podem vir no topo do payload ou dentro de metrics
+    const statusMidia = body?.status_midia ?? metrics?.status_midia;
+    if (statusMidia != null && !(STATUS_MIDIA as readonly string[]).includes(statusMidia)) {
+        return NextResponse.json({ success: false, error: `status_midia inválido — um de: ${STATUS_MIDIA.join(', ')}` }, { status: 400 });
+    }
+    const mergedMetrics: Record<string, unknown> = {
+        ...(metrics && typeof metrics === 'object' ? metrics : {}),
+        ...(statusMidia ? { status_midia: statusMidia } : {}),
+        ...(body?.log && typeof body.log === 'object' ? { log_execucao: body.log } : {}),
+    };
     if (!run_type || typeof run_type !== 'string') {
         return NextResponse.json({ success: false, error: 'run_type obrigatório' }, { status: 400 });
     }
@@ -59,7 +93,7 @@ export async function POST(req: NextRequest) {
     const { data, error } = await admin
         .from('marketing_agent_runs')
         .insert({
-            squad: squad as Squad,
+            squad,
             skill_name: skill_name || null,
             run_type,
             status: status || (requires_approval ? 'pending_approval' : 'success'),
@@ -67,7 +101,7 @@ export async function POST(req: NextRequest) {
             summary: summary || null,
             input_ref: input_ref || null,
             output_ref: output_ref || null,
-            metrics: metrics || {},
+            metrics: mergedMetrics,
             requires_approval: !!requires_approval,
             error_message: error_message || null,
             duration_ms: typeof duration_ms === 'number' ? duration_ms : null,

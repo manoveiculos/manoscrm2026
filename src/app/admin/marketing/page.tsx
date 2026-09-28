@@ -3,13 +3,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import {
-    Megaphone, FileSearch, Camera, Radar, Repeat, MessageCircle,
-    RefreshCw, CheckCircle2, XCircle, Clock, AlertTriangle, ChevronDown, Loader2, Play,
+    Megaphone, RefreshCw, CheckCircle2, XCircle, Clock, AlertTriangle, ChevronDown,
+    Loader2, Play, Eye, ImageOff, ExternalLink, Plug,
 } from 'lucide-react';
 import { ExecuteModal } from './ExecuteModal';
+import { SquadDetailModal } from './SquadDetailModal';
+import { MidiaBadge, LogResumo, statusMidia } from './MidiaStatus';
 import {
     ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid,
 } from 'recharts';
+import {
+    SquadKey, SQUAD_INFO, SQUAD_ORDER, SQUAD_GROUPS,
+    KpiRow, FeedData,
+    timeAgo, formatBRL, metricLabel, parseRefUrl,
+    STATUS_STYLE, getSquadInfo,
+} from './utils';
 
 /**
  * /admin/marketing — Time de Marketing
@@ -20,90 +28,6 @@ import {
  * aprovar/rejeitar o que precisar de decisão humana.
  */
 
-type SquadKey = 'perito' | 'vitrine' | 'sentinela' | 'captador' | 'recepcao';
-
-const SQUAD_INFO: Record<SquadKey, { label: string; missao: string; icon: any; color: string }> = {
-    perito: { label: 'Perito', missao: 'Laudo cautelar → proposta de compra', icon: FileSearch, color: '#f59e0b' },
-    vitrine: { label: 'Vitrine', missao: 'Conteúdo Instagram / elétricos', icon: Camera, color: '#ec4899' },
-    sentinela: { label: 'Sentinela', missao: 'Inteligência de concorrência regional', icon: Radar, color: '#22d3ee' },
-    captador: { label: 'Captador', missao: 'Qualificação de lead de troca por 0km', icon: Repeat, color: '#a3e635' },
-    recepcao: { label: 'Recepção', missao: 'Captação 24h no Instagram (DM/comentário)', icon: MessageCircle, color: '#818cf8' },
-};
-const SQUAD_ORDER: SquadKey[] = ['perito', 'vitrine', 'sentinela', 'captador', 'recepcao'];
-
-interface KpiRow { squad: SquadKey; total_runs: number; runs_7d: number; runs_24h: number; errors_7d: number; pending_approvals: number; last_run_at: string | null; }
-interface RunRow {
-    id: string; squad: SquadKey; skill_name: string | null; run_type: string; status: string;
-    title: string; summary: string | null; input_ref: string | null; output_ref: string | null;
-    metrics: Record<string, any>; requires_approval: boolean; approved_by: string | null;
-    approved_at: string | null; rejected_reason: string | null; error_message: string | null; created_at: string;
-}
-interface FeedData { kpis: KpiRow[]; recentRuns: RunRow[]; pendingApprovals: RunRow[]; daily: Array<Record<string, any>>; generated_at: string; }
-
-function timeAgo(iso: string | null): string {
-    if (!iso) return '—';
-    const sec = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
-    if (sec < 60) return `${sec}s atrás`;
-    const min = Math.floor(sec / 60);
-    if (min < 60) return `${min}min atrás`;
-    const h = Math.floor(min / 60);
-    if (h < 24) return `${h}h atrás`;
-    return `${Math.floor(h / 24)}d atrás`;
-}
-
-function formatBRL(v: any): string | null {
-    const n = typeof v === 'number' ? v : parseFloat(v);
-    if (isNaN(n)) return null;
-    return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-}
-
-function metricLabel(key: string): string {
-    const map: Record<string, string> = {
-        valor_proposta: 'Proposta', fipe: 'FIPE', nota_compra: 'Nota', execution_id: 'Execução n8n',
-        http_status: 'HTTP', leads_qualificados: 'Leads qualificados',
-    };
-    return map[key] || key.replace(/_/g, ' ');
-}
-
-function parseRefUrl(ref: string | null | undefined): { isUrl: boolean; href: string; text: string } {
-    if (!ref) return { isUrl: false, href: '', text: '' };
-    const trimmed = ref.trim();
-    if (/^https?:\/\//i.test(trimmed) || /^mailto:/i.test(trimmed)) {
-        return { isUrl: true, href: trimmed, text: trimmed };
-    }
-    if (/^www\./i.test(trimmed)) {
-        return { isUrl: true, href: `https://${trimmed}`, text: trimmed };
-    }
-    if (/^[a-zA-Z0-9-]+\.[a-zA-Z]{2,}(\/.*)?$/.test(trimmed)) {
-        return { isUrl: true, href: `https://${trimmed}`, text: trimmed };
-    }
-    return { isUrl: false, href: '', text: trimmed };
-}
-
-const STATUS_STYLE: Record<string, { dot: string; label: string; text: string }> = {
-    success: { dot: 'bg-emerald-500', label: 'ok', text: 'text-emerald-400' },
-    error: { dot: 'bg-red-500', label: 'erro', text: 'text-red-400' },
-    pending_approval: { dot: 'bg-amber-500', label: 'aguardando aprovação', text: 'text-amber-400' },
-    approved: { dot: 'bg-blue-500', label: 'aprovado', text: 'text-blue-400' },
-    rejected: { dot: 'bg-zinc-500', label: 'rejeitado', text: 'text-zinc-400' },
-};
-
-const DEFAULT_SQUAD_INFO = {
-    label: 'Geral',
-    missao: 'Agente de marketing',
-    icon: Megaphone,
-    color: '#a1a1aa',
-};
-
-function getSquadInfo(squad?: string | null) {
-    if (!squad) return DEFAULT_SQUAD_INFO;
-    const key = squad.toLowerCase() as SquadKey;
-    if (SQUAD_INFO[key]) return SQUAD_INFO[key];
-    return {
-        ...DEFAULT_SQUAD_INFO,
-        label: squad.charAt(0).toUpperCase() + squad.slice(1),
-    };
-}
 
 export default function MarketingSquadPage() {
     const supabase = useMemo(() => createClient(), []);
@@ -112,6 +36,7 @@ export default function MarketingSquadPage() {
     const [busyId, setBusyId] = useState<string | null>(null);
     const [expanded, setExpanded] = useState<string | null>(null);
     const [showExecute, setShowExecute] = useState(false);
+    const [selectedSquad, setSelectedSquad] = useState<SquadKey | null>(null);
     const lastFetchRef = useRef(0);
 
     const fetchFeed = useCallback(async () => {
@@ -183,7 +108,7 @@ export default function MarketingSquadPage() {
                             Time de Marketing
                         </h1>
                         <p className="text-xs text-zinc-500 mt-0.5">
-                            Squad de agentes de IA — Perito, Vitrine, Sentinela, Captador e Recepção. {totalRuns7d} execuções nos últimos 7 dias.
+                            8 squads de IA — conteúdo, aquisição e inteligência de mercado. {totalRuns7d} execuções nos últimos 7 dias.
                         </p>
                     </div>
                     <div className="flex items-center gap-3 text-xs text-zinc-500">
@@ -199,53 +124,91 @@ export default function MarketingSquadPage() {
                     </div>
                 </div>
 
+                {/* CONEXÕES */}
+                {data && data.integrations && data.integrations.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mb-5">
+                        {data.integrations.map((ig) => {
+                            const ok = ig.status === 'connected';
+                            const d = ig.details || {};
+                            const networks = d.networks || {};
+                            const dashboardUrl = d.dashboard_url as string | undefined;
+                            return (
+                                <div key={ig.id} className="flex items-center gap-2 rounded-xl bg-white/[0.03] border border-white/[0.06] px-3 py-2 text-xs">
+                                    <Plug className={`w-3.5 h-3.5 ${ok ? 'text-emerald-400' : 'text-red-400'}`} />
+                                    <span className="font-bold capitalize">{ig.provider}</span>
+                                    <span className={ok ? 'text-emerald-400' : 'text-red-400'}>{ok ? 'conectado' : ig.status}</span>
+                                    {networks.instagram && <span className="text-zinc-500">· Instagram @{networks.instagram}</span>}
+                                    {d.plan && <span className="text-zinc-600">· plano {d.plan}</span>}
+                                    <span className="text-zinc-600">· verificado {timeAgo(ig.checked_at)}</span>
+                                    {dashboardUrl && (
+                                        <a href={dashboardUrl} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">Gerenciar →</a>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
+
                 {loading && !data ? (
                     <div className="text-zinc-500 text-sm py-10 text-center">Carregando…</div>
                 ) : (
                     <>
-                        {/* CARDS POR SQUAD */}
-                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-5">
-                            {SQUAD_ORDER.map((key) => {
-                                const info = SQUAD_INFO[key];
-                                const kpi = kpiBySquad[key];
-                                const Icon = info.icon;
-                                return (
-                                    <div key={key} className="rounded-2xl bg-white/[0.03] border border-white/[0.06] p-4 relative overflow-hidden">
-                                        <div className="flex items-center gap-2 mb-2">
-                                            <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0" style={{ backgroundColor: `${info.color}1a`, color: info.color }}>
-                                                <Icon className="w-4 h-4" />
-                                            </div>
-                                            <div className="min-w-0">
-                                                <p className="font-bold text-sm leading-tight">{info.label}</p>
-                                                <p className="text-[10px] text-zinc-500 leading-tight truncate" title={info.missao}>{info.missao}</p>
-                                            </div>
-                                        </div>
-                                        <div className="flex items-end justify-between mt-3">
-                                            <div>
-                                                <p className="text-2xl font-black leading-none">{kpi?.runs_7d ?? 0}</p>
-                                                <p className="text-[10px] text-zinc-500 mt-1">execuções / 7d</p>
-                                            </div>
-                                            <div className="text-right">
-                                                {!!kpi?.pending_approvals && (
-                                                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded-full mb-1">
-                                                        <Clock className="w-2.5 h-2.5" /> {kpi.pending_approvals} pendente(s)
-                                                    </span>
+                        {/* CARDS POR SQUAD — agrupados por pipeline (separados, como pedido) */}
+                        {SQUAD_GROUPS.map((group) => (
+                            <div key={group.title} className="mb-5">
+                                <div className="flex items-baseline gap-2 mb-2 px-0.5">
+                                    <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-400">{group.title}</h3>
+                                    <span className="text-[10px] text-zinc-600">{group.note}</span>
+                                </div>
+                                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                                    {group.squads.map((key) => {
+                                        const info = SQUAD_INFO[key];
+                                        const kpi = kpiBySquad[key];
+                                        const Icon = info.icon;
+                                        return (
+                                            <button
+                                                key={key}
+                                                onClick={() => setSelectedSquad(key)}
+                                                className="text-left rounded-2xl bg-white/[0.03] border border-white/[0.06] p-4 relative overflow-hidden hover:bg-white/[0.05] hover:border-white/[0.12] transition-colors cursor-pointer"
+                                            >
+                                                <div className="flex items-center gap-2 mb-2">
+                                                    <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0" style={{ backgroundColor: `${info.color}1a`, color: info.color }}>
+                                                        <Icon className="w-4 h-4" />
+                                                    </div>
+                                                    <div className="min-w-0">
+                                                        <p className="font-bold text-sm leading-tight">{info.label}</p>
+                                                        <p className="text-[10px] text-zinc-500 leading-tight truncate" title={info.missao}>{info.missao}</p>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-end justify-between mt-3">
+                                                    <div>
+                                                        <p className="text-2xl font-black leading-none">{kpi?.runs_7d ?? 0}</p>
+                                                        <p className="text-[10px] text-zinc-500 mt-1">execuções / 7d</p>
+                                                    </div>
+                                                    <div className="text-right">
+                                                        {!!kpi?.pending_approvals && (
+                                                            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded-full mb-1">
+                                                                <Clock className="w-2.5 h-2.5" /> {kpi.pending_approvals} pendente(s)
+                                                            </span>
+                                                        )}
+                                                        <p className="text-[10px] text-zinc-500">{timeAgo(kpi?.last_run_at || null)}</p>
+                                                    </div>
+                                                </div>
+                                                {!!kpi?.errors_7d && (
+                                                    <p className="text-[10px] text-red-400 mt-1.5">{kpi.errors_7d} erro(s) na semana</p>
                                                 )}
-                                                <p className="text-[10px] text-zinc-500">{timeAgo(kpi?.last_run_at || null)}</p>
-                                            </div>
-                                        </div>
-                                        {!!kpi?.errors_7d && (
-                                            <p className="text-[10px] text-red-400 mt-1.5">{kpi.errors_7d} erro(s) na semana</p>
-                                        )}
-                                        {!kpi && <p className="text-[10px] text-zinc-600 mt-1.5">Sem execuções ainda</p>}
-                                    </div>
-                                );
-                            })}
-                        </div>
+                                                {!kpi && <p className="text-[10px] text-zinc-600 mt-1.5">Sem execuções ainda</p>}
+                                                <p className="text-[9px] text-zinc-600 mt-2">Clique para ver o histórico →</p>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        ))}
 
                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                             {/* PENDENTES DE APROVAÇÃO */}
-                            <div className="lg:col-span-1 rounded-2xl bg-white/[0.03] border border-white/[0.06] p-4">
+                            <div className="lg:col-span-2 rounded-2xl bg-white/[0.03] border border-white/[0.06] p-4">
                                 <h2 className="text-sm font-bold mb-3 flex items-center gap-2">
                                     <Clock className="w-4 h-4 text-amber-400" /> Aguardando aprovação
                                     {totalPending > 0 && <span className="text-[10px] font-black bg-amber-500/15 text-amber-400 px-1.5 py-0.5 rounded-full">{totalPending}</span>}
@@ -253,21 +216,83 @@ export default function MarketingSquadPage() {
                                 {totalPending === 0 ? (
                                     <p className="text-xs text-zinc-500">Nada esperando decisão agora.</p>
                                 ) : (
-                                    <div className="space-y-2 max-h-[600px] overflow-y-auto custom-scrollbar">
+                                    <div className="space-y-3 max-h-[720px] overflow-y-auto custom-scrollbar">
                                         {data!.pendingApprovals.map((run) => {
                                             const info = getSquadInfo(run.squad);
                                             const proposta = formatBRL(run.metrics?.valor_proposta);
                                             const fipe = formatBRL(run.metrics?.fipe);
                                             const outRef = parseRefUrl(run.output_ref);
+                                            const imagens: string[] = Array.isArray(run.metrics?.imagens_publicas) ? run.metrics.imagens_publicas : [];
+                                            const caption: string | null = run.metrics?.caption_instagram || null;
+                                            const temArteGerada = run.squad === 'vitrine' || run.squad === 'diretor_arte';
+                                            const pronto = imagens.length > 0;
+                                            const visualRevisado = !!run.metrics?.visual_revisado;
+                                            const visualAprovado = !!run.metrics?.visual_aprovado;
+                                            const problemasVisuais = run.metrics?.problemas_visuais;
                                             return (
                                                 <div key={run.id} className="rounded-xl bg-black/30 border border-white/[0.06] p-3">
                                                     <div className="flex items-center gap-1.5 text-[10px] text-zinc-500 mb-1">
                                                         <span style={{ color: info.color }} className="font-bold">{info.label}</span>
                                                         <span>·</span>
                                                         <span>{timeAgo(run.created_at)}</span>
+                                                        {temArteGerada && (
+                                                            pronto ? (
+                                                                <span className="ml-auto inline-flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded-full">
+                                                                    <CheckCircle2 className="w-2.5 h-2.5" /> pronto p/ publicar
+                                                                </span>
+                                                            ) : (
+                                                                <span className="ml-auto inline-flex items-center gap-1 text-[10px] font-bold text-red-400 bg-red-500/10 px-1.5 py-0.5 rounded-full" title="Sem imagens_publicas no metrics — o Publisher vai bloquear essa pauta ate a Vitrine reprocessar.">
+                                                                    <ImageOff className="w-2.5 h-2.5" /> sem imagens públicas
+                                                                </span>
+                                                            )
+                                                        )}
                                                     </div>
                                                     <p className="text-sm font-semibold leading-snug">{run.title}</p>
                                                     {run.summary && <p className="text-xs text-zinc-400 mt-1 leading-snug">{run.summary}</p>}
+
+                                                    <div className="mt-1.5"><MidiaBadge metrics={run.metrics} /></div>
+                                                    <LogResumo metrics={run.metrics} />
+
+                                                    {temArteGerada && (
+                                                        <div className="mt-1.5">
+                                                            {visualRevisado ? (
+                                                                visualAprovado ? (
+                                                                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-violet-400 bg-violet-500/10 px-1.5 py-0.5 rounded-full">
+                                                                        <Eye className="w-2.5 h-2.5" /> Diretor de Arte aprovou
+                                                                    </span>
+                                                                ) : (
+                                                                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-red-400 bg-red-500/10 px-1.5 py-0.5 rounded-full" title={typeof problemasVisuais === 'string' ? problemasVisuais : JSON.stringify(problemasVisuais)}>
+                                                                        <AlertTriangle className="w-2.5 h-2.5" /> Diretor de Arte reprovou
+                                                                    </span>
+                                                                )
+                                                            ) : (
+                                                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-zinc-500 bg-white/[0.04] px-1.5 py-0.5 rounded-full">
+                                                                    <Clock className="w-2.5 h-2.5" /> aguardando revisão do Diretor de Arte
+                                                                </span>
+                                                            )}
+                                                            {visualRevisado && !visualAprovado && problemasVisuais && (
+                                                                <p className="text-[10px] text-red-400/90 mt-1 leading-snug">
+                                                                    {Array.isArray(problemasVisuais) ? problemasVisuais.join(' • ') : String(problemasVisuais)}
+                                                                </p>
+                                                            )}
+                                                        </div>
+                                                    )}
+
+                                                    {imagens.length > 0 && (
+                                                        <div className="grid grid-cols-3 gap-1.5 mt-2">
+                                                            {imagens.slice(0, 6).map((url, i) => (
+                                                                <a key={i} href={url} target="_blank" rel="noreferrer" className="block aspect-square rounded-lg overflow-hidden border border-white/[0.08] bg-black/40 hover:opacity-80 transition-opacity relative group">
+                                                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                                                    <img src={url} alt={`${run.title} — imagem ${i + 1}`} className="w-full h-full object-cover" loading="lazy" />
+                                                                    <span className="absolute bottom-0.5 right-0.5 opacity-0 group-hover:opacity-100 transition-opacity"><ExternalLink className="w-3 h-3 text-white drop-shadow" /></span>
+                                                                </a>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                    {caption && (
+                                                        <p className="text-[11px] text-zinc-300 mt-2 leading-snug bg-black/40 border border-white/[0.06] rounded-lg p-2 whitespace-pre-wrap max-h-24 overflow-y-auto custom-scrollbar">{caption}</p>
+                                                    )}
+
                                                     {(proposta || fipe) && (
                                                         <p className="text-xs text-emerald-400 mt-1.5 font-mono">
                                                             {proposta && <>Proposta: {proposta}</>}{proposta && fipe && ' · '}{fipe && <>FIPE: {fipe}</>}
@@ -282,8 +307,12 @@ export default function MarketingSquadPage() {
                                                     )}
                                                     <div className="flex gap-2 mt-2.5">
                                                         <button
-                                                            disabled={busyId === run.id}
-                                                            onClick={() => decide(run.id, 'approve')}
+                                                            disabled={busyId === run.id || statusMidia(run.metrics) === 'aguardando_ativo'}
+                                                            title={statusMidia(run.metrics) === 'aguardando_ativo' ? 'Sem imagem publicada ainda — aguardando ativo' : undefined}
+                                                            onClick={() => {
+                                                                if (temArteGerada && visualRevisado && !visualAprovado && !confirm('O Diretor de Arte reprovou essa arte. Aprovar mesmo assim?')) return;
+                                                                decide(run.id, 'approve');
+                                                            }}
                                                             className="flex-1 flex items-center justify-center gap-1 text-xs font-bold px-2 py-1.5 rounded-lg bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 transition-colors disabled:opacity-40"
                                                         >
                                                             {busyId === run.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />} Aprovar
@@ -304,7 +333,7 @@ export default function MarketingSquadPage() {
                             </div>
 
                             {/* ATIVIDADE RECENTE */}
-                            <div className="lg:col-span-2 rounded-2xl bg-white/[0.03] border border-white/[0.06] p-4">
+                            <div className="lg:col-span-1 rounded-2xl bg-white/[0.03] border border-white/[0.06] p-4">
                                 <h2 className="text-sm font-bold mb-3">Atividade recente</h2>
                                 {(!data?.recentRuns || data.recentRuns.length === 0) ? (
                                     <p className="text-xs text-zinc-500">Nenhuma execução registrada ainda. Assim que os agentes começarem a rodar, elas aparecem aqui.</p>
@@ -314,7 +343,7 @@ export default function MarketingSquadPage() {
                                             const info = getSquadInfo(run.squad);
                                             const st = STATUS_STYLE[run.status] || STATUS_STYLE.success;
                                             const isOpen = expanded === run.id;
-                                            const metricEntries = Object.entries(run.metrics || {});
+                                            const metricEntries = Object.entries(run.metrics || {}).filter(([, v]) => v === null || typeof v !== 'object');
                                             const inRef = parseRefUrl(run.input_ref);
                                             const outRef = parseRefUrl(run.output_ref);
                                             return (
@@ -402,6 +431,14 @@ export default function MarketingSquadPage() {
 
                 {showExecute && (
                     <ExecuteModal onClose={() => setShowExecute(false)} onDone={() => fetchFeed()} />
+                )}
+                {selectedSquad && (
+                    <SquadDetailModal
+                        squad={selectedSquad}
+                        busyId={busyId}
+                        onClose={() => setSelectedSquad(null)}
+                        onDecide={(runId, action) => decide(runId, action)}
+                    />
                 )}
             </div>
         </div>
