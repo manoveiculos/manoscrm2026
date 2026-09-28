@@ -4,10 +4,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import {
     Megaphone, RefreshCw, CheckCircle2, XCircle, Clock, AlertTriangle, ChevronDown,
-    Loader2, Play, Eye, ImageOff, ExternalLink, Plug,
+    Loader2, Play, Eye, ImageOff, Maximize2, Plug,
 } from 'lucide-react';
 import { ExecuteModal } from './ExecuteModal';
 import { SquadDetailModal } from './SquadDetailModal';
+import { Lightbox } from './Lightbox';
 import { MidiaBadge, LogResumo, statusMidia } from './MidiaStatus';
 import {
     ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid,
@@ -37,6 +38,7 @@ export default function MarketingSquadPage() {
     const [expanded, setExpanded] = useState<string | null>(null);
     const [showExecute, setShowExecute] = useState(false);
     const [selectedSquad, setSelectedSquad] = useState<SquadKey | null>(null);
+    const [lightbox, setLightbox] = useState<{ images: string[]; index: number; title: string } | null>(null);
     const lastFetchRef = useRef(0);
 
     const fetchFeed = useCallback(async () => {
@@ -281,11 +283,16 @@ export default function MarketingSquadPage() {
                                                     {imagens.length > 0 && (
                                                         <div className="grid grid-cols-3 gap-1.5 mt-2">
                                                             {imagens.slice(0, 6).map((url, i) => (
-                                                                <a key={i} href={url} target="_blank" rel="noreferrer" className="block aspect-square rounded-lg overflow-hidden border border-white/[0.08] bg-black/40 hover:opacity-80 transition-opacity relative group">
+                                                                <button
+                                                                    key={i}
+                                                                    type="button"
+                                                                    onClick={() => setLightbox({ images: imagens, index: i, title: run.title })}
+                                                                    className="block aspect-square rounded-lg overflow-hidden border border-white/[0.08] bg-black/40 hover:opacity-80 transition-opacity relative group"
+                                                                >
                                                                     {/* eslint-disable-next-line @next/next/no-img-element */}
                                                                     <img src={url} alt={`${run.title} — imagem ${i + 1}`} className="w-full h-full object-cover" loading="lazy" />
-                                                                    <span className="absolute bottom-0.5 right-0.5 opacity-0 group-hover:opacity-100 transition-opacity"><ExternalLink className="w-3 h-3 text-white drop-shadow" /></span>
-                                                                </a>
+                                                                    <span className="absolute bottom-0.5 right-0.5 opacity-0 group-hover:opacity-100 transition-opacity"><Maximize2 className="w-3 h-3 text-white drop-shadow" /></span>
+                                                                </button>
                                                             ))}
                                                         </div>
                                                     )}
@@ -438,6 +445,15 @@ export default function MarketingSquadPage() {
                         busyId={busyId}
                         onClose={() => setSelectedSquad(null)}
                         onDecide={(runId, action) => decide(runId, action)}
+                    />
+                )}
+                {lightbox && (
+                    <Lightbox
+                        images={lightbox.images}
+                        index={lightbox.index}
+                        title={lightbox.title}
+                        onClose={() => setLightbox(null)}
+                        onNavigate={(i) => setLightbox((prev) => (prev ? { ...prev, index: i } : prev))}
                     />
                 )}
             </div>
