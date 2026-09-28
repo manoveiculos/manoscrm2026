@@ -26,13 +26,14 @@
     "jspdf": "^4.2.1",
     "jszip": "^3.10.1",
     "lucide-react": "^0.575.0",
-    "next": "^16.1.6",
+    "next": "^16.3.6",
     "openai": "^6.25.0",
     "papaparse": "^5.5.3",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-pull-to-refresh": "^2.0.1",
     "recharts": "^3.7.0",
+    "sharp": "^0.35.5",
     "tailwind-merge": "^3.5.0",
     "unpdf": "^1.8.1"
   },
@@ -43,12 +44,18 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.1.6",
+    "eslint-config-next": "^16.3.6",
     "tailwindcss": "^4",
     "typescript": "^5"
   },
   "optionalDependencies": {
     "@tailwindcss/oxide-linux-x64-gnu": "4.2.1",
     "lightningcss-linux-x64-gnu": "1.31.1"
+  },
+  "overrides": {
+    "js-yaml": "^4.3.2",
+    "nanoid": "^3.3.12",
+    "browserslist": "^4.28.7",
+    "brace-expansion": ">=1.1.18"
   }
 }
