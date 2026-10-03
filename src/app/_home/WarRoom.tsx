@@ -8,6 +8,7 @@ import {
     TrendingUp, ArrowRight, ChevronRight, CalendarClock,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import RadarMercado from './RadarMercado';
 
 const SEV: Record<string, { ring: string; dot: string; text: string }> = {
     critico: { ring: 'border-red-500/30 bg-red-500/5', dot: 'bg-red-500', text: 'text-red-400' },
@@ -101,6 +102,9 @@ export default function WarRoom({ authId }: { authId: string | null }) {
                 <Kpi label="Leads quentes" value={k.sla_critico} icon={<Flame className="w-5 h-5 text-orange-400" />} color="text-orange-400" bg="bg-orange-500/5" border="border-orange-500/20" pulse={k.sla_critico > 0} />
                 {isGer && <Kpi label="Esfriando +8h" value={k.esfriando} icon={<Clock className="w-5 h-5 text-amber-400" />} color="text-amber-400" bg="bg-amber-500/5" border="border-amber-500/20" pulse={k.esfriando > 0} />}
             </div>
+
+            {/* RADAR DE MERCADO — carros nossos em disputa com concorrentes da região */}
+            <RadarMercado authId={authId} />
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* COLUNA PRINCIPAL: PAINEL DE AÇÃO + (ranking | foco) */}
