@@ -30,6 +30,7 @@ import {
     PieChart, // Divisão de Lucro (sócios Alexandre e Ivo)
     Megaphone, // Time de Marketing (squad de agentes de IA)
     Flame, // Painel de Alta Prioridade 48h
+    Handshake, // Negociação de Terceiros
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
@@ -46,6 +47,7 @@ interface NavItem {
     alexandreOnly?: boolean; // visível SOMENTE para o login Alexandre (nem outros admins veem)
     pauloOnly?: boolean; // app de Repasse — só Paulo (e Alexandre p/ supervisão)
     socioOnly?: boolean; // Divisão de Lucro — só os sócios (Alexandre e Ivo)
+    terceirosOnly?: boolean; // Negociação de Terceiros — só Alexandre e Wilson
     blocked?: boolean;
 }
 
@@ -60,6 +62,7 @@ const NAV_ITEMS: NavItem[] = [
     { label: 'Painel 48h', icon: Flame, href: '/admin/prioridade48h', adminOnly: true },
     { label: 'Compras', icon: Radar, href: '/compras' },
     { label: 'Cobrança Acordos', icon: DollarSign, href: '/consultor/cobranca' },
+    { label: 'Negociação Terceiros', icon: Handshake, href: '/negociacao-terceiros', terceirosOnly: true },
     { label: 'Repasse', icon: Store, href: '/repasse', pauloOnly: true },
     { label: 'Divisão de Lucro', icon: PieChart, href: '/divisaodelucro', socioOnly: true },
     { label: 'Cobrança', icon: DollarSign, href: '/admin/cobranca', adminOnly: true },
@@ -216,12 +219,20 @@ export const NavigationV2 = () => {
                     const isAlexandre = user?.email === 'alexandre_gorges@hotmail.com';
                     const isPaulo = user?.email === 'paulo@manoscrm.com';
                     const isIvo = user?.email === 'ivo@acesso.com';
-                    const isRestrictedBuyer = isIvo || isPaulo;
+                    const isWilson = user?.email === 'dultra49@gmail.com';
+                    const isRestrictedBuyer = isIvo || isPaulo; // Wilson isn't necessarily restricted here unless specified.
 
                     // Compradores restritos: Central de Compras. Paulo também tem o app de Repasse; Ivo (sócio), a Divisão de Lucro.
                     if (isRestrictedBuyer && !isAdmin && !isAlexandre) {
                         if (isPaulo) return item.href === '/compras' || item.href === '/repasse';
                         return item.href === '/compras' || item.href === '/divisaodelucro';
+                    }
+
+                    // Se for Wilson e não for Admin, ele pode ver o que ele via antes, mais a aba Terceiros
+                    // Mas vamos restringi-lo apenas à sua aba caso ele não tenha acesso de admin/consultor.
+                    if (isWilson && !isAdmin && !isAlexandre) {
+                         // Wilson vai ver Inbox, Atendimento, Agenda, Leads, Dashboard, e Terceiros (ou só Terceiros?)
+                         // A specification não restringe ele de ver o resto, apenas que a aba Terceiros é restrita a ele e Alexandre.
                     }
 
                     // Camila tem acesso EXCLUSIVO à Cobrança — esconde tudo o mais
@@ -231,6 +242,9 @@ export const NavigationV2 = () => {
 
                     // Divisão de Lucro é só dos sócios — nem outros admins enxergam
                     if (item.socioOnly) return isAlexandre || isIvo;
+
+                    // Negociação de Terceiros — só Alexandre e Wilson
+                    if (item.terceirosOnly) return isAlexandre || isWilson;
 
                     // Milhão é exclusivo do Alexandre — nem outros admins enxergam
                     if (item.alexandreOnly) return isAlexandre;
