@@ -112,6 +112,9 @@ async function loadHorario(admin: any): Promise<{ horas: HorarioConfig; feriados
     }
 }
 
+/** Horário da loja + feriados (para quem precisa contar tempo útil fora do motor). */
+export const horarioLoja = loadHorario;
+
 const hojeISO = () => spYMD(new Date()).iso;
 /** Data de hoje (YYYY-MM-DD) no fuso da loja — usada pelo check-in. */
 export const hojeSP = () => spYMD(new Date()).iso;
@@ -238,6 +241,12 @@ export async function marcarAtendido(table: LeadTable, native: string | number):
 
 async function logEscalation(admin: any, d: any) {
     try {
+        // UMA linha por lead. O repasse de 10 em 10 min gravava uma linha por
+        // ciclo (1.494 em 60 dias, ~8 por lead, nenhuma resolvida) e virou
+        // ruído. Os ciclos seguintes já ficam em lead_distribuicao.tentados/ciclos.
+        const { data: ja } = await admin.from('sla_escalations')
+            .select('id').eq('lead_id', String(d.native_id)).eq('lead_table', d.table_name).limit(1);
+        if (ja && ja.length > 0) return;
         await admin.from('sla_escalations').insert({
             lead_id: String(d.native_id), lead_table: d.table_name, consultant_id: d.assigned_consultant_id,
             level: 10, notes: `SLA 10min estourado (ciclo ${d.ciclos})`, triggered_at: new Date().toISOString(),
