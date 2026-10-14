@@ -1,27 +1,19 @@
 import { NextResponse } from 'next/server';
 import { requireVendedor, supabaseAdmin } from '../agenda/_guard';
+import { labelMotivoPerda as labelDe } from '@/constants/lossReasons';
 
 export const dynamic = 'force-dynamic';
 
 const LOST = ['perdido', 'lost', 'lost_by_inactivity'];
 const JANELA_DIAS = 90;
 
-// Slug do motivo_perda_estruturado → rótulo legível
-const MOTIVO_LABEL: Record<string, string> = {
-    preco: 'Preço', parcela: 'Parcela alta', modelo: 'Queria outro modelo',
-    concorrente: 'Comprou no concorrente', credito_negado: 'Crédito negado',
-    cpf_ruim: 'CPF com restrição', score_baixo: 'Score baixo',
-    sumiu: 'Sumiu / não respondeu', sem_interesse: 'Sem interesse',
-    ja_comprou: 'Já comprou', inatividade: 'Perdido por inatividade', outro: 'Outro',
-};
-const labelDe = (slug?: string | null) => {
-    const s = (slug || '').trim().toLowerCase();
-    if (!s) return null;
-    return MOTIVO_LABEL[s] || (s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, ' '));
-};
 // motivo final = "[Rótulo] diagnóstico do vendedor"
-const compor = (label: string | null, diag: string | null) =>
-    [label ? `[${label}]` : null, (diag || '').trim() || null].filter(Boolean).join(' ') || null;
+// (desde 14/10 o diagnóstico já chega com o rótulo na frente — não duplica)
+const compor = (label: string | null, diag: string | null) => {
+    const d = (diag || '').trim() || null;
+    if (d && d.startsWith('[')) return d;
+    return [label ? `[${label}]` : null, d].filter(Boolean).join(' ') || null;
+};
 
 /**
  * GET /api/perdidos — fila de auditoria (SÓ ADMIN).

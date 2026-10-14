@@ -5,6 +5,9 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import { Clock, AlertTriangle, MessageCircle, Trophy, X as XIcon, GripVertical, Flag, Archive, Pencil } from 'lucide-react';
+import { MOTIVOS_PERDA, MIN_TEXTO_OUTRO, getMotivoPerda } from '@/constants/lossReasons';
+
+const PAYMENT_METHODS = ['à vista', 'financiado', 'consórcio', 'CDC', 'troca + diferença'];
 
 interface KanbanLead {
     uid: string;
@@ -117,6 +120,10 @@ export default function AtendimentoKanbanPage() {
     const [finishLead, setFinishLead] = useState<KanbanLead | null>(null);
     const [finishType, setFinishType] = useState<'vendido' | 'perdido' | 'arquivar' | null>(null);
     const [diagnostico, setDiagnostico] = useState('');
+    const [motivoPerda, setMotivoPerda] = useState('');
+    const [vendaVeiculo, setVendaVeiculo] = useState('');
+    const [vendaValor, setVendaValor] = useState('');
+    const [vendaPagamento, setVendaPagamento] = useState(PAYMENT_METHODS[0]);
     const [finishBusy, setFinishBusy] = useState(false);
     const [confetti, setConfetti] = useState(false);
     // Mantém leads "aguardando desfecho" na coluna Finalizado sem persistir no banco
@@ -333,6 +340,10 @@ export default function AtendimentoKanbanPage() {
             setFinishLead(lead);
             setFinishType(null);
             setDiagnostico('');
+            setMotivoPerda('');
+            setVendaVeiculo(lead.vehicle_interest || '');
+            setVendaValor('');
+            setVendaPagamento(PAYMENT_METHODS[0]);
             return;
         }
         // FORÇA VISITA: pra entrar em Test Drive ou Fechamento, o lead precisa ter
@@ -386,6 +397,8 @@ export default function AtendimentoKanbanPage() {
         setFinishLead(null);
         setFinishType(null);
         setDiagnostico('');
+        setMotivoPerda('');
+        setVendaValor('');
     }, []);
 
     const cancelFinish = useCallback(() => {
@@ -396,42 +409,64 @@ export default function AtendimentoKanbanPage() {
         closeFinishModal();
     }, [finishLead, closeFinishModal]);
 
+    const finishBlocker = useMemo((): string | null => {
+        if (finishType === 'perdido') {
+            const m = getMotivoPerda(motivoPerda);
+            if (!m) return 'Escolha o motivo da perda.';
+            if (m.exigeTexto && diagnostico.trim().length < MIN_TEXTO_OUTRO) return `Descreva o motivo (mín. ${MIN_TEXTO_OUTRO} caracteres).`;
+        }
+        if (finishType === 'vendido') {
+            if (!vendaVeiculo.trim()) return 'Informe o veículo vendido.';
+            if (!/\d/.test(vendaValor)) return 'Informe o valor da venda.';
+        }
+        return null;
+    }, [finishType, motivoPerda, diagnostico, vendaVeiculo, vendaValor]);
+
     const submitFinish = useCallback(async () => {
         if (!finishLead || !finishType) return;
-        if (finishType === 'perdido' && diagnostico.trim().length < 30) {
-            alert('O motivo da perda é OBRIGATÓRIO e precisa de no mínimo 30 caracteres. Explique o que travou a venda (preço, crédito, modelo, sumiu...) pra gente entender onde está o erro e reverter.');
-            return;
-        }
+        if (finishBlocker) { alert(finishBlocker); return; }
         setFinishBusy(true);
         const lead = finishLead;
-        const realId: any = lead.table_name === 'leads_distribuicao_crm_26'
-            ? parseInt(lead.native_id, 10)
-            : lead.native_id;
-        const now = new Date().toISOString();
-        const updates: Record<string, any> = {
-            ultima_interacao_humana: now,
-        };
-        if (lead.table_name === 'leads_distribuicao_crm_26') updates.atualizado_em = now;
-        else updates.updated_at = now;
-
-        if (finishType === 'vendido') {
-            updates.status = 'vendido';
-            updates.won_at = now;
-        } else if (finishType === 'perdido') {
-            updates.status = 'perdido';
-            updates.diagnostico_atendimento = diagnostico.trim();
-            updates.motivo_perda = diagnostico.trim();
-        } else { // arquivar
-            updates.archived_at = now;
-            updates.archived_reason = 'manual_kanban';
-            updates.archived_by = consultantId;
-            // Pausa qualquer follow-up automático
-            updates.ai_silence_until = new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString();
-        }
 
         try {
-            const { error } = await supabase.from(lead.table_name).update(updates).eq('id', realId);
-            if (error) throw error;
+            if (finishType === 'arquivar') {
+                const realId: any = lead.table_name === 'leads_distribuicao_crm_26'
+                    ? parseInt(lead.native_id, 10)
+                    : lead.native_id;
+                const now = new Date().toISOString();
+                const updates: Record<string, any> = {
+                    ultima_interacao_humana: now,
+                    archived_at: now,
+                    archived_reason: 'manual_kanban',
+                    archived_by: consultantId,
+                    // Pausa qualquer follow-up automático
+                    ai_silence_until: new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString(),
+                };
+                if (lead.table_name === 'leads_distribuicao_crm_26') updates.atualizado_em = now;
+                else updates.updated_at = now;
+                const { error } = await supabase.from(lead.table_name).update(updates).eq('id', realId);
+                if (error) throw error;
+            } else {
+                // Venda e perda passam pela rota única: grava status, sales_manos_crm
+                // e perdidos_auditoria. Antes o Kanban fazia update direto com
+                // won_at — coluna que leads_distribuicao_crm_26 não tem — e a venda
+                // era rejeitada pelo banco.
+                const res = await fetch('/api/lead/finish', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(finishType === 'vendido'
+                        ? {
+                            lead_id: lead.native_id, lead_table: lead.table_name, finish_type: 'venda',
+                            vehicle_name: vendaVeiculo.trim(), sale_value: vendaValor, payment_method: vendaPagamento,
+                        }
+                        : {
+                            lead_id: lead.native_id, lead_table: lead.table_name, finish_type: 'perda',
+                            motivo_perda_estruturado: motivoPerda, diagnostico_atendimento: diagnostico.trim() || null,
+                        }),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok || !data.success) throw new Error(data.error || `HTTP ${res.status}`);
+            }
 
             if (finishType === 'vendido') {
                 setConfetti(true);
@@ -447,7 +482,7 @@ export default function AtendimentoKanbanPage() {
         } finally {
             setFinishBusy(false);
         }
-    }, [finishLead, finishType, diagnostico, consultantId, supabase, closeFinishModal]);
+    }, [finishLead, finishType, finishBlocker, motivoPerda, diagnostico, vendaVeiculo, vendaValor, vendaPagamento, consultantId, supabase, closeFinishModal]);
 
     // Cria a visita (obrigatória pra avançar) e só então move o card.
     const submitVisit = useCallback(async () => {
@@ -718,7 +753,7 @@ export default function AtendimentoKanbanPage() {
             {finishLead && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={() => !finishBusy && cancelFinish()}>
                     <div
-                        className="w-full max-w-md rounded-2xl border border-white/10 bg-zinc-900/80 backdrop-blur-2xl shadow-[0_20px_60px_-10px_rgba(0,0,0,0.8)] p-6"
+                        className="w-full max-w-md max-h-[92vh] overflow-y-auto rounded-2xl border border-white/10 bg-zinc-900/80 backdrop-blur-2xl shadow-[0_20px_60px_-10px_rgba(0,0,0,0.8)] p-6"
                         onClick={e => e.stopPropagation()}
                     >
                         <div className="flex items-center justify-between mb-1">
@@ -768,20 +803,36 @@ export default function AtendimentoKanbanPage() {
                                 <label className="block text-[11px] uppercase tracking-wider text-zinc-400 font-bold mb-2">
                                     Motivo da perda <span className="text-red-400">*</span>
                                 </label>
+                                <div className="grid grid-cols-2 gap-1.5 mb-3">
+                                    {MOTIVOS_PERDA.map(m => (
+                                        <button
+                                            key={m.v}
+                                            type="button"
+                                            onClick={() => setMotivoPerda(m.v)}
+                                            className={`px-2.5 py-2 rounded-lg text-xs font-bold text-left border transition ${
+                                                motivoPerda === m.v
+                                                    ? 'bg-red-500/20 border-red-400 text-white'
+                                                    : 'bg-zinc-950/60 border-zinc-700 text-zinc-300 hover:border-zinc-500'
+                                            }`}
+                                        >
+                                            {m.l}
+                                        </button>
+                                    ))}
+                                </div>
                                 <textarea
                                     value={diagnostico}
                                     onChange={e => setDiagnostico(e.target.value)}
-                                    placeholder="Ex.: preço acima do orçamento, crédito reprovado, escolheu outro modelo..."
-                                    rows={3}
-                                    autoFocus
+                                    placeholder={getMotivoPerda(motivoPerda)?.exigeTexto ? 'Descreva o que aconteceu (obrigatório)' : 'Detalhe (opcional): o que travou a venda?'}
+                                    rows={2}
                                     className="w-full rounded-lg bg-zinc-950/80 border border-zinc-700 text-sm text-white p-3 focus:outline-none focus:border-red-500/60"
                                 />
-                                <div className="flex items-center justify-between mt-1">
-                                    <p className="text-[10px] text-zinc-500">Obrigatório pra entender onde está o erro (e a IA tentar reverter).</p>
-                                    <span className={`text-[10px] font-bold ${diagnostico.trim().length < 30 ? 'text-red-400' : 'text-emerald-400'}`}>
-                                        {diagnostico.trim().length}/30
-                                    </span>
-                                </div>
+                                {getMotivoPerda(motivoPerda)?.exigeTexto && (
+                                    <div className="flex justify-end mt-1">
+                                        <span className={`text-[10px] font-bold ${diagnostico.trim().length < MIN_TEXTO_OUTRO ? 'text-red-400' : 'text-emerald-400'}`}>
+                                            {diagnostico.trim().length}/{MIN_TEXTO_OUTRO}
+                                        </span>
+                                    </div>
+                                )}
                             </div>
                         )}
 
@@ -792,9 +843,40 @@ export default function AtendimentoKanbanPage() {
                         )}
 
                         {finishType === 'vendido' && (
-                            <p className="text-xs text-emerald-300 mb-5 leading-relaxed">
-                                🎉 Vamos registrar a vitória! Detalhes financeiros podem ser preenchidos depois na ficha do lead.
-                            </p>
+                            <div className="mb-5 space-y-2.5">
+                                <p className="text-xs text-emerald-300 leading-relaxed">🎉 Vamos registrar a vitória!</p>
+                                <div>
+                                    <label className="block text-[11px] uppercase tracking-wider text-zinc-400 font-bold mb-1">Veículo vendido <span className="text-red-400">*</span></label>
+                                    <input
+                                        value={vendaVeiculo}
+                                        onChange={e => setVendaVeiculo(e.target.value)}
+                                        placeholder="Ex.: Onix LT 2021"
+                                        className="w-full rounded-lg bg-zinc-950/80 border border-zinc-700 text-sm text-white px-3 py-2 focus:outline-none focus:border-emerald-500/60"
+                                    />
+                                </div>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <label className="block text-[11px] uppercase tracking-wider text-zinc-400 font-bold mb-1">Valor (R$) <span className="text-red-400">*</span></label>
+                                        <input
+                                            value={vendaValor}
+                                            onChange={e => setVendaValor(e.target.value)}
+                                            inputMode="decimal"
+                                            placeholder="85.900"
+                                            className="w-full rounded-lg bg-zinc-950/80 border border-zinc-700 text-sm text-white px-3 py-2 focus:outline-none focus:border-emerald-500/60"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-[11px] uppercase tracking-wider text-zinc-400 font-bold mb-1">Pagamento</label>
+                                        <select
+                                            value={vendaPagamento}
+                                            onChange={e => setVendaPagamento(e.target.value)}
+                                            className="w-full rounded-lg bg-zinc-950/80 border border-zinc-700 text-sm text-white px-2 py-2 focus:outline-none"
+                                        >
+                                            {PAYMENT_METHODS.map(p => <option key={p} value={p}>{p}</option>)}
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
                         )}
 
                         <div className="flex gap-2">
@@ -807,7 +889,8 @@ export default function AtendimentoKanbanPage() {
                             </button>
                             <button
                                 onClick={submitFinish}
-                                disabled={finishBusy || !finishType || (finishType === 'perdido' && diagnostico.trim().length < 30)}
+                                disabled={finishBusy || !finishType || !!finishBlocker}
+                                title={finishBlocker || undefined}
                                 className="flex-1 py-2.5 rounded-xl bg-white text-black hover:bg-zinc-200 text-sm font-black disabled:opacity-40 disabled:cursor-not-allowed"
                             >
                                 {finishBusy ? 'Salvando...' : 'Confirmar'}

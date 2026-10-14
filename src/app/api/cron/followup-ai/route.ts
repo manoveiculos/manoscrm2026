@@ -25,8 +25,8 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
  *   3. Lê motivo_perda_estruturado + diagnostico_atendimento + histórico
  *      completo de whatsapp_messages.
  *   4. Decide estratégia de virada baseada no motivo:
- *      - preco/parcela → carro mais barato no estoque (cheaper)
- *      - modelo → últimos cadastrados (newer)
+ *      - preco/parcela/sem_entrada → carro mais barato no estoque (cheaper)
+ *      - modelo/carro_fora_estoque → últimos cadastrados (newer)
  *      - concorrente → reforça diferencial sem mencionar carro (reinforce_value)
  *      - sumiu/outro → reativação leve (gentle_pulse)
  *   5. Sanity check de preço (bloqueia >R$400k não-premium).
@@ -78,8 +78,8 @@ interface LeadReversao {
 /** Mapeia motivo → estratégia de reversão. */
 function strategyFor(motivo: string | null | undefined): Strategy {
     const m = (motivo || '').toLowerCase();
-    if (m === 'preco' || m === 'parcela') return 'cheaper';
-    if (m === 'modelo') return 'newer';
+    if (m === 'preco' || m === 'parcela' || m === 'sem_entrada') return 'cheaper';
+    if (m === 'modelo' || m === 'carro_fora_estoque') return 'newer';
     if (m === 'concorrente') return 'reinforce_value';
     return 'gentle_pulse'; // sumiu, outro, vazio
 }

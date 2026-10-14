@@ -4,6 +4,7 @@ import { InfoGrid } from '../sections/InfoGrid';
 import { TacticalAction } from '../sections/TacticalAction';
 import { QuickActions } from '../sections/QuickActions';
 import { Lead } from '../types';
+import { MOTIVOS_PERDA, MIN_TEXTO_OUTRO, getMotivoPerda } from '@/constants/lossReasons';
 
 interface DashboardTabProps {
     lead: Lead;
@@ -22,6 +23,8 @@ interface DashboardTabProps {
     setVehicleDetails: (val: string) => void;
     lossReason: string;
     setLossReason: (val: string) => void;
+    lossSlug: string;
+    setLossSlug: (val: string) => void;
     handleSaveFinish: () => Promise<void>;
     loadingStatus: 'idle' | 'analyzing' | 'matching' | 'finalizing';
     recalculateStrategy: () => void;
@@ -52,6 +55,8 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
     setVehicleDetails,
     lossReason,
     setLossReason,
+    lossSlug,
+    setLossSlug,
     handleSaveFinish,
     loadingStatus,
     recalculateStrategy,
@@ -155,12 +160,24 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                             </div>
                         ) : (
                             <div className="space-y-1.5">
-                                <label className="text-[11px] text-white/40 uppercase tracking-widest">Motivo da perda</label>
+                                <label className="text-[11px] text-white/40 uppercase tracking-widest">Motivo da perda *</label>
+                                <div className="grid grid-cols-2 gap-1.5">
+                                    {MOTIVOS_PERDA.map(m => (
+                                        <button
+                                            key={m.v}
+                                            type="button"
+                                            onClick={() => setLossSlug(m.v)}
+                                            className={`px-3 py-2 rounded-lg text-[12px] text-left border transition-colors ${lossSlug === m.v ? 'bg-red-500/15 border-red-500/50 text-white' : 'bg-[#141418] border-white/[0.09] text-white/60 hover:border-white/20'}`}
+                                        >
+                                            {m.l}
+                                        </button>
+                                    ))}
+                                </div>
                                 <textarea
                                     value={lossReason}
-                                    placeholder="Por que este lead não converteu?"
+                                    placeholder={getMotivoPerda(lossSlug)?.exigeTexto ? `Descreva o motivo (mín. ${MIN_TEXTO_OUTRO} caracteres)` : 'Detalhe (opcional)'}
                                     onChange={e => setLossReason(e.target.value)}
-                                    rows={3}
+                                    rows={2}
                                     className="w-full bg-[#141418] border border-white/[0.09] rounded-xl px-4 py-3 text-white text-[13px] outline-none resize-none focus:border-white/20 transition-colors"
                                 />
                             </div>

@@ -1,176 +1,285 @@
 import { createClient } from '@/lib/supabase/admin';
+import { createClient as createAuthClient } from '@/lib/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
+import { getMotivoPerda, MIN_TEXTO_OUTRO, comporMotivoAuditoria } from '@/constants/lossReasons';
 
 export const maxDuration = 30;
 
 type LeadTable = 'leads_manos_crm' | 'leads_compra' | 'leads_distribuicao_crm_26' | 'leads_master' | 'leadsfacebook';
 
+/**
+ * Colunas que EXISTEM em cada tabela (conferido no banco em 14/10/2026).
+ *
+ * A versão anterior gravava won_at/lost_at em tabelas que não têm essas
+ * colunas. O PostgREST rejeita o UPDATE inteiro quando uma coluna não existe,
+ * então a venda/perda simplesmente não era salva — e a tela comemorava assim
+ * mesmo, porque não olhava a resposta.
+ */
 interface TableSchema {
     statusSold: string;
     statusLost: string;
     updatedAtCol: string;
+    nameCol: string;
+    phoneCol: string;
+    interestCol: string;
     wonAtCol: string | null;
-    lostAtCol: string | null;
-    lossReasonCol: string | null;
+    lossTextCol: string | null;          // texto legado do motivo
+    hasStructured: boolean;              // motivo_perda_estruturado + descarte_financeiro + reversao_attempt_count
+    hasDiagnostico: boolean;             // diagnostico_atendimento
+    hasUltimaInteracao: boolean;         // ultima_interacao_humana
 }
 
 const SCHEMA: Record<LeadTable, TableSchema> = {
+    leads_distribuicao_crm_26: {
+        statusSold: 'vendido', statusLost: 'perdido', updatedAtCol: 'atualizado_em',
+        nameCol: 'nome', phoneCol: 'telefone', interestCol: 'interesse',
+        wonAtCol: null, lossTextCol: 'motivo_perda',
+        hasStructured: true, hasDiagnostico: true, hasUltimaInteracao: true,
+    },
     leads_manos_crm: {
-        statusSold: 'vendido', statusLost: 'perdido',
-        updatedAtCol: 'updated_at', wonAtCol: 'won_at',
-        lostAtCol: 'lost_at', lossReasonCol: 'motivo_perda',
+        statusSold: 'vendido', statusLost: 'perdido', updatedAtCol: 'updated_at',
+        nameCol: 'name', phoneCol: 'phone', interestCol: 'vehicle_interest',
+        wonAtCol: 'won_at', lossTextCol: 'motivo_perda',
+        hasStructured: true, hasDiagnostico: true, hasUltimaInteracao: true,
     },
     leads_compra: {
-        statusSold: 'comprado', statusLost: 'perdido',
-        updatedAtCol: 'updated_at', wonAtCol: null,
-        lostAtCol: null, lossReasonCol: 'motivo_perda',
-    },
-    leads_distribuicao_crm_26: {
-        statusSold: 'vendido', statusLost: 'perdido',
-        updatedAtCol: 'atualizado_em', wonAtCol: null,
-        lostAtCol: null, lossReasonCol: null,
+        statusSold: 'comprado', statusLost: 'perdido', updatedAtCol: 'updated_at',
+        nameCol: 'nome', phoneCol: 'telefone', interestCol: 'veiculo_original',
+        wonAtCol: 'won_at', lossTextCol: 'lost_reason',
+        hasStructured: true, hasDiagnostico: true, hasUltimaInteracao: true,
     },
     leads_master: {
-        statusSold: 'vendido', statusLost: 'perdido',
-        updatedAtCol: 'updated_at', wonAtCol: 'won_at',
-        lostAtCol: 'lost_at', lossReasonCol: 'motivo_perda',
+        statusSold: 'vendido', statusLost: 'perdido', updatedAtCol: 'updated_at',
+        nameCol: 'name', phoneCol: 'phone', interestCol: 'vehicle_interest',
+        wonAtCol: null, lossTextCol: 'motivo_perda',
+        hasStructured: false, hasDiagnostico: false, hasUltimaInteracao: false,
     },
     leadsfacebook: {
-        statusSold: 'vendido', statusLost: 'perdido',
-        updatedAtCol: 'updated_at', wonAtCol: null,
-        lostAtCol: null, lossReasonCol: 'observacoes',
+        statusSold: 'vendido', statusLost: 'perdido', updatedAtCol: 'updated_at',
+        nameCol: 'nome', phoneCol: 'phone', interestCol: 'vehicle_interest',
+        wonAtCol: null, lossTextCol: null,
+        hasStructured: false, hasDiagnostico: true, hasUltimaInteracao: true,
     },
 };
 
-const VALID_TABLES = new Set<LeadTable>(['leads_manos_crm', 'leads_compra', 'leads_distribuicao_crm_26', 'leads_master', 'leadsfacebook']);
+const VALID_TABLES = new Set<LeadTable>(Object.keys(SCHEMA) as LeadTable[]);
 
-// Motivos de perda que descartam o lead da fila de reversão da IA
-// (lead sem crédito não vai virar via reengajamento).
-const DESCARTE_FINANCEIRO_MOTIVOS = new Set([
-    'credito_negado',
-    'cpf_ruim',
-    'score_baixo',
-]);
+const isAdminEmail = (email?: string | null) => (email || '').toLowerCase() === 'alexandre_gorges@hotmail.com';
+
+/** Aceita "85.900", "85900,00", "R$ 85.900,50", 85900. */
+function parseValor(v: unknown): number {
+    if (typeof v === 'number') return Number.isFinite(v) && v > 0 ? v : 0;
+    const s = String(v ?? '').replace(/[^\d,.]/g, '');
+    if (!s) return 0;
+    // Formato BR: ponto = milhar, vírgula = decimal.
+    const n = Number(s.replace(/\./g, '').replace(',', '.'));
+    return Number.isFinite(n) && n > 0 ? n : 0;
+}
 
 export async function POST(req: NextRequest) {
     try {
+        const body = await req.json();
         const {
-            lead_id, lead_table, finish_type, vehicle_details, loss_reason,
-            consultant_name, consultant_id,
-            motivo_perda_estruturado,    // dropdown novo (9 opções)
-            diagnostico_atendimento,     // texto livre opcional
-        } = await req.json();
+            lead_id, lead_table, finish_type,
+            motivo_perda_estruturado, diagnostico_atendimento,
+            vehicle_name, sale_value, payment_method,
+            vehicle_details, loss_reason, // legado (clientes antigos)
+        } = body || {};
 
-        if (!lead_id || !finish_type) {
-            return NextResponse.json({ error: 'lead_id e finish_type são obrigatórios' }, { status: 400 });
+        if (!lead_id || !['venda', 'perda', 'compra'].includes(finish_type)) {
+            return NextResponse.json({ error: 'lead_id e finish_type (venda|perda|compra) são obrigatórios' }, { status: 400 });
         }
-
-        const table: LeadTable = VALID_TABLES.has(lead_table) ? lead_table : 'leads_manos_crm';
+        if (!VALID_TABLES.has(lead_table)) {
+            return NextResponse.json({ error: `lead_table inválida: ${lead_table}` }, { status: 400 });
+        }
+        const table = lead_table as LeadTable;
         const schema = SCHEMA[table];
 
+        // ── Quem está finalizando ────────────────────────────────────────────
+        const auth = await createAuthClient();
+        const { data: { user } } = await auth.auth.getUser();
+        if (!user) return NextResponse.json({ error: 'não autenticado' }, { status: 401 });
+
         const admin = createClient();
-        const cleanId = lead_id.toString().replace(/^(main_|crm26_|dist_|lead_|crm25_|master_|compra_)/, '');
-        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(cleanId);
-        const cleanConsId = (consultant_id || '').toString().replace(/^(main_|crm26_|dist_|lead_|crm25_|master_)/, '') || null;
-        const now = new Date().toISOString();
+        const { data: me } = await admin
+            .from('consultants_manos_crm')
+            .select('id, name, role')
+            .or(`user_id.eq.${user.id},auth_id.eq.${user.id}`)
+            .maybeSingle();
+        const isAdmin = me?.role === 'admin' || isAdminEmail(user.email);
 
-        const newStatus = finish_type === 'perda' ? schema.statusLost : schema.statusSold;
-
-        const notePrefix = finish_type === 'perda'
-            ? '🚫 ENCERRADO COMO PERDA'
-            : finish_type === 'compra'
-            ? '🔄 COMPRA / TROCA REGISTRADA'
-            : '🏆 VENDA REALIZADA';
-        const noteDetail = finish_type === 'perda'
-            ? (loss_reason || 'Motivo não informado')
-            : (vehicle_details || 'Veículo não informado');
-
-        // Snapshot pré-update (perda apenas — leads_manos_crm)
-        let scoreAtLoss: number | null = null;
-        if (finish_type === 'perda' && table === 'leads_manos_crm' && isUUID) {
-            const { data: snapshot } = await admin
-                .from('leads_manos_crm')
-                .select('ai_score')
-                .eq('id', cleanId)
-                .maybeSingle();
-            scoreAtLoss = Number(snapshot?.ai_score) || 0;
+        const cleanId = String(lead_id).replace(/^(main_|crm26_|dist_|lead_|crm25_|master_|compra_|fb_)/, '');
+        const realId: string | number = table === 'leads_distribuicao_crm_26' ? parseInt(cleanId, 10) : cleanId;
+        if (table === 'leads_distribuicao_crm_26' && !Number.isFinite(realId as number)) {
+            return NextResponse.json({ error: 'lead_id inválido' }, { status: 400 });
         }
 
+        // ── Snapshot do lead (antes do update) ──────────────────────────────
+        const { data: lead, error: leadErr } = await admin
+            .from(table)
+            .select('*')
+            .eq('id', realId)
+            .maybeSingle();
+        if (leadErr) return NextResponse.json({ error: leadErr.message }, { status: 500 });
+        if (!lead) return NextResponse.json({ error: 'Lead não encontrado' }, { status: 404 });
+
+        if (!isAdmin && lead.assigned_consultant_id && me?.id && lead.assigned_consultant_id !== me.id) {
+            return NextResponse.json({ error: 'Este lead pertence a outro vendedor.' }, { status: 403 });
+        }
+
+        const now = new Date().toISOString();
+        const isPerda = finish_type === 'perda';
+
+        // ── Validação da perda: lista fechada ───────────────────────────────
+        const motivo = isPerda ? getMotivoPerda(motivo_perda_estruturado) : null;
+        const diagnostico = typeof diagnostico_atendimento === 'string' ? diagnostico_atendimento.trim().slice(0, 2000) : '';
+        if (isPerda) {
+            if (!motivo) {
+                return NextResponse.json({ error: 'Escolha o motivo da perda na lista.' }, { status: 400 });
+            }
+            if (motivo.exigeTexto && diagnostico.length < MIN_TEXTO_OUTRO) {
+                return NextResponse.json({ error: `Motivo "Outro": descreva o que aconteceu (mín. ${MIN_TEXTO_OUTRO} caracteres).` }, { status: 400 });
+            }
+        }
+
+        // ── Validação da venda: veículo ─────────────────────────────────────
+        const valorVenda = parseValor(sale_value);
+        const veiculoVenda = String(vehicle_name || vehicle_details || lead[schema.interestCol] || '').trim().slice(0, 300);
+        if (finish_type === 'venda' && !veiculoVenda) {
+            return NextResponse.json({ error: 'Informe o veículo vendido.' }, { status: 400 });
+        }
+
+        // ── 1. Status do lead ───────────────────────────────────────────────
+        const oldStatus: string | null = lead.status || null;
+        const textoPerda = isPerda && motivo ? comporMotivoAuditoria(motivo.v, diagnostico) : null;
         const updatePayload: Record<string, any> = {
-            status: newStatus,
+            status: isPerda ? schema.statusLost : schema.statusSold,
             [schema.updatedAtCol]: now,
         };
-        if (scoreAtLoss !== null && table === 'leads_manos_crm') {
-            updatePayload.ai_score_at_loss = scoreAtLoss;
-        }
-        if (finish_type === 'perda') {
-            if (schema.lostAtCol) updatePayload[schema.lostAtCol] = now;
-            if (schema.lossReasonCol) updatePayload[schema.lossReasonCol] = loss_reason || 'Não informado';
+        if (schema.hasUltimaInteracao) updatePayload.ultima_interacao_humana = now;
 
-            // Módulo de Reversão: grava motivo estruturado + diagnóstico do vendedor.
-            // Se motivo for financeiro, marca descarte_financeiro=true (IA ignora pra sempre).
-            if (motivo_perda_estruturado) {
-                updatePayload.motivo_perda_estruturado = motivo_perda_estruturado;
-                if (DESCARTE_FINANCEIRO_MOTIVOS.has(String(motivo_perda_estruturado).toLowerCase())) {
-                    updatePayload.descarte_financeiro = true;
-                }
+        if (isPerda && motivo) {
+            if (schema.lossTextCol) updatePayload[schema.lossTextCol] = (textoPerda || motivo.l).slice(0, 250);
+            if (schema.hasStructured) {
+                updatePayload.motivo_perda_estruturado = motivo.v;
+                if (motivo.descarteFinanceiro) updatePayload.descarte_financeiro = true;
+                // Mesmo sinal que o detector de intenção usa: 99 = reversão travada.
+                if (motivo.travaReversao) updatePayload.reversao_attempt_count = 99;
             }
-            if (typeof diagnostico_atendimento === 'string' && diagnostico_atendimento.trim().length > 0) {
-                updatePayload.diagnostico_atendimento = diagnostico_atendimento.trim().slice(0, 2000);
-            }
-        } else if (schema.wonAtCol) {
+            if (schema.hasDiagnostico) updatePayload.diagnostico_atendimento = textoPerda;
+            if (table === 'leads_manos_crm') updatePayload.ai_score_at_loss = Number(lead.ai_score) || 0;
+        } else if (!isPerda && schema.wonAtCol) {
             updatePayload[schema.wonAtCol] = now;
         }
 
-        const { error: statusError } = await admin
-            .from(table)
-            .update(updatePayload)
-            .eq('id', cleanId);
-
+        const { error: statusError } = await admin.from(table).update(updatePayload).eq('id', realId);
         if (statusError) {
             console.error(`[finish] Erro ao atualizar status em ${table}:`, statusError);
             return NextResponse.json({ error: statusError.message }, { status: 500 });
         }
 
-        // Timeline (sempre interactions_manos_crm — única tabela de timeline)
-        await admin.from('interactions_manos_crm').insert({
-            [isUUID ? 'lead_id' : 'lead_id_v1']: cleanId,
-            type: finish_type === 'perda' ? 'loss' : 'sale',
-            notes: `${notePrefix}: ${noteDetail}`,
-            consultant_id: cleanConsId,
-            user_name: consultant_name || 'Sistema',
-            created_at: now,
-        });
-
-        // Registro de venda (apenas venda real)
-        if (finish_type === 'venda' && vehicle_details) {
-            const salePayload = {
-                lead_id: cleanId,
-                consultant_id: cleanConsId,
-                sale_date: now,
-                created_at: now,
-                vehicle_name: vehicle_details,
-                consultant_name: consultant_name || 'Equipe',
-                sale_value: 0,
-            };
-            await Promise.allSettled([
-                admin.from('sales').insert([salePayload]),
-                admin.from('sales_manos_crm').insert([salePayload]),
-            ]);
+        // Dono da venda/perda: quem tem o lead; se não tem dono, quem finalizou.
+        const ownerId: string | null = lead.assigned_consultant_id || me?.id || null;
+        let ownerName: string | null = ownerId && ownerId === me?.id ? (me?.name || null) : null;
+        if (ownerId && !ownerName) {
+            const { data: c } = await admin.from('consultants_manos_crm').select('name').eq('id', ownerId).maybeSingle();
+            ownerName = c?.name || null;
         }
 
-        // Classifica motivo de perda em background (apenas leads_manos_crm tem loss_category)
-        if (finish_type === 'perda' && loss_reason && table === 'leads_manos_crm') {
-            classifyLossReasonAsync(cleanId, loss_reason, admin).catch(
+        // ── 2. Venda → sales_manos_crm (idempotente) ────────────────────────
+        // Só grava na TABELA. `sales` é uma view simples sobre ela: inserir nas
+        // duas duplicava cada venda (todas as linhas de julho estão em dobro).
+        let saleId: string | null = null;
+        if (finish_type === 'venda') {
+            const nomeVeiculo = payment_method ? `${veiculoVenda} | ${String(payment_method).slice(0, 40)}` : veiculoVenda;
+            const { data: existing } = await admin
+                .from('sales_manos_crm')
+                .select('id, sale_value')
+                .eq('lead_id', String(realId))
+                .limit(1);
+            if (existing && existing.length > 0) {
+                // Linha já criada (trigger de status ou clique duplo): completa
+                // valor e veículo em vez de gravar a venda de novo.
+                saleId = existing[0].id;
+                const patch: Record<string, any> = { vehicle_name: nomeVeiculo };
+                if (!Number(existing[0].sale_value) && valorVenda) patch.sale_value = valorVenda;
+                await admin.from('sales_manos_crm').update(patch).eq('id', existing[0].id);
+            } else {
+                const { data: sale, error: saleErr } = await admin
+                    .from('sales_manos_crm')
+                    .insert({
+                        lead_id: String(realId),
+                        consultant_id: ownerId,
+                        consultant_name: ownerName || 'Equipe',
+                        sale_value: valorVenda,
+                        sale_date: now,
+                        created_at: now,
+                        vehicle_name: nomeVeiculo,
+                        client_name: lead[schema.nameCol] || null,
+                        phone: lead[schema.phoneCol] || null,
+                    })
+                    .select('id')
+                    .single();
+                if (saleErr) {
+                    // O lead já foi marcado vendido; sem a linha a venda some dos
+                    // relatórios. Devolve erro pra tela avisar em vez de comemorar.
+                    console.error('[finish] Erro ao gravar sales_manos_crm:', saleErr);
+                    return NextResponse.json({ error: `Lead marcado como vendido, mas a venda não foi registrada: ${saleErr.message}` }, { status: 500 });
+                }
+                saleId = sale?.id || null;
+            }
+        }
+
+        // ── 3. Perda → perdidos_auditoria na hora ───────────────────────────
+        // Antes a fila só era populada quando o admin abria /admin/perdidos;
+        // ninguém abriu depois de 31/07 e as perdas pararam de aparecer.
+        // Só os campos de snapshot: o upsert não toca no que o admin auditou.
+        if (isPerda && motivo) {
+            const { error: auditErr } = await admin.from('perdidos_auditoria').upsert({
+                lead_uid: `${table}:${realId}`,
+                categoria: 'perdido',
+                cliente_nome: lead[schema.nameCol] || null,
+                cliente_telefone: lead[schema.phoneCol] || null,
+                veiculo_interesse: lead[schema.interestCol] || lead.vehicle_interest || null,
+                vendedor_consultant_id: ownerId,
+                vendedor_nome: ownerName,
+                motivo: textoPerda,
+                perdido_em: now,
+            }, { onConflict: 'lead_uid' });
+            if (auditErr) console.error('[finish] perdidos_auditoria:', auditErr.message);
+        }
+
+        // ── 4. Timeline (best-effort) ───────────────────────────────────────
+        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(String(realId));
+        const notes = isPerda
+            ? `🚫 ENCERRADO COMO PERDA: ${textoPerda || loss_reason || 'Não informado'}`
+            : finish_type === 'compra'
+                ? `🔄 COMPRA / TROCA REGISTRADA: ${veiculoVenda || 'Veículo não informado'}`
+                : `🏆 VENDA REALIZADA: ${veiculoVenda}${valorVenda ? ` — R$ ${valorVenda.toLocaleString('pt-BR')}` : ''}`;
+        const { error: tlErr } = await admin.from('interactions_manos_crm').insert({
+            [isUUID ? 'lead_id' : 'lead_id_v1']: String(realId),
+            type: isPerda ? 'loss' : 'sale',
+            notes,
+            old_status: oldStatus,
+            new_status: updatePayload.status,
+            consultant_id: me?.id || ownerId,
+            user_name: me?.name || 'Sistema',
+            created_at: now,
+        });
+        if (tlErr) console.warn('[finish] timeline:', tlErr.message);
+
+        // Classificação da categoria (só leads_manos_crm tem loss_category)
+        if (isPerda && textoPerda && table === 'leads_manos_crm') {
+            classifyLossReasonAsync(String(realId), textoPerda, admin).catch(
                 (e) => console.error('[finish] classifyLoss falhou:', e)
             );
         }
 
         return NextResponse.json({
             success: true,
-            status: newStatus,
+            status: updatePayload.status,
             table,
-            ai_score_at_loss: scoreAtLoss,
+            sale_id: saleId,
         });
     } catch (err: any) {
         console.error('[finish-lead CRM]', err);

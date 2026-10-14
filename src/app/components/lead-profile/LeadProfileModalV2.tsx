@@ -26,6 +26,8 @@ import { LeadHeader } from './sections/LeadHeader';
 import { ConsultantBadge } from './sections/ConsultantBadge';
 import PrizeWheelModal from '@/app/components/roleta/PrizeWheelModal';
 import { normalizeStatus } from '@/constants/status';
+import { comporMotivoAuditoria, getMotivoPerda, MIN_TEXTO_OUTRO } from '@/constants/lossReasons';
+import { getTableForLead, stripPrefix } from '@/lib/services/leadRouter';
 
 import { 
     getTemplatesForStage, 
@@ -78,10 +80,48 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
         });
     }, [lead]);
     // Wrapper do dropdown de status: só abre a roleta se o "Vendido" persistir de fato.
-    const handleStatusChange = useCallback(async (newStatus: string, reason?: string) => {
-        const ok = await updateStatus(newStatus, reason);
-        if (ok && normalizeStatus(newStatus) === 'vendido') openRoletaForSale();
-    }, [updateStatus, openRoletaForSale]);
+    // Vendido/Perdido passam ANTES por /api/lead/finish (linha em sales_manos_crm,
+    // motivo estruturado e perdidos_auditoria); depois o updateStatus de sempre
+    // segue cuidando do estado local e das conversões.
+    const registrarDesfecho = useCallback(async (
+        kind: 'venda' | 'perda',
+        opts: { motivoSlug?: string; detalhe?: string; veiculo?: string },
+    ): Promise<boolean> => {
+        try {
+            const res = await fetch('/api/lead/finish', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    lead_id: stripPrefix(String(lead.id)),
+                    lead_table: getTableForLead(String(lead.id)),
+                    finish_type: kind,
+                    motivo_perda_estruturado: opts.motivoSlug,
+                    diagnostico_atendimento: opts.detalhe || null,
+                    vehicle_name: opts.veiculo || lead.vehicle_interest || 'Veículo não informado',
+                }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || !data.success) {
+                alert('Não foi possível registrar: ' + (data.error || `erro ${res.status}`));
+                return false;
+            }
+            return true;
+        } catch (e: any) {
+            alert('Não foi possível registrar: ' + (e?.message || 'erro de rede'));
+            return false;
+        }
+    }, [lead]);
+
+    const handleStatusChange = useCallback(async (newStatus: string, reason?: string, motivoSlug?: string) => {
+        const norm = normalizeStatus(newStatus);
+        if (norm === 'vendido' || norm === 'perdido') {
+            const ok = await registrarDesfecho(norm === 'vendido' ? 'venda' : 'perda', { motivoSlug, detalhe: reason });
+            if (!ok) return;
+        }
+        const motivoTexto = norm === 'perdido' ? (comporMotivoAuditoria(motivoSlug, reason) || reason) : reason;
+        const ok = await updateStatus(newStatus, motivoTexto || undefined);
+        if (ok && norm === 'vendido') openRoletaForSale();
+    }, [registrarDesfecho, updateStatus, openRoletaForSale]);
 
     // specialized Hooks
     const timeline = useLeadTimeline(lead.id, lead.phone);
@@ -128,6 +168,7 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
     const [finishType, setFinishType] = useState<'venda' | 'compra' | 'perda' | null>(null);
     const [vehicleDetails, setVehicleDetails] = useState('');
     const [lossReason, setLossReason] = useState('');
+    const [lossSlug, setLossSlug] = useState('');
     const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
     const [editedTemplates, setEditedTemplates] = useState<Record<string, string>>({});
     const [isDeleting, setIsDeleting] = useState(false);
@@ -408,29 +449,40 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
 
     const handleSaveFinish = async () => {
         if (!finishType) return;
+        const motivoPerda = finishType === 'perda' ? getMotivoPerda(lossSlug) : null;
+        if (finishType === 'perda') {
+            if (!motivoPerda) { alert('Escolha o motivo da perda.'); return; }
+            if (motivoPerda.exigeTexto && lossReason.trim().length < MIN_TEXTO_OUTRO) {
+                alert(`Descreva o motivo (mín. ${MIN_TEXTO_OUTRO} caracteres).`);
+                return;
+            }
+        }
         setLoadingStatus('finalizing'); // Usando loading genérico do modal
         try {
-            const { recordSaleAction, recordPurchaseAction, updateLeadStatusAction } = await import('@/app/actions/leads');
+            const { recordPurchaseAction, updateLeadStatusAction } = await import('@/app/actions/leads');
 
             let result;
-            if (finishType === 'venda') {
-                result = await recordSaleAction(
-                    { ...lead, status: 'closed', vehicle_interest: vehicleDetails || lead.vehicle_interest },
-                    { consultant_id: lead.assigned_consultant_id, vehicle_name: vehicleDetails, sale_value: 0 }
-                );
-            } else if (finishType === 'compra') {
+            if (finishType === 'compra') {
                 result = await recordPurchaseAction(
                     { ...lead, status: 'comprado', vehicle_interest: vehicleDetails || lead.vehicle_interest },
                     { consultant_id: lead.assigned_consultant_id, vehicle_details: vehicleDetails, purchase_value: 0 }
                 );
             } else {
-                // Perda
+                // Venda e perda: registro pela rota única (sales_manos_crm /
+                // motivo estruturado + perdidos_auditoria). Depois o status de
+                // sempre pela action, que também cuida das conversões.
+                const ok = await registrarDesfecho(finishType === 'venda' ? 'venda' : 'perda', {
+                    motivoSlug: motivoPerda?.v,
+                    detalhe: lossReason.trim(),
+                    veiculo: vehicleDetails.trim(),
+                });
+                if (!ok) return;
                 result = await updateLeadStatusAction(
-                    lead.id, 
-                    'lost' as any, 
-                    lead.status, 
-                    `🏁 ATENDIMENTO FINALIZADO: PERDIDO / DESCARTE. Motivo: ${lossReason}`,
-                    lossReason
+                    lead.id,
+                    (finishType === 'venda' ? 'vendido' : 'perdido') as any,
+                    lead.status,
+                    undefined,
+                    finishType === 'perda' ? (comporMotivoAuditoria(motivoPerda?.v, lossReason) || undefined) : undefined
                 );
             }
 
@@ -439,7 +491,7 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
             }
 
             // Atualiza estado local otimistically/after action
-            const finalStatus = finishType === 'venda' ? 'closed' : finishType === 'compra' ? 'comprado' : 'lost';
+            const finalStatus = finishType === 'venda' ? 'vendido' : finishType === 'compra' ? 'comprado' : 'perdido';
             
             setLead((prev: any) => ({ ...prev, status: finalStatus }));
             if (setLeads) {
@@ -455,6 +507,7 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
             setFinishType(null);
             setVehicleDetails('');
             setLossReason('');
+            setLossSlug('');
 
             await timeline.refresh();
 
@@ -789,6 +842,8 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
                                             setVehicleDetails={setVehicleDetails}
                                             lossReason={lossReason}
                                             setLossReason={setLossReason}
+                                            lossSlug={lossSlug}
+                                            setLossSlug={setLossSlug}
                                             handleSaveFinish={handleSaveFinish}
                                             loadingStatus={loadingStatus}
                                             recalculateStrategy={recalculateStrategy}

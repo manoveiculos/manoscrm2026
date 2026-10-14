@@ -39,16 +39,28 @@ export async function recordSale(saleData: any) {
         consultant_name: saleData.consultant_name || 'Equipe'
     };
 
-    // 1. Gravar na tabela 'sales' (Legacy + metricsService)
-    const { data: legacySale, error: legacyError } = await supabase
-        .from('sales')
-        .insert([salePayload])
-        .select()
-        .single();
+    // Grava SÓ em sales_manos_crm. 'sales' é uma view simples sobre essa
+    // tabela: inserir nas duas gravava cada venda em dobro.
+    // Idempotente por lead: se já existe linha (ex.: criada pelo trigger de
+    // status 'vendido'), completa valor/veículo em vez de duplicar.
+    if (cleanId) {
+        const { data: existing } = await supabase
+            .from('sales_manos_crm')
+            .select('id, sale_value')
+            .eq('lead_id', cleanId)
+            .limit(1);
+        if (existing && existing.length > 0) {
+            const patch: Record<string, any> = {};
+            if (!Number(existing[0].sale_value) && salePayload.sale_value) patch.sale_value = salePayload.sale_value;
+            if (saleData.vehicle_name) patch.vehicle_name = salePayload.vehicle_name;
+            if (Object.keys(patch).length > 0) {
+                await supabase.from('sales_manos_crm').update(patch).eq('id', existing[0].id);
+            }
+            cacheInvalidate('leads_', 'metrics_');
+            return { ...existing[0], ...patch };
+        }
+    }
 
-    if (legacyError) console.error("Erro ao gravar em sales (legacy):", legacyError);
-
-    // 2. Gravar na tabela 'sales_manos_crm' (V2 Performance + dataService)
     const { data: v2Sale, error: v2Error } = await supabase
         .from('sales_manos_crm')
         .insert([salePayload])
@@ -58,7 +70,7 @@ export async function recordSale(saleData: any) {
     if (v2Error) console.error("Erro ao gravar em sales_manos_crm (v2):", v2Error);
 
     cacheInvalidate('leads_', 'metrics_');
-    return v2Sale || legacySale;
+    return v2Sale;
 }
 
 

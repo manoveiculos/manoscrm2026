@@ -4,11 +4,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ALL_STATUS, getStatusConfig, normalizeStatus } from '@/constants/status';
 import { ChevronDown, Check } from 'lucide-react';
 import { ScoreBadgeWithFeedback } from '../components/ScoreBadgeWithFeedback';
+import { MOTIVOS_PERDA, MIN_TEXTO_OUTRO, getMotivoPerda } from '@/constants/lossReasons';
 
 interface StatusSelectorProps {
     lead: any;
     currentStatus: string;
-    onChange: (newStatus: string, reason?: string) => void;
+    /** reason = detalhe livre; motivoSlug = item da lista fechada (perda). */
+    onChange: (newStatus: string, reason?: string, motivoSlug?: string) => void;
     scoreInfo: { color: string; label: string };
     displayScore: number;
     userName: string;
@@ -29,6 +31,7 @@ export const StatusSelector: React.FC<StatusSelectorProps> = ({
     const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({});
     const [pendingStatus, setPendingStatus] = useState<string | null>(null);
     const [lossReason, setLossReason] = useState('');
+    const [lossSlug, setLossSlug] = useState('');
     const buttonRef = useRef<HTMLButtonElement>(null);
     const normalizedId = normalizeStatus(currentStatus);
     const statusConfig = getStatusConfig(currentStatus);
@@ -124,33 +127,45 @@ export const StatusSelector: React.FC<StatusSelectorProps> = ({
                                             </button>
                                         ))
                                     ) : (
-                                        <div className="p-4 flex flex-col gap-3">
+                                        <div className="p-4 flex flex-col gap-3 max-h-[70vh] overflow-y-auto">
                                             <div className="flex items-center gap-2 text-red-400 text-[10px] font-bold uppercase tracking-widest mb-1">
                                                 <span>💀</span> Motivo da Perda
                                             </div>
+                                            <div className="flex flex-col gap-1">
+                                                {MOTIVOS_PERDA.map(m => (
+                                                    <button
+                                                        key={m.v}
+                                                        onClick={() => setLossSlug(m.v)}
+                                                        className={`text-left px-3 py-1.5 rounded-md text-[11px] font-semibold border transition-colors ${lossSlug === m.v ? 'bg-red-500/20 border-red-500/50 text-white' : 'border-white/10 text-white/60 hover:bg-white/[0.04]'}`}
+                                                    >
+                                                        {m.l}
+                                                    </button>
+                                                ))}
+                                            </div>
                                             <textarea
-                                                autoFocus
                                                 value={lossReason}
                                                 onChange={(e) => setLossReason(e.target.value)}
-                                                placeholder="Por que este lead foi perdido? (Ex: comprou em outra loja, sem crédito...)"
-                                                className="w-full bg-white/[0.03] border border-white/10 rounded-lg p-3 text-[11px] text-white outline-none focus:border-red-500/50 min-h-[80px] resize-none"
+                                                placeholder={getMotivoPerda(lossSlug)?.exigeTexto ? 'Descreva o motivo (obrigatório)' : 'Detalhe (opcional)'}
+                                                className="w-full bg-white/[0.03] border border-white/10 rounded-lg p-3 text-[11px] text-white outline-none focus:border-red-500/50 min-h-[60px] resize-none"
                                             />
                                             <div className="flex gap-2">
                                                 <button
                                                     onClick={() => {
                                                         setPendingStatus(null);
                                                         setLossReason('');
+                                                        setLossSlug('');
                                                     }}
                                                     className="flex-1 py-2 rounded-lg text-[10px] font-bold uppercase bg-white/5 hover:bg-white/10 transition-colors"
                                                 >
                                                     Voltar
                                                 </button>
                                                 <button
-                                                    disabled={!lossReason.trim()}
+                                                    disabled={!getMotivoPerda(lossSlug) || (!!getMotivoPerda(lossSlug)?.exigeTexto && lossReason.trim().length < MIN_TEXTO_OUTRO)}
                                                     onClick={() => {
-                                                        onChange('perdido', lossReason);
+                                                        onChange('perdido', lossReason.trim(), lossSlug);
                                                         setPendingStatus(null);
                                                         setLossReason('');
+                                                        setLossSlug('');
                                                         setShowStatusMenu(false);
                                                     }}
                                                     className="flex-3 py-2 rounded-lg text-[10px] font-bold uppercase bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 transition-colors disabled:opacity-30"

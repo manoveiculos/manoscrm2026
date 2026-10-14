@@ -7,6 +7,7 @@ import { Trophy, X, CalendarPlus, ArrowLeft, MessageSquare, Activity, Archive, P
 import { parseUid } from '@/lib/services/unifiedLead';
 import CannedResponses, { CannedContext } from '@/components/CannedResponses';
 import FollowupHistory from '@/components/FollowupHistory';
+import { MOTIVOS_PERDA, MIN_TEXTO_OUTRO, getMotivoPerda } from '@/constants/lossReasons';
 
 const ARCHIVE_REASONS = [
     { v: 'nao_e_lead', l: 'Spam / não é lead real' },
@@ -29,20 +30,8 @@ const ARCHIVE_REASONS = [
  * Direita:  botões de ação
  */
 
-// Motivos estruturados do módulo de Reversão.
-// Os 3 financeiros (credito_negado, cpf_ruim, score_baixo) marcam o lead
-// como descarte_financeiro=true — IA NÃO tenta reverter (sem crédito).
-const LOSS_REASONS = [
-    { v: 'preco',          l: 'Preço alto',           hint: 'Cliente achou caro' },
-    { v: 'parcela',        l: 'Parcela cara',         hint: 'Parcela não cabe no bolso' },
-    { v: 'credito_negado', l: '❌ Crédito negado',     hint: 'Descarta IA (sem reversão)' },
-    { v: 'cpf_ruim',       l: '❌ CPF ruim',           hint: 'Descarta IA' },
-    { v: 'score_baixo',    l: '❌ Score baixo',        hint: 'Descarta IA' },
-    { v: 'modelo',         l: 'Queria outro modelo',  hint: 'IA tenta novidade do estoque' },
-    { v: 'concorrente',    l: 'Foi pro concorrente',  hint: 'IA reforça diferencial Manos' },
-    { v: 'sumiu',          l: 'Sumiu / não responde', hint: 'IA tenta reabertura leve' },
-    { v: 'outro',          l: 'Outro',                hint: 'Use o campo abaixo pra detalhar' },
-];
+// Motivos de perda: lista fechada única (src/constants/lossReasons.ts),
+// validada também no servidor (/api/lead/finish).
 
 const PAYMENT_METHODS = ['à vista', 'financiado', 'consórcio', 'CDC', 'troca + diferença'];
 
@@ -157,7 +146,7 @@ export default function LeadDetailPage() {
     const [soldVehicle, setSoldVehicle] = useState('');
 
     // Lost
-    const [lossReason, setLossReason] = useState(LOSS_REASONS[0].v);
+    const [lossReason, setLossReason] = useState('');
     const [lossNote, setLossNote] = useState('');
 
     // Schedule
@@ -309,20 +298,27 @@ export default function LeadDetailPage() {
     }
 
     async function handleSold() {
-        if (!soldValue || !soldPayment) return;
+        if (!soldValue || !soldPayment || !soldVehicle.trim()) return;
         setSubmitting(true);
         try {
-            await fetch('/api/lead/finish', {
+            const res = await fetch('/api/lead/finish', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     lead_id: leadId,
-                    lead_table: leadTable,
+                    lead_table: lead?.table_name || leadTable,
                     finish_type: 'venda',
-                    vehicle_details: `${soldVehicle} | ${soldPayment} | R$ ${soldValue}`,
-                    consultant_id: lead?.assigned_consultant_id,
+                    vehicle_name: soldVehicle.trim(),
+                    sale_value: soldValue,
+                    payment_method: soldPayment,
                 }),
             });
+            const data = await res.json().catch(() => ({}));
+            // Antes a tela comemorava mesmo com erro — e a venda se perdia calada.
+            if (!res.ok || !data.success) {
+                alert('A venda NÃO foi registrada: ' + (data.error || `erro ${res.status}`) + '\nTente de novo ou avise o gestor.');
+                return;
+            }
             // Comemoração antes de redirecionar
             setShowSold(false);
             setShowConfetti(true);
@@ -333,24 +329,27 @@ export default function LeadDetailPage() {
     }
 
     async function handleLost() {
-        if (!lossReason) return;
+        const motivo = getMotivoPerda(lossReason);
+        if (!motivo) return;
+        if (motivo.exigeTexto && lossNote.trim().length < MIN_TEXTO_OUTRO) return;
         setSubmitting(true);
         try {
-            await fetch('/api/lead/finish', {
+            const res = await fetch('/api/lead/finish', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     lead_id: leadId,
-                    lead_table: leadTable,
+                    lead_table: lead?.table_name || leadTable,
                     finish_type: 'perda',
-                    // legado (mantém pra compat e classifyLossReasonAsync)
-                    loss_reason: lossNote ? `${lossReason}: ${lossNote}` : lossReason,
-                    // Módulo de Reversão: estruturado + diagnóstico
-                    motivo_perda_estruturado: lossReason,
-                    diagnostico_atendimento: lossNote || null,
-                    consultant_id: lead?.assigned_consultant_id,
+                    motivo_perda_estruturado: motivo.v,
+                    diagnostico_atendimento: lossNote.trim() || null,
                 }),
             });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || !data.success) {
+                alert('A perda NÃO foi registrada: ' + (data.error || `erro ${res.status}`));
+                return;
+            }
             router.push('/inbox');
         } finally {
             setSubmitting(false);
@@ -884,37 +883,38 @@ export default function LeadDetailPage() {
                     </select>
                     <label className="block text-sm text-gray-300 mb-1">Veículo vendido</label>
                     <input value={soldVehicle} onChange={e => setSoldVehicle(e.target.value)} className="w-full p-2 rounded bg-zinc-800 text-white mb-4" />
-                    <button disabled={submitting || !soldValue} onClick={handleSold} className="w-full bg-green-600 disabled:bg-gray-700 text-white py-3 rounded font-bold">
+                    <button disabled={submitting || !soldValue || !soldVehicle.trim()} onClick={handleSold} className="w-full bg-green-600 disabled:bg-gray-700 text-white py-3 rounded font-bold">
                         {submitting ? 'Salvando…' : 'CONFIRMAR VENDA'}
                     </button>
                 </Modal>
             )}
 
             {showLost && (() => {
-                const selectedReason = LOSS_REASONS.find(r => r.v === lossReason);
-                const isFinanceiro = ['credito_negado', 'cpf_ruim', 'score_baixo'].includes(lossReason);
+                const selectedReason = getMotivoPerda(lossReason);
+                const precisaTexto = !!selectedReason?.exigeTexto;
+                const bloqueado = !selectedReason || (precisaTexto && lossNote.trim().length < MIN_TEXTO_OUTRO);
                 return (
                     <Modal title="Marcar PERDA" onClose={() => setShowLost(false)}>
                         <label className="block text-sm text-gray-300 mb-1">Por que esse lead não fechou? *</label>
                         <select
                             value={lossReason}
                             onChange={e => setLossReason(e.target.value)}
-                            className="w-full p-2 rounded bg-zinc-800 text-white mb-1"
+                            className="w-full p-2 rounded bg-zinc-800 text-white mb-3"
                         >
-                            {LOSS_REASONS.map(r => <option key={r.v} value={r.v}>{r.l}</option>)}
+                            <option value="" disabled>Escolha o motivo…</option>
+                            {MOTIVOS_PERDA.map(r => <option key={r.v} value={r.v}>{r.l}</option>)}
                         </select>
-                        {selectedReason?.hint && (
-                            <p className="text-[11px] text-zinc-400 mb-3 px-1">{selectedReason.hint}</p>
-                        )}
 
-                        {isFinanceiro && (
+                        {selectedReason?.descarteFinanceiro && (
                             <div className="mb-3 p-2 rounded bg-red-950/50 border border-red-700/50 text-xs text-red-200">
-                                ⚠️ Motivo financeiro detectado. IA <strong>não vai tentar reverter</strong> esse lead — sem crédito, sem reengajamento.
+                                ⚠️ Motivo financeiro. IA <strong>não vai tentar reverter</strong> esse lead — sem crédito, sem reengajamento.
                             </div>
                         )}
 
                         <label className="block text-sm text-gray-300 mb-1">
-                            Diagnóstico do atendimento <span className="text-zinc-500">(opcional, ajuda a IA)</span>
+                            {precisaTexto
+                                ? <>Descreva o motivo <span className="text-red-400">*</span> <span className="text-zinc-500">(mín. {MIN_TEXTO_OUTRO} caracteres)</span></>
+                                : <>Diagnóstico do atendimento <span className="text-zinc-500">(opcional, ajuda a IA)</span></>}
                         </label>
                         <textarea
                             value={lossNote}
@@ -924,7 +924,7 @@ export default function LeadDetailPage() {
                             className="w-full p-2 rounded bg-zinc-800 text-white mb-4 text-sm"
                         />
                         <button
-                            disabled={submitting}
+                            disabled={submitting || bloqueado}
                             onClick={handleLost}
                             className="w-full bg-red-700 disabled:bg-gray-700 text-white py-3 rounded font-bold"
                         >
