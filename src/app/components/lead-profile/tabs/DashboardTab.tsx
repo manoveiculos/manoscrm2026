@@ -5,6 +5,9 @@ import { TacticalAction } from '../sections/TacticalAction';
 import { QuickActions } from '../sections/QuickActions';
 import { Lead } from '../types';
 import { MOTIVOS_PERDA, MIN_TEXTO_OUTRO, getMotivoPerda } from '@/constants/lossReasons';
+import { QualificacaoCard } from '@/components/qualificacao/QualificacaoCard';
+import { tabelaComQualificacao } from '@/lib/qualificacao';
+import { getTableForLead, stripPrefix } from '@/lib/services/leadRouter';
 
 interface DashboardTabProps {
     lead: Lead;
@@ -214,6 +217,8 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
         ? 'Score IA baixo. Qualifique o interesse: pergunte sobre prazo e orçamento.'
         : 'Mantenha contato regular para reduzir o risco de abandono.';
 
+    const tabelaLead = getTableForLead(String(lead.id));
+
     // ── TELA PRINCIPAL ──
     return (
         <div className="space-y-4">
@@ -224,6 +229,10 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                 calcularTempoFunil={calcularTempoFunil}
                 calcularDiffHoras={calcularDiffHoras}
             />
+
+            {tabelaComQualificacao(tabelaLead) && (
+                <QualificacaoCard uid={`${tabelaLead}:${stripPrefix(String(lead.id))}`} />
+            )}
 
             <TacticalAction
                 lead={lead}

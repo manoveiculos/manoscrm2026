@@ -8,6 +8,9 @@ import { parseUid } from '@/lib/services/unifiedLead';
 import CannedResponses, { CannedContext } from '@/components/CannedResponses';
 import FollowupHistory from '@/components/FollowupHistory';
 import { MOTIVOS_PERDA, MIN_TEXTO_OUTRO, getMotivoPerda } from '@/constants/lossReasons';
+import { QualificacaoCard } from '@/components/qualificacao/QualificacaoCard';
+import { etapaDoStatus, ETAPAS_FUNIL, triagemAtrasada } from '@/constants/funil';
+import { tabelaComQualificacao } from '@/lib/qualificacao';
 
 const ARCHIVE_REASONS = [
     { v: 'nao_e_lead', l: 'Spam / não é lead real' },
@@ -556,8 +559,18 @@ export default function LeadDetailPage() {
                             </div>
                         </div>
                         <div className="pt-2 border-t border-zinc-800/60">
-                            <span className="text-zinc-500 block text-[11px] uppercase tracking-wider mb-0.5">Status</span>
-                            <span className="text-zinc-300 uppercase text-xs font-black bg-zinc-800 px-2 py-0.5 rounded inline-block">{lead.status || 'novo'}</span>
+                            <span className="text-zinc-500 block text-[11px] uppercase tracking-wider mb-0.5">Etapa do funil</span>
+                            <span className="text-zinc-300 uppercase text-xs font-black bg-zinc-800 px-2 py-0.5 rounded inline-block" title={`status: ${lead.status || 'novo'}`}>
+                                {ETAPAS_FUNIL.find(e => e.id === etapaDoStatus(lead.status))?.label || lead.status || 'novo'}
+                            </span>
+                            {(() => {
+                                const t = triagemAtrasada(lead);
+                                return t.atrasada ? (
+                                    <span className="ml-1.5 text-[10px] font-black bg-red-700 text-white px-1.5 py-0.5 rounded inline-block">
+                                        ⏰ {t.horas}h em triagem
+                                    </span>
+                                ) : null;
+                            })()}
                         </div>
                     </div>
                         {(() => {
@@ -574,6 +587,19 @@ export default function LeadDetailPage() {
                                 </div>
                             ) : null;
                         })()}
+
+                    {tabelaComQualificacao(lead.table_name) && (
+                        <QualificacaoCard
+                            uid={`${lead.table_name}:${lead.id}`}
+                            className="mt-4"
+                            onSaved={(q) => setLead(prev => prev ? {
+                                ...prev,
+                                vehicle_interest: q.campos.vehicle_interest ?? prev.vehicle_interest,
+                                carro_troca: q.campos.carro_troca ?? prev.carro_troca,
+                                valor_investimento: q.campos.valor_investimento ?? prev.valor_investimento,
+                            } : prev)}
+                        />
+                    )}
 
                     {/* Bloco de Formulário Facebook Lead Ads se houver dados preenchidos */}
                     {(lead.cidade || lead.momento_compra || lead.forma_pagamento || lead.observacoes) && (

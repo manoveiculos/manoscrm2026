@@ -3,6 +3,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/admin';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
+import { buscarQualificacao, pisoEstoque } from '@/lib/services/qualificacaoService';
+import { classificarLead, tabelaComQualificacao } from '@/lib/qualificacao';
 
 export const dynamic = 'force-dynamic';
 
@@ -110,6 +112,24 @@ export async function GET(req: NextRequest) {
                     if (info.obs) l.observacoes = info.obs;
                 }
             });
+        }
+
+        // Selo de qualificação (Quente/Morno/Fora do perfil/Sem qualificação).
+        // Best-effort: se falhar, a fila continua chegando sem o selo.
+        try {
+            const uids = rawLeads.filter((l: any) => tabelaComQualificacao(l.table_name)).map((l: any) => l.uid);
+            if (uids.length > 0) {
+                const [piso, mapa] = await Promise.all([pisoEstoque(admin), buscarQualificacao(admin, uids)]);
+                rawLeads.forEach((l: any) => {
+                    const campos = mapa.get(l.uid);
+                    if (!campos) return;
+                    const r = classificarLead(campos, piso);
+                    l.qualificacao = { selo: r.selo, motivo: r.motivo, completa: r.completa };
+                    if (campos.vehicle_interest && !l.vehicle_interest) l.vehicle_interest = campos.vehicle_interest;
+                });
+            }
+        } catch (qErr: any) {
+            console.warn('[inbox/pesca] qualificação:', qErr?.message);
         }
 
         return NextResponse.json({ success: true, leads: rawLeads });

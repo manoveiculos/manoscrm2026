@@ -6,6 +6,11 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import { Clock, AlertTriangle, MessageCircle, Trophy, X as XIcon, GripVertical, Flag, Archive, Pencil } from 'lucide-react';
 import { MOTIVOS_PERDA, MIN_TEXTO_OUTRO, getMotivoPerda } from '@/constants/lossReasons';
+import { etapaDoStatus, STATUS_DA_ETAPA, ETAPAS_EXIGEM_QUALIFICACAO, ETAPAS_EXIGEM_VISITA, triagemAtrasada, type EtapaFunil } from '@/constants/funil';
+import { tabelaComQualificacao } from '@/lib/qualificacao';
+import { useQualificacaoLote } from '@/hooks/useQualificacao';
+import { SeloQualificacao } from '@/components/qualificacao/SeloQualificacao';
+import { QualificacaoCard } from '@/components/qualificacao/QualificacaoCard';
 
 const PAYMENT_METHODS = ['à vista', 'financiado', 'consórcio', 'CDC', 'troca + diferença'];
 
@@ -18,6 +23,7 @@ interface KanbanLead {
     vehicle_interest: string | null;
     status: string | null;
     ai_score: number | null;
+    created_at: string | null;
     atendimento_iniciado_em: string | null;
     ultima_interacao_humana: string | null;
     flagged_reversao: boolean | null;
@@ -26,30 +32,9 @@ interface KanbanLead {
 
 interface LastMsg { text: string; direction: string; created_at: string; }
 
-type Column = 'qualificacao' | 'proposta' | 'test_drive' | 'fechamento' | 'finalizado';
-
-const COLUMN_OF_STATUS: Record<string, Column> = {
-    received: 'qualificacao',
-    novo: 'qualificacao',
-    triagem: 'qualificacao',
-    attempt: 'qualificacao',
-    contacted: 'qualificacao',
-    proposed: 'proposta',
-    negotiation: 'proposta',
-    scheduled: 'test_drive',
-    visited: 'test_drive',
-    closing: 'fechamento',
-    fechamento: 'fechamento',
-    pending_finish: 'finalizado',
-};
-
-const STATUS_OF_COLUMN: Record<Column, string> = {
-    qualificacao: 'attempt',
-    proposta: 'proposed',
-    test_drive: 'scheduled',
-    fechamento: 'fechamento',
-    finalizado: 'pending_finish',
-};
+// Colunas = etapas padronizadas do funil (src/constants/funil.ts).
+// Vendido/Perdido não têm coluna: saem pelo "Finalizado" (escolha do desfecho).
+type Column = Exclude<EtapaFunil, 'vendido' | 'perdido'> | 'finalizado';
 
 const COLUMNS: Array<{
     key: Column;
@@ -61,27 +46,32 @@ const COLUMNS: Array<{
     text: string;
     badge: string;
 }> = [
-    { key: 'qualificacao', label: 'Qualificação', emoji: '🔍', desc: 'Entendendo necessidade',
+    { key: 'triagem',         label: 'Triagem',         emoji: '🔍', desc: 'Qualificar em até 24h',
       gradient: 'from-blue-950/60 to-zinc-900',
       border: 'border-blue-700/40',
       text: 'text-blue-300',
       badge: 'bg-blue-900/60 text-blue-200' },
-    { key: 'proposta',     label: 'Proposta',     emoji: '💼', desc: 'Negociando valor',
-      gradient: 'from-amber-950/60 to-zinc-900',
-      border: 'border-amber-700/40',
-      text: 'text-amber-300',
-      badge: 'bg-amber-900/60 text-amber-200' },
-    { key: 'test_drive',   label: 'Test Drive',   emoji: '🚗', desc: 'Visita agendada / feita',
+    { key: 'em_atendimento',  label: 'Em atendimento',  emoji: '💬', desc: 'Qualificado, conversa andando',
+      gradient: 'from-cyan-950/60 to-zinc-900',
+      border: 'border-cyan-700/40',
+      text: 'text-cyan-300',
+      badge: 'bg-cyan-900/60 text-cyan-200' },
+    { key: 'visita_agendada', label: 'Visita agendada', emoji: '📅', desc: 'Tem dia e hora na agenda',
       gradient: 'from-purple-950/60 to-zinc-900',
       border: 'border-purple-700/40',
       text: 'text-purple-300',
       badge: 'bg-purple-900/60 text-purple-200' },
-    { key: 'fechamento',   label: 'Fechamento',   emoji: '🏆', desc: 'Última milha',
-      gradient: 'from-emerald-950/60 to-zinc-900',
-      border: 'border-emerald-700/40',
-      text: 'text-emerald-300',
-      badge: 'bg-emerald-900/60 text-emerald-200' },
-    { key: 'finalizado',   label: 'Finalizado',   emoji: '🏁', desc: 'Escolha o desfecho',
+    { key: 'visitou',         label: 'Visitou / Test drive', emoji: '🚗', desc: 'Veio na loja',
+      gradient: 'from-fuchsia-950/60 to-zinc-900',
+      border: 'border-fuchsia-700/40',
+      text: 'text-fuchsia-300',
+      badge: 'bg-fuchsia-900/60 text-fuchsia-200' },
+    { key: 'proposta',        label: 'Proposta',        emoji: '💼', desc: 'Negociando valor',
+      gradient: 'from-amber-950/60 to-zinc-900',
+      border: 'border-amber-700/40',
+      text: 'text-amber-300',
+      badge: 'bg-amber-900/60 text-amber-200' },
+    { key: 'finalizado',      label: 'Finalizado',      emoji: '🏁', desc: 'Vendido ou perdido',
       gradient: 'from-zinc-900 to-zinc-950',
       border: 'border-white/15',
       text: 'text-white/90',
@@ -89,7 +79,8 @@ const COLUMNS: Array<{
 ];
 
 function columnFor(lead: KanbanLead): Column {
-    return COLUMN_OF_STATUS[String(lead.status || '').toLowerCase()] || 'qualificacao';
+    const etapa = etapaDoStatus(lead.status);
+    return etapa === 'vendido' || etapa === 'perdido' ? 'finalizado' : etapa;
 }
 
 function ageInfo(iso: string | null | undefined): { text: string; color: string; stale: boolean; alert: boolean } {
@@ -136,10 +127,16 @@ export default function AtendimentoKanbanPage() {
     const [visitForm, setVisitForm] = useState({ tipo: 'loja', data_hora: '', endereco: '', observacoes: '' });
     const [visitBusy, setVisitBusy] = useState(false);
 
+    // Qualificação obrigatória pra sair da triagem (selo no card + trava no avanço)
+    const qualUids = useMemo(() => leads.filter(l => tabelaComQualificacao(l.table_name)).map(l => l.uid), [leads]);
+    const qual = useQualificacaoLote(qualUids);
+    const [qualLead, setQualLead] = useState<KanbanLead | null>(null);
+    const [qualPendingCol, setQualPendingCol] = useState<Column | null>(null);
+
     const fetchLeads = useCallback(async (cid: string) => {
         const { data, error } = await supabase
             .from('leads_unified_active')
-            .select('uid, table_name, native_id, name, phone, vehicle_interest, status, ai_score, atendimento_iniciado_em, ultima_interacao_humana, flagged_reversao, archived_at')
+            .select('uid, table_name, native_id, name, phone, vehicle_interest, status, ai_score, created_at, atendimento_iniciado_em, ultima_interacao_humana, flagged_reversao, archived_at')
             .eq('assigned_consultant_id', cid)
             .not('atendimento_iniciado_em', 'is', null)
             .is('archived_at', null)
@@ -304,7 +301,8 @@ export default function AtendimentoKanbanPage() {
 
     // Persiste a mudança de coluna (sem as travas — usado por moveLead e pós-visita).
     const doMove = useCallback(async (lead: KanbanLead, targetCol: Column) => {
-        const newStatus = STATUS_OF_COLUMN[targetCol];
+        if (targetCol === 'finalizado') return;
+        const newStatus = STATUS_DA_ETAPA[targetCol];
         if (!newStatus) return;
         // Optimistic update
         setLeads(prev => prev.map(l => l.uid === lead.uid ? { ...l, status: newStatus, ultima_interacao_humana: new Date().toISOString() } : l));
@@ -332,7 +330,7 @@ export default function AtendimentoKanbanPage() {
         }
     }, [supabase, consultantId, fetchLeads]);
 
-    const moveLead = useCallback(async (lead: KanbanLead, targetCol: Column) => {
+    const moveLead = useCallback(async (lead: KanbanLead, targetCol: Column, opts: { qualOk?: boolean } = {}) => {
         if (columnFor(lead) === targetCol) return;
         // FINALIZADO: não persiste; segura o card local e abre o menu de desfecho
         if (targetCol === 'finalizado') {
@@ -341,21 +339,30 @@ export default function AtendimentoKanbanPage() {
             setFinishType(null);
             setDiagnostico('');
             setMotivoPerda('');
-            setVendaVeiculo(lead.vehicle_interest || '');
+            setVendaVeiculo(qual.items[lead.uid]?.campos.vehicle_interest || lead.vehicle_interest || '');
             setVendaValor('');
             setVendaPagamento(PAYMENT_METHODS[0]);
             return;
         }
-        // FORÇA VISITA: pra entrar em Test Drive ou Fechamento, o lead precisa ter
-        // uma visita agendada. Se não tem, abre o modal (obrigatório) antes de mover.
-        if ((targetCol === 'test_drive' || targetCol === 'fechamento') && !visitaUids.has(lead.uid)) {
+        // QUALIFICAÇÃO OBRIGATÓRIA: sair da triagem exige carro, entrada, troca e
+        // prazo respondidos. Sem isso abre o formulário antes de mover.
+        if (!opts.qualOk && tabelaComQualificacao(lead.table_name)
+            && (ETAPAS_EXIGEM_QUALIFICACAO as Column[]).includes(targetCol)
+            && !qual.items[lead.uid]?.completa) {
+            setQualLead(lead);
+            setQualPendingCol(targetCol);
+            return;
+        }
+        // FORÇA VISITA: pra entrar em Visita agendada ou Visitou, o lead precisa ter
+        // uma visita na agenda. Se não tem, abre o modal (obrigatório) antes de mover.
+        if ((ETAPAS_EXIGEM_VISITA as Column[]).includes(targetCol) && !visitaUids.has(lead.uid)) {
             setVisitLead(lead);
             setVisitPendingCol(targetCol);
             setVisitForm({ tipo: 'loja', data_hora: '', endereco: '', observacoes: '' });
             return;
         }
         await doMove(lead, targetCol);
-    }, [doMove, visitaUids]);
+    }, [doMove, visitaUids, qual.items]);
 
     // Renomear cliente direto no card (facilita achar o cliente no funil)
     const renameLead = useCallback(async (l: KanbanLead) => {
@@ -379,13 +386,16 @@ export default function AtendimentoKanbanPage() {
     }, []);
 
     const grouped = useMemo(() => {
-        const map: Record<Column, KanbanLead[]> = { qualificacao: [], proposta: [], test_drive: [], fechamento: [], finalizado: [] };
+        const map: Record<Column, KanbanLead[]> = { triagem: [], em_atendimento: [], visita_agendada: [], visitou: [], proposta: [], finalizado: [] };
         for (const l of leads) {
             if (pendingFinishUids.has(l.uid)) map.finalizado.push(l);
             else map[columnFor(l)].push(l);
         }
         return map;
     }, [leads, pendingFinishUids]);
+
+    // Triagem tem prazo: 24h desde a entrada do lead pra qualificar.
+    const triagemVencida = useMemo(() => leads.filter(l => triagemAtrasada(l).atrasada), [leads]);
 
     // Leads parados há +8h — o sistema COBRA o vendedor (nunca remove sozinho).
     const staleLeads = useMemo(
@@ -565,6 +575,17 @@ export default function AtendimentoKanbanPage() {
                 </div>
             </div>
 
+            {/* Triagem com prazo: 24h desde a entrada pra qualificar */}
+            {triagemVencida.length > 0 && (
+                <div className="mb-3 rounded-2xl border border-red-700/60 bg-red-950/30 px-4 py-3 flex items-start gap-3">
+                    <AlertTriangle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+                    <div className="text-sm text-red-200">
+                        <b>{triagemVencida.length}</b> {triagemVencida.length === 1 ? 'lead está' : 'leads estão'} em <b>triagem há mais de 24h</b>.
+                        <span className="text-red-300/80"> Qualifique (carro, entrada, troca, prazo) e mova pra Em atendimento — ou finalize como perdido com o motivo.</span>
+                    </div>
+                </div>
+            )}
+
             {/* Cobrança: leads parados há +8h (o sistema questiona, nunca remove) */}
             {staleLeads.length > 0 && (
                 <div className="mb-4 rounded-2xl border border-orange-700/50 bg-orange-950/30 px-4 py-3 flex items-start gap-3">
@@ -586,7 +607,7 @@ export default function AtendimentoKanbanPage() {
                     </p>
                 </div>
             ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
+                <div className="grid grid-cols-1 md:grid-cols-3 2xl:grid-cols-6 gap-3">
                     {COLUMNS.map(col => {
                         const colLeads = grouped[col.key];
                         const isDragTarget = dragOverCol === col.key;
@@ -623,6 +644,10 @@ export default function AtendimentoKanbanPage() {
                                             const lastMsg = lastMsgs.get(l.native_id);
                                             const isDragging = draggingUid === l.uid;
                                             const isBusy = busyMoves.has(l.uid);
+                                            const q = qual.items[l.uid];
+                                            const triagem = triagemAtrasada(l);
+                                            const interesse = q?.campos.vehicle_interest || l.vehicle_interest;
+                                            const troca = q?.campos.carro_troca || l.carro_troca;
                                             return (
                                                 <article
                                                     key={l.uid}
@@ -631,6 +656,7 @@ export default function AtendimentoKanbanPage() {
                                                     onDragEnd={onDragEnd}
                                                     className={`group relative rounded-xl bg-zinc-900/90 border ${
                                                         col.key === 'finalizado' ? 'border-amber-300/60 ring-2 ring-amber-200/30 shadow-[0_0_30px_-5px_rgba(252,211,77,0.45)] animate-pulse' :
+                                                        triagem.atrasada ? 'border-red-600 ring-2 ring-red-500/40' :
                                                         age.alert ? 'border-red-700/60 ring-1 ring-red-500/20' :
                                                         age.stale ? 'border-orange-700/60' : 'border-zinc-800'
                                                     } p-3 cursor-grab active:cursor-grabbing transition-all hover:bg-zinc-800/90 hover:border-zinc-700 ${
@@ -668,16 +694,28 @@ export default function AtendimentoKanbanPage() {
                                                         )}
                                                     </div>
 
+                                                    {/* Selo de qualificação + prazo da triagem */}
+                                                    {(q || triagem.atrasada) && (
+                                                        <div className="flex flex-wrap items-center gap-1 mb-1.5">
+                                                            {q && <SeloQualificacao selo={q.selo} motivo={q.motivo} compact />}
+                                                            {triagem.atrasada && (
+                                                                <span className="text-[10px] font-black bg-red-700 text-white px-1.5 py-0.5 rounded" title="Lead não pode passar de 24h em triagem">
+                                                                    ⏰ {triagem.horas >= 48 ? `${Math.floor(triagem.horas / 24)}d` : `${triagem.horas}h`} em triagem
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    )}
+
                                                     {/* Veículos: Interesse + Troca */}
                                                     <div className="text-[11px] text-zinc-400 mb-2 space-y-0.5">
-                                                        <div className="flex items-center gap-1 truncate" title={`Interesse: ${l.vehicle_interest || '—'}`}>
+                                                        <div className="flex items-center gap-1 truncate" title={`Interesse: ${interesse || '—'}`}>
                                                             <span>🚗</span>
-                                                            <span className="truncate">{l.vehicle_interest || '—'}</span>
+                                                            <span className="truncate">{interesse || '—'}</span>
                                                         </div>
-                                                        {l.carro_troca && l.carro_troca !== '---' && (
-                                                            <div className="flex items-center gap-1 text-[10px] text-zinc-500 truncate" title={`Troca: ${l.carro_troca}`}>
+                                                        {troca && troca !== '---' && (
+                                                            <div className="flex items-center gap-1 text-[10px] text-zinc-500 truncate" title={`Troca: ${troca}`}>
                                                                 <span>🔄 Troca:</span>
-                                                                <span className="truncate italic font-medium text-zinc-400">{l.carro_troca}</span>
+                                                                <span className="truncate italic font-medium text-zinc-400">{troca}</span>
                                                             </div>
                                                         )}
                                                     </div>
@@ -722,7 +760,7 @@ export default function AtendimentoKanbanPage() {
                                 </div>
 
                                 {/* Footer coluna — atalhos finalizar */}
-                                {col.key === 'fechamento' && colLeads.length > 0 && (
+                                {col.key === 'proposta' && colLeads.length > 0 && (
                                     <div className="px-2 pb-3 pt-1 border-t border-emerald-900/30 flex gap-1">
                                         <button
                                             onClick={() => alert('Abra o lead pra registrar venda com valor + forma de pagamento')}
@@ -748,6 +786,30 @@ export default function AtendimentoKanbanPage() {
             <p className="text-[11px] text-zinc-500 italic mt-4 text-center md:hidden">
                 💡 No celular, arraste o cartão segurando-o até a próxima coluna.
             </p>
+
+            {/* Modal: qualificação obrigatória pra sair da triagem */}
+            {qualLead && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={() => { setQualLead(null); setQualPendingCol(null); }}>
+                    <div className="w-full max-w-md max-h-[92vh] overflow-y-auto rounded-2xl border border-blue-500/30 bg-zinc-900/95 shadow-2xl p-5" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center justify-between mb-1">
+                            <h3 className="text-lg font-black text-white">📋 Qualifique antes de avançar</h3>
+                            <button onClick={() => { setQualLead(null); setQualPendingCol(null); }} className="text-zinc-500 hover:text-white"><XIcon className="w-5 h-5" /></button>
+                        </div>
+                        <p className="text-xs text-zinc-400 mb-3 truncate">{qualLead.name || 'Sem nome'} — responda as 4 perguntas pra sair da triagem.</p>
+                        <QualificacaoCard
+                            uid={qualLead.uid}
+                            saveLabel="Salvar e mover"
+                            onSaved={(item) => {
+                                qual.atualizar(qualLead.uid, item);
+                                if (!item.completa) return; // continua aberto mostrando o que falta
+                                const lead = qualLead; const col = qualPendingCol;
+                                setQualLead(null); setQualPendingCol(null);
+                                if (lead && col) moveLead(lead, col, { qualOk: true });
+                            }}
+                        />
+                    </div>
+                </div>
+            )}
 
             {/* Modal de Desfecho (V8) */}
             {finishLead && (
