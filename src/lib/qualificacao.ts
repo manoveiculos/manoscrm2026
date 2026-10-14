@@ -111,6 +111,18 @@ export function getPrazo(v: string | null | undefined) {
     return PRAZOS_COMPRA.find(p => p.v === v) || null;
 }
 
+/** Texto livre do cliente ("essa semana", "mês que vem", "só olhando") → prazo. */
+export function normalizarPrazo(texto: string | null | undefined): PrazoCompra | null {
+    const s = (texto || '').toLowerCase().trim();
+    if (!s) return null;
+    if (getPrazo(s)) return s as PrazoCompra;
+    if (/pesquis|olhando|s[oó] vendo|n[aã]o sei|sem pressa|ainda n[aã]o|curiosidade/.test(s)) return 'pesquisando';
+    if (/hoje|amanh[aã]|essa semana|esta semana|semana que vem|pr[oó]xima semana|urgente|imediat|j[aá]\b|agora/.test(s)) return 'esta_semana';
+    if (/(este|esse) m[eê]s|at[eé] o fim do m[eê]s|(15|20|30) dias|quinze dias|m[eê]s que vem/.test(s)) return 'este_mes';
+    if (/\b[1-3]\s*(a\s*[2-3]\s*)?m[eê]s(es)?|dois meses|tr[eê]s meses|um m[eê]s/.test(s)) return '1_3_meses';
+    return null;
+}
+
 /**
  * Teto de preço que o cliente pediu, lido do texto do interesse:
  * "Onix até 50 mil" → 50000; "carro de 30k" → 30000; "Gol 2014" → null.

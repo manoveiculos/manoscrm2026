@@ -71,9 +71,12 @@ export function QualificacaoCard({ uid, onSaved, saveLabel = 'Salvar qualificaç
             });
             const d = await res.json();
             if (!res.ok || !d.success) throw new Error(d.error || `erro ${res.status}`);
-            setAviso(d.ignorados?.includes('prazo_compra')
-                ? 'Salvo — o prazo ainda não grava no banco (falta aplicar a atualização do banco).'
-                : 'Qualificação salva.');
+            setAviso([
+                d.ignorados?.includes('prazo_compra')
+                    ? 'Salvo — o prazo ainda não grava no banco (falta aplicar a atualização do banco).'
+                    : 'Qualificação salva.',
+                d.alerta_carro === 'criado' ? 'Carro abaixo do estoque: cadastrei um alerta na Central de Compras.' : '',
+            ].filter(Boolean).join(' '));
             onSaved?.({ campos: d.campos, selo: d.selo, faltando: d.faltando, completa: d.completa, entrada: d.entrada, troca: d.troca, faixaMaxima: d.faixaMaxima, motivo: d.motivo });
         } catch (e: any) {
             setErro('Não salvou: ' + (e?.message || 'tente de novo'));

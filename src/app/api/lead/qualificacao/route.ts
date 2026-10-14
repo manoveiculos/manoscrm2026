@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/admin';
 import { createClient as createAuthClient } from '@/lib/supabase/server';
 import { classificarLead, type QualificacaoCampos } from '@/lib/qualificacao';
 import { buscarQualificacao, salvarQualificacao, pisoEstoque, tabelaSuportaQualificacao } from '@/lib/services/qualificacaoService';
+import { cadastrarAlertaAbaixoDaFaixa } from '@/lib/services/alertaCarroAbaixoFaixa';
 
 export const dynamic = 'force-dynamic';
 
@@ -81,5 +82,7 @@ export async function POST(req: NextRequest) {
 
     const [piso, mapa] = await Promise.all([pisoEstoque(ctx.admin), buscarQualificacao(ctx.admin, [uid])]);
     const atual = mapa.get(uid) || campos;
-    return NextResponse.json({ success: true, piso, ignorados: r.ignorados, campos: atual, ...classificarLead(atual, piso) });
+    // Pediu carro abaixo do estoque → alerta na Central de Compras (não descarta).
+    const alertaCarro = await cadastrarAlertaAbaixoDaFaixa(ctx.admin, table, id);
+    return NextResponse.json({ success: true, piso, ignorados: r.ignorados, campos: atual, alerta_carro: alertaCarro.status, ...classificarLead(atual, piso) });
 }

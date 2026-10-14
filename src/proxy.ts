@@ -52,6 +52,7 @@ export async function middleware(request: NextRequest) {
         '/api/meta-agent',              // valida META_AGENT_CONNECTOR_TOKEN
         '/api/meta-capi/vehicle',       // site do veiculo — valida META_CAPI_SITE_SECRET
         '/api/compras/webhooks',        // trigger do Postgres
+        '/api/laura',                   // ferramentas da IA no n8n — valida LAURA_API_KEY
         '/api/leads/rescue-stale',      // agendador externo, tem segredo proprio
     ];
     const isPublicApi = PUBLIC_API_PREFIXES.some(prefix => path === prefix || path.startsWith(prefix + '/'));
