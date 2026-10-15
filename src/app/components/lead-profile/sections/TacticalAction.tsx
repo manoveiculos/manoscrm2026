@@ -1,6 +1,6 @@
 'use client';
 import React, { useState, useEffect } from 'react';
-import { Bot, Zap, Sparkles, MessageSquare, Phone, ChevronRight, FileText, X, ArrowRightLeft, Copy, Check } from 'lucide-react';
+import { Bot, Zap, Sparkles, MessageSquare, Phone, ChevronRight, FileText, X, Copy, Check } from 'lucide-react';
 import { Lead } from '../types';
 
 const PROPOSAL_CACHE_HOURS = 6;
@@ -89,16 +89,8 @@ export const TacticalAction: React.FC<TacticalActionProps> = ({
 
     return (
         <>
-        {/* Banner de handoff — exibido quando o lead foi redistribuído */}
-        {lead.handoff_summary && (
-            <div className="bg-cyan-500/[0.06] border border-cyan-500/20 rounded-xl px-4 py-3 mb-3 flex gap-3">
-                <ArrowRightLeft size={14} className="text-cyan-400 shrink-0 mt-0.5" />
-                <div className="min-w-0">
-                    <p className="text-[11px] font-bold text-cyan-300 uppercase tracking-widest mb-1">Briefing de passagem</p>
-                    <p className="text-[12px] text-white/60 leading-relaxed">{lead.handoff_summary}</p>
-                </div>
-            </div>
-        )}
+        {/* Briefing de passagem e Ficha da IA: renderizados pelo FichaIACard no
+            DashboardTab (lê handoff_summary da tabela-base; as views não têm). */}
         <div className="bg-[#141418] border border-white/[0.07] rounded-xl overflow-hidden">
             {/* Cabeçalho da seção */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.05]">

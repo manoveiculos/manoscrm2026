@@ -9,6 +9,7 @@ import CannedResponses, { CannedContext } from '@/components/CannedResponses';
 import FollowupHistory from '@/components/FollowupHistory';
 import { MOTIVOS_PERDA, MIN_TEXTO_OUTRO, getMotivoPerda } from '@/constants/lossReasons';
 import { QualificacaoCard } from '@/components/qualificacao/QualificacaoCard';
+import { FichaIACard } from '@/components/qualificacao/FichaIACard';
 import { etapaDoStatus, ETAPAS_FUNIL, triagemAtrasada } from '@/constants/funil';
 import { tabelaComQualificacao } from '@/lib/qualificacao';
 
@@ -646,6 +647,9 @@ export default function LeadDetailPage() {
 
                 {/* Centro — conversa real + resumo IA empilhados */}
                 <section className="md:col-span-6 flex flex-col gap-3 min-w-0">
+                    {/* Ficha da IA: a conversa vendedor ↔ cliente não fica no CRM,
+                        então é isto que o vendedor lê antes de chamar o cliente. */}
+                    <FichaIACard uid={`${lead.table_name}:${lead.id}`} />
                     {/* CONVERSA REAL */}
                     <div className="bg-zinc-900 rounded-lg p-3 md:p-4 flex flex-col min-w-0" style={{ maxHeight: '50vh', minHeight: '300px' }}>
                         <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">

@@ -6,6 +6,7 @@ import { QuickActions } from '../sections/QuickActions';
 import { Lead } from '../types';
 import { MOTIVOS_PERDA, MIN_TEXTO_OUTRO, getMotivoPerda } from '@/constants/lossReasons';
 import { QualificacaoCard } from '@/components/qualificacao/QualificacaoCard';
+import { FichaIACard } from '@/components/qualificacao/FichaIACard';
 import { tabelaComQualificacao } from '@/lib/qualificacao';
 import { getTableForLead, stripPrefix } from '@/lib/services/leadRouter';
 
@@ -233,6 +234,9 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
             {tabelaComQualificacao(tabelaLead) && (
                 <QualificacaoCard uid={`${tabelaLead}:${stripPrefix(String(lead.id))}`} />
             )}
+
+            {/* Ficha da IA + briefing de passagem (handoff_summary, lido da tabela-base) */}
+            <FichaIACard uid={`${tabelaLead}:${stripPrefix(String(lead.id))}`} />
 
             <TacticalAction
                 lead={lead}

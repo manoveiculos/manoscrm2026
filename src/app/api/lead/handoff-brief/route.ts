@@ -98,11 +98,19 @@ Retorne JSON: {
         }
 
         const now = new Date().toISOString();
+        const tabela = lead.table_name || 'leads_manos_crm';
+
+        // A rotina "Ficha do Consultor" grava em handoff_summary um texto que
+        // começa com "FICHA IA". Não apagar: o briefing novo entra ACIMA da ficha.
+        const { data: atual } = await supabase.from(tabela).select('handoff_summary').eq('id', leadId).maybeSingle();
+        const anterior = String((atual as any)?.handoff_summary || '');
+        const posFicha = anterior.indexOf('FICHA IA');
+        const novoTexto = posFicha >= 0 ? `${summary}\n\n${anterior.slice(posFicha)}` : summary;
 
         // Salva no lead (na tabela original correta)
         await supabase
-            .from(lead.table_name || 'leads_manos_crm')
-            .update({ handoff_summary: summary, handoff_at: now })
+            .from(tabela)
+            .update({ handoff_summary: novoTexto, handoff_at: now })
             .eq('id', leadId);
 
         // Alerta para o novo consultor no Cowork IA
@@ -113,7 +121,8 @@ Retorne JSON: {
             priority: lead.ai_classification === 'hot' || (lead.ai_score || 0) >= 70 ? 1 : 2,
             target_consultant_id: newConsultantId,
             is_active: true,
-            metadata: { lead_id: leadId, previous_consultant_id: previousConsultantId, ai_score: lead.ai_score },
+            // cowork_alerts não tem coluna metadata: com ela o insert falhava e o
+            // novo consultor nunca recebia o aviso de redistribuição.
         });
 
         // Log na timeline
