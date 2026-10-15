@@ -212,6 +212,7 @@ export async function POST(req: NextRequest) {
                         consultant_id: ownerId,
                         consultant_name: ownerName || 'Equipe',
                         sale_value: valorVenda,
+                        profit_margin: 0, // NOT NULL sem default na tabela
                         sale_date: now,
                         created_at: now,
                         vehicle_name: nomeVeiculo,
