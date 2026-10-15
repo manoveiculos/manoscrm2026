@@ -46,12 +46,13 @@ BEGIN
      WHERE id = NEW.assigned_consultant_id;
 
     INSERT INTO public.sales_manos_crm
-        (lead_id, consultant_id, consultant_name, sale_value, sale_date, created_at,
+        (lead_id, consultant_id, consultant_name, sale_value, profit_margin, sale_date, created_at,
          vehicle_name, client_name, phone)
     VALUES (
         v_lead_id,
         NEW.assigned_consultant_id,
         COALESCE(v_cons_nome, 'Equipe'),
+        0,
         0,
         NOW(),
         NOW(),
