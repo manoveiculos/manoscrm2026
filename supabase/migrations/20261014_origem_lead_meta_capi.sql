@@ -432,14 +432,15 @@ $$;
 -- vendido = 'vendido'. 'visited' também vale como visita agendada (se a etapa
 -- foi pulada, a visita aconteceu); a fila deduplica por pessoa.
 -- Mantém o critério do relatório do squad Tráfego (venda/ganho, "contém
--- visita") para status antigos ou novos que sigam esse padrão.
+-- visita") para status antigos ou novos que sigam esse padrão. 'closed' conta
+-- como venda porque o trg_registrar_venda (sessão do funil) também conta.
 CREATE OR REPLACE FUNCTION public.fn_meta_capi_evento_da_etapa(p_status text)
 RETURNS text
 LANGUAGE sql
 IMMUTABLE
 AS $$
     SELECT CASE
-        WHEN s IN ('vendido', 'venda', 'ganho', 'venda_realizada', 'venda realizada')
+        WHEN s IN ('vendido', 'closed', 'venda', 'ganho', 'venda_realizada', 'venda realizada')
             THEN 'Purchase'
         WHEN (s IN ('scheduled', 'visited', 'agendado', 'agendamento') OR s LIKE '%visita%')
              AND s NOT LIKE '%cancel%' AND s NOT LIKE '%nao_compareceu%' AND s NOT LIKE '%não compareceu%'

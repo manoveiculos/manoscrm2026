@@ -126,7 +126,7 @@ Alternativa: chamar direto a função no nó Postgres que já faz o INSERT:
 |---|---|---|
 | carro (`vehicle_interest`/`interesse`), entrada (`valor_investimento`), troca (`carro_troca`) e prazo (`prazo_compra`) respondidos — o mesmo critério do selo "qualificado" das telas | `QualifiedLead` (CTWA: `LeadSubmitted`) | lidos via `to_jsonb`. Coluna inexistente, vazia ou "não consta" = não respondido; "Analisar Perfil" e "Lead Google - Não especificado" não contam como carro. "Sem entrada", "Sem troca" e "pesquisando" contam como resposta. Forma de pagamento não entra. Nomes em `fn_lead_qualificacao()` |
 | status `scheduled` ou `visited` (ou que contenha "visita"), ou INSERT em `agendamentos` | `Schedule` | exceto cancelada/não compareceu. Mapa em `fn_meta_capi_evento_da_etapa()` |
-| status `vendido` (ou `venda`/`ganho`) | `Purchase` | lê `sales_manos_crm.sale_value` no envio: espera 2h, tenta até 24h pelo valor, depois envia com `value=0` |
+| status `vendido` (ou `closed`/`venda`/`ganho`) | `Purchase` | lê `sales_manos_crm.sale_value` no envio: espera 2h, tenta até 24h pelo valor, depois envia com `value=0` |
 
 > Em 15/10, nenhum lead dos últimos 30 dias tinha entrada e troca preenchidos. O evento
 > começa a sair quando os vendedores usarem as perguntas da tela, e `prazo_compra` só existe
