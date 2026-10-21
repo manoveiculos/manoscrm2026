@@ -11,19 +11,25 @@ export async function GET(req: NextRequest) {
     const consultantId = searchParams.get('consultantId');
 
     try {
+        const nowIso = new Date().toISOString();
+        // Só considera avisos dos últimos 3 dias (evita acúmulo de dezenas de avisos antigos)
+        const sinceIso = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+
         let query = supabaseAdmin
             .from('cowork_alerts')
             .select('*')
             .eq('is_active', true)
+            .gte('created_at', sinceIso)
             .order('priority', { ascending: true })
-            .order('created_at', { ascending: true });
+            .order('created_at', { ascending: false });
 
         if (consultantId) {
             query = query.or(`target_consultant_id.eq.${consultantId},target_consultant_id.is.null`);
         }
 
-        const { data: alerts, error } = await query;
+        const { data: rawAlerts, error } = await query;
         if (error) throw error;
+        const alerts = (rawAlerts ?? []).filter((a: any) => !a.expires_at || new Date(a.expires_at).getTime() > Date.now());
 
         if (!consultantId || !alerts?.length) {
             return NextResponse.json({ success: true, alerts: alerts ?? [] });
@@ -36,7 +42,8 @@ export async function GET(req: NextRequest) {
             .eq('consultant_id', consultantId);
 
         const ackedIds = new Set((acks ?? []).map((a: any) => a.alert_id));
-        const pending = alerts.filter((a: any) => !ackedIds.has(a.id));
+        // Limita a 5 para não travar o consultor com dezenas de pop-ups
+        const pending = alerts.filter((a: any) => !ackedIds.has(a.id)).slice(0, 5);
 
         return NextResponse.json({ success: true, alerts: pending });
     } catch (err: any) {

@@ -31,6 +31,7 @@ import {
     Megaphone, // Time de Marketing (squad de agentes de IA)
     Flame, // Painel de Alta Prioridade 48h
     Handshake, // Negociação de Terceiros
+    MessageCircle, // Leads WhatsApp Direto (Wilson)
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
@@ -63,6 +64,7 @@ const NAV_ITEMS: NavItem[] = [
     { label: 'Compras', icon: Radar, href: '/compras' },
     { label: 'Cobrança Acordos', icon: DollarSign, href: '/consultor/cobranca' },
     { label: 'Negociação Terceiros', icon: Handshake, href: '/negociacao-terceiros', terceirosOnly: true },
+    { label: 'Leads WhatsApp', icon: MessageCircle, href: '/leads-whatsapp', terceirosOnly: true },
     { label: 'Repasse', icon: Store, href: '/repasse', pauloOnly: true },
     { label: 'Divisão de Lucro', icon: PieChart, href: '/divisaodelucro', socioOnly: true },
     { label: 'Cobrança', icon: DollarSign, href: '/admin/cobranca', adminOnly: true },

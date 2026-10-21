@@ -105,15 +105,33 @@ export const ConsultantAlertModal = () => {
         };
 
         init();
-
-        // Re-verifica a cada 3 minutos
-        const timer = setInterval(() => {
-            if (consultant) fetchAlerts(consultant.id);
-        }, 3 * 60 * 1000);
-
-        return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
+
+    // Re-verifica a cada 3 minutos
+    useEffect(() => {
+        if (!consultant) return;
+        const timer = setInterval(() => fetchAlerts(consultant.id), 3 * 60 * 1000);
+        return () => clearInterval(timer);
+    }, [consultant, fetchAlerts]);
+
+    const handleAckAll = async () => {
+        if (!consultant || !alerts.length) return;
+        setSubmitting(true);
+        const list = alerts;
+        setAlerts([]);
+        await Promise.allSettled(list.map(a => fetch('/api/v2/cowork-alerts/respond', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                alert_id: a.id,
+                consultant_id: consultant.id,
+                consultant_name: consultant.name,
+                action: 'acknowledged',
+            }),
+        })));
+        setSubmitting(false);
+    };
 
     const handleRespond = async (action: 'acknowledged' | 'contested') => {
         if (!current || !consultant) return;
@@ -267,6 +285,16 @@ export const ConsultantAlertModal = () => {
                                         <MessageSquare size={13} />
                                         Não concordo — Contestar
                                     </button>
+
+                                    {alerts.length > 1 && (
+                                        <button
+                                            onClick={handleAckAll}
+                                            disabled={submitting}
+                                            className="w-full py-2.5 text-white/30 hover:text-white/60 font-bold text-[10px] uppercase tracking-widest transition-all disabled:opacity-40"
+                                        >
+                                            Ciente de todos ({alerts.length})
+                                        </button>
+                                    )}
                                 </>
                             ) : (
                                 <>
