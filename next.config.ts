@@ -5,6 +5,10 @@ const nextConfig: NextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
+  experimental: {
+    // Evita "OS can't spawn worker thread" em servidores de build com muitos CPUs
+    cpus: 4,
+  },
   async headers() {
     return [
       // ── Security headers para todas as rotas ──────────────────
