@@ -228,6 +228,24 @@ export function TabelaLancamentos({
                                                         {l.placa}
                                                     </span>
                                                 )}
+                                                {l.destinacao === 'loja_100' && (
+                                                    <span className={`inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-bold ${
+                                                        l.reembolso_status === 'pago'
+                                                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
+                                                            : 'bg-blue-500/10 text-blue-400 border border-blue-500/30'
+                                                    }`}>
+                                                        {l.reembolso_status === 'pago' ? '✅ Loja (Reembolsado)' : '🏢 100% Loja (A Receber)'}
+                                                    </span>
+                                                )}
+                                                {l.destinacao === 'loja_50' && (
+                                                    <span className={`inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-bold ${
+                                                        l.reembolso_status === 'pago'
+                                                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
+                                                            : 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
+                                                    }`}>
+                                                        {l.reembolso_status === 'pago' ? '✅ Meio a Meio (Pago)' : '🤝 Meio a Meio (A Receber 50%)'}
+                                                    </span>
+                                                )}
                                             </div>
                                         </td>
 

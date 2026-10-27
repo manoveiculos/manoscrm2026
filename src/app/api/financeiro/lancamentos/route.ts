@@ -84,6 +84,7 @@ export async function POST(req: NextRequest) {
             placa,
             status,
             texto_original,
+            destinacao,
             criar_patrimonio, // flag opcional
         } = body;
 
@@ -95,6 +96,30 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ success: false, error: 'Descrição é obrigatória' }, { status: 400 });
         }
 
+        // Lógica de Reembolso / Acerto entre Alexandre e Ledra
+        const dest = destinacao || 'particular';
+        let reembolsoStatus = 'nenhum';
+        let reembolsoValor = 0;
+        let reembolsoDe: string | null = null;
+        let reembolsoPara: string | null = null;
+
+        const isLedra = effectiveOwner.includes('ledra');
+        const outroSocio = isLedra ? 'alexandre_gorges@hotmail.com' : 'hgledra@hotmail.com';
+
+        if (tipo === 'saida') {
+            if (dest === 'loja_100') {
+                reembolsoStatus = 'pendente';
+                reembolsoValor = Math.round(val * 100) / 100;
+                reembolsoDe = outroSocio; // Quem deve pagar de volta
+                reembolsoPara = effectiveOwner; // Quem adiantou o dinheiro
+            } else if (dest === 'loja_50') {
+                reembolsoStatus = 'pendente';
+                reembolsoValor = Math.round((val / 2) * 100) / 100;
+                reembolsoDe = outroSocio;
+                reembolsoPara = effectiveOwner;
+            }
+        }
+
         const payload: any = {
             owner_email: effectiveOwner,
             tipo: tipo || 'saida',
@@ -104,10 +129,15 @@ export async function POST(req: NextRequest) {
             conta_id: conta_id || null,
             conta_destino_id: conta_destino_id || null,
             categoria_id: categoria_id || null,
-            escopo: escopo || 'PF',
+            escopo: dest === 'particular' ? (escopo || 'PF') : 'PJ',
             placa: placa ? placa.toUpperCase().replace(/[^A-Z0-9]/g, '') : null,
             status: status || 'pago',
             texto_original: texto_original || null,
+            destinacao: dest,
+            reembolso_status: reembolsoStatus,
+            reembolso_valor: reembolsoValor,
+            reembolso_de: reembolsoDe,
+            reembolso_para: reembolsoPara,
         };
 
         const { data: lanc, error } = await adminClient
@@ -202,6 +232,7 @@ export async function PUT(req: NextRequest) {
         if (updates.escopo !== undefined) cleanUpdates.escopo = updates.escopo;
         if (updates.placa !== undefined) cleanUpdates.placa = updates.placa ? updates.placa.toUpperCase().replace(/[^A-Z0-9]/g, '') : null;
         if (updates.status !== undefined) cleanUpdates.status = updates.status;
+        if (updates.destinacao !== undefined) cleanUpdates.destinacao = updates.destinacao;
 
         const { data, error } = await adminClient
             .from('fin_lancamentos')
@@ -218,6 +249,39 @@ export async function PUT(req: NextRequest) {
 
         if (error) throw error;
         return NextResponse.json({ success: true, lancamento: data });
+    } catch (err: any) {
+        return NextResponse.json({ success: false, error: err?.message }, { status: 500 });
+    }
+}
+
+export async function PATCH(req: NextRequest) {
+    const guard = await requireFinanceiro(req);
+    if (!guard.ok) return guard.res;
+
+    const { adminClient } = guard;
+
+    try {
+        const body = await req.json();
+        const { id, ids, acao } = body; // acao = 'liquidar'
+
+        const idsArray = ids || (id ? [id] : []);
+        if (idsArray.length === 0) {
+            return NextResponse.json({ success: false, error: 'Nenhum ID fornecido' }, { status: 400 });
+        }
+
+        const { data, error } = await adminClient
+            .from('fin_lancamentos')
+            .update({
+                reembolso_status: 'pago',
+                reembolso_liquidado_em: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+            })
+            .in('id', idsArray)
+            .select();
+
+        if (error) throw error;
+
+        return NextResponse.json({ success: true, liquidados: data });
     } catch (err: any) {
         return NextResponse.json({ success: false, error: err?.message }, { status: 500 });
     }

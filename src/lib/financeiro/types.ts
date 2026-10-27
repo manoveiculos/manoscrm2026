@@ -10,6 +10,7 @@ export function isFinanceiroAutorizado(email?: string | null): boolean {
 export type TipoLancamento = 'entrada' | 'saida' | 'transferencia';
 export type Escopo = 'PF' | 'PJ';
 export type StatusLancamento = 'pago' | 'previsto';
+export type DestinacaoGasto = 'particular' | 'loja_100' | 'loja_50';
 
 export interface FinConta {
     id: string;
@@ -48,6 +49,12 @@ export interface FinLancamento {
     placa: string | null;
     status: StatusLancamento;
     texto_original: string | null;
+    destinacao?: DestinacaoGasto;
+    reembolso_status?: 'nenhum' | 'pendente' | 'pago';
+    reembolso_valor?: number;
+    reembolso_de?: string | null;
+    reembolso_para?: string | null;
+    reembolso_liquidado_em?: string | null;
     fechamento_id: string | null;
     created_at: string;
 }

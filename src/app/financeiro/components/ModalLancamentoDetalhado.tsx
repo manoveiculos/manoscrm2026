@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { X, Check, Trash2, ArrowRightLeft, Car, Building, User, Calendar } from 'lucide-react';
-import { FinCategoria, FinConta, FinLancamento, TipoLancamento, Escopo, StatusLancamento } from '@/lib/financeiro/types';
+import { FinCategoria, FinConta, FinLancamento, TipoLancamento, Escopo, StatusLancamento, DestinacaoGasto } from '@/lib/financeiro/types';
 import { hojeISO } from '@/lib/financeiro/format';
 
 interface Props {
@@ -34,6 +34,7 @@ export function ModalLancamentoDetalhado({
     const [escopo, setEscopo] = useState<Escopo>('PF');
     const [placa, setPlaca] = useState('');
     const [status, setStatus] = useState<StatusLancamento>('pago');
+    const [destinacao, setDestinacao] = useState<DestinacaoGasto>('particular');
     const [criarPatrimonio, setCriarPatrimonio] = useState(false);
     const [salvando, setSalvando] = useState(false);
 
@@ -49,6 +50,7 @@ export function ModalLancamentoDetalhado({
             setEscopo(lancamentoParaEditar.escopo);
             setPlaca(lancamentoParaEditar.placa || '');
             setStatus(lancamentoParaEditar.status);
+            setDestinacao(lancamentoParaEditar.destinacao || 'particular');
             setCriarPatrimonio(false);
         } else {
             setTipo('saida');
@@ -61,6 +63,7 @@ export function ModalLancamentoDetalhado({
             setEscopo('PF');
             setPlaca('');
             setStatus('pago');
+            setDestinacao('particular');
             setCriarPatrimonio(false);
         }
     }, [lancamentoParaEditar, contas, isOpen]);
@@ -86,6 +89,7 @@ export function ModalLancamentoDetalhado({
                 escopo,
                 placa: placa.trim() || null,
                 status,
+                destinacao,
                 criar_patrimonio: criarPatrimonio,
             });
             if (ok) onClose();
@@ -245,6 +249,55 @@ export function ModalLancamentoDetalhado({
                                     ))}
                                 </select>
                             </div>
+                        </div>
+                    )}
+
+                    {/* Destinação do Gasto (Particular vs Loja com Reembolso) */}
+                    {tipo === 'saida' && (
+                        <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800 space-y-2">
+                            <label className="block text-xs font-bold text-slate-300">
+                                🏢 Destinação do Gasto (Quem deve pagar?):
+                            </label>
+                            <div className="grid grid-cols-3 gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setDestinacao('particular')}
+                                    className={`py-2 px-2 rounded-xl text-xs font-bold transition-all text-center ${
+                                        destinacao === 'particular'
+                                            ? 'bg-purple-600 text-white font-black shadow-md'
+                                            : 'bg-slate-900 hover:bg-slate-800 text-slate-400'
+                                    }`}
+                                >
+                                    👤 Particular (Meu)
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setDestinacao('loja_100')}
+                                    className={`py-2 px-2 rounded-xl text-xs font-bold transition-all text-center ${
+                                        destinacao === 'loja_100'
+                                            ? 'bg-blue-600 text-white font-black shadow-md'
+                                            : 'bg-slate-900 hover:bg-slate-800 text-slate-400'
+                                    }`}
+                                >
+                                    🏢 100% da Loja
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setDestinacao('loja_50')}
+                                    className={`py-2 px-2 rounded-xl text-xs font-bold transition-all text-center ${
+                                        destinacao === 'loja_50'
+                                            ? 'bg-amber-600 text-white font-black shadow-md'
+                                            : 'bg-slate-900 hover:bg-slate-800 text-slate-400'
+                                    }`}
+                                >
+                                    🤝 Meio a Meio (50%)
+                                </button>
+                            </div>
+                            <p className="text-[10px] text-slate-400">
+                                {destinacao === 'particular' && 'Gasto pessoal. Não gera pendência nem acerto entre os sócios.'}
+                                {destinacao === 'loja_100' && 'Adiantamento total da loja. Você fica a receber 100% de volta no Acerto de Sócios.'}
+                                {destinacao === 'loja_50' && 'Despesa dividida meio a meio. Você fica a receber 50% de volta do seu sócio.'}
+                            </p>
                         </div>
                     )}
 

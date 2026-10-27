@@ -31,6 +31,7 @@ import { ModalLancamentoDetalhado } from './components/ModalLancamentoDetalhado'
 import { ModalGerenciarConta } from './components/ModalGerenciarConta';
 import { ModalTransferencia } from './components/ModalTransferencia';
 import { ModalFechamentoConta } from './components/ModalFechamentoConta';
+import { ModalAcertoSocios } from './components/ModalAcertoSocios';
 
 type AbaAtiva = 'visao_geral' | 'extrato' | 'patrimonio' | 'fechamentos';
 
@@ -90,6 +91,8 @@ export default function FinanceiroPage() {
 
     const [modalFechamentoContaAberto, setModalFechamentoContaAberto] = useState(false);
     const [contaIdFechamento, setContaIdFechamento] = useState<string | undefined>(undefined);
+
+    const [modalAcertoAberto, setModalAcertoAberto] = useState(false);
 
     // Toast de Feedback
     const [toastMsg, setToastMsg] = useState<string | null>(null);
@@ -368,6 +371,26 @@ export default function FinanceiroPage() {
         }
     };
 
+    // Ações de Liquidação de Acerto entre Sócios
+    const handleLiquidarAcerto = async (ids: string[]): Promise<boolean> => {
+        try {
+            const res = await fetch(`/api/financeiro/lancamentos?owner=${encodeURIComponent(effectiveOwner)}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ids, acao: 'liquidar' }),
+            });
+            const json = await res.json();
+            if (!json.success) throw new Error(json.error);
+
+            mostrarToast('PIX confirmado e acerto atualizado com sucesso!');
+            carregarTudo();
+            return true;
+        } catch (err: any) {
+            alert(err.message);
+            return false;
+        }
+    };
+
     // Renderização de Telas de Carregamento e Bloqueio
     if (carregandoAcesso) {
         return (
@@ -590,6 +613,7 @@ export default function FinanceiroPage() {
                                 setContaIdFechamento(cId);
                                 setModalFechamentoContaAberto(true);
                             }}
+                            onAbrirAcerto={() => setModalAcertoAberto(true)}
                         />
 
                         {/* Extrato Recente no Painel Diário */}
@@ -726,6 +750,13 @@ export default function FinanceiroPage() {
                 contas={contas}
                 contaIdInicial={contaIdFechamento}
                 onRealizarFechamento={handleCriarFechamento}
+            />
+
+            <ModalAcertoSocios
+                isOpen={modalAcertoAberto}
+                onClose={() => setModalAcertoAberto(false)}
+                acerto={kpis.acerto || { totalAlexandreDeveAoLedra: 0, totalLedraDeveAoAlexandre: 0, saldoLiquidoAcerto: 0, itensPendentes: [] }}
+                onLiquidar={handleLiquidarAcerto}
             />
         </div>
     );

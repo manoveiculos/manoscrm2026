@@ -19,6 +19,9 @@ import {
     Edit2,
     Banknote,
     Landmark,
+    Handshake,
+    AlertCircle,
+    CheckCircle2,
 } from 'lucide-react';
 import { brl } from '@/lib/financeiro/format';
 import { FinConta } from '@/lib/financeiro/types';
@@ -32,8 +35,20 @@ interface KpisData {
     totalSaidas: number;
     resultadoPeriodo: number;
     resultadoOperacional: number;
-    aPagar7d: number;
-    aReceber7d: number;
+    // Prazos
+    aPagarHoje?: number;
+    aReceberHoje?: number;
+    aPagarSemana?: number;
+    aReceberSemana?: number;
+    aPagarMes?: number;
+    aReceberMes?: number;
+    // Acerto
+    acerto?: {
+        totalAlexandreDeveAoLedra: number;
+        totalLedraDeveAoAlexandre: number;
+        saldoLiquidoAcerto: number;
+        itensPendentes?: any[];
+    };
 }
 
 interface Props {
@@ -43,6 +58,7 @@ interface Props {
     onNovaConta: () => void;
     onTransferir: (contaOrigemId?: string) => void;
     onFecharConta: (contaId?: string) => void;
+    onAbrirAcerto: () => void;
 }
 
 export function KpiCardsFinanceiro({
@@ -52,9 +68,19 @@ export function KpiCardsFinanceiro({
     onNovaConta,
     onTransferir,
     onFecharConta,
+    onAbrirAcerto,
 }: Props) {
     const isResultadoPositivo = kpis.resultadoPeriodo >= 0;
     const isPatrimonioPositivo = kpis.patrimonioLiquido >= 0;
+
+    const acerto = kpis.acerto || {
+        totalAlexandreDeveAoLedra: 0,
+        totalLedraDeveAoAlexandre: 0,
+        saldoLiquidoAcerto: 0,
+        itensPendentes: [],
+    };
+    const saldoAcerto = acerto.saldoLiquidoAcerto;
+    const temPendenciaAcerto = (acerto.itensPendentes?.length || 0) > 0 || saldoAcerto !== 0;
 
     const getIconeTipoConta = (tipo: string) => {
         switch (tipo) {
@@ -79,7 +105,7 @@ export function KpiCardsFinanceiro({
                             <Wallet className="w-5 h-5" />
                         </div>
                     </div>
-                    <div className="text-2xl md:text-3xl font-black text-white tracking-tight mb-2">
+                    <div className="text-2xl md:text-3xl font-black text-white tracking-tight mb-2 font-mono">
                         {brl(kpis.totalCaixa)}
                     </div>
                     <div className="text-xs text-slate-400 flex items-center justify-between">
@@ -104,7 +130,7 @@ export function KpiCardsFinanceiro({
                             <Gem className="w-5 h-5" />
                         </div>
                     </div>
-                    <div className={`text-2xl md:text-3xl font-black tracking-tight mb-2 ${
+                    <div className={`text-2xl md:text-3xl font-black tracking-tight mb-2 font-mono ${
                         isPatrimonioPositivo ? 'text-purple-300' : 'text-rose-400'
                     }`}>
                         {brl(kpis.patrimonioLiquido)}
@@ -129,7 +155,7 @@ export function KpiCardsFinanceiro({
                             {isResultadoPositivo ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
                         </div>
                     </div>
-                    <div className={`text-2xl md:text-3xl font-black tracking-tight mb-2 ${
+                    <div className={`text-2xl md:text-3xl font-black tracking-tight mb-2 font-mono ${
                         isResultadoPositivo ? 'text-emerald-400' : 'text-rose-400'
                     }`}>
                         {kpis.resultadoPeriodo >= 0 ? '+' : ''}{brl(kpis.resultadoPeriodo)}
@@ -144,24 +170,98 @@ export function KpiCardsFinanceiro({
                     </div>
                 </div>
 
-                {/* 4. Previsão 7 Dias */}
-                <div className="relative overflow-hidden bg-gradient-to-br from-slate-900 to-slate-950 border border-slate-800 rounded-3xl p-5 shadow-xl">
-                    <div className="flex items-center justify-between mb-3">
+                {/* 4. Previsão de Contas (Hoje / Semana / Mês) */}
+                <div className="relative overflow-hidden bg-gradient-to-br from-slate-900 to-slate-950 border border-slate-800 rounded-3xl p-4 md:p-5 shadow-xl flex flex-col justify-between">
+                    <div className="flex items-center justify-between mb-2">
                         <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-                            Previsão Próximos 7 Dias
+                            Contas a Pagar & Receber
                         </span>
-                        <div className="w-9 h-9 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center">
-                            <Clock className="w-5 h-5" />
+                        <div className="w-8 h-8 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center">
+                            <Clock className="w-4 h-4" />
                         </div>
                     </div>
-                    <div className="text-2xl md:text-3xl font-black text-white tracking-tight mb-2">
-                        {brl(kpis.aReceber7d - kpis.aPagar7d)}
-                    </div>
-                    <div className="text-[11px] text-slate-400 flex items-center justify-between pt-1 border-t border-slate-800/80">
-                        <span className="text-emerald-400">Receber: {brl(kpis.aReceber7d)}</span>
-                        <span className="text-amber-400">Pagar: {brl(kpis.aPagar7d)}</span>
+
+                    <div className="space-y-1.5 text-xs">
+                        {/* Hoje */}
+                        <div className="flex items-center justify-between p-1 rounded-lg bg-slate-950/60">
+                            <span className="text-slate-400 font-semibold text-[11px]">Hoje:</span>
+                            <div className="flex items-center gap-2 font-mono text-[11px]">
+                                <span className="text-rose-400">Pagar {brl(kpis.aPagarHoje || 0)}</span>
+                                <span className="text-slate-600">|</span>
+                                <span className="text-emerald-400">Receber {brl(kpis.aReceberHoje || 0)}</span>
+                            </div>
+                        </div>
+
+                        {/* Semana */}
+                        <div className="flex items-center justify-between p-1 rounded-lg bg-slate-950/60">
+                            <span className="text-slate-400 font-semibold text-[11px]">Esta Semana:</span>
+                            <div className="flex items-center gap-2 font-mono text-[11px]">
+                                <span className="text-rose-400">Pagar {brl(kpis.aPagarSemana || 0)}</span>
+                                <span className="text-slate-600">|</span>
+                                <span className="text-emerald-400">Receber {brl(kpis.aReceberSemana || 0)}</span>
+                            </div>
+                        </div>
+
+                        {/* Mês */}
+                        <div className="flex items-center justify-between p-1 rounded-lg bg-slate-950/60">
+                            <span className="text-slate-400 font-semibold text-[11px]">Este Mês:</span>
+                            <div className="flex items-center gap-2 font-mono text-[11px]">
+                                <span className="text-rose-400">Pagar {brl(kpis.aPagarMes || 0)}</span>
+                                <span className="text-slate-600">|</span>
+                                <span className="text-emerald-400">Receber {brl(kpis.aReceberMes || 0)}</span>
+                            </div>
+                        </div>
                     </div>
                 </div>
+            </div>
+
+            {/* Banner Destaque: Acerto de Contas Alexandre & Ledra */}
+            <div className={`p-4 md:p-5 rounded-3xl border shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4 ${
+                temPendenciaAcerto
+                    ? 'bg-gradient-to-r from-amber-950/30 via-slate-900 to-slate-900 border-amber-500/30'
+                    : 'bg-gradient-to-r from-emerald-950/20 via-slate-900 to-slate-900 border-emerald-500/30'
+            }`}>
+                <div className="flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 ${
+                        temPendenciaAcerto
+                            ? 'bg-amber-500/20 border border-amber-500/30 text-amber-400'
+                            : 'bg-emerald-500/20 border border-emerald-500/30 text-emerald-400'
+                    }`}>
+                        <Handshake className="w-5 h-5" />
+                    </div>
+                    <div>
+                        <div className="flex items-center gap-2">
+                            <h3 className="text-sm font-black text-white">Acerto de Contas (Alexandre & Ledra)</h3>
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-bold">
+                                {acerto.itensPendentes?.length || 0} despesas pendentes de acerto
+                            </span>
+                        </div>
+                        <p className="text-xs mt-0.5 font-medium">
+                            {saldoAcerto > 0 ? (
+                                <span className="text-amber-300">
+                                    ⚠️ <strong>Alexandre</strong> tem a pagar ao Ledra: <strong className="font-mono text-white text-sm">{brl(saldoAcerto)}</strong> (Ledra usou dinheiro do caixa dele pela loja)
+                                </span>
+                            ) : saldoAcerto < 0 ? (
+                                <span className="text-amber-300">
+                                    ⚠️ <strong>Felipe Ledra</strong> tem a pagar ao Alexandre: <strong className="font-mono text-white text-sm">{brl(Math.abs(saldoAcerto))}</strong>
+                                </span>
+                            ) : (
+                                <span className="text-emerald-400">
+                                    ✅ O acerto entre os dois está 100% quitado e em dia! Ninguém deve nada para ninguém.
+                                </span>
+                            )}
+                        </p>
+                    </div>
+                </div>
+
+                <button
+                    type="button"
+                    onClick={onAbrirAcerto}
+                    className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition-all shadow-md flex items-center gap-2 shrink-0 self-start md:self-center"
+                >
+                    <Handshake className="w-4 h-4" />
+                    <span>Ver Itens do Acerto & Pagar PIX</span>
+                </button>
             </div>
 
             {/* Painel de Contas Individuais (Saldos Atuais + Ações Rápidas) */}
@@ -199,7 +299,6 @@ export function KpiCardsFinanceiro({
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
                     {contas.map((c) => {
                         const saldoNum = Number(c.saldo || 0);
-                        const isPositivo = saldoNum >= 0;
 
                         return (
                             <div

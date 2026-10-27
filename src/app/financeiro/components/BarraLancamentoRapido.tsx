@@ -60,6 +60,7 @@ export function BarraLancamentoRapido({
                 escopo: parsed.escopo,
                 placa: parsed.placa || null,
                 status: parsed.status,
+                destinacao: parsed.destinacao,
                 texto_original: texto,
             });
 
@@ -210,6 +211,21 @@ export function BarraLancamentoRapido({
                         {dataBR(parsed.data)}
                     </span>
 
+                    {/* Destinação */}
+                    {parsed.tipo === 'saida' && (
+                        <span className={`px-2 py-0.5 rounded-md font-bold text-[10px] ${
+                            parsed.destinacao === 'loja_100'
+                                ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                                : parsed.destinacao === 'loja_50'
+                                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                                : 'bg-slate-900 text-slate-400 border border-slate-800'
+                        }`}>
+                            {parsed.destinacao === 'loja_100' ? '🏢 100% Loja (A Receber)' :
+                             parsed.destinacao === 'loja_50' ? '🤝 Meio a Meio (50% A Receber)' :
+                             '👤 Particular'}
+                        </span>
+                    )}
+
                     {/* Status */}
                     {parsed.status === 'previsto' && (
                         <span className="px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-400 border border-amber-500/30 font-bold">
@@ -249,6 +265,20 @@ export function BarraLancamentoRapido({
                     className="px-2 py-1 rounded-lg bg-slate-950/60 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-300 transition-all"
                 >
                     🏢 Aluguel Loja
+                </button>
+                <button
+                    type="button"
+                    onClick={() => aplicarAtalho('-350 pecas gol 100% loja ')}
+                    className="px-2 py-1 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-300 transition-all"
+                >
+                    🏢 100% Loja (Reembolso)
+                </button>
+                <button
+                    type="button"
+                    onClick={() => aplicarAtalho('-250 tbi fox rachei ')}
+                    className="px-2 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 transition-all"
+                >
+                    🤝 Meio a Meio (Rachei)
                 </button>
                 <button
                     type="button"

@@ -7,7 +7,7 @@
 //   "150 almoco" (padrão é saída)
 //   ">5000 nubank dinheiro" (transferência)
 
-import { TipoLancamento, Escopo, StatusLancamento, FinCategoria } from './types';
+import { TipoLancamento, Escopo, StatusLancamento, FinCategoria, DestinacaoGasto } from './types';
 import { hojeISO, addDias } from './format';
 
 export interface ParsedLancamento {
@@ -17,6 +17,7 @@ export interface ParsedLancamento {
     data: string; // YYYY-MM-DD
     escopo: Escopo;
     status: StatusLancamento;
+    destinacao: DestinacaoGasto;
     categoriaSugeridaId?: string;
     categoriaSugeridaNome?: string;
     placa?: string;
@@ -102,6 +103,24 @@ export function parseLinhaRapida(
         resto = resto.replace(pfMatch[0], '').trim();
     }
 
+    // Destinação do Gasto: Particular, 100% Loja ou 50% Meio a Meio (Rachei)
+    let destinacao: DestinacaoGasto = 'particular';
+    const loja100Match = resto.match(/\b(100%\s*loja|total\s*loja|loja\s*100|pela\s*loja)\b/i);
+    const loja50Match = resto.match(/\b(rachei|rachado|meio\s*a\s*meio|50%|metade|sociedade|dividido)\b/i);
+
+    if (loja100Match) {
+        destinacao = 'loja_100';
+        escopo = 'PJ';
+        resto = resto.replace(loja100Match[0], '').trim();
+    } else if (loja50Match) {
+        destinacao = 'loja_50';
+        escopo = 'PJ';
+        resto = resto.replace(loja50Match[0], '').trim();
+    } else if (pjMatch) {
+        // Se escreveu PJ ou loja sem especificar se rachei ou total loja
+        destinacao = 'loja_100';
+    }
+
     // Status: previsto ou pago
     let status: StatusLancamento = 'pago';
     const previstoMatch = resto.match(/\b(a pagar|a receber|previsto|pendente|boleto)\b/i);
@@ -151,6 +170,7 @@ export function parseLinhaRapida(
         data,
         escopo,
         status,
+        destinacao,
         categoriaSugeridaId,
         categoriaSugeridaNome,
         placa,
