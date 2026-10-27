@@ -51,6 +51,7 @@ interface NavItem {
     socioOnly?: boolean; // Divisão de Lucro — só os sócios (Alexandre e Ivo)
     terceirosOnly?: boolean; // Negociação de Terceiros — só Alexandre e Wilson
     financeiroOnly?: boolean; // Financeiro — só Alexandre e Felipe Ledra
+    garimpeiroOnly?: boolean; // Garimpeiro OLX — só Alexandre e Felipe Ledra
     blocked?: boolean;
 }
 
@@ -64,6 +65,7 @@ const NAV_ITEMS: NavItem[] = [
     { label: 'Leads', icon: LayoutDashboard, href: '/leads' },
     { label: 'Painel 48h', icon: Flame, href: '/admin/prioridade48h', adminOnly: true },
     { label: 'Compras', icon: Radar, href: '/compras' },
+    { label: 'Garimpeiro OLX', icon: Flame, href: '/garimpeiromanos', garimpeiroOnly: true },
     { label: 'Cobrança Acordos', icon: DollarSign, href: '/consultor/cobranca' },
     { label: 'Negociação Terceiros', icon: Handshake, href: '/negociacao-terceiros', terceirosOnly: true },
     { label: 'Leads WhatsApp', icon: MessageCircle, href: '/leads-whatsapp', terceirosOnly: true },
@@ -254,6 +256,9 @@ export const NavigationV2 = () => {
 
                     // Financeiro — exclusivo Alexandre e Felipe Ledra
                     if (item.financeiroOnly) return isAlexandre || isLedra;
+
+                    // Garimpeiro OLX — exclusivo Alexandre e Felipe Ledra
+                    if (item.garimpeiroOnly) return isAlexandre || isLedra || isAdmin;
 
                     // Milhão é exclusivo do Alexandre — nem outros admins enxergam
                     if (item.alexandreOnly) return isAlexandre;

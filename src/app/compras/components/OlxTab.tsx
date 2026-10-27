@@ -543,8 +543,19 @@ export function OlxTab({ onNavigateToTab, userEmail, role }: OlxTabProps) {
             </p>
           </div>
 
-          {/* Estado do Robô: Apenas Online ou Offline */}
-          <div className="flex items-center">
+          {/* Ações do Topo: Link para Sistema Completo /garimpeiromanos e Estado do Robô */}
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <a
+              href="/garimpeiromanos"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs font-bold transition shadow-sm"
+              title="Abrir o Garimpeiro completo em nova aba na URL /garimpeiromanos"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span>Abrir Garimpeiro Completo</span>
+            </a>
+
             {botStatus.online ? (
               <div className="flex items-center gap-2 px-3.5 py-2 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-bold shadow-lg shadow-emerald-500/5">
                 <span className="relative flex h-2.5 w-2.5">

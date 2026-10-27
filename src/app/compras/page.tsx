@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, Suspense } from 'react';
 import { 
-  TrendingUp, Calculator, Bell, Database, ShieldAlert, Layers, Flame
+  TrendingUp, Calculator, Bell, Database, ShieldAlert, Layers, Flame, ExternalLink
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { RadarTab } from './components/RadarTab';
@@ -195,6 +195,22 @@ function ComprasContent() {
             Central de <span className="text-red-500 font-black">Compras</span>
           </h1>
         </div>
+
+        {/* Link Direto para o Garimpeiro Completo (/garimpeiromanos) */}
+        {allowedTabIds.includes('olx') && (
+          <a
+            href="/garimpeiromanos"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs font-bold transition shadow-sm"
+            title="Abrir o Garimpeiro Completo (/garimpeiromanos)"
+          >
+            <Flame className="w-3.5 h-3.5 fill-current" />
+            <span className="hidden sm:inline">Garimpeiro:</span>
+            <span>/garimpeiromanos</span>
+            <ExternalLink className="w-3 h-3 text-amber-400" />
+          </a>
+        )}
       </header>
 
       {/* Tabs Selector Navigation */}
