@@ -5,6 +5,17 @@ export const dynamic = 'force-dynamic';
 
 const FLASK_URL = process.env.OLX_BOT_URL || 'http://localhost:5000';
 
+function parseNumber(val: any): number | null {
+  if (val === null || val === undefined || val === '') return null;
+  if (typeof val === 'number') return isNaN(val) ? null : val;
+  if (typeof val === 'string') {
+    const cleaned = val.replace(/[^\d.,-]/g, '').replace(',', '.');
+    const parsed = parseFloat(cleaned);
+    return isNaN(parsed) ? null : parsed;
+  }
+  return null;
+}
+
 export async function GET(req: NextRequest) {
   const supabase = createClient();
   const url = new URL(req.url);
@@ -75,6 +86,15 @@ export async function GET(req: NextRequest) {
         const adId = String(ad.ad_id);
         const annotation = crmAnnotations[adId];
 
+        const precoNum = parseNumber(ad.price) || 0;
+        const precoFipeNum = parseNumber(ad.fipe_price);
+        let margemPctNum = parseNumber(ad.margin_percent);
+        let margemValNum = parseNumber(ad.margin_value);
+        if (precoFipeNum && precoFipeNum > 0 && precoNum > 0) {
+          if (margemValNum === null) margemValNum = Math.round((precoFipeNum - precoNum) * 100) / 100;
+          if (margemPctNum === null) margemPctNum = Math.round(((precoFipeNum - precoNum) / precoFipeNum) * 1000) / 10;
+        }
+
         return {
           id: adId,
           ad_id: adId,
@@ -83,13 +103,13 @@ export async function GET(req: NextRequest) {
           marca: ad.brand || null,
           modelo: ad.model || null,
           ano: ad.year || null,
-          km: ad.mileage !== undefined && ad.mileage !== null ? Number(ad.mileage) : null,
+          km: parseNumber(ad.mileage),
           combustivel: ad.fuel || null,
           cambio: ad.gearbox || null,
-          preco: Number(ad.price || 0),
-          preco_fipe: ad.fipe_price ? Number(ad.fipe_price) : null,
-          margem_percent: ad.margin_percent !== undefined && ad.margin_percent !== null ? Number(ad.margin_percent) : null,
-          margem_valor: ad.margin_value !== undefined && ad.margin_value !== null ? Number(ad.margin_value) : null,
+          preco: precoNum,
+          preco_fipe: precoFipeNum,
+          margem_percent: margemPctNum,
+          margem_valor: margemValNum,
           localizacao: ad.location || '',
           foto_url: ad.image_url || null,
           publicado_em: ad.published_at || null,
