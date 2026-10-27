@@ -32,6 +32,7 @@ import {
     Flame, // Painel de Alta Prioridade 48h
     Handshake, // Negociação de Terceiros
     MessageCircle, // Leads WhatsApp Direto (Wilson)
+    WalletCards, // Financeiro & Patrimônio (Alexandre & Ledra)
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
@@ -49,6 +50,7 @@ interface NavItem {
     pauloOnly?: boolean; // app de Repasse — só Paulo (e Alexandre p/ supervisão)
     socioOnly?: boolean; // Divisão de Lucro — só os sócios (Alexandre e Ivo)
     terceirosOnly?: boolean; // Negociação de Terceiros — só Alexandre e Wilson
+    financeiroOnly?: boolean; // Financeiro — só Alexandre e Felipe Ledra
     blocked?: boolean;
 }
 
@@ -65,6 +67,7 @@ const NAV_ITEMS: NavItem[] = [
     { label: 'Cobrança Acordos', icon: DollarSign, href: '/consultor/cobranca' },
     { label: 'Negociação Terceiros', icon: Handshake, href: '/negociacao-terceiros', terceirosOnly: true },
     { label: 'Leads WhatsApp', icon: MessageCircle, href: '/leads-whatsapp', terceirosOnly: true },
+    { label: 'Financeiro', icon: WalletCards, href: '/financeiro', financeiroOnly: true },
     { label: 'Repasse', icon: Store, href: '/repasse', pauloOnly: true },
     { label: 'Divisão de Lucro', icon: PieChart, href: '/divisaodelucro', socioOnly: true },
     { label: 'Cobrança', icon: DollarSign, href: '/admin/cobranca', adminOnly: true },
@@ -222,6 +225,7 @@ export const NavigationV2 = () => {
                     const isPaulo = user?.email === 'paulo@manoscrm.com';
                     const isIvo = user?.email === 'ivo@acesso.com';
                     const isWilson = user?.email === 'dultra49@gmail.com';
+                    const isLedra = user?.email?.toLowerCase() === 'hgledra@hotmail.com';
                     const isRestrictedBuyer = isIvo || isPaulo; // Wilson isn't necessarily restricted here unless specified.
 
                     // Compradores restritos: Central de Compras. Paulo também tem o app de Repasse; Ivo (sócio), a Divisão de Lucro.
@@ -247,6 +251,9 @@ export const NavigationV2 = () => {
 
                     // Negociação de Terceiros — só Alexandre e Wilson
                     if (item.terceirosOnly) return isAlexandre || isWilson;
+
+                    // Financeiro — exclusivo Alexandre e Felipe Ledra
+                    if (item.financeiroOnly) return isAlexandre || isLedra;
 
                     // Milhão é exclusivo do Alexandre — nem outros admins enxergam
                     if (item.alexandreOnly) return isAlexandre;

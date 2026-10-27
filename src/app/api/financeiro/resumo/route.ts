@@ -1,0 +1,179 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { requireFinanceiro } from '../_guard';
+import { rangePreset, Preset, brl, dataBR, addDias, hojeISO } from '@/lib/financeiro/format';
+
+export const dynamic = 'force-dynamic';
+
+export async function GET(req: NextRequest) {
+    const guard = await requireFinanceiro(req);
+    if (!guard.ok) return guard.res;
+
+    const { adminClient, effectiveOwner } = guard;
+    const url = new URL(req.url);
+
+    const preset = (url.searchParams.get('preset') || 'mes') as Preset;
+    const range = rangePreset(preset);
+    const inicio = url.searchParams.get('inicio') || range.inicio;
+    const fim = url.searchParams.get('fim') || range.fim;
+    const escopoFiltro = url.searchParams.get('escopo'); // PF | PJ | todos
+
+    try {
+        // 1. Contas e saldo de caixa
+        const { data: contas } = await adminClient
+            .from('fin_contas')
+            .select('id, saldo_inicial')
+            .eq('owner_email', effectiveOwner);
+
+        const { data: todosLancsPagos } = await adminClient
+            .from('fin_lancamentos')
+            .select('tipo, valor, data')
+            .eq('owner_email', effectiveOwner)
+            .eq('status', 'pago');
+
+        let totalCaixa = (contas || []).reduce((acc, c) => acc + Number(c.saldo_inicial || 0), 0);
+        for (const l of todosLancsPagos || []) {
+            const v = Number(l.valor || 0);
+            if (l.tipo === 'entrada') totalCaixa += v;
+            else if (l.tipo === 'saida') totalCaixa -= v;
+        }
+
+        // 2. Lançamentos no período
+        let queryPeriodo = adminClient
+            .from('fin_lancamentos')
+            .select(`
+                id, tipo, valor, data, descricao, escopo, status, placa,
+                categoria:fin_categorias(id, nome, cor, natureza)
+            `)
+            .eq('owner_email', effectiveOwner)
+            .gte('data', inicio)
+            .lte('data', fim)
+            .eq('status', 'pago');
+
+        if (escopoFiltro && escopoFiltro !== 'todos') {
+            queryPeriodo = queryPeriodo.eq('escopo', escopoFiltro);
+        }
+
+        const { data: lancsPeriodo } = await queryPeriodo;
+
+        let totalEntradas = 0;
+        let totalSaidas = 0;
+        let totalOperacional = 0;
+        const categoriasMap = new Map<string, { nome: string; cor: string; valor: number }>();
+
+        for (const l of lancsPeriodo || []) {
+            const val = Number(l.valor || 0);
+            const isPatrimonial = (l as any)?.categoria?.natureza === 'patrimonial';
+
+            if (l.tipo === 'entrada') {
+                totalEntradas += val;
+                if (!isPatrimonial) totalOperacional += val;
+            } else if (l.tipo === 'saida') {
+                totalSaidas += val;
+                if (!isPatrimonial) totalOperacional -= val;
+
+                const catNome = (l as any)?.categoria?.nome || 'Outras Saídas';
+                const catCor = (l as any)?.categoria?.cor || '#64748b';
+                const cur = categoriasMap.get(catNome) || { nome: catNome, cor: catCor, valor: 0 };
+                cur.valor += val;
+                categoriasMap.set(catNome, cur);
+            }
+        }
+
+        const topCategorias = Array.from(categoriasMap.values())
+            .sort((a, b) => b.valor - a.valor)
+            .slice(0, 5);
+
+        // 3. Contas a pagar e receber nos próximos 7 dias
+        const hoje = hojeISO();
+        const em7dias = addDias(hoje, 7);
+        const { data: previstos } = await adminClient
+            .from('fin_lancamentos')
+            .select('tipo, valor, data, descricao, escopo')
+            .eq('owner_email', effectiveOwner)
+            .eq('status', 'previsto')
+            .gte('data', hoje)
+            .lte('data', em7dias);
+
+        let aPagar7d = 0;
+        let aReceber7d = 0;
+        for (const p of previstos || []) {
+            const v = Number(p.valor || 0);
+            if (p.tipo === 'saida') aPagar7d += v;
+            else if (p.tipo === 'entrada') aReceber7d += v;
+        }
+
+        // 4. Patrimônio
+        const { data: itensPatrimonio } = await adminClient
+            .from('fin_patrimonio')
+            .select('tipo, valor_atual')
+            .eq('owner_email', effectiveOwner)
+            .eq('ativo', true);
+
+        let totalAtivosBens = 0;
+        let totalPassivos = 0;
+        for (const it of itensPatrimonio || []) {
+            const v = Number(it.valor_atual || 0);
+            if (it.tipo === 'ativo') totalAtivosBens += v;
+            else if (it.tipo === 'passivo') totalPassivos += v;
+        }
+
+        const patrimonioLiquido = totalCaixa + totalAtivosBens - totalPassivos;
+
+        // 5. Gera texto formatado para envio no WhatsApp
+        const nomeUsuario = effectiveOwner.includes('ledra') ? 'Felipe Ledra' : 'Alexandre Gorges';
+        const tituloPeriodo = preset === 'hoje' ? `Hoje (${dataBR(hoje)})` :
+            preset === 'semana' ? `Semana (${dataBR(inicio)} a ${dataBR(fim)})` :
+            `Mês (${dataBR(inicio)} a ${dataBR(fim)})`;
+
+        const resultadoPeriodo = totalEntradas - totalSaidas;
+        const emojiResultado = resultadoPeriodo >= 0 ? '🟢' : '🔴';
+
+        const topCatStr = topCategorias.length > 0
+            ? topCategorias.map(c => `• ${c.nome}: ${brl(c.valor)}`).join('\n')
+            : '• Nenhuma saída registrada';
+
+        const whatsappTexto = `📊 *Resumo Financeiro — ${nomeUsuario}*
+📅 *Período:* ${tituloPeriodo}
+
+💰 *Caixa Livre:* ${brl(totalCaixa)}
+💎 *Patrimônio Líquido:* ${brl(patrimonioLiquido)}
+   └ Ativos (Bens): ${brl(totalAtivosBens)}
+   └ Passivos (Dívidas): ${brl(totalPassivos)}
+
+━━━━━━━━━━━━━━━━━━━
+📈 *Movimentações do Período:*
+✅ *Entradas:* ${brl(totalEntradas)}
+❌ *Saídas:* ${brl(totalSaidas)}
+${emojiResultado} *Resultado:* ${brl(resultadoPeriodo)}
+
+🔝 *Principais Gastos:*
+${topCatStr}
+
+⏰ *Previsão Próximos 7 Dias:*
+🔻 A Pagar: ${brl(aPagar7d)}
+🔺 A Receber: ${brl(aReceber7d)}
+━━━━━━━━━━━━━━━━━━━
+_Gerado via Manos CRM Financeiro_`;
+
+        return NextResponse.json({
+            success: true,
+            periodo: { inicio, fim, preset },
+            kpis: {
+                totalCaixa: Math.round(totalCaixa * 100) / 100,
+                patrimonioLiquido: Math.round(patrimonioLiquido * 100) / 100,
+                totalAtivosBens: Math.round(totalAtivosBens * 100) / 100,
+                totalPassivos: Math.round(totalPassivos * 100) / 100,
+                totalEntradas: Math.round(totalEntradas * 100) / 100,
+                totalSaidas: Math.round(totalSaidas * 100) / 100,
+                resultadoPeriodo: Math.round(resultadoPeriodo * 100) / 100,
+                resultadoOperacional: Math.round(totalOperacional * 100) / 100,
+                aPagar7d: Math.round(aPagar7d * 100) / 100,
+                aReceber7d: Math.round(aReceber7d * 100) / 100,
+            },
+            topCategorias,
+            whatsappTexto,
+        });
+    } catch (err: any) {
+        return NextResponse.json({ success: false, error: err?.message }, { status: 500 });
+    }
+}
