@@ -19,6 +19,9 @@ import {
     ArrowRightLeft,
     Upload,
     History,
+    Clock,
+    ShieldAlert,
+    ShieldCheck,
 } from 'lucide-react';
 import { FinConta, FinCategoria, FinLancamento, FinPatrimonio, FinFechamento, isFinanceiroAutorizado } from '@/lib/financeiro/types';
 import { Preset, rangePreset, hojeISO, brl } from '@/lib/financeiro/format';
@@ -29,6 +32,7 @@ import { TabelaLancamentos } from './components/TabelaLancamentos';
 import { AbaPatrimonio } from './components/AbaPatrimonio';
 import { AbaFechamentos } from './components/AbaFechamentos';
 import { AbaHistoricoPlanilha } from './components/AbaHistoricoPlanilha';
+import { AbaContasPagarReceber } from './components/AbaContasPagarReceber';
 import { ModalResumoWhatsApp } from './components/ModalResumoWhatsApp';
 import { ModalLancamentoDetalhado } from './components/ModalLancamentoDetalhado';
 import { ModalGerenciarConta } from './components/ModalGerenciarConta';
@@ -36,8 +40,10 @@ import { ModalTransferencia } from './components/ModalTransferencia';
 import { ModalFechamentoConta } from './components/ModalFechamentoConta';
 import { ModalAcertoSocios } from './components/ModalAcertoSocios';
 import { ModalImportarExtrato } from './components/ModalImportarExtrato';
+import { ModalConfirmarExclusao } from './components/ModalConfirmarExclusao';
+import { ModalAuditoriaExclusoes } from './components/ModalAuditoriaExclusoes';
 
-type AbaAtiva = 'visao_geral' | 'extrato' | 'patrimonio' | 'fechamentos' | 'historico_planilha';
+type AbaAtiva = 'visao_geral' | 'contas_pagar_receber' | 'extrato' | 'patrimonio' | 'fechamentos' | 'historico_planilha';
 
 export default function FinanceiroPage() {
     const router = useRouter();
@@ -98,6 +104,9 @@ export default function FinanceiroPage() {
 
     const [modalAcertoAberto, setModalAcertoAberto] = useState(false);
     const [modalImportarExtratoAberto, setModalImportarExtratoAberto] = useState(false);
+    const [modalAuditoriaAberto, setModalAuditoriaAberto] = useState(false);
+    const [modalExclusaoAberto, setModalExclusaoAberto] = useState(false);
+    const [lancamentoParaExcluir, setLancamentoParaExcluir] = useState<FinLancamento | null>(null);
 
     // Toast de Feedback
     const [toastMsg, setToastMsg] = useState<string | null>(null);
@@ -237,19 +246,48 @@ export default function FinanceiroPage() {
         }
     };
 
-    const handleExcluirLancamento = async (id: string): Promise<boolean> => {
+    const handleSolicitarExclusao = (id: string, lanc?: FinLancamento) => {
+        const item = lanc || lancamentos.find((l) => l.id === id) || null;
+        if (item) {
+            setLancamentoParaExcluir(item);
+            setModalExclusaoAberto(true);
+        }
+    };
+
+    const handleConfirmarExclusaoComMotivo = async (id: string, motivo: string): Promise<boolean> => {
         try {
             const res = await fetch(`/api/financeiro/lancamentos?owner=${encodeURIComponent(effectiveOwner)}&id=${id}`, {
                 method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ motivo }),
             });
             const json = await res.json();
             if (!json.success) throw new Error(json.error || 'Erro ao excluir');
 
-            mostrarToast('Lançamento excluído.');
+            mostrarToast('Lançamento excluído e registrado no log de auditoria.');
             carregarTudo();
             return true;
         } catch (err: any) {
             alert(err.message || 'Erro ao excluir');
+            return false;
+        }
+    };
+
+    const handleDarBaixa = async (id: string, contaId?: string): Promise<boolean> => {
+        try {
+            const res = await fetch(`/api/financeiro/lancamentos?owner=${encodeURIComponent(effectiveOwner)}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ acao: 'dar_baixa', id, conta_id: contaId }),
+            });
+            const json = await res.json();
+            if (!json.success) throw new Error(json.error || 'Erro ao dar baixa');
+
+            mostrarToast('Pagamento/Recebimento baixado com sucesso!');
+            carregarTudo();
+            return true;
+        } catch (err: any) {
+            alert(err.message || 'Erro ao dar baixa');
             return false;
         }
     };
@@ -505,6 +543,16 @@ export default function FinanceiroPage() {
 
                     <button
                         type="button"
+                        onClick={() => setModalAuditoriaAberto(true)}
+                        className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 font-bold text-xs transition-all flex items-center gap-2"
+                        title="Histórico de exclusões com rastreabilidade"
+                    >
+                        <ShieldAlert className="w-4 h-4 text-amber-400" />
+                        <span>Logs Exclusões</span>
+                    </button>
+
+                    <button
+                        type="button"
                         onClick={() => {
                             atualizarResumoWhatsApp(presetWhatsApp);
                             setModalWhatsAppAberto(true);
@@ -567,6 +615,22 @@ export default function FinanceiroPage() {
                         }`}
                     >
                         <Sparkles className="w-4 h-4" /> Visão Geral & Diário
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setAbaAtiva('contas_pagar_receber')}
+                        className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap ${
+                            abaAtiva === 'contas_pagar_receber'
+                                ? 'bg-rose-500/10 text-rose-300 border border-rose-500/30 font-black'
+                                : 'text-slate-400 hover:text-white'
+                        }`}
+                    >
+                        <Clock className="w-4 h-4 text-rose-400" /> Contas a Pagar & Receber
+                        {lancamentos.filter(l => l.status === 'previsto').length > 0 && (
+                            <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-rose-500/20 text-rose-300 font-bold">
+                                {lancamentos.filter(l => l.status === 'previsto').length}
+                            </span>
+                        )}
                     </button>
                     <button
                         type="button"
@@ -664,7 +728,7 @@ export default function FinanceiroPage() {
                                     setLancamentoParaEditar(l);
                                     setModalLancamentoAberto(true);
                                 }}
-                                onExcluir={handleExcluirLancamento}
+                                onExcluir={handleSolicitarExclusao}
                                 filtroPreset={filtroPreset}
                                 onMudarPreset={setFiltroPreset}
                                 filtroEscopo={filtroEscopo}
@@ -682,6 +746,39 @@ export default function FinanceiroPage() {
                     </div>
                 )}
 
+                {abaAtiva === 'contas_pagar_receber' && (
+                    <AbaContasPagarReceber
+                        lancamentos={lancamentos}
+                        contas={contas}
+                        onDarBaixa={handleDarBaixa}
+                        onEditar={(l) => {
+                            setLancamentoParaEditar(l);
+                            setModalLancamentoAberto(true);
+                        }}
+                        onExcluir={(l) => handleSolicitarExclusao(l.id, l)}
+                        onNovo={(tipo) => {
+                            setLancamentoParaEditar({
+                                id: '',
+                                tipo,
+                                valor: 0,
+                                data: hojeISO(),
+                                data_vencimento: hojeISO(),
+                                descricao: '',
+                                conta_id: contas[0]?.id || null,
+                                conta_destino_id: null,
+                                categoria_id: null,
+                                escopo: 'PF',
+                                placa: null,
+                                status: 'previsto',
+                                texto_original: null,
+                                fechamento_id: null,
+                                created_at: new Date().toISOString(),
+                            });
+                            setModalLancamentoAberto(true);
+                        }}
+                    />
+                )}
+
                 {abaAtiva === 'extrato' && (
                     <TabelaLancamentos
                         lancamentos={lancamentos}
@@ -691,7 +788,7 @@ export default function FinanceiroPage() {
                             setLancamentoParaEditar(l);
                             setModalLancamentoAberto(true);
                         }}
-                        onExcluir={handleExcluirLancamento}
+                        onExcluir={handleSolicitarExclusao}
                         filtroPreset={filtroPreset}
                         onMudarPreset={setFiltroPreset}
                         filtroEscopo={filtroEscopo}
@@ -766,7 +863,7 @@ export default function FinanceiroPage() {
                 isOpen={modalLancamentoAberto}
                 onClose={() => setModalLancamentoAberto(false)}
                 onSalvar={handleSalvarLancamento}
-                onExcluir={handleExcluirLancamento}
+                onExcluir={handleSolicitarExclusao}
                 categorias={categorias}
                 contas={contas}
                 lancamentoParaEditar={lancamentoParaEditar}
@@ -801,6 +898,25 @@ export default function FinanceiroPage() {
                 onClose={() => setModalAcertoAberto(false)}
                 acerto={kpis.acerto || { totalAlexandreDeveAoLedra: 0, totalLedraDeveAoAlexandre: 0, saldoLiquidoAcerto: 0, itensPendentes: [] }}
                 onLiquidar={handleLiquidarAcerto}
+            />
+
+            <ModalConfirmarExclusao
+                aberto={modalExclusaoAberto}
+                lancamento={lancamentoParaExcluir}
+                onFechar={() => {
+                    setModalExclusaoAberto(false);
+                    setLancamentoParaExcluir(null);
+                }}
+                onConfirmar={handleConfirmarExclusaoComMotivo}
+            />
+
+            <ModalAuditoriaExclusoes
+                aberto={modalAuditoriaAberto}
+                onFechar={() => setModalAuditoriaAberto(false)}
+                onItemRestaurado={() => {
+                    mostrarToast('Lançamento restaurado com sucesso!');
+                    carregarTudo();
+                }}
             />
         </div>
     );

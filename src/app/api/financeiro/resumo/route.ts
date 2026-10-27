@@ -34,7 +34,8 @@ export async function GET(req: NextRequest) {
             .from('fin_lancamentos')
             .select('tipo, valor, data')
             .eq('owner_email', effectiveOwner)
-            .eq('status', 'pago');
+            .eq('status', 'pago')
+            .is('deleted_at', null);
 
         let totalCaixa = (contas || []).reduce((acc, c) => acc + Number(c.saldo_inicial || 0), 0);
         for (const l of todosLancsPagos || []) {
@@ -53,7 +54,8 @@ export async function GET(req: NextRequest) {
             .eq('owner_email', effectiveOwner)
             .gte('data', inicio)
             .lte('data', fim)
-            .eq('status', 'pago');
+            .eq('status', 'pago')
+            .is('deleted_at', null);
 
         if (escopoFiltro && escopoFiltro !== 'todos') {
             queryPeriodo = queryPeriodo.eq('escopo', escopoFiltro);
@@ -94,7 +96,8 @@ export async function GET(req: NextRequest) {
             .from('fin_lancamentos')
             .select('tipo, valor, data, descricao, escopo')
             .eq('owner_email', effectiveOwner)
-            .eq('status', 'previsto');
+            .eq('status', 'previsto')
+            .is('deleted_at', null);
 
         let aPagarHoje = 0;
         let aReceberHoje = 0;
@@ -146,6 +149,7 @@ export async function GET(req: NextRequest) {
             .from('fin_lancamentos')
             .select('id, data, descricao, valor, destinacao, reembolso_valor, reembolso_de, reembolso_para, owner_email, placa')
             .eq('reembolso_status', 'pendente')
+            .is('deleted_at', null)
             .order('data', { ascending: false });
 
         let totalAlexandreDeveAoLedra = 0;

@@ -32,6 +32,7 @@ export async function GET(req: NextRequest) {
                 categoria:fin_categorias(id, nome, tipo, natureza, acao_patrimonio, cor)
             `, { count: 'exact' })
             .eq('owner_email', effectiveOwner)
+            .is('deleted_at', null)
             .order('data', { ascending: false })
             .order('created_at', { ascending: false });
 
@@ -258,12 +259,56 @@ export async function PATCH(req: NextRequest) {
     const guard = await requireFinanceiro(req);
     if (!guard.ok) return guard.res;
 
-    const { adminClient } = guard;
+    const { adminClient, userEmail, effectiveOwner } = guard;
 
     try {
         const body = await req.json();
-        const { id, ids, acao } = body; // acao = 'liquidar'
+        const { id, ids, acao, conta_id, data_pagamento } = body;
 
+        // Ação 1: Dar baixa / Liquidar Conta a Pagar ou Conta a Receber
+        if (acao === 'dar_baixa' && id) {
+            const { data: atual, error: errAtual } = await adminClient
+                .from('fin_lancamentos')
+                .select('*')
+                .eq('id', id)
+                .single();
+
+            if (errAtual || !atual) {
+                return NextResponse.json({ success: false, error: 'Lançamento não encontrado' }, { status: 404 });
+            }
+
+            const payloadUpdate: any = {
+                status: 'pago',
+                data_pagamento: data_pagamento || new Date().toISOString().slice(0, 10),
+                updated_at: new Date().toISOString(),
+            };
+            if (conta_id) {
+                payloadUpdate.conta_id = conta_id;
+            }
+
+            const { data: atualizado, error: errUpdate } = await adminClient
+                .from('fin_lancamentos')
+                .update(payloadUpdate)
+                .eq('id', id)
+                .select()
+                .single();
+
+            if (errUpdate) throw errUpdate;
+
+            // Log de auditoria para a baixa
+            await adminClient.from('fin_lancamentos_audit').insert({
+                lancamento_id: id,
+                acao: 'baixa',
+                executado_por: userEmail,
+                owner_email: effectiveOwner,
+                motivo: 'Baixa / Pagamento realizado',
+                dados_snapshot: { anterior: atual, novo: atualizado },
+            });
+
+            return NextResponse.json({ success: true, lancamento: atualizado });
+        }
+
+        // Ação 2: Liquidar acerto mútuo entre sócios
         const idsArray = ids || (id ? [id] : []);
         if (idsArray.length === 0) {
             return NextResponse.json({ success: false, error: 'Nenhum ID fornecido' }, { status: 400 });
@@ -291,37 +336,83 @@ export async function DELETE(req: NextRequest) {
     const guard = await requireFinanceiro(req);
     if (!guard.ok) return guard.res;
 
-    const { adminClient, effectiveOwner } = guard;
+    const { adminClient, userEmail, effectiveOwner } = guard;
     const url = new URL(req.url);
     const id = url.searchParams.get('id');
+
+    let motivo = url.searchParams.get('motivo');
+    try {
+        const body = await req.json();
+        if (body?.motivo) motivo = body.motivo;
+    } catch (e) {
+        // Sem body JSON, usa query param
+    }
 
     if (!id) {
         return NextResponse.json({ success: false, error: 'ID é obrigatório' }, { status: 400 });
     }
 
+    if (!motivo || motivo.trim().length < 3) {
+        return NextResponse.json({
+            success: false,
+            error: 'O motivo da exclusão é obrigatório para registrar no log de auditoria de segurança.',
+        }, { status: 400 });
+    }
+
     try {
-        const { data: atual } = await adminClient
+        const { data: atual, error: errBusca } = await adminClient
             .from('fin_lancamentos')
-            .select('fechamento_id')
+            .select('*')
             .eq('id', id)
             .eq('owner_email', effectiveOwner)
             .single();
 
+        if (errBusca || !atual) {
+            return NextResponse.json({ success: false, error: 'Lançamento não encontrado' }, { status: 404 });
+        }
+
         if (atual?.fechamento_id) {
             return NextResponse.json({
                 success: false,
-                error: 'Este lançamento pertence a um fechamento encerrado e não pode ser excluído',
+                error: 'Este lançamento pertence a um fechamento já encerrado e não pode ser excluído.',
             }, { status: 403 });
         }
 
-        const { error } = await adminClient
+        // 1. Grava no log de auditoria o registro completo antes de apagar
+        const { error: errAudit } = await adminClient
+            .from('fin_lancamentos_audit')
+            .insert({
+                lancamento_id: id,
+                acao: 'exclusao',
+                executado_por: userEmail,
+                owner_email: effectiveOwner,
+                motivo: motivo.trim(),
+                dados_snapshot: atual,
+            });
+
+        if (errAudit) {
+            console.error('Erro ao gravar log de auditoria:', errAudit);
+        }
+
+        // 2. Soft-delete seguro (mantém histórico e dados salvos no banco)
+        const { error: errDelete } = await adminClient
             .from('fin_lancamentos')
-            .delete()
+            .update({
+                deleted_at: new Date().toISOString(),
+                deleted_by: userEmail,
+                motivo_exclusao: motivo.trim(),
+                updated_at: new Date().toISOString(),
+            })
             .eq('id', id)
             .eq('owner_email', effectiveOwner);
 
-        if (error) throw error;
-        return NextResponse.json({ success: true });
+        if (errDelete) throw errDelete;
+
+        return NextResponse.json({
+            success: true,
+            auditoria: true,
+            mensagem: 'Lançamento excluído e registrado no log de auditoria com sucesso.',
+        });
     } catch (err: any) {
         return NextResponse.json({ success: false, error: err?.message }, { status: 500 });
     }

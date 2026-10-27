@@ -23,7 +23,8 @@ export async function GET(req: NextRequest) {
             .from('fin_lancamentos')
             .select('tipo, valor, conta_id, conta_destino_id')
             .eq('owner_email', effectiveOwner)
-            .eq('status', 'pago');
+            .eq('status', 'pago')
+            .is('deleted_at', null);
 
         if (errLancs) throw errLancs;
 

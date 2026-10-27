@@ -41,6 +41,8 @@ export interface FinLancamento {
     tipo: TipoLancamento;
     valor: number;
     data: string; // YYYY-MM-DD
+    data_vencimento?: string | null;
+    data_pagamento?: string | null;
     descricao: string;
     conta_id: string | null;
     conta_destino_id: string | null;
@@ -56,6 +58,20 @@ export interface FinLancamento {
     reembolso_para?: string | null;
     reembolso_liquidado_em?: string | null;
     fechamento_id: string | null;
+    deleted_at?: string | null;
+    deleted_by?: string | null;
+    motivo_exclusao?: string | null;
+    created_at: string;
+}
+
+export interface FinLancamentoAudit {
+    id: string;
+    lancamento_id: string;
+    acao: 'exclusao' | 'restauracao' | 'baixa';
+    executado_por: string;
+    owner_email: string;
+    motivo: string;
+    dados_snapshot: any;
     created_at: string;
 }
 

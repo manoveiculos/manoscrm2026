@@ -24,7 +24,7 @@ interface Props {
     categorias: FinCategoria[];
     contas: FinConta[];
     onEditar: (lanc: FinLancamento) => void;
-    onExcluir: (id: string) => void;
+    onExcluir: (id: string, lanc?: FinLancamento) => void;
     filtroPreset: Preset;
     onMudarPreset: (p: Preset) => void;
     filtroEscopo: string;
@@ -327,7 +327,7 @@ export function TabelaLancamentos({
                                                 </button>
                                                 <button
                                                     type="button"
-                                                    onClick={() => onExcluir(l.id)}
+                                                    onClick={() => onExcluir(l.id, l)}
                                                     className="p-1 rounded-md hover:bg-rose-500/20 text-slate-400 hover:text-rose-400"
                                                     title="Excluir"
                                                 >

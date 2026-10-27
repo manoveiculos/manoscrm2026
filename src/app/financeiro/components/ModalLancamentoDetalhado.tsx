@@ -9,7 +9,7 @@ interface Props {
     isOpen: boolean;
     onClose: () => void;
     onSalvar: (dados: any) => Promise<boolean>;
-    onExcluir?: (id: string) => Promise<boolean>;
+    onExcluir?: (id: string, lanc?: FinLancamento) => void;
     categorias: FinCategoria[];
     contas: FinConta[];
     lancamentoParaEditar?: FinLancamento | null;
@@ -98,16 +98,11 @@ export function ModalLancamentoDetalhado({
         }
     };
 
-    const handleExcluir = async () => {
+    const handleExcluir = () => {
         if (!lancamentoParaEditar?.id || !onExcluir) return;
-        if (!confirm('Deseja realmente excluir este lançamento?')) return;
-        setSalvando(true);
-        try {
-            const ok = await onExcluir(lancamentoParaEditar.id);
-            if (ok) onClose();
-        } finally {
-            setSalvando(false);
-        }
+        const item = lancamentoParaEditar;
+        onClose();
+        onExcluir(item.id, item);
     };
 
     const categoriasFiltradas = categorias.filter(c => c.tipo === (tipo === 'transferencia' ? 'saida' : tipo));
