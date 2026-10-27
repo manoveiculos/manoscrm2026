@@ -95,6 +95,16 @@ export async function GET(req: NextRequest) {
           if (margemPctNum === null) margemPctNum = Math.round(((precoFipeNum - precoNum) / precoFipeNum) * 1000) / 10;
         }
 
+        const precoAnteriorNum = parseNumber(ad.previous_price);
+        const valorQuedaNum = parseNumber(ad.price_dropped_value) || 
+          (precoAnteriorNum && precoNum && precoAnteriorNum > precoNum ? Math.round((precoAnteriorNum - precoNum) * 100) / 100 : null);
+        const pctQuedaNum = parseNumber(ad.price_dropped_pct) ||
+          (precoAnteriorNum && precoNum && precoAnteriorNum > precoNum ? Math.round(((precoAnteriorNum - precoNum) / precoAnteriorNum) * 1000) / 10 : null);
+        const isQuedaPreco = Boolean(
+          (precoAnteriorNum && precoNum && precoAnteriorNum > precoNum) || 
+          (valorQuedaNum && valorQuedaNum > 0)
+        );
+
         return {
           id: adId,
           ad_id: adId,
@@ -116,8 +126,10 @@ export async function GET(req: NextRequest) {
           is_particular: Boolean(ad.is_particular),
           has_leilao: Boolean(ad.has_auction),
           status_classificacao: ad.status || 'NORMAL',
-          is_queda_preco: Boolean(ad.previous_price && Number(ad.previous_price) > Number(ad.price)),
-          preco_anterior: ad.previous_price ? Number(ad.previous_price) : null,
+          is_queda_preco: isQuedaPreco,
+          preco_anterior: precoAnteriorNum,
+          valor_desconto_queda: valorQuedaNum,
+          percentual_desconto_queda: pctQuedaNum,
           avisos: [],
           status_crm: ((annotation?.status_crm || ad.crm_status || 'novo').toLowerCase()) as any,
           responsavel_nome: null,
@@ -232,9 +244,28 @@ export async function GET(req: NextRequest) {
       .select('*', { count: 'exact', head: true })
       .eq('is_queda_preco', true);
 
+    const mappedFallback = (opportunities || []).map((row: any) => {
+      const precoNum = parseNumber(row.preco) || 0;
+      const precoAnteriorNum = parseNumber(row.preco_anterior);
+      const valorQuedaNum = precoAnteriorNum && precoNum && precoAnteriorNum > precoNum
+        ? Math.round((precoAnteriorNum - precoNum) * 100) / 100
+        : null;
+      const pctQuedaNum = precoAnteriorNum && precoNum && precoAnteriorNum > precoNum
+        ? Math.round(((precoAnteriorNum - precoNum) / precoAnteriorNum) * 1000) / 10
+        : null;
+      return {
+        ...row,
+        preco: precoNum,
+        preco_anterior: precoAnteriorNum,
+        valor_desconto_queda: valorQuedaNum,
+        percentual_desconto_queda: pctQuedaNum,
+        is_queda_preco: Boolean(row.is_queda_preco || (precoAnteriorNum && precoNum && precoAnteriorNum > precoNum)),
+      };
+    });
+
     return NextResponse.json({
       success: true,
-      opportunities: opportunities || [],
+      opportunities: mappedFallback,
       total: count || 0,
       limit,
       offset,

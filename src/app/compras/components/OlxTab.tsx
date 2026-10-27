@@ -56,6 +56,8 @@ export interface OlxOpportunity {
   status_classificacao: string;
   is_queda_preco: boolean;
   preco_anterior: number | null;
+  valor_desconto_queda?: number | null;
+  percentual_desconto_queda?: number | null;
   avisos: string[];
   status_crm: 'novo' | 'em_analise' | 'contatado' | 'descartado' | 'comprado';
   responsavel_nome: string | null;
@@ -956,12 +958,17 @@ export function OlxTab({ onNavigateToTab, userEmail, role }: OlxTabProps) {
                           </div>
                         )}
 
-                        {/* Badge Queda de Preço */}
-                        {item.is_queda_preco && (
-                          <div className="absolute top-3 left-3 bg-emerald-500 text-slate-950 font-black px-2.5 py-1 rounded-xl text-[11px] shadow-lg flex items-center gap-1">
-                            <TrendingDown className="w-3.5 h-3.5" /> Baixou Preço
-                          </div>
-                        )}
+                        {/* Badge Queda de Preço com Valor Exato do Desconto */}
+                        {item.is_queda_preco && (() => {
+                          const desconto = item.valor_desconto_queda || 
+                            (item.preco_anterior && item.preco && item.preco_anterior > item.preco ? (item.preco_anterior - item.preco) : null);
+                          return (
+                            <div className="absolute top-3 left-3 bg-emerald-500 text-slate-950 font-black px-2.5 py-1 rounded-xl text-[11px] shadow-lg flex items-center gap-1.5 border border-emerald-400">
+                              <TrendingDown className="w-3.5 h-3.5 stroke-[2.5]" />
+                              <span>{desconto ? `Baixou ${formatBRL(desconto)}` : 'Baixou Preço'}</span>
+                            </div>
+                          );
+                        })()}
 
                         {/* Badge Particular ou Lojista */}
                         <div className="absolute bottom-3 left-3">
@@ -1035,12 +1042,27 @@ export function OlxTab({ onNavigateToTab, userEmail, role }: OlxTabProps) {
                         <div className="bg-slate-950/80 border border-slate-800/80 rounded-xl p-3 flex items-center justify-between">
                           <div>
                             <span className="text-[10px] font-bold text-slate-400 uppercase">Preço Pedido</span>
-                            <p className="text-base font-black text-white">{formatBRL(item.preco)}</p>
-                            {item.preco_anterior && (
-                              <span className="text-[10px] text-slate-500 line-through">
-                                De {formatBRL(item.preco_anterior)}
-                              </span>
-                            )}
+                            <div className="flex items-baseline gap-1.5">
+                              <p className="text-base font-black text-white">{formatBRL(item.preco)}</p>
+                              {item.preco_anterior && item.preco_anterior > item.preco && (
+                                <span className="text-[10px] text-slate-500 line-through">
+                                  {formatBRL(item.preco_anterior)}
+                                </span>
+                              )}
+                            </div>
+                            {item.is_queda_preco && (() => {
+                              const desconto = item.valor_desconto_queda || 
+                                (item.preco_anterior && item.preco && item.preco_anterior > item.preco ? (item.preco_anterior - item.preco) : null);
+                              const pct = item.percentual_desconto_queda ||
+                                (item.preco_anterior && desconto ? Math.round((desconto / item.preco_anterior) * 1000) / 10 : null);
+                              if (!desconto) return null;
+                              return (
+                                <span className="text-[11px] font-bold text-emerald-400 flex items-center gap-1 mt-0.5">
+                                  <TrendingDown className="w-3 h-3 shrink-0" />
+                                  <span>Desconto de {formatBRL(desconto)}{pct ? ` (-${pct}%)` : ''}</span>
+                                </span>
+                              );
+                            })()}
                           </div>
 
                           <div className="text-right">
@@ -1762,14 +1784,34 @@ export function OlxTab({ onNavigateToTab, userEmail, role }: OlxTabProps) {
               <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 flex items-center justify-between">
                 <div>
                   <span className="text-[10px] text-slate-400 font-bold uppercase">Preço Pedido</span>
-                  <p className="text-lg font-black text-white">{formatBRL(detalhesItem.preco)}</p>
+                  <div className="flex items-baseline gap-2">
+                    <p className="text-lg font-black text-white">{formatBRL(detalhesItem.preco)}</p>
+                    {detalhesItem.preco_anterior && detalhesItem.preco_anterior > detalhesItem.preco && (
+                      <span className="text-xs text-slate-500 line-through">
+                        De {formatBRL(detalhesItem.preco_anterior)}
+                      </span>
+                    )}
+                  </div>
+                  {detalhesItem.is_queda_preco && (() => {
+                    const desc = detalhesItem.valor_desconto_queda || 
+                      (detalhesItem.preco_anterior && detalhesItem.preco && detalhesItem.preco_anterior > detalhesItem.preco ? (detalhesItem.preco_anterior - detalhesItem.preco) : null);
+                    const pct = detalhesItem.percentual_desconto_queda ||
+                      (detalhesItem.preco_anterior && desc ? Math.round((desc / detalhesItem.preco_anterior) * 1000) / 10 : null);
+                    if (!desc) return null;
+                    return (
+                      <div className="flex items-center gap-1 text-xs font-bold text-emerald-400 mt-1">
+                        <TrendingDown className="w-3.5 h-3.5" />
+                        <span>Desconto recente de {formatBRL(desc)}{pct ? ` (-${pct}%)` : ''}</span>
+                      </div>
+                    );
+                  })()}
                 </div>
                 <div className="text-right">
                   <span className="text-[10px] text-slate-400 font-bold uppercase">Tabela FIPE</span>
                   <p className="text-base font-bold text-slate-300">{formatBRL(detalhesItem.preco_fipe)}</p>
                   {detalhesItem.margem_valor && (
-                    <span className="text-xs font-bold text-amber-400">
-                      Economia: {formatBRL(detalhesItem.margem_valor)}
+                    <span className="text-xs font-bold text-amber-400 block mt-0.5">
+                      Margem: {formatBRL(detalhesItem.margem_valor)}
                     </span>
                   )}
                 </div>
