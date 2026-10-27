@@ -147,6 +147,7 @@ export function OlxTab({ onNavigateToTab, userEmail, role }: OlxTabProps) {
   const [stats, setStats] = useState({
     totalGeral: 0,
     totalOportunidades15: 0,
+    totalAbaixoFipe: 0,
     totalParticulares: 0,
     totalQuedasPreco: 0,
   });
@@ -159,6 +160,7 @@ export function OlxTab({ onNavigateToTab, userEmail, role }: OlxTabProps) {
   const [search, setSearch] = useState('');
   const [selectedCity, setSelectedCity] = useState('ALL');
   const [minMargin, setMinMargin] = useState<string>('0');
+  const [onlyBelowFipe, setOnlyBelowFipe] = useState(false);
   const [onlyParticular, setOnlyParticular] = useState(false);
   const [statusCrm, setStatusCrm] = useState('all');
   const [sortBy, setSortBy] = useState('recent');
@@ -225,7 +227,11 @@ export function OlxTab({ onNavigateToTab, userEmail, role }: OlxTabProps) {
       const params = new URLSearchParams();
       if (search.trim()) params.set('q', search.trim());
       if (selectedCity !== 'ALL') params.set('city', selectedCity);
-      if (minMargin && minMargin !== '0') params.set('min_margin', minMargin);
+      if (onlyBelowFipe) {
+        params.set('only_below_fipe', 'true');
+      } else if (minMargin && minMargin !== '0') {
+        params.set('min_margin', minMargin);
+      }
       if (onlyParticular) params.set('only_particular', 'true');
       if (statusCrm !== 'all') params.set('status_crm', statusCrm);
       params.set('sort_by', sortBy);
@@ -319,7 +325,7 @@ export function OlxTab({ onNavigateToTab, userEmail, role }: OlxTabProps) {
   useEffect(() => {
     carregarOportunidades(true);
     checarBot();
-  }, [selectedCity, minMargin, onlyParticular, statusCrm, sortBy]);
+  }, [selectedCity, minMargin, onlyBelowFipe, onlyParticular, statusCrm, sortBy]);
 
   useEffect(() => {
     if (activeSubTab === 'searches') {
@@ -516,6 +522,9 @@ export function OlxTab({ onNavigateToTab, userEmail, role }: OlxTabProps) {
 
   return (
     <div className="space-y-6">
+      {/* Evita bloqueio da CDN da OLX por Referer */}
+      <meta name="referrer" content="no-referrer" />
+
       {/* Cabeçalho Principal com Sub-Abas do Sistema Completo */}
       <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl space-y-5">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -618,7 +627,7 @@ export function OlxTab({ onNavigateToTab, userEmail, role }: OlxTabProps) {
           {/* Métricas Rápidas */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <div
-              onClick={() => { setMinMargin('0'); setStatusCrm('all'); setOnlyParticular(false); }}
+              onClick={() => { setMinMargin('0'); setOnlyBelowFipe(false); setStatusCrm('all'); setOnlyParticular(false); }}
               className="bg-slate-900 border border-slate-800 hover:border-slate-700 rounded-2xl p-4 cursor-pointer transition select-none group"
             >
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total em SC</span>
@@ -629,14 +638,25 @@ export function OlxTab({ onNavigateToTab, userEmail, role }: OlxTabProps) {
             </div>
 
             <div
-              onClick={() => setMinMargin('15')}
-              className="bg-slate-900 border border-amber-500/30 hover:border-amber-500 rounded-2xl p-4 cursor-pointer transition select-none group"
+              onClick={() => {
+                setOnlyBelowFipe((prev) => !prev);
+                setMinMargin('0');
+              }}
+              className={`bg-slate-900 border rounded-2xl p-4 cursor-pointer transition select-none group ${
+                onlyBelowFipe
+                  ? 'border-emerald-500 ring-2 ring-emerald-500/30 bg-emerald-500/10'
+                  : 'border-emerald-500/30 hover:border-emerald-500'
+              }`}
             >
-              <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1">
-                <Flame className="w-3 h-3 fill-current" /> Oportunidades &ge; 15%
+              <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1">
+                <TrendingDown className="w-3.5 h-3.5" /> Abaixo da Tabela FIPE
               </span>
-              <p className="text-2xl font-black text-amber-400 mt-1">{stats.totalOportunidades15}</p>
-              <span className="text-[10px] text-slate-500 mt-0.5 block">Lucro garantido</span>
+              <p className="text-2xl font-black text-emerald-400 mt-1">
+                {stats.totalAbaixoFipe || stats.totalOportunidades15}
+              </p>
+              <span className="text-[10px] text-slate-400 mt-0.5 block">
+                {onlyBelowFipe ? 'Filtro ativo (clique p/ remover)' : 'Todos os veículos abaixo da FIPE'}
+              </span>
             </div>
 
             <div
@@ -701,11 +721,21 @@ export function OlxTab({ onNavigateToTab, userEmail, role }: OlxTabProps) {
               {/* Filtro de Margem */}
               <div className="md:col-span-2">
                 <select
-                  value={minMargin}
-                  onChange={(e) => setMinMargin(e.target.value)}
+                  value={onlyBelowFipe ? 'below_fipe' : minMargin}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === 'below_fipe') {
+                      setOnlyBelowFipe(true);
+                      setMinMargin('0');
+                    } else {
+                      setOnlyBelowFipe(false);
+                      setMinMargin(val);
+                    }
+                  }}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-amber-400 font-bold focus:outline-none focus:border-amber-500"
                 >
                   <option value="0">Margem: Todas</option>
+                  <option value="below_fipe">📉 Todos Abaixo da FIPE</option>
                   <option value="10">Margem: &ge; 10% OFF</option>
                   <option value="15">Margem: &ge; 15% OFF</option>
                   <option value="20">Margem: &ge; 20% OFF</option>
@@ -835,8 +865,19 @@ export function OlxTab({ onNavigateToTab, userEmail, role }: OlxTabProps) {
                           <img
                             src={item.foto_url}
                             alt={item.titulo}
+                            referrerPolicy="no-referrer"
                             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                             loading="lazy"
+                            onError={(e) => {
+                              (e.currentTarget as HTMLElement).style.display = 'none';
+                              const parent = (e.currentTarget as HTMLElement).parentElement;
+                              if (parent && !parent.querySelector('.fallback-sem-foto')) {
+                                const placeholder = document.createElement('div');
+                                placeholder.className = 'w-full h-full flex items-center justify-center text-slate-700 text-xs fallback-sem-foto';
+                                placeholder.innerText = 'Sem Foto Disponível';
+                                parent.appendChild(placeholder);
+                              }
+                            }}
                           />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center text-slate-700 text-xs">
@@ -1614,7 +1655,11 @@ export function OlxTab({ onNavigateToTab, userEmail, role }: OlxTabProps) {
                   <img
                     src={detalhesItem.foto_url}
                     alt={detalhesItem.titulo}
+                    referrerPolicy="no-referrer"
                     className="w-full h-full object-cover"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLElement).style.display = 'none';
+                    }}
                   />
                 </div>
               )}

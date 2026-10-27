@@ -12,6 +12,7 @@ export async function GET(req: NextRequest) {
   const search = url.searchParams.get('q')?.trim() || '';
   const city = url.searchParams.get('city')?.trim() || '';
   const minMargin = url.searchParams.get('min_margin') || '0';
+  const onlyBelowFipe = url.searchParams.get('only_below_fipe') === 'true' || minMargin === 'below_fipe';
   const onlyParticular = url.searchParams.get('only_particular') === 'true';
   const statusCrm = url.searchParams.get('status_crm') || 'all';
   const sortBy = url.searchParams.get('sort_by') || 'recent';
@@ -25,7 +26,11 @@ export async function GET(req: NextRequest) {
     // Combina busca textual e cidade se selecionada
     const combinedSearch = [search, city && city !== 'ALL' ? city : ''].filter(Boolean).join(' ');
     if (combinedSearch) flaskParams.set('search', combinedSearch);
-    if (minMargin && minMargin !== '0') flaskParams.set('min_margin', minMargin);
+    if (onlyBelowFipe) {
+      flaskParams.set('only_below_fipe', 'true');
+    } else if (minMargin && minMargin !== '0') {
+      flaskParams.set('min_margin', minMargin);
+    }
     if (onlyParticular) flaskParams.set('only_particular', 'true');
     flaskParams.set('order_by', sortBy);
     flaskParams.set('limit', String(limit));
@@ -117,6 +122,7 @@ export async function GET(req: NextRequest) {
         stats: {
           totalGeral: statsData?.total_ads || adsData.total || 0,
           totalOportunidades15: statsData?.opportunities || 0,
+          totalAbaixoFipe: statsData?.below_fipe || 0,
           totalParticulares: adsData.total || 0,
           totalQuedasPreco: statsData?.price_drops || 0,
         },
@@ -142,7 +148,9 @@ export async function GET(req: NextRequest) {
       query = query.ilike('localizacao', `%${city}%`);
     }
 
-    if (minMargin && minMargin !== '0') {
+    if (onlyBelowFipe) {
+      query = query.gt('margem_percent', 0);
+    } else if (minMargin && minMargin !== '0') {
       const marginVal = parseFloat(minMargin);
       if (!isNaN(marginVal)) {
         query = query.gte('margem_percent', marginVal);
@@ -181,6 +189,11 @@ export async function GET(req: NextRequest) {
       .select('*', { count: 'exact', head: true })
       .gte('margem_percent', 15);
 
+    const { count: totalAbaixoFipe } = await supabase
+      .from('compras_olx_oportunidades')
+      .select('*', { count: 'exact', head: true })
+      .gt('margem_percent', 0);
+
     const { count: totalParticulares } = await supabase
       .from('compras_olx_oportunidades')
       .select('*', { count: 'exact', head: true })
@@ -201,6 +214,7 @@ export async function GET(req: NextRequest) {
       stats: {
         totalGeral: totalGeral || 0,
         totalOportunidades15: totalOportunidades15 || 0,
+        totalAbaixoFipe: totalAbaixoFipe || 0,
         totalParticulares: totalParticulares || 0,
         totalQuedasPreco: totalQuedasPreco || 0,
       },
