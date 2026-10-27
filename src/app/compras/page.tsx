@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, Suspense } from 'react';
 import { 
-  TrendingUp, Calculator, Bell, Database, ShieldAlert, Layers
+  TrendingUp, Calculator, Bell, Database, ShieldAlert, Layers, Flame
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { RadarTab } from './components/RadarTab';
@@ -11,6 +11,7 @@ import FacebookTab from './components/FacebookTab';
 import AlertsTab from './components/AlertsTab';
 import ImportTab from './components/ImportTab';
 import AdminTab from './components/AdminTab';
+import { OlxTab } from './components/OlxTab';
 
 const FacebookIcon = (props: React.SVGProps<SVGSVGElement>) => (
   <svg
@@ -82,10 +83,10 @@ function ComprasContent() {
   }, []);
 
   const allowedTabIds = role === 'admin'
-    ? ['radar', 'calculator', 'facebook', 'alerts', 'import', 'admin']
+    ? ['radar', 'olx', 'calculator', 'facebook', 'alerts', 'import', 'admin']
     : (userEmail?.toLowerCase() === 'hgledra@hotmail.com' || userEmail?.toLowerCase() === 'ivo@acesso.com' || userEmail?.toLowerCase() === 'paulo@manoscrm.com'
-        ? ['radar', 'calculator', 'facebook', 'alerts']
-        : ['radar', 'calculator', 'alerts']);
+        ? ['radar', 'olx', 'calculator', 'facebook', 'alerts']
+        : ['radar', 'olx', 'calculator', 'alerts']);
 
   // Força vendedor a ficar apenas nas abas permitidas
   useEffect(() => {
@@ -99,7 +100,7 @@ function ComprasContent() {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       const tabParam = params.get('tab');
-      if (tabParam && ['radar', 'calculator', 'facebook', 'alerts', 'import', 'admin'].includes(tabParam)) {
+      if (tabParam && ['radar', 'olx', 'calculator', 'facebook', 'alerts', 'import', 'admin'].includes(tabParam)) {
         // Se a aba não for permitida para o nível do usuário atual, vai para radar
         if (!loadingRole && !allowedTabIds.includes(tabParam)) {
           setActiveTab('radar');
@@ -155,6 +156,7 @@ function ComprasContent() {
 
   const allTabs = [
     { id: 'radar', label: 'Radar 24h', icon: TrendingUp },
+    { id: 'olx', label: 'Garimpo OLX SC', icon: Flame },
     { id: 'calculator', label: 'Calculadora de Compra', icon: Calculator },
     { id: 'facebook', label: 'Exclusivas Manos', icon: FacebookIcon },
     { id: 'alerts', label: 'Configurar Alertas', icon: Bell },
@@ -227,6 +229,10 @@ function ComprasContent() {
           
           {activeTab === 'radar' && (
             <RadarTab />
+          )}
+
+          {activeTab === 'olx' && allowedTabIds.includes('olx') && (
+            <OlxTab onNavigateToTab={handleNavigateToTab} userEmail={userEmail} role={role} />
           )}
 
           {activeTab === 'calculator' && allowedTabIds.includes('calculator') && (
