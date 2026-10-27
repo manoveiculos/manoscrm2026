@@ -17,6 +17,8 @@ import {
     SlidersHorizontal,
     Sparkles,
     ArrowRightLeft,
+    Upload,
+    History,
 } from 'lucide-react';
 import { FinConta, FinCategoria, FinLancamento, FinPatrimonio, FinFechamento, isFinanceiroAutorizado } from '@/lib/financeiro/types';
 import { Preset, rangePreset, hojeISO, brl } from '@/lib/financeiro/format';
@@ -26,14 +28,16 @@ import { KpiCardsFinanceiro } from './components/KpiCardsFinanceiro';
 import { TabelaLancamentos } from './components/TabelaLancamentos';
 import { AbaPatrimonio } from './components/AbaPatrimonio';
 import { AbaFechamentos } from './components/AbaFechamentos';
+import { AbaHistoricoPlanilha } from './components/AbaHistoricoPlanilha';
 import { ModalResumoWhatsApp } from './components/ModalResumoWhatsApp';
 import { ModalLancamentoDetalhado } from './components/ModalLancamentoDetalhado';
 import { ModalGerenciarConta } from './components/ModalGerenciarConta';
 import { ModalTransferencia } from './components/ModalTransferencia';
 import { ModalFechamentoConta } from './components/ModalFechamentoConta';
 import { ModalAcertoSocios } from './components/ModalAcertoSocios';
+import { ModalImportarExtrato } from './components/ModalImportarExtrato';
 
-type AbaAtiva = 'visao_geral' | 'extrato' | 'patrimonio' | 'fechamentos';
+type AbaAtiva = 'visao_geral' | 'extrato' | 'patrimonio' | 'fechamentos' | 'historico_planilha';
 
 export default function FinanceiroPage() {
     const router = useRouter();
@@ -93,6 +97,7 @@ export default function FinanceiroPage() {
     const [contaIdFechamento, setContaIdFechamento] = useState<string | undefined>(undefined);
 
     const [modalAcertoAberto, setModalAcertoAberto] = useState(false);
+    const [modalImportarExtratoAberto, setModalImportarExtratoAberto] = useState(false);
 
     // Toast de Feedback
     const [toastMsg, setToastMsg] = useState<string | null>(null);
@@ -491,6 +496,15 @@ export default function FinanceiroPage() {
 
                     <button
                         type="button"
+                        onClick={() => setModalImportarExtratoAberto(true)}
+                        className="px-3.5 py-2.5 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/30 text-purple-300 font-bold text-xs transition-all flex items-center gap-2"
+                    >
+                        <Upload className="w-4 h-4 text-purple-400" />
+                        <span>Importar Extrato</span>
+                    </button>
+
+                    <button
+                        type="button"
                         onClick={() => {
                             atualizarResumoWhatsApp(presetWhatsApp);
                             setModalWhatsAppAberto(true);
@@ -586,6 +600,20 @@ export default function FinanceiroPage() {
                         }`}
                     >
                         <Layers className="w-4 h-4" /> Fechamentos de Caixa
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setAbaAtiva('historico_planilha')}
+                        className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap ${
+                            abaAtiva === 'historico_planilha'
+                                ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30 font-black'
+                                : 'text-slate-400 hover:text-white'
+                        }`}
+                    >
+                        <History className="w-4 h-4 text-amber-400" /> 📜 Histórico Planilha (2023–2026)
+                        <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500/20 text-amber-300 font-bold">
+                            30 Períodos
+                        </span>
                     </button>
                 </div>
             </div>
@@ -707,9 +735,25 @@ export default function FinanceiroPage() {
                         onReabrirFechamento={handleReabrirFechamento}
                     />
                 )}
+
+                {abaAtiva === 'historico_planilha' && (
+                    <AbaHistoricoPlanilha />
+                )}
             </div>
 
             {/* Modais */}
+            <ModalImportarExtrato
+                aberto={modalImportarExtratoAberto}
+                onFechar={() => setModalImportarExtratoAberto(false)}
+                contas={contas}
+                categorias={categorias}
+                ownerParam={effectiveOwner}
+                onImportadoComSucesso={() => {
+                    mostrarToast('Extrato importado com sucesso!');
+                    carregarTudo();
+                }}
+            />
+
             <ModalResumoWhatsApp
                 isOpen={modalWhatsAppAberto}
                 onClose={() => setModalWhatsAppAberto(false)}

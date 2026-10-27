@@ -96,6 +96,34 @@ export interface FinFechamento {
     fechado_em: string;
 }
 
+export interface FinHistoricoPeriodo {
+    id: string;
+    numero_ordem: number;
+    titulo: string;
+    saldo_inicial: number;
+    total_recebido: number;
+    total_pago: number;
+    saldo_final: number;
+    qtd_entradas: number;
+    qtd_saidas: number;
+    created_at: string;
+}
+
+export interface FinHistoricoItem {
+    id: string;
+    periodo_id: string;
+    tipo: 'receita' | 'despesa';
+    data_registro: string | null;
+    descricao: string;
+    motivo_ou_placa: string | null;
+    valor: number;
+    ordem_linha: number;
+    fin_historico_periodos?: {
+        numero_ordem: number;
+        titulo: string;
+    } | null;
+}
+
 export const GRUPO_LABEL: Record<GrupoPatrimonio, string> = {
     veiculo: 'Veículo',
     imovel: 'Imóvel',
