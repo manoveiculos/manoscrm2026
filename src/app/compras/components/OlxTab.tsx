@@ -271,14 +271,24 @@ export function OlxTab({ onNavigateToTab, userEmail, role }: OlxTabProps) {
     }
   }
 
-  // Carregar Buscas Salvas
+  // Carregar Buscas Salvas exclusivas do usuário logado
   async function carregarBuscas() {
     try {
       setLoadingSearches(true);
-      const res = await fetch('/api/compras/olx/buscas');
+      const url = userEmail
+        ? `/api/compras/olx/buscas?user_email=${encodeURIComponent(userEmail)}`
+        : '/api/compras/olx/buscas';
+      const res = await fetch(url);
       const data = await res.json();
       if (data.success) {
         setSavedSearches(data.searches || []);
+        if (data.active_client) {
+          setConfigData((prev) => ({
+            ...prev,
+            CLIENT_NAME: data.active_client.name || prev.CLIENT_NAME,
+            CLIENT_PHONE: data.active_client.phone || prev.CLIENT_PHONE,
+          }));
+        }
       }
     } catch (err) {
       console.error('Erro ao carregar buscas salvas:', err);
@@ -287,11 +297,14 @@ export function OlxTab({ onNavigateToTab, userEmail, role }: OlxTabProps) {
     }
   }
 
-  // Carregar Configurações
+  // Carregar Configurações exclusivas do usuário logado
   async function carregarConfig() {
     try {
       setLoadingConfig(true);
-      const res = await fetch('/api/compras/olx/config');
+      const url = userEmail
+        ? `/api/compras/olx/config?user_email=${encodeURIComponent(userEmail)}`
+        : '/api/compras/olx/config';
+      const res = await fetch(url);
       const data = await res.json();
       if (data.success && data.config) {
         setConfigData(data.config);
@@ -314,7 +327,14 @@ export function OlxTab({ onNavigateToTab, userEmail, role }: OlxTabProps) {
     } else if (activeSubTab === 'config') {
       carregarConfig();
     }
-  }, [activeSubTab]);
+  }, [activeSubTab, userEmail]);
+
+  useEffect(() => {
+    if (userEmail) {
+      carregarConfig();
+      carregarBuscas();
+    }
+  }, [userEmail]);
 
   // Atualizar Status do CRM
   async function handleMudarStatus(id: string, novoStatus: string) {
@@ -403,6 +423,9 @@ export function OlxTab({ onNavigateToTab, userEmail, role }: OlxTabProps) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          user_email: userEmail || '',
+          client_name: configData.CLIENT_NAME,
+          client_phone: configData.CLIENT_PHONE,
           title: novaBuscaForm.title.trim() || novaBuscaForm.keywords.trim() || 'Busca Geral',
           keywords: novaBuscaForm.keywords.trim(),
           min_year: novaBuscaForm.min_year ? parseInt(novaBuscaForm.min_year, 10) : null,
@@ -471,7 +494,10 @@ export function OlxTab({ onNavigateToTab, userEmail, role }: OlxTabProps) {
       const res = await fetch('/api/compras/olx/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(configData),
+        body: JSON.stringify({
+          ...configData,
+          user_email: userEmail || '',
+        }),
       });
       const data = await res.json();
       if (data.success) {

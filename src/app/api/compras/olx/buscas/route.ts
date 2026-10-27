@@ -4,9 +4,15 @@ export const dynamic = 'force-dynamic';
 
 const FLASK_URL = process.env.OLX_BOT_URL || 'http://localhost:5000';
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const userEmail = req.nextUrl.searchParams.get('user_email')?.trim() || '';
+
   try {
-    const res = await fetch(`${FLASK_URL}/api/saved-searches`, {
+    const url = userEmail
+      ? `${FLASK_URL}/api/saved-searches?user_email=${encodeURIComponent(userEmail)}`
+      : `${FLASK_URL}/api/saved-searches`;
+
+    const res = await fetch(url, {
       method: 'GET',
       headers: { 'Content-Type': 'application/json' },
       cache: 'no-store',
