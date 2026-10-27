@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
   const onlyParticular = url.searchParams.get('only_particular') === 'true';
   const statusCrm = url.searchParams.get('status_crm') || 'all';
   const sortBy = url.searchParams.get('sort_by') || 'recent';
-  const limit = Math.min(parseInt(url.searchParams.get('limit') || '40', 10), 100);
+  const limit = Math.min(parseInt(url.searchParams.get('limit') || '10', 10), 100);
   const offset = parseInt(url.searchParams.get('offset') || '0', 10);
 
   try {
