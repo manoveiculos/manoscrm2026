@@ -9,9 +9,12 @@ import {
   Flame,
   ExternalLink,
   RefreshCw,
+  RotateCcw,
   TrendingDown,
   User,
   Store,
+  ChevronLeft,
+  ChevronRight,
   AlertTriangle,
   CheckCircle2,
   Copy,
@@ -178,8 +181,79 @@ export function OlxTab({ onNavigateToTab, userEmail, role }: OlxTabProps) {
   const [salvandoNota, setSalvandoNota] = useState(false);
   const [notaSucesso, setNotaSucesso] = useState(false);
 
-  // Modal de Detalhes do Anúncio
+  // Modal de Detalhes do Anúncio & Sincronização em Tempo Real da FIPE Nativa da OLX
   const [detalhesItem, setDetalhesItem] = useState<OlxOpportunity | null>(null);
+  const [detalhesCarregando, setDetalhesCarregando] = useState(false);
+  const [detalhesImagens, setDetalhesImagens] = useState<string[]>([]);
+  const [detalhesImagemAtiva, setDetalhesImagemAtiva] = useState(0);
+  const [detalhesDescricao, setDetalhesDescricao] = useState<string>('');
+  const [detalhesPrecoMedioOlx, setDetalhesPrecoMedioOlx] = useState<number | null>(null);
+
+  async function handleAbrirDetalhes(item: OlxOpportunity) {
+    setDetalhesItem(item);
+    setDetalhesImagens(item.foto_url ? [item.foto_url] : []);
+    setDetalhesImagemAtiva(0);
+    setDetalhesDescricao('');
+    setDetalhesPrecoMedioOlx(null);
+    setDetalhesCarregando(true);
+
+    try {
+      const res = await fetch(`/api/compras/olx/detalhes?id=${item.ad_id}&url=${encodeURIComponent(item.url)}`);
+      const data = await res.json();
+      if (data.success) {
+        if (data.images && data.images.length > 0) {
+          setDetalhesImagens(data.images);
+        }
+        if (data.description) {
+          setDetalhesDescricao(data.description);
+        }
+        if (data.olx_avg_price) {
+          setDetalhesPrecoMedioOlx(data.olx_avg_price);
+        }
+
+        // Se a OLX retornou a FIPE oficial nativa do anúncio (__ADVIEW_STATE__), atualiza na hora
+        if (data.fipe_price && data.fipe_price > 0) {
+          const novoFipe = Number(data.fipe_price);
+          const preco = Number(item.preco || 0);
+          const novaMargemVal = data.margin_value !== undefined && data.margin_value !== null 
+            ? Number(data.margin_value) 
+            : Math.round((novoFipe - preco) * 100) / 100;
+          const novaMargemPct = data.margin_percent !== undefined && data.margin_percent !== null 
+            ? Number(data.margin_percent) 
+            : Math.round(((novoFipe - preco) / novoFipe) * 1000) / 10;
+
+          setDetalhesItem((prev) =>
+            prev && prev.id === item.id
+              ? {
+                  ...prev,
+                  preco_fipe: novoFipe,
+                  margem_valor: novaMargemVal,
+                  margem_percent: novaMargemPct,
+                }
+              : prev
+          );
+
+          // Atualiza também no feed de oportunidades
+          setOpportunities((prev) =>
+            prev.map((it) =>
+              it.id === item.id
+                ? {
+                    ...it,
+                    preco_fipe: novoFipe,
+                    margem_valor: novaMargemVal,
+                    margem_percent: novaMargemPct,
+                  }
+                : it
+            )
+          );
+        }
+      }
+    } catch (err) {
+      console.warn('Erro ao sincronizar detalhes do anúncio:', err);
+    } finally {
+      setDetalhesCarregando(false);
+    }
+  }
 
   // Estados de Buscas Personalizadas (WhatsApp)
   const [savedSearches, setSavedSearches] = useState<SavedSearch[]>([]);
@@ -266,6 +340,20 @@ export function OlxTab({ onNavigateToTab, userEmail, role }: OlxTabProps) {
   function carregarMais() {
     if (carregandoMais || opportunities.length >= totalOpportunities) return;
     carregarOportunidades(false);
+  }
+
+  function handleLimparFiltros() {
+    setSearch('');
+    setSelectedCity('ALL');
+    setMinMargin('0');
+    setOnlyBelowFipe(false);
+    setOnlyParticular(false);
+    setOnlyPriceDrop(false);
+    setStatusCrm('all');
+    setSortBy('recent');
+    setTimeout(() => {
+      carregarOportunidades(true);
+    }, 50);
   }
 
   // Checar status do robô Python local
@@ -874,13 +962,27 @@ export function OlxTab({ onNavigateToTab, userEmail, role }: OlxTabProps) {
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={() => carregarOportunidades(true)}
-                className="text-xs text-slate-400 hover:text-white flex items-center gap-1.5 transition font-medium"
-              >
-                <RefreshCw className="w-3.5 h-3.5" /> Atualizar Feed
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleLimparFiltros}
+                  className="px-3 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-xs text-slate-300 hover:text-white flex items-center gap-1.5 transition font-semibold"
+                  title="Limpar todos os filtros e voltar aos mais recentes"
+                >
+                  <RotateCcw className="w-3.5 h-3.5 text-amber-500" />
+                  <span>Limpar Filtros</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => carregarOportunidades(true)}
+                  className="px-3 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-xs text-slate-300 hover:text-white flex items-center gap-1.5 transition font-semibold"
+                  title="Atualizar feed de anúncios"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-amber-500' : 'text-slate-400'}`} />
+                  <span>Atualizar Feed</span>
+                </button>
+              </div>
             </div>
           </div>
 
@@ -923,7 +1025,7 @@ export function OlxTab({ onNavigateToTab, userEmail, role }: OlxTabProps) {
                     <div>
                       {/* Foto do Carro com Badges Sobrepostos */}
                       <div
-                        onClick={() => setDetalhesItem(item)}
+                        onClick={() => handleAbrirDetalhes(item)}
                         className="relative h-48 w-full bg-slate-950 overflow-hidden group cursor-pointer"
                       >
                         {item.foto_url ? (
@@ -1005,7 +1107,7 @@ export function OlxTab({ onNavigateToTab, userEmail, role }: OlxTabProps) {
                         {/* Título & Cidade */}
                         <div>
                           <h3
-                            onClick={() => setDetalhesItem(item)}
+                            onClick={() => handleAbrirDetalhes(item)}
                             className="text-sm font-bold text-white line-clamp-2 hover:text-amber-400 transition cursor-pointer"
                             title={item.titulo}
                           >
@@ -1734,8 +1836,73 @@ export function OlxTab({ onNavigateToTab, userEmail, role }: OlxTabProps) {
 
             {/* Content */}
             <div className="p-5 overflow-y-auto space-y-4">
-              {/* Foto Principal */}
-              {detalhesItem.foto_url && (
+              {/* Indicador de Sincronização em Tempo Real da FIPE Nativa */}
+              {detalhesCarregando && (
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-semibold animate-pulse">
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-400" />
+                  <span>Sincronizando FIPE nativa da OLX e fotos em alta resolução...</span>
+                </div>
+              )}
+
+              {/* Galeria de Fotos em Alta Resolução */}
+              {detalhesImagens.length > 0 ? (
+                <div className="space-y-2">
+                  <div className="relative h-72 w-full rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 group">
+                    <img
+                      src={detalhesImagens[detalhesImagemAtiva] || detalhesImagens[0]}
+                      alt={detalhesItem.titulo}
+                      referrerPolicy="no-referrer"
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        (e.currentTarget as HTMLElement).style.display = 'none';
+                      }}
+                    />
+
+                    {/* Controles de Navegação de Fotos */}
+                    {detalhesImagens.length > 1 && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setDetalhesImagemAtiva((prev) => (prev > 0 ? prev - 1 : detalhesImagens.length - 1))}
+                          className="absolute left-2 top-1/2 -translate-y-1/2 p-2 rounded-xl bg-black/60 hover:bg-black/80 text-white backdrop-blur-sm transition"
+                        >
+                          <ChevronLeft className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDetalhesImagemAtiva((prev) => (prev < detalhesImagens.length - 1 ? prev + 1 : 0))}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-xl bg-black/60 hover:bg-black/80 text-white backdrop-blur-sm transition"
+                        >
+                          <ChevronRight className="w-4 h-4" />
+                        </button>
+                        <div className="absolute bottom-2 right-2 px-2 py-1 rounded-lg bg-black/70 backdrop-blur-sm text-[10px] font-bold text-white">
+                          {detalhesImagemAtiva + 1} / {detalhesImagens.length}
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Faixa de Miniaturas */}
+                  {detalhesImagens.length > 1 && (
+                    <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin">
+                      {detalhesImagens.map((img, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => setDetalhesImagemAtiva(idx)}
+                          className={`relative h-14 w-20 shrink-0 rounded-lg overflow-hidden border transition ${
+                            idx === detalhesImagemAtiva
+                              ? 'border-amber-500 ring-2 ring-amber-500/50 scale-105'
+                              : 'border-slate-800 opacity-60 hover:opacity-100'
+                          }`}
+                        >
+                          <img src={img} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : detalhesItem.foto_url ? (
                 <div className="relative h-64 w-full rounded-2xl overflow-hidden bg-slate-950 border border-slate-800">
                   <img
                     src={detalhesItem.foto_url}
@@ -1747,7 +1914,7 @@ export function OlxTab({ onNavigateToTab, userEmail, role }: OlxTabProps) {
                     }}
                   />
                 </div>
-              )}
+              ) : null}
 
               {/* Data e Hora de Publicação */}
               <div className="flex items-center justify-between text-xs text-slate-300 bg-slate-950 p-3 rounded-2xl border border-slate-800">
@@ -1816,6 +1983,26 @@ export function OlxTab({ onNavigateToTab, userEmail, role }: OlxTabProps) {
                   )}
                 </div>
               </div>
+
+              {/* Preço Médio OLX se disponível */}
+              {detalhesPrecoMedioOlx && detalhesPrecoMedioOlx > 0 && (
+                <div className="bg-slate-950 p-3 rounded-2xl border border-slate-800 flex items-center justify-between text-xs">
+                  <span className="text-slate-400 font-medium">Preço Médio Estimado na OLX:</span>
+                  <span className="text-white font-bold">{formatBRL(detalhesPrecoMedioOlx)}</span>
+                </div>
+              )}
+
+              {/* Descrição do Vendedor na OLX */}
+              {detalhesDescricao && (
+                <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-1.5">
+                  <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">
+                    Descrição do Vendedor (OLX)
+                  </span>
+                  <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-line max-h-48 overflow-y-auto">
+                    {detalhesDescricao}
+                  </p>
+                </div>
+              )}
 
               {/* Nota Existente */}
               {detalhesItem.observacoes && (
