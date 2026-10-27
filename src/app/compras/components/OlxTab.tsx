@@ -498,7 +498,8 @@ export function OlxTab({ onNavigateToTab, userEmail, role }: OlxTabProps) {
   async function handleExcluirBusca(id: number) {
     if (!confirm('Deseja realmente remover este monitoramento de busca?')) return;
     try {
-      await fetch(`/api/compras/olx/buscas?id=${id}`, { method: 'DELETE' });
+      const emailQuery = userEmail ? `&user_email=${encodeURIComponent(userEmail)}` : '';
+      await fetch(`/api/compras/olx/buscas?id=${id}${emailQuery}`, { method: 'DELETE' });
       setSavedSearches((prev) => prev.filter((b) => b.id !== id));
     } catch (err) {
       console.error('Erro ao excluir busca:', err);
@@ -508,7 +509,8 @@ export function OlxTab({ onNavigateToTab, userEmail, role }: OlxTabProps) {
   // Alternar Ativo/Inativo Busca Salva
   async function handleToggleBusca(id: number) {
     try {
-      await fetch(`/api/compras/olx/buscas?id=${id}`, { method: 'PATCH' });
+      const emailQuery = userEmail ? `&user_email=${encodeURIComponent(userEmail)}` : '';
+      await fetch(`/api/compras/olx/buscas?id=${id}${emailQuery}`, { method: 'PATCH' });
       setSavedSearches((prev) =>
         prev.map((b) => (b.id === id ? { ...b, is_active: !b.is_active } : b))
       );
@@ -533,6 +535,9 @@ export function OlxTab({ onNavigateToTab, userEmail, role }: OlxTabProps) {
       });
       const data = await res.json();
       if (data.success) {
+        if (data.config) {
+          setConfigData(data.config);
+        }
         setConfigSalvaComSucesso(true);
         setTimeout(() => setConfigSalvaComSucesso(false), 3500);
       } else {
