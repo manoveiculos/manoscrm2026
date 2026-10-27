@@ -14,6 +14,7 @@ export async function GET(req: NextRequest) {
   const minMargin = url.searchParams.get('min_margin') || '0';
   const onlyBelowFipe = url.searchParams.get('only_below_fipe') === 'true' || minMargin === 'below_fipe';
   const onlyParticular = url.searchParams.get('only_particular') === 'true';
+  const onlyPriceDrops = url.searchParams.get('only_price_drops') === 'true';
   const statusCrm = url.searchParams.get('status_crm') || 'all';
   const sortBy = url.searchParams.get('sort_by') || 'recent';
   const limit = Math.min(parseInt(url.searchParams.get('limit') || '12', 10), 100);
@@ -32,6 +33,7 @@ export async function GET(req: NextRequest) {
       flaskParams.set('min_margin', minMargin);
     }
     if (onlyParticular) flaskParams.set('only_particular', 'true');
+    if (onlyPriceDrops) flaskParams.set('only_price_drops', 'true');
     flaskParams.set('order_by', sortBy);
     flaskParams.set('limit', String(limit));
     flaskParams.set('page', String(page));
@@ -161,6 +163,10 @@ export async function GET(req: NextRequest) {
 
     if (onlyParticular) {
       query = query.eq('is_particular', true);
+    }
+
+    if (onlyPriceDrops) {
+      query = query.eq('is_queda_preco', true);
     }
 
     if (statusCrm && statusCrm !== 'all') {

@@ -157,29 +157,8 @@ function GarimpeiroContent() {
           </div>
         </div>
 
-        {/* Link Direto e Ações Rápidas */}
+        {/* Ações Rápidas */}
         <div className="flex items-center gap-2.5 flex-wrap">
-          {/* Botão de Copiar Link de Produção */}
-          <button
-            type="button"
-            onClick={copiarLinkProducao}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-700 hover:border-amber-500/50 text-slate-300 hover:text-white text-xs font-semibold transition"
-            title="Copiar URL de Produção"
-          >
-            {copiadoUrl ? (
-              <>
-                <Check className="w-3.5 h-3.5 text-emerald-400" />
-                <span className="text-emerald-400 font-bold">Link Copiado!</span>
-              </>
-            ) : (
-              <>
-                <Copy className="w-3.5 h-3.5 text-slate-400" />
-                <span className="hidden sm:inline">/garimpeiromanos</span>
-                <span className="text-amber-400 text-[10px] font-bold">Copiar Link</span>
-              </>
-            )}
-          </button>
-
           <Link
             href="/compras"
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/[0.05] hover:bg-white/[0.1] text-slate-300 hover:text-white text-xs font-semibold border border-white/10 transition"

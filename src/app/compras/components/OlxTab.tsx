@@ -162,6 +162,7 @@ export function OlxTab({ onNavigateToTab, userEmail, role }: OlxTabProps) {
   const [minMargin, setMinMargin] = useState<string>('0');
   const [onlyBelowFipe, setOnlyBelowFipe] = useState(false);
   const [onlyParticular, setOnlyParticular] = useState(false);
+  const [onlyPriceDrop, setOnlyPriceDrop] = useState(false);
   const [statusCrm, setStatusCrm] = useState('all');
   const [sortBy, setSortBy] = useState('recent');
 
@@ -233,6 +234,7 @@ export function OlxTab({ onNavigateToTab, userEmail, role }: OlxTabProps) {
         params.set('min_margin', minMargin);
       }
       if (onlyParticular) params.set('only_particular', 'true');
+      if (onlyPriceDrop) params.set('only_price_drops', 'true');
       if (statusCrm !== 'all') params.set('status_crm', statusCrm);
       params.set('sort_by', sortBy);
       params.set('limit', String(pageSize));
@@ -325,7 +327,7 @@ export function OlxTab({ onNavigateToTab, userEmail, role }: OlxTabProps) {
   useEffect(() => {
     carregarOportunidades(true);
     checarBot();
-  }, [selectedCity, minMargin, onlyBelowFipe, onlyParticular, statusCrm, sortBy]);
+  }, [selectedCity, minMargin, onlyBelowFipe, onlyParticular, onlyPriceDrop, statusCrm, sortBy]);
 
   useEffect(() => {
     if (activeSubTab === 'searches') {
@@ -574,19 +576,8 @@ export function OlxTab({ onNavigateToTab, userEmail, role }: OlxTabProps) {
             </p>
           </div>
 
-          {/* Ações do Topo: Link para Sistema Completo /garimpeiromanos e Estado do Robô */}
+          {/* Estado do Robô */}
           <div className="flex items-center gap-2.5 flex-wrap">
-            <a
-              href="/garimpeiromanos"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 px-3 py-2 rounded-2xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs font-bold transition shadow-sm"
-              title="Abrir o Garimpeiro completo em nova aba na URL /garimpeiromanos"
-            >
-              <ExternalLink className="w-3.5 h-3.5" />
-              <span>Abrir Garimpeiro Completo</span>
-            </a>
-
             {botStatus.online ? (
               <div className="flex items-center gap-2 px-3.5 py-2 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-bold shadow-lg shadow-emerald-500/5">
                 <span className="relative flex h-2.5 w-2.5">
@@ -669,7 +660,13 @@ export function OlxTab({ onNavigateToTab, userEmail, role }: OlxTabProps) {
           {/* Métricas Rápidas */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <div
-              onClick={() => { setMinMargin('0'); setOnlyBelowFipe(false); setStatusCrm('all'); setOnlyParticular(false); }}
+              onClick={() => {
+                setMinMargin('0');
+                setOnlyBelowFipe(false);
+                setStatusCrm('all');
+                setOnlyParticular(false);
+                setOnlyPriceDrop(false);
+              }}
               className="bg-slate-900 border border-slate-800 hover:border-slate-700 rounded-2xl p-4 cursor-pointer transition select-none group"
             >
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total em SC</span>
@@ -703,7 +700,11 @@ export function OlxTab({ onNavigateToTab, userEmail, role }: OlxTabProps) {
 
             <div
               onClick={() => setOnlyParticular((prev) => !prev)}
-              className="bg-slate-900 border border-slate-800 hover:border-blue-500/50 rounded-2xl p-4 cursor-pointer transition select-none group"
+              className={`bg-slate-900 border rounded-2xl p-4 cursor-pointer transition select-none group ${
+                onlyParticular
+                  ? 'border-blue-500 ring-2 ring-blue-500/30 bg-blue-500/10'
+                  : 'border-slate-800 hover:border-blue-500/50'
+              }`}
             >
               <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wider flex items-center gap-1">
                 <User className="w-3 h-3" /> Particulares
@@ -711,18 +712,26 @@ export function OlxTab({ onNavigateToTab, userEmail, role }: OlxTabProps) {
               <p className="text-2xl font-black text-white mt-1 group-hover:text-blue-400 transition">
                 {stats.totalParticulares}
               </p>
-              <span className="text-[10px] text-slate-500 mt-0.5 block">Direto do proprietário</span>
+              <span className="text-[10px] text-slate-500 mt-0.5 block">
+                {onlyParticular ? 'Filtro ativo (clique p/ remover)' : 'Direto do proprietário'}
+              </span>
             </div>
 
             <div
-              onClick={() => setSortBy('recent')}
-              className="bg-slate-900 border border-slate-800 hover:border-emerald-500/50 rounded-2xl p-4 cursor-pointer transition select-none group"
+              onClick={() => setOnlyPriceDrop((prev) => !prev)}
+              className={`bg-slate-900 border rounded-2xl p-4 cursor-pointer transition select-none group ${
+                onlyPriceDrop
+                  ? 'border-emerald-500 ring-2 ring-emerald-500/30 bg-emerald-500/10 shadow-lg shadow-emerald-500/10'
+                  : 'border-slate-800 hover:border-emerald-500/50'
+              }`}
             >
               <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1">
                 <TrendingDown className="w-3 h-3" /> Quedas de Preço
               </span>
               <p className="text-2xl font-black text-emerald-400 mt-1">{stats.totalQuedasPreco}</p>
-              <span className="text-[10px] text-slate-500 mt-0.5 block">Vendedor baixou valor</span>
+              <span className="text-[10px] text-slate-400 mt-0.5 block">
+                {onlyPriceDrop ? 'Filtro ativo (clique p/ remover)' : 'Vendedor baixou valor'}
+              </span>
             </div>
           </div>
 
@@ -810,7 +819,19 @@ export function OlxTab({ onNavigateToTab, userEmail, role }: OlxTabProps) {
                     onChange={(e) => setOnlyParticular(e.target.checked)}
                     className="rounded bg-slate-950 border-slate-700 text-amber-500 focus:ring-amber-500 w-3.5 h-3.5"
                   />
-                  <span>Apenas Vendedores Particulares</span>
+                  <span>Apenas Particulares</span>
+                </label>
+
+                <div className="h-4 w-px bg-slate-800" />
+
+                <label className="flex items-center gap-2 cursor-pointer text-xs text-emerald-400 select-none font-semibold">
+                  <input
+                    type="checkbox"
+                    checked={onlyPriceDrop}
+                    onChange={(e) => setOnlyPriceDrop(e.target.checked)}
+                    className="rounded bg-slate-950 border-slate-700 text-emerald-500 focus:ring-emerald-500 w-3.5 h-3.5"
+                  />
+                  <span>Apenas Quedas de Preço</span>
                 </label>
 
                 <div className="h-4 w-px bg-slate-800" />
