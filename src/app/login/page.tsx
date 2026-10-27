@@ -54,9 +54,13 @@ export default function LoginPage() {
 
                 if (authError) throw authError;
 
+                const redirectParam = typeof window !== 'undefined'
+                    ? (new URLSearchParams(window.location.search).get('redirect') || '/')
+                    : '/';
+
                 // For the admin email, we can proceed directly
                 if (email.toLowerCase() === 'alexandre_gorges@hotmail.com') {
-                    router.push('/');
+                    router.push(redirectParam);
                     return;
                 }
 
@@ -88,7 +92,7 @@ export default function LoginPage() {
                     throw new Error('Sua conta não está ativa no CRM. Solicite liberação ao administrador.');
                 }
 
-                router.push('/');
+                router.push(redirectParam);
             } else if (mode === 'register') {
                 const { data, error: registerError } = await supabase.auth.signUp({
                     email,

@@ -104,6 +104,9 @@ export async function middleware(request: NextRequest) {
     if (!user && !isLoginPage) {
         // Redireciona para login se não estiver autenticado
         const loginUrl = new URL('/login', request.url);
+        if (path && path !== '/') {
+            loginUrl.searchParams.set('redirect', path);
+        }
         const redirectResponse = NextResponse.redirect(loginUrl);
         supabaseResponse.cookies.getAll().forEach((cookie) => {
             redirectResponse.cookies.set(cookie.name, cookie.value, cookie);

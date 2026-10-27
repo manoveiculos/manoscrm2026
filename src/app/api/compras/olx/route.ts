@@ -97,9 +97,11 @@ export async function GET(req: NextRequest) {
           is_queda_preco: Boolean(ad.previous_price && Number(ad.previous_price) > Number(ad.price)),
           preco_anterior: ad.previous_price ? Number(ad.previous_price) : null,
           avisos: [],
-          status_crm: (annotation?.status_crm || 'novo') as any,
+          status_crm: ((annotation?.status_crm || ad.crm_status || 'novo').toLowerCase()) as any,
           responsavel_nome: null,
-          observacoes: annotation?.observacoes || null,
+          observacoes: (annotation?.observacoes !== undefined && annotation.observacoes !== null) 
+            ? annotation.observacoes 
+            : (ad.crm_notes || ad.observacoes || null),
           created_at: ad.created_at || new Date().toISOString(),
         };
       });
@@ -231,32 +233,77 @@ export async function PATCH(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { id, status_crm, responsavel_nome, observacoes } = body;
+    const { id, status_crm, responsavel_nome, observacoes, url, titulo, preco, preco_fipe, margem_percent, margem_valor, foto_url, localizacao } = body;
 
     if (!id) {
       return NextResponse.json({ success: false, error: 'ID é obrigatório' }, { status: 400 });
     }
 
     const payload: any = {
-      ad_id: String(id),
       updated_at: new Date().toISOString(),
     };
     if (status_crm) payload.status_crm = status_crm;
     if (responsavel_nome !== undefined) payload.responsavel_nome = responsavel_nome;
     if (observacoes !== undefined) payload.observacoes = observacoes;
 
-    // Upsert no Supabase por ad_id
-    const { data, error } = await supabase
+    // 1. Tenta atualizar diretamente no Supabase por ad_id
+    const { data: updatedRows, error: updateError } = await supabase
       .from('compras_olx_oportunidades')
-      .upsert(payload, { onConflict: 'ad_id' })
-      .select()
-      .single();
+      .update(payload)
+      .eq('ad_id', String(id))
+      .select();
 
-    if (error) {
-      console.warn('Aviso ao atualizar anotação no Supabase:', error);
+    let savedData = updatedRows && updatedRows.length > 0 ? updatedRows[0] : null;
+
+    // 2. Se o registro ainda não existia no Supabase, insere com todos os campos obrigatórios (url, titulo, preco, etc.)
+    if (!savedData) {
+      const fullInsertPayload: any = {
+        ad_id: String(id),
+        url: url || `https://sc.olx.com.br/autos-e-pecas/carros-vans-e-utilitarios/${id}`,
+        titulo: titulo || 'Anúncio OLX',
+        preco: Number(preco || 0),
+        preco_fipe: preco_fipe ? Number(preco_fipe) : null,
+        margem_percent: margem_percent ? Number(margem_percent) : null,
+        margem_valor: margem_valor ? Number(margem_valor) : null,
+        foto_url: foto_url || null,
+        localizacao: localizacao || '',
+        status_crm: status_crm || 'novo',
+        responsavel_nome: responsavel_nome || null,
+        observacoes: observacoes !== undefined ? observacoes : null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      const { data: inserted, error: insertError } = await supabase
+        .from('compras_olx_oportunidades')
+        .upsert(fullInsertPayload, { onConflict: 'ad_id' })
+        .select()
+        .single();
+
+      if (insertError) {
+        console.error('Erro ao inserir oportunidade no Supabase com campos completos:', insertError);
+      } else {
+        savedData = inserted;
+      }
     }
 
-    return NextResponse.json({ success: true, opportunity: data || payload });
+    // 3. Sincroniza em tempo real no Flask / SQLite local
+    try {
+      await fetch(`${FLASK_URL}/api/ads/${id}/crm`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          status: status_crm ? status_crm.toUpperCase() : undefined,
+          notes: observacoes,
+          status_crm, 
+          observacoes 
+        }),
+      });
+    } catch {
+      // Ignora se Flask estiver temporariamente indisponível
+    }
+
+    return NextResponse.json({ success: true, opportunity: savedData || payload });
   } catch (err: any) {
     console.error('Erro ao atualizar oportunidade OLX:', err);
     return NextResponse.json({ success: false, error: err?.message }, { status: 500 });

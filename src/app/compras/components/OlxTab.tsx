@@ -344,17 +344,32 @@ export function OlxTab({ onNavigateToTab, userEmail, role }: OlxTabProps) {
 
   // Atualizar Status do CRM
   async function handleMudarStatus(id: string, novoStatus: string) {
+    const item = opportunities.find((it) => it.id === id);
     try {
+      // Atualização imediata na UI
+      setOpportunities((prev) =>
+        prev.map((it) => (it.id === id ? { ...it, status_crm: novoStatus as any } : it))
+      );
+
       const res = await fetch('/api/compras/olx', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, status_crm: novoStatus }),
+        body: JSON.stringify({
+          id,
+          status_crm: novoStatus,
+          url: item?.url,
+          titulo: item?.titulo,
+          preco: item?.preco,
+          preco_fipe: item?.preco_fipe,
+          margem_percent: item?.margem_percent,
+          margem_valor: item?.margem_valor,
+          foto_url: item?.foto_url,
+          localizacao: item?.localizacao,
+        }),
       });
       const data = await res.json();
-      if (data.success) {
-        setOpportunities((prev) =>
-          prev.map((item) => (item.id === id ? { ...item, status_crm: novoStatus as any } : item))
-        );
+      if (!data.success) {
+        console.error('Erro ao gravar status:', data.error);
       }
     } catch (err) {
       console.error('Erro ao atualizar status CRM:', err);
@@ -373,12 +388,21 @@ export function OlxTab({ onNavigateToTab, userEmail, role }: OlxTabProps) {
     if (!modalNotaItem) return;
     setSalvandoNota(true);
     try {
+      const notaFinal = notaTexto.trim() || null;
       const res = await fetch('/api/compras/olx', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           id: modalNotaItem.id,
-          observacoes: notaTexto.trim() || null,
+          observacoes: notaFinal,
+          url: modalNotaItem.url,
+          titulo: modalNotaItem.titulo,
+          preco: modalNotaItem.preco,
+          preco_fipe: modalNotaItem.preco_fipe,
+          margem_percent: modalNotaItem.margem_percent,
+          margem_valor: modalNotaItem.margem_valor,
+          foto_url: modalNotaItem.foto_url,
+          localizacao: modalNotaItem.localizacao,
         }),
       });
       const data = await res.json();
@@ -386,7 +410,7 @@ export function OlxTab({ onNavigateToTab, userEmail, role }: OlxTabProps) {
         setOpportunities((prev) =>
           prev.map((item) =>
             item.id === modalNotaItem.id
-              ? { ...item, observacoes: notaTexto.trim() || null }
+              ? { ...item, observacoes: notaFinal }
               : item
           )
         );
@@ -395,6 +419,8 @@ export function OlxTab({ onNavigateToTab, userEmail, role }: OlxTabProps) {
           setModalNotaItem(null);
           setNotaSucesso(false);
         }, 800);
+      } else {
+        alert('Falha ao salvar a nota: ' + (data.error || 'Erro desconhecido'));
       }
     } catch (err) {
       console.error('Erro ao salvar nota:', err);
