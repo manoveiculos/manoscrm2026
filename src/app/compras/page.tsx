@@ -83,10 +83,10 @@ function ComprasContent() {
   }, []);
 
   const allowedTabIds = role === 'admin'
-    ? ['radar', 'olx', 'calculator', 'facebook', 'alerts', 'import', 'admin']
+    ? ['radar', 'calculator', 'facebook', 'alerts', 'import', 'admin']
     : (userEmail?.toLowerCase() === 'hgledra@hotmail.com' || userEmail?.toLowerCase() === 'ivo@acesso.com' || userEmail?.toLowerCase() === 'paulo@manoscrm.com'
-        ? ['radar', 'olx', 'calculator', 'facebook', 'alerts']
-        : ['radar', 'olx', 'calculator', 'alerts']);
+        ? ['radar', 'calculator', 'facebook', 'alerts']
+        : ['radar', 'calculator', 'alerts']);
 
   // Força vendedor a ficar apenas nas abas permitidas
   useEffect(() => {
@@ -156,7 +156,6 @@ function ComprasContent() {
 
   const allTabs = [
     { id: 'radar', label: 'Radar 24h', icon: TrendingUp },
-    { id: 'olx', label: 'Garimpo OLX SC', icon: Flame },
     { id: 'calculator', label: 'Calculadora de Compra', icon: Calculator },
     { id: 'facebook', label: 'Exclusivas Manos', icon: FacebookIcon },
     { id: 'alerts', label: 'Configurar Alertas', icon: Bell },
