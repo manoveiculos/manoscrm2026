@@ -33,6 +33,7 @@ import {
     Handshake, // Negociação de Terceiros
     MessageCircle, // Leads WhatsApp Direto (Wilson)
     WalletCards, // Financeiro & Patrimônio (Alexandre & Ledra)
+    Calculator, // Precificar FIPE
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
@@ -62,6 +63,7 @@ const NAV_ITEMS: NavItem[] = [
     { label: 'Atendimento', icon: PlayCircle, href: '/atendimento' },
     { label: 'Agenda', icon: CalendarClock, href: '/agenda' },
     { label: 'Leads', icon: LayoutDashboard, href: '/leads' },
+    { label: 'Precificar', icon: Calculator, href: '/precificar' },
     { label: 'Painel 48h', icon: Flame, href: '/admin/prioridade48h', adminOnly: true },
     { label: 'Compras', icon: Radar, href: '/compras' },
     { label: 'Cobrança Acordos', icon: DollarSign, href: '/consultor/cobranca' },
