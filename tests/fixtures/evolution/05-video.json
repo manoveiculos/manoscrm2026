@@ -1,0 +1,42 @@
+{
+  "event": "messages.upsert",
+  "instance": "loja-teste",
+  "data": {
+    "key": {
+      "remoteJid": "5547900000001@s.whatsapp.net",
+      "fromMe": false,
+      "id": "3EB0TESTE0000000000005"
+    },
+    "pushName": "Cliente Teste",
+    "status": "DELIVERY_ACK",
+    "message": {
+      "videoMessage": {
+        "url": "https://mmg.whatsapp.net/v/t62.7161-24/00000000_0000000000000000_0000000000000000000_n.enc?ccb=11-4&oh=FAKE&oe=FAKE&_nc_sid=5e03e0&mms3=true",
+        "mimetype": "video/mp4",
+        "fileSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "fileLength": "2483120",
+        "mediaKey": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
+        "fileEncSha256": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC=",
+        "directPath": "/v/t62.7161-24/00000000_0000000000000000_0000000000000000000_n.enc?ccb=11-4&oh=FAKE&oe=FAKE&_nc_sid=5e03e0",
+        "mediaKeyTimestamp": "1793797200",
+        "caption": "Vídeo do motor funcionando",
+        "seconds": 14,
+        "height": 848,
+        "width": 480,
+        "jpegThumbnail": "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA="
+      },
+      "messageContextInfo": {
+        "deviceListMetadataVersion": 2
+      }
+    },
+    "messageType": "videoMessage",
+    "messageTimestamp": 1793797440,
+    "instanceId": "00000000-0000-4000-8000-000000000000",
+    "source": "android"
+  },
+  "destination": "https://crm.exemplo.test/api/wa/ingest",
+  "date_time": "2026-11-04T13:04:00.000Z",
+  "sender": "5547900000000@s.whatsapp.net",
+  "server_url": "https://evolution.exemplo.test",
+  "apikey": "FAKE-APIKEY-0000-0000"
+}

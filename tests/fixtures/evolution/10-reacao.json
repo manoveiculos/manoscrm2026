@@ -1,0 +1,36 @@
+{
+  "event": "messages.upsert",
+  "instance": "loja-teste",
+  "data": {
+    "key": {
+      "remoteJid": "5547900000001@s.whatsapp.net",
+      "fromMe": false,
+      "id": "3EB0TESTE0000000000010"
+    },
+    "pushName": "Cliente Teste",
+    "status": "DELIVERY_ACK",
+    "message": {
+      "reactionMessage": {
+        "key": {
+          "remoteJid": "5547900000001@s.whatsapp.net",
+          "fromMe": true,
+          "id": "3EB0LOJA00000000000001"
+        },
+        "text": "👍",
+        "senderTimestampMs": "1793797740000"
+      },
+      "messageContextInfo": {
+        "deviceListMetadataVersion": 2
+      }
+    },
+    "messageType": "reactionMessage",
+    "messageTimestamp": 1793797740,
+    "instanceId": "00000000-0000-4000-8000-000000000000",
+    "source": "android"
+  },
+  "destination": "https://crm.exemplo.test/api/wa/ingest",
+  "date_time": "2026-11-04T13:09:00.000Z",
+  "sender": "5547900000000@s.whatsapp.net",
+  "server_url": "https://evolution.exemplo.test",
+  "apikey": "FAKE-APIKEY-0000-0000"
+}

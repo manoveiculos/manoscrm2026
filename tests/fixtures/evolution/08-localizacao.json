@@ -1,0 +1,34 @@
+{
+  "event": "messages.upsert",
+  "instance": "loja-teste",
+  "data": {
+    "key": {
+      "remoteJid": "5547900000001@s.whatsapp.net",
+      "fromMe": false,
+      "id": "3EB0TESTE0000000000008"
+    },
+    "pushName": "Cliente Teste",
+    "status": "DELIVERY_ACK",
+    "message": {
+      "locationMessage": {
+        "degreesLatitude": -27,
+        "degreesLongitude": -49,
+        "name": "Ponto de teste",
+        "address": "Endereço fictício, 100 — Cidade Teste/SC",
+        "jpegThumbnail": "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA="
+      },
+      "messageContextInfo": {
+        "deviceListMetadataVersion": 2
+      }
+    },
+    "messageType": "locationMessage",
+    "messageTimestamp": 1793797620,
+    "instanceId": "00000000-0000-4000-8000-000000000000",
+    "source": "android"
+  },
+  "destination": "https://crm.exemplo.test/api/wa/ingest",
+  "date_time": "2026-11-04T13:07:00.000Z",
+  "sender": "5547900000000@s.whatsapp.net",
+  "server_url": "https://evolution.exemplo.test",
+  "apikey": "FAKE-APIKEY-0000-0000"
+}

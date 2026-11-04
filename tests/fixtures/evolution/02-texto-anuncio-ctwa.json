@@ -1,0 +1,45 @@
+{
+  "event": "messages.upsert",
+  "instance": "loja-teste",
+  "data": {
+    "key": {
+      "remoteJid": "5547900000001@s.whatsapp.net",
+      "fromMe": false,
+      "id": "3EB0TESTE0000000000002"
+    },
+    "pushName": "Cliente Teste",
+    "status": "DELIVERY_ACK",
+    "message": {
+      "extendedTextMessage": {
+        "text": "Olá! Tenho interesse neste carro.",
+        "contextInfo": {
+          "conversionSource": "FB_Ads",
+          "entryPointConversionSource": "ctwa_ad",
+          "entryPointConversionApp": "instagram",
+          "externalAdReply": {
+            "title": "Onix 2020 1.0 — Manos Veículos (anúncio de teste)",
+            "body": "Fale com a gente no WhatsApp",
+            "mediaType": "IMAGE",
+            "sourceType": "ad",
+            "sourceId": "120200000000000000",
+            "sourceUrl": "https://www.instagram.com/p/FAKE000000/",
+            "ctwaClid": "FAKE-CTWA-CLID-0000000000000000",
+            "showAdAttribution": true
+          }
+        }
+      },
+      "messageContextInfo": {
+        "deviceListMetadataVersion": 2
+      }
+    },
+    "messageType": "extendedTextMessage",
+    "messageTimestamp": 1793797260,
+    "instanceId": "00000000-0000-4000-8000-000000000000",
+    "source": "android"
+  },
+  "destination": "https://crm.exemplo.test/api/wa/ingest",
+  "date_time": "2026-11-04T13:01:00.000Z",
+  "sender": "5547900000000@s.whatsapp.net",
+  "server_url": "https://evolution.exemplo.test",
+  "apikey": "FAKE-APIKEY-0000-0000"
+}

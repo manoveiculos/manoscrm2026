@@ -1,0 +1,45 @@
+{
+  "event": "messages.upsert",
+  "instance": "loja-teste",
+  "data": {
+    "key": {
+      "remoteJid": "5547900000001@s.whatsapp.net",
+      "fromMe": false,
+      "id": "3EB0TESTE0000000000016"
+    },
+    "pushName": "Cliente Teste",
+    "status": "DELIVERY_ACK",
+    "message": {
+      "documentWithCaptionMessage": {
+        "message": {
+          "documentMessage": {
+            "url": "https://mmg.whatsapp.net/v/t62.7119-24/00000000_0000000000000000_0000000000000000000_n.enc?ccb=11-4&oh=FAKE&oe=FAKE&_nc_sid=5e03e0&mms3=true",
+            "mimetype": "application/pdf",
+            "fileSha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+            "fileLength": "98112",
+            "mediaKey": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
+            "fileEncSha256": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC=",
+            "directPath": "/v/t62.7119-24/00000000_0000000000000000_0000000000000000000_n.enc?ccb=11-4&oh=FAKE&oe=FAKE&_nc_sid=5e03e0",
+            "mediaKeyTimestamp": "1793797200",
+            "title": "comprovante-de-renda.pdf",
+            "fileName": "comprovante-de-renda.pdf",
+            "pageCount": 1,
+            "caption": "Segue o comprovante"
+          }
+        }
+      },
+      "messageContextInfo": {
+        "deviceListMetadataVersion": 2
+      }
+    },
+    "messageType": "documentWithCaptionMessage",
+    "messageTimestamp": 1793797500,
+    "instanceId": "00000000-0000-4000-8000-000000000000",
+    "source": "android"
+  },
+  "destination": "https://crm.exemplo.test/api/wa/ingest",
+  "date_time": "2026-11-04T13:05:00.000Z",
+  "sender": "5547900000000@s.whatsapp.net",
+  "server_url": "https://evolution.exemplo.test",
+  "apikey": "FAKE-APIKEY-0000-0000"
+}

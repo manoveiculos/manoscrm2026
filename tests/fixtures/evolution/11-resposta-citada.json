@@ -1,0 +1,44 @@
+{
+  "event": "messages.upsert",
+  "instance": "loja-teste",
+  "data": {
+    "key": {
+      "remoteJid": "5547900000001@s.whatsapp.net",
+      "fromMe": false,
+      "id": "3EB0TESTE0000000000011"
+    },
+    "pushName": "Cliente Teste",
+    "status": "DELIVERY_ACK",
+    "message": {
+      "extendedTextMessage": {
+        "text": "Pode ser sábado de manhã?",
+        "contextInfo": {
+          "stanzaId": "3EB0LOJA00000000000001",
+          "participant": "5547900000000@s.whatsapp.net",
+          "quotedMessage": {
+            "conversation": "Quer agendar uma visita para ver o carro?"
+          }
+        }
+      },
+      "messageContextInfo": {
+        "deviceListMetadataVersion": 2
+      }
+    },
+    "messageType": "extendedTextMessage",
+    "messageTimestamp": 1793797800,
+    "instanceId": "00000000-0000-4000-8000-000000000000",
+    "source": "android",
+    "contextInfo": {
+      "stanzaId": "3EB0LOJA00000000000001",
+      "participant": "5547900000000@s.whatsapp.net",
+      "quotedMessage": {
+        "conversation": "Quer agendar uma visita para ver o carro?"
+      }
+    }
+  },
+  "destination": "https://crm.exemplo.test/api/wa/ingest",
+  "date_time": "2026-11-04T13:10:00.000Z",
+  "sender": "5547900000000@s.whatsapp.net",
+  "server_url": "https://evolution.exemplo.test",
+  "apikey": "FAKE-APIKEY-0000-0000"
+}
