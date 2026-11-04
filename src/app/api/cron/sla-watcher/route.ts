@@ -2,6 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/admin';
 import { notifyConsultant } from '@/lib/services/consultantNotifier';
 import { withHeartbeat } from '@/lib/services/cronHeartbeat';
+import { alertarQuentesSemResposta } from '@/lib/services/alertaQuente';
+
+/**
+ * 14/10/2026 — os níveis 1/2/5/6/7/8 abaixo ficaram DESLIGADOS. O único alerta
+ * de SLA agora é "lead Quente sem resposta humana há 15 min" (alertaQuente.ts);
+ * o resto vai no resumo diário do gestor (morning-summary).
+ * Para religar os níveis antigos: SLA_ALERTAS_LEGADO=on.
+ */
+const NIVEIS_LEGADO_LIGADOS = process.env.SLA_ALERTAS_LEGADO === 'on';
 
 /**
  * SLA Watcher — substitui pipeline-sla, anti-loss e hot-leak-alert.
@@ -233,19 +242,33 @@ export async function GET(req: NextRequest) {
                 reassigned: 0,
                 autoFinished: 0,
                 staleChatsClosed: 0,
+                quentesCandidatos: 0,
+                quentesAlertados: 0,
                 errors: 0,
             };
-            const [compra, venda] = await Promise.all([fetchLeadsCompra(), fetchLeadsVenda()]);
-            const leads = [...compra, ...venda];
-            r.scanned = leads.length;
+            if (NIVEIS_LEGADO_LIGADOS) {
+                const [compra, venda] = await Promise.all([fetchLeadsCompra(), fetchLeadsVenda()]);
+                const leads = [...compra, ...venda];
+                r.scanned = leads.length;
 
-            for (const lead of leads) {
-                try {
-                    await processLead(lead, r);
-                } catch (e: any) {
-                    r.errors++;
-                    console.error('[sla-watcher] lead', lead.id, 'erro:', e?.message);
+                for (const lead of leads) {
+                    try {
+                        await processLead(lead, r);
+                    } catch (e: any) {
+                        r.errors++;
+                        console.error('[sla-watcher] lead', lead.id, 'erro:', e?.message);
+                    }
                 }
+            }
+
+            // Alerta único: lead Quente sem resposta humana há 15 min.
+            try {
+                const q = await alertarQuentesSemResposta();
+                r.quentesCandidatos = q.candidatos;
+                r.quentesAlertados = q.alertados;
+            } catch (e: any) {
+                r.errors++;
+                console.error('[sla-watcher] alerta quente:', e?.message);
             }
 
             // V3 LIVE: cleanup de chats stale (>5min sem heartbeat = vendedor fechou aba ou perdeu conexão)

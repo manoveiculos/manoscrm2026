@@ -22,6 +22,8 @@ export interface ConsultantAlertArgs {
     message: string;
     /** Se true, cria modal bloqueante (level 2+ por padrão). */
     blocking?: boolean;
+    /** cowork_alerts.type (padrão 'urgency'). */
+    type?: string;
 }
 
 const PUSH_RATE_LIMIT_MS = 10 * 60 * 1000;
@@ -60,17 +62,20 @@ async function createCoworkAlert(args: ConsultantAlertArgs) {
     try {
         const admin = createClient();
         const blocking = args.blocking ?? args.level >= 2;
-        await admin.from('cowork_alerts').insert({
-            assigned_consultant_id: args.consultantId,
-            lead_id: args.leadId ?? null,
-            type: 'urgency',
+        // Colunas reais de cowork_alerts. A versão anterior gravava
+        // assigned_consultant_id/lead_id/acknowledged (inexistentes): o insert
+        // falhava calado e o "modal bloqueante" nunca apareceu pra ninguém.
+        const { error } = await admin.from('cowork_alerts').insert({
+            target_consultant_id: args.consultantId,
+            type: args.type || 'urgency',
             priority: args.level === 3 ? 1 : args.level === 2 ? 2 : 3,
             title: args.title,
             message: args.message,
             blocking,
-            acknowledged: false,
-            created_at: new Date().toISOString(),
+            is_active: true,
+            expires_at: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
         });
+        if (error) console.warn('[consultantNotifier] cowork_alert:', error.message);
     } catch (e: any) {
         console.warn('[consultantNotifier] cowork_alert falhou:', e?.message);
     }
@@ -100,7 +105,7 @@ export async function notifyConsultant(args: ConsultantAlertArgs): Promise<{ pus
 
     const emoji = args.level === 3 ? '🚨🚨' : '⚠️';
     const greeting = (cons.name || '').split(' ')[0];
-    const text = `${emoji} ${greeting}, atenção:\n\n${args.title}\n${args.message}\n\nResponda agora ou o lead vai pra outro vendedor.`;
+    const text = `${emoji} ${greeting}, atenção:\n\n${args.title}\n${args.message}`;
 
     const result = await sendWhatsApp({
         toPhone: targetPhone,

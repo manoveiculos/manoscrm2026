@@ -9,6 +9,9 @@ import { parseUid } from '@/lib/services/unifiedLead';
 import { Flame, Snowflake, Thermometer, Clock, Phone, Wifi, Bell, X, AlertTriangle, MessageCircle, Zap, PhoneOff, Trash2, Archive } from 'lucide-react';
 import AgendaStrip from '@/app/agenda/_components/AgendaStrip';
 import { CheckinBanner } from '@/components/v2/CheckinBanner';
+import { SeloQualificacao } from '@/components/qualificacao/SeloQualificacao';
+import { triagemAtrasada } from '@/constants/funil';
+import type { Selo } from '@/lib/qualificacao';
 
 const PTR = dynamic(() => import('react-pull-to-refresh'), { ssr: false }) as any;
 
@@ -48,6 +51,8 @@ interface InboxLead {
     ultima_interacao_humana?: string | null;
     descarte_financeiro?: boolean | null;
     diagnostico_atendimento?: string | null;
+    /** Selo calculado no servidor (/api/inbox/pesca). */
+    qualificacao?: { selo: Selo; motivo: string; completa: boolean } | null;
 }
 
 interface LastMessage {
@@ -1071,6 +1076,7 @@ const Section = memo(function Section({ title, subtitle, icon, accent, leads, la
 
 const LeadCard = memo(function LeadCard({ lead, messages, isExpanded, onToggle, onArchive, onDeletePermanent, onAdminRemove, onCaptureSuccess, consultantName, supabase, router, consultantId, isAdmin, isFishing }: { lead: InboxLead; messages?: { inbound?: LastMessage, outbound?: LastMessage }; isExpanded: boolean; onToggle: () => void; onArchive: (e: React.MouseEvent) => void; onDeletePermanent?: (e: React.MouseEvent) => void; onAdminRemove?: (e: React.MouseEvent) => void; onCaptureSuccess?: (uid: string) => void; consultantName?: string; supabase: any; router: any; consultantId: string | null; isAdmin?: boolean; isFishing?: boolean }) {
     const sla = slaInfo(lead);
+    const triagem = triagemAtrasada(lead);
     const state = getLeadState(lead, messages?.inbound, messages?.outbound);
     const showMask = isFishing && !isAdmin;
     
@@ -1114,7 +1120,7 @@ const LeadCard = memo(function LeadCard({ lead, messages, isExpanded, onToggle, 
         <li className="list-none">
             <div
                 onClick={onToggle}
-                className={`block border rounded-2xl p-5 transition-all duration-300 relative overflow-hidden active:scale-[0.98] cursor-pointer ${reversaoClass || stateColors[state]} ${isExpanded ? 'ring-2 ring-blue-500/50 bg-zinc-900' : ''}`}>
+                className={`block border rounded-2xl p-5 transition-all duration-300 relative overflow-hidden active:scale-[0.98] cursor-pointer ${reversaoClass || (triagem.atrasada ? 'border-red-600 ring-2 ring-red-500/40 bg-red-950/10' : stateColors[state])} ${isExpanded ? 'ring-2 ring-blue-500/50 bg-zinc-900' : ''}`}>
                 {intentMatch && (
                     <div className="absolute -top-1 -right-1 px-2 py-0.5 bg-amber-400 text-black text-[10px] font-black rounded-bl-lg uppercase tracking-wider">
                         {intentLabel[intentMatch]}
@@ -1161,6 +1167,12 @@ const LeadCard = memo(function LeadCard({ lead, messages, isExpanded, onToggle, 
                 </div>
 
                 <div className="flex items-center gap-2 flex-wrap mb-4">
+                    {triagem.atrasada && (
+                        <span className="text-[11px] px-2.5 py-1 rounded-md font-black uppercase tracking-tight bg-red-700 text-white" title="Lead não pode passar de 24h em triagem">
+                            ⏰ {triagem.horas >= 48 ? `${Math.floor(triagem.horas / 24)}d` : `${triagem.horas}h`} em triagem
+                        </span>
+                    )}
+                    {lead.qualificacao && <SeloQualificacao selo={lead.qualificacao.selo} motivo={lead.qualificacao.motivo} />}
                     <span className={`text-[11px] px-2.5 py-1 rounded-md font-black uppercase tracking-tight shadow-sm ${sla.color}`}>
                         {sla.text}
                     </span>

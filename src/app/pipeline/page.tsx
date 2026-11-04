@@ -236,6 +236,15 @@ function PipelineContent() {
     };
 
     const handleStatusChange = async (leadId: string, newStatus: LeadStatus) => {
+        // Vendido/Perdido não podem sair do menu "Mover" direto: abrem o perfil,
+        // que exige motivo (lista fechada) ou veículo e registra a venda/perda.
+        const normalized = normalizeStatus(newStatus);
+        if (normalized === 'vendido' || normalized === 'perdido') {
+            const lead = leads.find(l => l.id === leadId);
+            if (lead) setSelectedLead(lead);
+            return;
+        }
+
         // Optimistic Update
         const oldLeads = [...leads];
         setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: newStatus } : l));

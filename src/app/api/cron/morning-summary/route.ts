@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/admin';
 import { sendWhatsApp, isSenderConfigured } from '@/lib/services/whatsappSender';
 import { withHeartbeat } from '@/lib/services/cronHeartbeat';
+import { resumoFunilDiario } from '@/lib/services/alertaQuente';
 
 export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
@@ -135,7 +136,13 @@ export async function GET(req: NextRequest) {
 
             const footer = `\n\n_Painel completo: /admin/conversion?days=1_`;
 
-            const message = greeting + summary + ranking + alerts + footer;
+            // Funil + triagem vencida: substitui os avisos de SLA que disparavam um a um.
+            const funil = await resumoFunilDiario().catch((e: any) => {
+                console.warn('[morning-summary] resumo do funil:', e?.message);
+                return '';
+            });
+
+            const message = greeting + summary + ranking + alerts + funil + footer;
 
             // Decide destinatário(s)
             const destinos: Array<{ name: string; phone: string }> = [];
