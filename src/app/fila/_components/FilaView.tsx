@@ -43,12 +43,21 @@ export function FilaView({ fila, dica, nome, aviso, carregando, erro, atualizado
     const pendentesRef = useRef(pendentes);
     pendentesRef.current = pendentes;
 
+    // Dois relógios: `agora` para "há 32 min" (fixo na prévia) e `relogio`
+    // para a contagem do "Desfazer" (sempre o tempo real).
+    const [relogio, setRelogio] = useState(() => Date.now());
     const temPendente = Object.keys(pendentes).length > 0;
     useEffect(() => {
         if (agoraFixo) return;
-        const t = setInterval(() => setAgora(Date.now()), temPendente ? 500 : 30_000);
+        const t = setInterval(() => setAgora(Date.now()), 30_000);
         return () => clearInterval(t);
-    }, [temPendente, agoraFixo]);
+    }, [agoraFixo]);
+    useEffect(() => {
+        if (!temPendente) return;
+        setRelogio(Date.now());
+        const t = setInterval(() => setRelogio(Date.now()), 500);
+        return () => clearInterval(t);
+    }, [temPendente]);
 
     useEffect(() => {
         if (!aviso2) return;
@@ -90,7 +99,7 @@ export function FilaView({ fila, dica, nome, aviso, carregando, erro, atualizado
             : `Perdido · ${r.rotulo}`;
         const timer = setTimeout(() => gravar(chave), DESFAZER_MS);
         setPendentes(prev => ({ ...prev, [chave]: { card, r, rotulo, ate: Date.now() + DESFAZER_MS, timer } }));
-        setAgora(Date.now());
+        setRelogio(Date.now());
     }, [gravar]);
 
     const desfazer = useCallback((card: CardFila) => {
@@ -222,6 +231,7 @@ export function FilaView({ fila, dica, nome, aviso, carregando, erro, atualizado
                                         key={chave}
                                         card={c}
                                         agora={agora}
+                                        relogio={relogio}
                                         pendente={p ? { rotulo: p.rotulo, ate: p.ate, erro: p.erro } : null}
                                         destacado={destaque === c.uid}
                                         onLigar={ligar}

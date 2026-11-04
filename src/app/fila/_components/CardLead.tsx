@@ -37,9 +37,12 @@ export function telFormatado(tel: string | null | undefined): string | null {
     return d || null;
 }
 
-export function CardLead({ card, agora, pendente, destacado, onLigar, onAgendar, onResultado, onDesfazer }: {
+export function CardLead({ card, agora, relogio, pendente, destacado, onLigar, onAgendar, onResultado, onDesfazer }: {
     card: CardFila;
+    /** Relógio de exibição ("há 32 min"). */
     agora: number;
+    /** Tempo real, para a contagem do "Desfazer". */
+    relogio: number;
     pendente: Pendente | null;
     destacado?: boolean;
     onLigar: (c: CardFila) => void;
@@ -50,7 +53,7 @@ export function CardLead({ card, agora, pendente, destacado, onLigar, onAgendar,
     const tel = telParaDiscar(card.telefone);
     const msg = card.ultimaMensagem;
     const hrefConversa = card.uid ? `/lead/${encodeURIComponent(card.uid)}` : '/agenda';
-    const restante = pendente ? Math.max(0, Math.ceil((pendente.ate - agora) / 1000)) : 0;
+    const restante = pendente ? Math.max(0, Math.ceil((pendente.ate - relogio) / 1000)) : 0;
 
     return (
         <article
@@ -69,8 +72,8 @@ export function CardLead({ card, agora, pendente, destacado, onLigar, onAgendar,
                 {card.selo && <SeloQualificacao selo={card.selo} motivo={card.seloMotivo || undefined} compact />}
             </header>
 
-            <p className={`mt-3 inline-flex max-w-full items-center rounded-full border px-2.5 py-1 text-[11px] font-bold ${COR_MOTIVO[card.secao]}`}>
-                <span className="truncate">{card.motivo}</span>
+            <p className={`mt-3 inline-flex max-w-full items-center rounded-xl border px-2.5 py-1 text-[11px] font-bold leading-snug ${COR_MOTIVO[card.secao]}`}>
+                <span className="line-clamp-2">{card.motivo}</span>
             </p>
 
             {card.carroCompativel && (

@@ -412,7 +412,7 @@ export function montarFila(e: EntradaFila): Fila {
 
         // 7. Em aberto
         const criado = ms(l.criadoEm) ?? agora;
-        const motivo = q?.selo === 'fora_do_perfil' ? 'Fora do perfil' : q?.selo === 'sem_qualificacao' ? 'Falta qualificar (entrada, troca, prazo)' : 'Em aberto';
+        const motivo = q?.selo === 'fora_do_perfil' ? (q.motivo || 'Fora do perfil') : q?.selo === 'sem_qualificacao' ? 'Falta qualificar (entrada, troca, prazo)' : 'Em aberto';
         por('em_aberto', cardBase(l, 'em_aberto', motivo, criado), -criado);
     }
 
