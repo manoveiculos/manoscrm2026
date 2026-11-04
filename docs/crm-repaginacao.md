@@ -67,3 +67,83 @@ Conferido no código deste branch e no banco (só leitura, sem dado pessoal) em 
    receber o arquivo do nosso Storage, não uma URL livre.
 4. O item "Repasse" (`pauloOnly`) não era filtrado: aparecia para todos os vendedores. O menu novo corrige isso (só Paulo e admin).
 
+
+---
+
+## Fase 1 — navegação por perfil + "Minha Fila"
+
+### Perfis (`src/lib/perfil.ts`)
+
+- **admin**: `role` `admin`/`owner` ou o login do Alexandre.
+- **gestor**: `role` `gestor`/`manager` (ninguém hoje).
+- **vendedor**: qualquer outro consultor ativo (inclui os 2 sem perfil).
+
+As regras por pessoa continuam iguais: Camila (só Cobrança), Paulo (Compras + Repasse), Ivo (Compras + Divisão de Lucro),
+Wilson (Terceiros + Leads WhatsApp, em "Seus módulos"), Ledra (Financeiro), Milhão e Scooters só para o Alexandre.
+
+### Menu (`src/components/v2/menuConfig.ts`, `MenuSecoes.tsx`, `BarraInferior.tsx`)
+
+- **Vendedor:** Minha Fila · Conversas (em breve, Fase 3) · Agenda · Meus Leads · Perfil. No celular, os 5 ficam numa barra fixa
+  embaixo (alvos de 60 px); o menu lateral continua com os sinos e o "Sair".
+- **Gestor:** os 5 do vendedor + Inbox geral, Conversão, Perdidos e Painel 48h.
+- **Admin:** os 27 itens de antes + Minha Fila e Conversas, em 5 grupos recolhíveis (Vendas · Compras · Financeiro · Gestão · Marketing).
+  O grupo aberto fica salvo no navegador.
+- Tela inicial: vendedor e gestor vão para `/fila`; admin continua no War Room (`/`).
+- **Saíram do menu do vendedor:** Inbox (pesca), Atendimento (Kanban), Precificar, Compras, Cobrança Acordos e Repasse.
+  As rotas continuam abrindo pelo endereço. O menu só esconde: quem protege o dado é o RLS e as rotas de API.
+
+### Minha Fila (`/fila`)
+
+- Dados: `GET /api/fila`. O servidor confere a sessão e monta a fila só do consultor logado; a chave de serviço não vai ao navegador.
+- Regra pura e testada: `src/lib/fila/montarFila.ts` (`npm run test:fila`, 11 testes). Leitura do banco: `src/lib/fila/carregarFila.ts`.
+
+Ordem das seções. Cada lead aparece uma vez, na 1ª seção em que se encaixa:
+
+1. **Quente sem resposta**: selo Quente e esperando um humano há mais de 15 min.
+2. **Visitas de hoje e de amanhã**: `agendamentos` do vendedor (`agendado`/`confirmado`), com ou sem lead ligado.
+3. **Cliente voltou a escrever**: alerta `cliente_voltou` dos últimos 3 dias, sem contato humano depois.
+4. **Follow-up vencido**: retorno combinado que venceu, ou cadência D0, D1, D3, D7, D15, D30 sem contato humano depois do marco
+   (marco contado do início do atendimento; sem início, da entrada do lead). D0 só vence depois de 15 min.
+5. **Quentes e mornos em conversa**: selo Morno, ou Quente já respondido.
+6. **Recuperável**: perdido nos últimos 90 dias por "Carro fora do estoque" (ou o antigo "modelo") e com carro do mesmo modelo no `estoque`.
+7. **Em aberto**: o resto (sem qualificação, fora do perfil).
+
+A seção 7 não está na spec: sem ela, lead sem selo ficaria fora da fila e quebraria a regra "não sai sem resultado". Lead novo sem
+contato aparece antes, na seção 4, como "D0 — 1º contato pendente".
+
+**Lead não sai da fila sem resultado ou sem próximo contato agendado.** Sai quando vira vendido/perdido, ou quando tem retorno ou visita
+marcados para depois de amanhã; volta sozinho na data. Quente sem resposta e cliente que voltou aparecem mesmo com retorno marcado.
+
+Cada card: nome, carro, telefone completo, selo, motivo de estar na fila, última mensagem da conversa com a Laura e há quanto tempo foi.
+Quatro botões (alvos de 56 px):
+
+| Botão | O que faz |
+|---|---|
+| **Conversa** | Por enquanto abre `/lead/<uid>` (a Timeline mostra a conversa da Laura). Na Fase 3 passa a abrir `/conversas`. |
+| **Ligar** | `tel:` com o número completo. Registra o toque (`POST /api/fila/contato`): `ultima_interacao_humana` + nota na timeline. Não grava `first_contact_at` (tocar não prova que a ligação aconteceu; a Fase 7 decide como medir). |
+| **Agendar** | 2 toques: Agendar → atalho. **Retorno** ("em 2 horas", "amanhã 9h", "amanhã 14h", "em 3 dias") grava em `follow_ups` (`POST /api/fila/retorno`). **Visita na loja** usa a mesma rota da Agenda (`POST /api/agenda`, com os lembretes de sempre). |
+| **Resultado** | **Perdido**: Resultado → motivo (2 toques; "Outro" pede o detalhe). **Vendido**: Resultado → valor → Confirmar venda. Grava pela rota que já existe (`/api/lead/finish`), que agora aceita `exige_valor` (a fila manda; as outras telas não). Depois do 2º toque há 5 s para **desfazer**. A venda abre a Roleta de Prêmios, como no perfil do lead. |
+
+Topo: "próximo passo" do 1º card da fila. Se o next-steps gravou ORIENTAÇÃO nos últimos 7 dias, ela aparece junto. Embaixo, a dica da
+semana (`src/lib/fila/dicas.ts`).
+
+### Prévia com dados fictícios
+
+`/dev/fila` (Minha Fila) e `/dev/fila?vista=menu&perfil=vendedor|gestor|admin` (menu). Só existe fora de produção: a página responde 404
+em produção e o proxy só libera `/dev/` fora dela. Os dados estão em `src/app/dev/fila/exemplo.ts` (nomes inventados, telefones
+`47 90000-0xxx`).
+
+### Limites conhecidos da Fase 1
+
+- "Sem mensagem humana há 15 min" é **aproximado**. A conversa do vendedor não é registrada; a fila usa a última mensagem do cliente para a
+  Laura contra `ultima_interacao_humana`/`first_contact_at`, a mesma regra do alerta de 15 min. Fica exato com `wa_mensagens` (Fase 2).
+- "Chegou carro compatível" não tem data: `estoque` não guarda quando o carro entrou. A data da perda é o `atualizado_em` do lead
+  (não existe coluna de data da perda).
+- "Conversas" fica desabilitado no menu até a Fase 3.
+- Marcar visita pela fila não muda a etapa do lead para "Visita agendada" (o Kanban continua mostrando o selo de visita).
+
+### Banco
+
+Nenhuma migration e nenhuma tabela nova. Leituras e gravações em tabelas que já existem: `follow_ups` (retorno, `type = 'retorno_fila'`,
+lead em `metadata.lead_uid`), `agendamentos` (visita), `interactions_manos_crm` (nota da ligação), `leads_distribuicao_crm_26` /
+`leadsfacebook` (`ultima_interacao_humana`).
