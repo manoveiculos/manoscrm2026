@@ -1,92 +1,24 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
-import { useState, useEffect } from 'react';
-import {
-    Activity, // Pulse/Cockpit
-    Users, // Pipeline de leads
-    KanbanSquare, // Pipeline
-    CarFront, // Estoque
-    BarChart3, // Analytics
-    LogOut,
-    Menu,
-    X,
-    Target, // Icone para Campanhas
-    Shield, // Icone para Gestão de Equipe
-    Bot, // Icone para Cowork IA
-    Trophy, // Icone para Ranking
-    ClipboardCheck, // Icone para Gestão de Vendas
-    LayoutDashboard,
-    Database, // Icone para Nutrição/Banco de Dados
-    SlidersHorizontal, // Calibração da IA
-    DollarSign,
-    Radar, // Radar de Tráfego
-    PlayCircle, // Atendimento ativo
-    Banknote, // Projeto Milhão (exclusivo Alexandre)
-    Store, // App de Repasse (Paulo)
-    Bike, // App de Scooters (Renato) — exclusivo Alexandre
-    CalendarClock, // Agenda de Visitas
-    PieChart, // Divisão de Lucro (sócios Alexandre e Ivo)
-    Megaphone, // Time de Marketing (squad de agentes de IA)
-    Flame, // Painel de Alta Prioridade 48h
-    Handshake, // Negociação de Terceiros
-    MessageCircle, // Leads WhatsApp Direto (Wilson)
-    WalletCards, // Financeiro & Patrimônio (Alexandre & Ledra)
-    Calculator, // Precificar FIPE
-} from 'lucide-react';
+import { usePathname } from 'next/navigation';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { LogOut, Menu, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '@/lib/supabase';
 import { UserProfileModal } from '@/components/UserProfileModal'; // using existing profile modal
 import { useAIAlerts } from '@/hooks/useAIAlerts';
 import { NotificationBell } from '@/components/v2/NotificationBell';
 import { CobrancaPressureBell } from '@/components/v2/CobrancaPressureBell';
+import { perfilDoConsultor, EMAIL_ALEXANDRE, type Perfil } from '@/lib/perfil';
+import { secoesDoMenu, itensBarraInferior, itemAtivo, type NavItem } from '@/components/v2/menuConfig';
+import { MenuSecoes } from '@/components/v2/MenuSecoes';
+import { BarraInferior } from '@/components/v2/BarraInferior';
 
-interface NavItem {
-    label: string;
-    icon: any;
-    href: string;
-    adminOnly?: boolean;
-    alexandreOnly?: boolean; // visível SOMENTE para o login Alexandre (nem outros admins veem)
-    pauloOnly?: boolean; // app de Repasse — só Paulo (e Alexandre p/ supervisão)
-    socioOnly?: boolean; // Divisão de Lucro — só os sócios (Alexandre e Ivo)
-    terceirosOnly?: boolean; // Negociação de Terceiros — só Alexandre e Wilson
-    financeiroOnly?: boolean; // Financeiro — só Alexandre e Felipe Ledra
-    blocked?: boolean;
-}
+// Itens do menu e regra de quem vê o quê: menuConfig.ts (menu por perfil —
+// Fase 1 da repaginação). Este componente só resolve quem está logado e desenha.
 
-// Vendedor leigo vê Inbox + Atendimento. Pipeline/Leads/Dashboard duplicavam
-// informação e confundiam — gerente já tem War Room + Conversão pra visão
-// geral, vendedor não precisa.
-const NAV_ITEMS: NavItem[] = [
-    { label: 'Inbox', icon: Bot, href: '/inbox' },
-    { label: 'Atendimento', icon: PlayCircle, href: '/atendimento' },
-    { label: 'Agenda', icon: CalendarClock, href: '/agenda' },
-    { label: 'Leads', icon: LayoutDashboard, href: '/leads' },
-    { label: 'Precificar', icon: Calculator, href: '/precificar' },
-    { label: 'Painel 48h', icon: Flame, href: '/admin/prioridade48h', adminOnly: true },
-    { label: 'Compras', icon: Radar, href: '/compras' },
-    { label: 'Cobrança Acordos', icon: DollarSign, href: '/consultor/cobranca' },
-    { label: 'Negociação Terceiros', icon: Handshake, href: '/negociacao-terceiros', terceirosOnly: true },
-    { label: 'Leads WhatsApp', icon: MessageCircle, href: '/leads-whatsapp', terceirosOnly: true },
-    { label: 'Financeiro', icon: WalletCards, href: '/financeiro', financeiroOnly: true },
-    { label: 'Repasse', icon: Store, href: '/repasse', pauloOnly: true },
-    { label: 'Divisão de Lucro', icon: PieChart, href: '/divisaodelucro', socioOnly: true },
-    { label: 'Cobrança', icon: DollarSign, href: '/admin/cobranca', adminOnly: true },
-    { label: 'Pipeline', icon: KanbanSquare, href: '/pipeline', adminOnly: true },
-    { label: 'Dashboard', icon: BarChart3, href: '/', adminOnly: true },
-    { label: 'Milhão', icon: Banknote, href: '/admin/milhao', alexandreOnly: true },
-    { label: 'Scooters', icon: Bike, href: '/admin/scooters', alexandreOnly: true },
-    { label: 'Conversão', icon: BarChart3, href: '/admin/conversion', adminOnly: true },
-    { label: 'Resgate', icon: Bot, href: '/admin/rescue', adminOnly: true },
-    { label: 'Perdidos', icon: ClipboardCheck, href: '/admin/perdidos', adminOnly: true },
-    { label: 'Consultores', icon: Shield, href: '/admin/users', adminOnly: true },
-    { label: 'Saúde', icon: Activity, href: '/admin/health', adminOnly: true },
-    { label: 'SDR Bench', icon: Bot, href: '/admin/sdr-bench', adminOnly: true },
-    { label: 'War Room', icon: Activity, href: '/admin/live', adminOnly: true },
-    { label: 'Time de Marketing', icon: Megaphone, href: '/admin/marketing', adminOnly: true },
-    { label: 'Configurações', icon: SlidersHorizontal, href: '/admin/config', adminOnly: true },
-];
+const GRUPOS_STORAGE = 'nav_grupos_abertos';
 
 interface NavUser {
     id?: string;
@@ -96,79 +28,93 @@ interface NavUser {
     };
 }
 
+const ROTULO_PERFIL: Record<Perfil, string> = { admin: 'Gerência', gestor: 'Gestor', vendedor: 'Consultor' };
+
 export const NavigationV2 = () => {
-    const pathname = usePathname();
-    const router = useRouter();
+    const pathname = usePathname() || '/';
     const [user, setUser] = useState<NavUser | null>(null);
     const [role, setRole] = useState<string | null>(null);
+    const [roleCarregado, setRoleCarregado] = useState(false);
     const [mobileOpen, setMobileOpen] = useState(false);
     const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
     const [isCollapsed, setIsCollapsed] = useState(false);
-    const { count: aiAlertCount } = useAIAlerts();
+    const [gruposAbertos, setGruposAbertos] = useState<Set<string>>(new Set(['vendas']));
+    useAIAlerts();
 
-    // Load collapse state
+    // Load collapse state + grupos abertos (admin)
     useEffect(() => {
-        const saved = localStorage.getItem('nav_collapsed');
-        if (saved === 'true') setIsCollapsed(true);
+        try {
+            if (localStorage.getItem('nav_collapsed') === 'true') setIsCollapsed(true);
+            const g = localStorage.getItem(GRUPOS_STORAGE);
+            if (g) setGruposAbertos(new Set(JSON.parse(g)));
+        } catch { /* storage indisponível: usa o padrão */ }
     }, []);
 
     const toggleCollapse = () => {
         const newState = !isCollapsed;
         setIsCollapsed(newState);
-        localStorage.setItem('nav_collapsed', String(newState));
+        try { localStorage.setItem('nav_collapsed', String(newState)); } catch { /* ignore */ }
     };
 
-    const handleLogoClick = () => {
-        router.push('/');
-    };
+    const toggleGrupo = useCallback((id: string) => {
+        setGruposAbertos(prev => {
+            const s = new Set(prev);
+            if (s.has(id)) s.delete(id); else s.add(id);
+            try { localStorage.setItem(GRUPOS_STORAGE, JSON.stringify([...s])); } catch { /* ignore */ }
+            return s;
+        });
+    }, []);
 
     useEffect(() => {
         setMobileOpen(false);
     }, [pathname]);
 
     useEffect(() => {
-        const getUserData = async () => {
-            const { data: { session } } = await supabase.auth.getSession();
-            const user = session?.user;
-            if (user) {
-                setUser(user as any);
-                const { data: consultant } = await supabase
-                    .from('consultants_manos_crm')
-                    .select('role')
-                    .or(`user_id.eq.${user.id},auth_id.eq.${user.id}`)
-                    .maybeSingle();
-
-                if (consultant) {
-                    setRole(consultant.role);
-                } else if (user.email === 'alexandre_gorges@hotmail.com') {
-                    setRole('admin');
-                } else {
-                    setRole('consultant');
-                }
+        const carregarRole = async (u: { id: string; email?: string | null }) => {
+            if ((u.email || '').toLowerCase() === EMAIL_ALEXANDRE) {
+                setRole('admin');
+                setRoleCarregado(true);
+                return;
             }
+            const { data: consultant } = await supabase
+                .from('consultants_manos_crm')
+                .select('role')
+                .or(`user_id.eq.${u.id},auth_id.eq.${u.id}`)
+                .maybeSingle();
+            setRole(consultant?.role ?? 'consultant');
+            setRoleCarregado(true);
         };
-        getUserData();
+
+        supabase.auth.getSession().then(({ data: { session } }: any) => {
+            const u = session?.user;
+            if (u) {
+                setUser(u as any);
+                carregarRole(u);
+            }
+        });
 
         const { data: { subscription } } = supabase.auth.onAuthStateChange((_event: any, session: any) => {
             const currentUser = session?.user || null;
             if (currentUser) {
                 setUser(currentUser);
-                if (currentUser.email === 'alexandre_gorges@hotmail.com') {
-                    setRole('admin');
-                } else {
-                    supabase
-                        .from('consultants_manos_crm')
-                        .select('role')
-                        .eq('auth_id', currentUser.id)
-                        .maybeSingle()
-                        .then(({ data }: any) => {
-                            if (data) setRole(data.role);
-                        });
-                }
+                carregarRole(currentUser);
             }
         });
 
         return () => subscription.unsubscribe();
+    }, []);
+
+    const perfil: Perfil | null = roleCarregado ? perfilDoConsultor(role, user?.email) : null;
+    const ctx = useMemo(() => ({ perfil, email: user?.email }), [perfil, user?.email]);
+    const secoes = useMemo(() => secoesDoMenu(ctx), [ctx]);
+    const barra = useMemo(() => itensBarraInferior(ctx), [ctx]);
+    const ativo = useMemo(() => itemAtivo(pathname, secoes.flatMap(s => s.itens)), [pathname, secoes]);
+
+    const onAcao = useCallback((item: NavItem) => {
+        if (item.acao === 'perfil') {
+            setMobileOpen(false);
+            setIsProfileModalOpen(true);
+        }
     }, []);
 
     const handleLogout = async () => {
@@ -179,7 +125,7 @@ export const NavigationV2 = () => {
     const sidebarContent = (
         <>
             {/* Toggle Button for Desktop */}
-            <button 
+            <button
                 onClick={toggleCollapse}
                 className="hidden md:flex absolute -right-3 top-20 h-6 w-6 rounded-full bg-[#1A1A20] border border-white/10 items-center justify-center text-white/40 hover:text-white hover:border-white/20 transition-all z-[60] shadow-xl"
             >
@@ -191,18 +137,18 @@ export const NavigationV2 = () => {
             {/* Logo Interativo (Home) */}
             <Link
                 href="/"
-                className={`mb-10 flex items-center ${isCollapsed ? 'justify-center px-0' : 'gap-3 px-5'} cursor-pointer group transition-all relative py-2 rounded-2xl hover:bg-white/[0.02] active:scale-[0.98] focus:outline-none`}
+                className={`mb-6 flex items-center ${isCollapsed ? 'justify-center px-0' : 'gap-3 px-5'} cursor-pointer group transition-all relative py-2 rounded-2xl hover:bg-white/[0.02] active:scale-[0.98] focus:outline-none`}
             >
                 <div className="h-9 w-9 rounded-xl bg-white/[0.03] border border-white/10 flex items-center justify-center shrink-0 group-hover:border-red-500/30 group-hover:bg-red-500/5 group-hover:shadow-[0_0_15px_rgba(239,68,68,0.1)] transition-all overflow-hidden p-1.5">
-                    <img 
-                        src="https://manosveiculos.com.br/wp-content/uploads/2024/02/LogoManos.png" 
-                        alt="Manos" 
+                    <img
+                        src="https://manosveiculos.com.br/wp-content/uploads/2024/02/LogoManos.png"
+                        alt="Manos"
                         className="w-full h-full object-contain group-hover:scale-110 transition-transform duration-300"
                     />
                 </div>
                 {!isCollapsed && (
-                    <motion.div 
-                        initial={{ opacity: 0, x: -10 }} 
+                    <motion.div
+                        initial={{ opacity: 0, x: -10 }}
                         animate={{ opacity: 1, x: 0 }}
                         className="min-w-0 flex flex-col"
                     >
@@ -215,109 +161,14 @@ export const NavigationV2 = () => {
             </Link>
 
             <div className={`flex-1 w-full ${isCollapsed ? 'px-2' : 'px-3'} space-y-1 overflow-y-auto custom-scrollbar transition-all`}>
-                {!isCollapsed && (
-                    <div className="px-3 mb-4 mt-2">
-                        <p className="text-[10px] font-black text-white/20 uppercase tracking-[0.3em]">Navegação Principal</p>
-                    </div>
-                )}
-                {NAV_ITEMS.filter(item => {
-                    const isAdmin = role === 'admin';
-                    const isCamila = user?.email === 'camila.renatta@hotmail.com' || user?.email === 'camilarenatta@hotmail.com';
-                    const isAlexandre = user?.email === 'alexandre_gorges@hotmail.com';
-                    const isPaulo = user?.email === 'paulo@manoscrm.com';
-                    const isIvo = user?.email === 'ivo@acesso.com';
-                    const isWilson = user?.email === 'dultra49@gmail.com';
-                    const isLedra = user?.email?.toLowerCase() === 'hgledra@hotmail.com';
-                    const isRestrictedBuyer = isIvo || isPaulo; // Wilson isn't necessarily restricted here unless specified.
-
-                    // Compradores restritos: Central de Compras. Paulo também tem o app de Repasse; Ivo (sócio), a Divisão de Lucro.
-                    if (isRestrictedBuyer && !isAdmin && !isAlexandre) {
-                        if (isPaulo) return item.href === '/compras' || item.href === '/repasse';
-                        return item.href === '/compras' || item.href === '/divisaodelucro';
-                    }
-
-                    // Se for Wilson e não for Admin, ele pode ver o que ele via antes, mais a aba Terceiros
-                    // Mas vamos restringi-lo apenas à sua aba caso ele não tenha acesso de admin/consultor.
-                    if (isWilson && !isAdmin && !isAlexandre) {
-                         // Wilson vai ver Inbox, Atendimento, Agenda, Leads, Dashboard, e Terceiros (ou só Terceiros?)
-                         // A specification não restringe ele de ver o resto, apenas que a aba Terceiros é restrita a ele e Alexandre.
-                    }
-
-                    // Camila tem acesso EXCLUSIVO à Cobrança — esconde tudo o mais
-                    if (isCamila && !isAdmin && !isAlexandre) {
-                        return item.href === '/admin/cobranca';
-                    }
-
-                    // Divisão de Lucro é só dos sócios — nem outros admins enxergam
-                    if (item.socioOnly) return isAlexandre || isIvo;
-
-                    // Negociação de Terceiros — só Alexandre e Wilson
-                    if (item.terceirosOnly) return isAlexandre || isWilson;
-
-                    // Financeiro — exclusivo Alexandre e Felipe Ledra
-                    if (item.financeiroOnly) return isAlexandre || isLedra;
-
-                    // Milhão é exclusivo do Alexandre — nem outros admins enxergam
-                    if (item.alexandreOnly) return isAlexandre;
-
-                    if (item.adminOnly) {
-                        if (item.href === '/admin/cobranca') {
-                            if (!isAdmin && !isCamila && !isAlexandre) return false;
-                        } else {
-                            if (!isAdmin && !isAlexandre) return false;
-                        }
-                    }
-                    return true;
-                }).map((item) => {
-                    const isActive = pathname.startsWith(item.href);
-                    return (
-                        <Link
-                            key={item.href}
-                            href={item.blocked ? '#' : item.href}
-                            title={isCollapsed ? item.label : undefined}
-                            onClick={(e) => item.blocked && e.preventDefault()}
-                            className={`relative flex items-center ${isCollapsed ? 'justify-center px-0' : 'gap-3 px-4'} py-3.5 rounded-2xl transition-all group overflow-hidden ${
-                                isActive
-                                    ? 'bg-gradient-to-r from-white/[0.05] to-transparent text-white'
-                                    : item.blocked
-                                    ? 'opacity-30 cursor-not-allowed'
-                                    : 'text-white/40 hover:text-white/90 hover:bg-white/[0.03]'
-                            }`}
-                        >
-                            {/* Indicador de borda ativa com Glow */}
-                            {isActive && (
-                                <motion.div 
-                                    layoutId="active-nav-indicator"
-                                    className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-red-500 rounded-r-full shadow-[0_0_12px_rgba(239,68,68,0.8)]"
-                                    transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-                                />
-                            )}
-
-                            <div className="relative shrink-0 flex items-center justify-center w-5">
-                                <item.icon
-                                    size={19}
-                                    strokeWidth={isActive ? 2.5 : 2}
-                                    className={isActive ? 'text-red-500' : 'transition-colors group-hover:text-white/70'}
-                                />
-                            </div>
-                            {!isCollapsed && (
-                                <motion.div
-                                    initial={{ opacity: 0, x: -10 }}
-                                    animate={{ opacity: 1, x: 0 }}
-                                    className="flex flex-col min-w-0 flex-1"
-                                >
-                                    <span className={`font-bold text-[13px] tracking-tight whitespace-nowrap ${isActive ? 'text-white' : 'group-hover:translate-x-0.5 transition-transform'}`}>
-                                        {item.label}
-                                    </span>
-                                    {item.blocked && (
-                                        <span className="text-[8px] font-black uppercase tracking-widest text-red-500/40 leading-none mt-0.5">Em breve</span>
-                                    )}
-                                </motion.div>
-                            )}
-                        </Link>
-                    );
-                })}
-
+                <MenuSecoes
+                    secoes={secoes}
+                    ativo={ativo}
+                    isCollapsed={isCollapsed}
+                    abertos={gruposAbertos}
+                    onToggleGrupo={toggleGrupo}
+                    onAcao={onAcao}
+                />
             </div>
 
             {/* Sino de Pressão de Cobrança — lê inactivity_alerts (leads esfriando) */}
@@ -344,8 +195,8 @@ export const NavigationV2 = () => {
                             <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-[#0C0C0F]" />
                         </div>
                         {!isCollapsed && (
-                            <motion.div 
-                                initial={{ opacity: 0, x: -10 }} 
+                            <motion.div
+                                initial={{ opacity: 0, x: -10 }}
                                 animate={{ opacity: 1, x: 0 }}
                                 className="min-w-0 flex-1"
                             >
@@ -353,7 +204,7 @@ export const NavigationV2 = () => {
                                     {(user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Usuário').split(' ')[0]}
                                 </p>
                                 <p className="text-[9px] text-white/35 font-medium uppercase tracking-widest">
-                                    {role === 'admin' ? 'Gerência' : 'Consultor'}
+                                    {perfil ? ROTULO_PERFIL[perfil] : '…'}
                                 </p>
                             </motion.div>
                         )}
@@ -380,14 +231,15 @@ export const NavigationV2 = () => {
             <div className="md:hidden fixed top-0 left-0 right-0 h-14 bg-[#0C0C0F]/95 backdrop-blur-xl border-b border-white/[0.06] z-[90] flex items-center justify-between px-4">
                 <button
                     onClick={() => setMobileOpen(true)}
-                    className="h-9 w-9 rounded-xl bg-white/[0.05] border border-white/[0.08] flex items-center justify-center text-white/50 hover:text-white hover:bg-white/10 transition-all active:scale-95"
+                    aria-label="Abrir menu"
+                    className="h-10 w-10 rounded-xl bg-white/[0.05] border border-white/[0.08] flex items-center justify-center text-white/50 hover:text-white hover:bg-white/10 transition-all active:scale-95"
                 >
                     <Menu size={18} />
                 </button>
                 <div className="flex items-center gap-3">
-                    <img 
-                        src="https://manosveiculos.com.br/wp-content/uploads/2024/02/LogoManos.png" 
-                        alt="Manos" 
+                    <img
+                        src="https://manosveiculos.com.br/wp-content/uploads/2024/02/LogoManos.png"
+                        alt="Manos"
                         className="h-7 w-auto object-contain"
                     />
                     <div className="flex flex-col">
@@ -395,13 +247,16 @@ export const NavigationV2 = () => {
                         <span className="text-[7px] font-bold text-red-500 uppercase tracking-widest">Premium Intelligence</span>
                     </div>
                 </div>
-                <div className="w-9" />
+                <div className="w-10" />
             </div>
 
             {/* Desktop sidebar — fixed: nunca sobe nem desce com o scroll */}
             <nav className={`hidden md:flex fixed left-0 top-0 h-screen bg-[#0C0C0F] border-r border-white/[0.06] py-6 flex-col items-stretch z-50 overflow-visible transition-all duration-300 ${isCollapsed ? 'w-20' : 'w-64'}`}>
                 {sidebarContent}
             </nav>
+
+            {/* Celular: barra fixa com os 5 itens do vendedor */}
+            <BarraInferior itens={barra} ativo={ativo} onAcao={onAcao} />
 
             <AnimatePresence>
                 {mobileOpen && (
@@ -418,11 +273,12 @@ export const NavigationV2 = () => {
                             animate={{ x: 0 }}
                             exit={{ x: '-100%' }}
                             transition={{ type: 'spring', damping: 25, stiffness: 250 }}
-                            className="md:hidden fixed left-0 top-0 h-screen w-64 bg-[#0C0C0F] border-r border-white/[0.06] py-6 flex-col items-center z-[100] overflow-hidden"
+                            className="md:hidden fixed left-0 top-0 h-screen w-72 max-w-[85vw] bg-[#0C0C0F] border-r border-white/[0.06] py-6 flex flex-col items-stretch z-[100] overflow-hidden"
                         >
                             <button
                                 onClick={() => setMobileOpen(false)}
-                                className="absolute top-4 right-4 h-8 w-8 rounded-xl bg-white/[0.05] border border-white/[0.08] flex items-center justify-center text-white/40 hover:text-white transition-all z-10"
+                                aria-label="Fechar menu"
+                                className="absolute top-4 right-4 h-9 w-9 rounded-xl bg-white/[0.05] border border-white/[0.08] flex items-center justify-center text-white/40 hover:text-white transition-all z-10"
                             >
                                 <X size={16} />
                             </button>
@@ -432,9 +288,9 @@ export const NavigationV2 = () => {
                 )}
             </AnimatePresence>
 
-            <UserProfileModal 
-                isOpen={isProfileModalOpen} 
-                onClose={() => setIsProfileModalOpen(false)} 
+            <UserProfileModal
+                isOpen={isProfileModalOpen}
+                onClose={() => setIsProfileModalOpen(false)}
                 user={user}
                 role={role}
             />

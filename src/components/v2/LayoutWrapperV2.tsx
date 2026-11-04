@@ -14,11 +14,13 @@ export const LayoutWrapperV2 = ({ children }: { children: React.ReactNode }) => 
     const isLogin = pathname === '/login';
     const isRepasse = pathname.startsWith('/repasse'); // app mobile do Paulo, sem sidebar
     const isScooters = pathname.startsWith('/renato'); // app do Renato (RG Scooters), sem sidebar
+    // Prévia de tela com dados fictícios (só existe fora de produção — ver src/app/dev).
+    const isDevPreview = pathname.startsWith('/dev/');
     const supabase = createClient();
     const router = useRouter();
 
     useEffect(() => {
-        if (isLogin || isEmbed) return;
+        if (isLogin || isEmbed || isDevPreview) return;
 
         let alive = true;
         async function checkAccess() {
@@ -65,7 +67,11 @@ export const LayoutWrapperV2 = ({ children }: { children: React.ReactNode }) => 
 
         checkAccess();
         return () => { alive = false; };
-    }, [pathname, isLogin, isEmbed, supabase, router]);
+    }, [pathname, isLogin, isEmbed, isDevPreview, supabase, router]);
+
+    if (isDevPreview) {
+        return <div className="min-h-screen bg-[#03060b] font-inter text-white w-full max-w-[100vw]">{children}</div>;
+    }
 
     // App mobile do Paulo (/repasse): casca própria com bottom-nav, sem o sidebar do desktop
     if (isRepasse) {
@@ -101,7 +107,8 @@ export const LayoutWrapperV2 = ({ children }: { children: React.ReactNode }) => 
             <ConsultantAlertModal />
             <main className="flex-1 min-h-screen w-full relative flex flex-col justify-start items-start">
                 <TrafficAlertBanner />
-                <div className="h-full w-full p-4 md:p-0 mt-14 md:mt-0 pt-16 md:pt-0 flex flex-col items-start justify-start overflow-x-hidden">
+                {/* pb-24 no celular: espaço da barra inferior do vendedor */}
+                <div className="h-full w-full p-4 md:p-0 mt-14 md:mt-0 pt-16 md:pt-0 pb-24 md:pb-0 flex flex-col items-start justify-start overflow-x-hidden">
                     {children}
                 </div>
             </main>
