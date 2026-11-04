@@ -3,7 +3,6 @@
 import { createClient } from '@/lib/supabase/admin';
 import { LeadStatus, Lead, Sale, Purchase } from '@/lib/types';
 import { sendMetaConversion } from '@/lib/meta-service';
-import { dispatchMetaConversionForStatusChange } from '@/lib/services/metaConversionService';
 import { dataService } from '@/lib/dataService';
 import { revalidatePath } from 'next/cache';
 import { cacheInvalidate } from '@/lib/services/cacheLayer';
@@ -227,41 +226,12 @@ export async function updateLeadStatusAction(
         }
     }
 
-    // DISPATCH META CONVERSION (v26.0 Advanced Matching)
-    try {
-        const selectFields = table === 'leads_distribuicao_crm_26' 
-            ? 'id, fb_lead_id, nome, telefone, cidade, interesse, meta_content_id' 
-            : 'id, fb_lead_id, name, nome, phone, telefone, email, city, cidade, state, estado, vehicle_interest, interesse, source, origem, meta_content_id';
+    // Meta CAPI: NÃO dispara daqui. Os eventos do funil (qualificado, visita,
+    // venda) saem da meta_capi_queue — alimentada por trigger no banco e
+    // enviada por /api/cron/meta-capi-dispatch — que cobre qualquer caminho que
+    // mude a etapa (Kanban, finish, extensão) sem duplicar. O bloco que existia
+    // aqui selecionava colunas inexistentes e nunca chegava a enviar.
 
-        const { data: fullLead } = await adminClient
-            .from(table)
-            .select(selectFields)
-            .eq('id', realId)
-            .maybeSingle();
-
-        if (fullLead) {
-            const normalizedLead: any = {
-                id: leadId,
-                fb_lead_id: (fullLead as any).fb_lead_id || (fullLead as any).lead_id,
-                name: (fullLead as any).name || (fullLead as any).nome,
-                phone: (fullLead as any).phone || (fullLead as any).telefone,
-                email: (fullLead as any).email,
-                city: (fullLead as any).city || (fullLead as any).cidade,
-                state: (fullLead as any).state || (fullLead as any).estado,
-                vehicle_interest: (fullLead as any).vehicle_interest || (fullLead as any).interesse,
-                meta_content_id: (fullLead as any).meta_content_id,
-                source: (fullLead as any).source || (fullLead as any).origem
-            };
-
-            const isSale = ['vendido', 'closed', 'venda realizada', 'comprado', 'fechado'].includes(String(status).toLowerCase());
-            const saleVal = isSale ? (resumo_fechamento ? parseFloat(resumo_fechamento.replace(/[^\d.,]/g, '').replace(',', '.')) : 0) : undefined;
-
-            await dispatchMetaConversionForStatusChange(normalizedLead, status, saleVal, motivo_perda);
-        }
-    } catch (metaErr) {
-        console.warn("Non-blocking Meta CAPI error:", metaErr);
-    }
-    
     // ATENÇÃO: Limpa cache local da API Node e FORÇA o re-render da /pipeline do Next.js
     // Invalidamos 'leads' e 'leads2' para cobrir V2 e CRM26
     cacheInvalidate('leads_', 'leads2');

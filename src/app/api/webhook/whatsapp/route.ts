@@ -3,6 +3,7 @@ import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@/lib/supabase/admin';
 import { distribuirLead } from '@/lib/services/slaEngine';
 import { detectClosingIntent, lossReasonFor } from '@/lib/services/conversationIntent';
+import { extrairOrigemWhatsApp, registrarOrigemLead } from '@/lib/services/leadOrigin';
 
 // Handler para Verificação do Webhook (GET)
 export async function GET(req: NextRequest) {
@@ -234,6 +235,18 @@ export async function POST(req: NextRequest) {
                 } catch (e: any) {
                     console.warn('[Webhook WA] notifyConsultant reversão falhou:', e?.message);
                 }
+            }
+        }
+
+        // 2b. Origem do anúncio (Click-to-WhatsApp): o referral só vem na
+        // primeira mensagem. Grava sem sobrescrever origem já existente.
+        const origemAnuncio = extrairOrigemWhatsApp(payload);
+        if (origemAnuncio && leadTable !== 'leads_compra') {
+            try {
+                const r = await registrarOrigemLead(createClient(), origemAnuncio);
+                if (!r.ok) console.warn('[Webhook WA] origem do anúncio não gravada:', r.motivo);
+            } catch (e: any) {
+                console.warn('[Webhook WA] origem do anúncio falhou (não-bloqueante):', e?.message);
             }
         }
 
