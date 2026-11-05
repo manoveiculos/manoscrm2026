@@ -147,3 +147,23 @@ em produção e o proxy só libera `/dev/` fora dela. Os dados estão em `src/ap
 Nenhuma migration e nenhuma tabela nova. Leituras e gravações em tabelas que já existem: `follow_ups` (retorno, `type = 'retorno_fila'`,
 lead em `metadata.lead_uid`), `agendamentos` (visita), `interactions_manos_crm` (nota da ligação), `leads_distribuicao_crm_26` /
 `leadsfacebook` (`ultima_interacao_humana`).
+
+### Ensaio com os dados reais (05/11/2026, só leitura)
+
+Mesmo código da `/api/fila`, rodado para cada consultor ativo, imprimindo só contagens (sem nome, telefone ou mensagem de cliente).
+
+- Só 2 vendedores têm leads ativos: **vendedor A com 117 e vendedor B com 68** (185 no total). Os 185 estão em triagem (`attempt`).
+- Qualificação quase vazia: prazo de compra respondido em 0 leads, entrada em 3, troca em 9 → **nenhum lead Quente**. A qualificação
+  da Laura (E04) ainda não está no ar; quando entrar, os selos passam a separar a fila.
+- O último contato humano que o CRM vê é o clique em "Iniciar atendimento": a conversa do vendedor fica no celular dele (Fase 2).
+- **71 leads tinham o cliente escrevendo para a Laura depois do último contato humano.**
+
+Primeira versão: 176 de 185 leads caíam em "Follow-up vencido", com os mais antigos (D7) no topo. Ajustes feitos:
+
+1. "Cliente voltou a escrever" passa a incluir quem escreveu nos últimos 3 dias **depois de um contato humano** (antes, só o alerta
+   `cliente_voltou`, que não tinha nenhum para esses vendedores). Lead sem contato humano nenhum continua no D0.
+2. Follow-up vencido em ordem: retorno combinado primeiro; depois o marco mais novo (D0, D1, D3…); no mesmo marco, o mais atrasado.
+3. Cada seção mostra 8 cards e um botão "Mostrar mais".
+
+Resultado depois do ajuste: 34 leads em "Cliente voltou a escrever" (19 + 15), 149 em follow-up (começando pelos D1), 2 em aberto.
+A fila carrega em ~0,7–1,1 s para os dois vendedores.

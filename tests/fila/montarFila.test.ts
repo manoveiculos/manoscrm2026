@@ -18,8 +18,8 @@ test('cada lead cai na seção certa, na ordem da spec', () => {
     assert.deepEqual(nomesDa(fila, 'quente_sem_resposta'), ['Marcos Fictício']);
     assert.deepEqual(nomesDa(fila, 'visitas'), ['Juliana Fictícia']);
     assert.deepEqual(nomesDa(fila, 'cliente_voltou'), ['Pedro Fictício']);
-    // Mais atrasado primeiro: retorno de ontem 17h, D3 de hoje cedo, D0 de 40 min.
-    assert.deepEqual(nomesDa(fila, 'followup_vencido'), ['Ricardo Fictício', 'Fernanda Fictícia', 'Lucas Fictício']);
+    // Retorno combinado primeiro; depois o marco mais novo (D0 antes de D3).
+    assert.deepEqual(nomesDa(fila, 'followup_vencido'), ['Ricardo Fictício', 'Lucas Fictício', 'Fernanda Fictícia']);
     assert.deepEqual(nomesDa(fila, 'em_conversa'), ['Beatriz Fictícia']);
     assert.deepEqual(nomesDa(fila, 'recuperavel'), ['Sandra Fictícia']);
     assert.deepEqual(nomesDa(fila, 'em_aberto'), ['Rafael Fictício']);
@@ -47,6 +47,32 @@ test('lead vendido ou perdido não entra na fila (exceto recuperável)', () => {
     assert.ok(!todos.includes('Marcos Fictício'));
     // Juliana tem visita, mas perdida não volta para a fila.
     assert.ok(!todos.includes('Juliana Fictícia'));
+});
+
+test('cliente que escreveu depois do último contato humano vai para "voltou a escrever"', () => {
+    const e = entradaExemplo();
+    // Beatriz: contato humano há 2 h; cliente escreve há 1 h.
+    const uid = 'leads_distribuicao_crm_26:9007';
+    e.conversas[uid] = {
+        ultima: { texto: 'E aí, consegue fazer um preço melhor?', autor: 'cliente', em: new Date(AGORA_EXEMPLO - 60 * 60_000).toISOString() },
+        ultimaDoClienteEm: new Date(AGORA_EXEMPLO - 60 * 60_000).toISOString(),
+    };
+    let fila = montarFila(e);
+    assert.ok(nomesDa(fila, 'cliente_voltou').includes('Beatriz Fictícia'));
+    assert.ok(!nomesDa(fila, 'em_conversa').includes('Beatriz Fictícia'));
+
+    // Mensagem com mais de 3 dias não conta.
+    e.conversas[uid].ultimaDoClienteEm = new Date(AGORA_EXEMPLO - 4 * 86_400_000).toISOString();
+    e.leads.find(l => l.uid === uid)!.ultimaInteracaoHumana = new Date(AGORA_EXEMPLO - 5 * 86_400_000).toISOString();
+    fila = montarFila(e);
+    assert.ok(!nomesDa(fila, 'cliente_voltou').includes('Beatriz Fictícia'));
+});
+
+test('lead sem nenhum contato humano fica no D0, mesmo com o cliente falando com a Laura', () => {
+    const fila = montarFila(entradaExemplo());
+    // Lucas: cliente escreveu há 39 min, ninguém humano falou ainda.
+    assert.ok(nomesDa(fila, 'followup_vencido').includes('Lucas Fictício'));
+    assert.ok(!nomesDa(fila, 'cliente_voltou').includes('Lucas Fictício'));
 });
 
 test('quente sem resposta passa na frente do retorno marcado', () => {

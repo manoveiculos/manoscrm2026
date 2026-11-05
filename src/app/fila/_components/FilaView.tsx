@@ -11,6 +11,12 @@ import { chaveCard, type FilaApi, type Resultado } from './tipos';
 
 /** Tempo para desfazer o resultado antes de gravar. */
 const DESFAZER_MS = 5000;
+/**
+ * Cards visíveis por seção antes do "mostrar mais". No ensaio com os dados
+ * reais (05/11) um vendedor tinha 115 leads em "Follow-up vencido": a lista
+ * inteira de uma vez afoga quem abre a fila no celular.
+ */
+const CARDS_POR_SECAO = 8;
 
 type PendenteInterno = Pendente & { card: CardFila; r: Resultado; timer: ReturnType<typeof setTimeout> | null };
 
@@ -39,6 +45,7 @@ export function FilaView({ fila, dica, nome, aviso, carregando, erro, atualizado
     const [pendentes, setPendentes] = useState<Record<string, PendenteInterno>>({});
     const [removidos, setRemovidos] = useState<Set<string>>(new Set());
     const [destaque, setDestaque] = useState<string | null>(null);
+    const [expandidas, setExpandidas] = useState<Set<string>>(new Set());
     const [aviso2, setAviso2] = useState<{ texto: string; tipo: 'ok' | 'erro' } | null>(null);
     const pendentesRef = useRef(pendentes);
     pendentesRef.current = pendentes;
@@ -223,7 +230,7 @@ export function FilaView({ fila, dica, nome, aviso, carregando, erro, atualizado
                             <p className="text-[11px] text-white/40 mt-0.5">{s.descricao}</p>
                         </header>
                         <div className="space-y-3">
-                            {s.cards.map(c => {
+                            {(expandidas.has(s.id) ? s.cards : s.cards.slice(0, CARDS_POR_SECAO)).map(c => {
                                 const chave = chaveCard(c);
                                 const p = pendentes[chave];
                                 return (
@@ -241,6 +248,19 @@ export function FilaView({ fila, dica, nome, aviso, carregando, erro, atualizado
                                     />
                                 );
                             })}
+                            {s.cards.length > CARDS_POR_SECAO && (
+                                <button
+                                    type="button"
+                                    onClick={() => setExpandidas(prev => {
+                                        const n = new Set(prev);
+                                        if (n.has(s.id)) n.delete(s.id); else n.add(s.id);
+                                        return n;
+                                    })}
+                                    className="w-full min-h-[48px] rounded-2xl border border-dashed border-white/15 text-[13px] font-bold text-white/60 active:bg-white/[0.04]"
+                                >
+                                    {expandidas.has(s.id) ? 'Mostrar menos' : `Mostrar mais ${s.cards.length - CARDS_POR_SECAO}`}
+                                </button>
+                            )}
                         </div>
                     </section>
                 ))}

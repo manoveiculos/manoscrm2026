@@ -33,8 +33,8 @@ export type SecaoFilaId =
 export const SECOES_FILA: { id: SecaoFilaId; titulo: string; emoji: string; descricao: string }[] = [
     { id: 'quente_sem_resposta', titulo: 'Quente sem resposta', emoji: '🔥', descricao: 'Esperando um humano há mais de 15 min' },
     { id: 'visitas', titulo: 'Visitas de hoje e de amanhã', emoji: '📅', descricao: 'Confirme a visita e deixe o carro pronto' },
-    { id: 'cliente_voltou', titulo: 'Cliente voltou a escrever', emoji: '↩️', descricao: 'Retome a conversa antes que esfrie' },
-    { id: 'followup_vencido', titulo: 'Follow-up vencido', emoji: '⏰', descricao: 'Retorno combinado ou cadência D0, D1, D3, D7, D15, D30' },
+    { id: 'cliente_voltou', titulo: 'Cliente voltou a escrever', emoji: '↩️', descricao: 'Escreveu depois do seu último contato — retome antes que esfrie' },
+    { id: 'followup_vencido', titulo: 'Follow-up vencido', emoji: '⏰', descricao: 'Retorno combinado ou cadência D0, D1, D3, D7, D15, D30 — os mais novos primeiro' },
     { id: 'em_conversa', titulo: 'Quentes e mornos em conversa', emoji: '🌡️', descricao: 'Avance para a visita' },
     { id: 'recuperavel', titulo: 'Recuperável', emoji: '♻️', descricao: 'Perdido por falta do carro — tem um compatível no estoque' },
     { id: 'em_aberto', titulo: 'Em aberto', emoji: '📋', descricao: 'Sem qualificação ou fora do perfil' },
@@ -351,9 +351,18 @@ export function montarFila(e: EntradaFila): Fila {
         }
 
         // 3 (antes do corte de "agendado"). Cliente que voltou passa na frente do retorno marcado.
+        // Duas fontes: o alerta cliente_voltou, ou a conversa com a Laura — o
+        // cliente escreveu nos últimos 3 dias DEPOIS do último contato humano.
+        // (Ensaio de 05/11: 71 de 185 leads tinham cliente escrevendo depois do
+        // vendedor e ficavam enterrados no follow-up.) Lead que nunca teve
+        // contato humano fica no D0 ("1º contato pendente").
         const voltou = voltouPorLead.get(l.uid);
-        const voltouT = voltou ? ms(voltou.em)! : null;
-        const voltouPendente = voltouT != null && (humano == null || humano < voltouT);
+        const alertaT = voltou ? ms(voltou.em)! : null;
+        const clienteT = ms(conversa?.ultimaDoClienteEm);
+        const escreveuDepois = humano != null && clienteT != null && clienteT > humano && agora - clienteT <= VOLTOU_JANELA_DIAS * DIA;
+        const alertaPendente = alertaT != null && (humano == null || humano < alertaT);
+        const voltouT = alertaPendente ? alertaT : escreveuDepois ? clienteT : null;
+        const voltouPendente = voltouT != null;
 
         // 2. Visita hoje/amanhã
         const visitas = visitasPorLead.get(l.uid) || [];
@@ -369,7 +378,8 @@ export function montarFila(e: EntradaFila): Fila {
         }
 
         if (voltouPendente) {
-            por('cliente_voltou', cardBase(l, 'cliente_voltou', `Voltou a escrever há ${tempoDesde(voltou!.em, agora)}`, voltouT), voltouT!);
+            const quando = new Date(voltouT!).toISOString();
+            por('cliente_voltou', cardBase(l, 'cliente_voltou', `Voltou a escrever há ${tempoDesde(quando, agora)}`, voltouT), voltouT!);
             continue;
         }
 
@@ -397,7 +407,10 @@ export function montarFila(e: EntradaFila): Fila {
             const motivo = cad.marco === 0
                 ? 'D0 — 1º contato pendente'
                 : `D${cad.marco} — sem contato ${humano != null ? `desde ${dataCurtaBRT(new Date(humano).toISOString())}` : 'humano'}`;
-            por('followup_vencido', cardBase(l, 'followup_vencido', motivo, cad.em), cad.em);
+            // Ordem: retorno combinado primeiro; depois o marco mais recente
+            // (D0, D1, D3… — lead novo converte mais); no mesmo marco, o mais atrasado.
+            const ordem = (CADENCIA_DIAS.indexOf(cad.marco as typeof CADENCIA_DIAS[number]) + 1) * 1e13 + cad.em;
+            por('followup_vencido', cardBase(l, 'followup_vencido', motivo, cad.em), ordem);
             continue;
         }
 
