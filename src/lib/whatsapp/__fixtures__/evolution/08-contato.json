@@ -1,0 +1,22 @@
+{
+  "event": "messages.upsert",
+  "instance": "loja-exemplo",
+  "data": {
+    "key": {
+      "remoteJid": "5547988880001@s.whatsapp.net",
+      "fromMe": false,
+      "id": "3EB0A1B2C3D4E5F6A7B808"
+    },
+    "pushName": "Cliente Exemplo",
+    "message": {
+      "contactMessage": {
+        "displayName": "Contato Exemplo",
+        "vcard": "BEGIN:VCARD\nVERSION:3.0\nN:;Contato Exemplo;;;\nFN:Contato Exemplo\nitem1.TEL;waid=5547977770003:+55 47 97777-0003\nitem1.X-ABLabel:Celular\nEND:VCARD"
+      }
+    },
+    "messageType": "contactMessage",
+    "messageTimestamp": 1793800420,
+    "source": "android"
+  },
+  "date_time": "2026-11-04T13:53:40.000Z"
+}

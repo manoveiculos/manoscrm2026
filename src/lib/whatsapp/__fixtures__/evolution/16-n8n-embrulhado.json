@@ -1,0 +1,31 @@
+{
+  "headers": {
+    "host": "n8n.exemplo.invalid",
+    "content-type": "application/json",
+    "apikey": "CHAVE-FALSA-NAO-USAR"
+  },
+  "params": {},
+  "query": {},
+  "body": {
+    "event": "messages.upsert",
+    "instance": "loja-exemplo",
+    "data": {
+      "key": {
+        "remoteJid": "5547988880001@s.whatsapp.net",
+        "fromMe": false,
+        "id": "3EB0A1B2C3D4E5F6A7B816"
+      },
+      "pushName": "Cliente Exemplo",
+      "message": {
+        "conversation": "Vocês fazem financiamento?"
+      },
+      "messageType": "conversation",
+      "messageTimestamp": 1793800720,
+      "source": "android"
+    },
+    "date_time": "2026-11-04T13:58:40.000Z",
+    "apikey": "CHAVE-FALSA-NAO-USAR"
+  },
+  "webhookUrl": "https://n8n.exemplo.invalid/webhook/laura",
+  "executionMode": "production"
+}

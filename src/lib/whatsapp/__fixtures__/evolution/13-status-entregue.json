@@ -1,0 +1,14 @@
+{
+  "event": "messages.update",
+  "instance": "loja-exemplo",
+  "data": {
+    "messageId": "cmexemplo000000000000001",
+    "keyId": "3EB0LAURA00000000000001",
+    "remoteJid": "5547988880001@s.whatsapp.net",
+    "fromMe": true,
+    "participant": "5547988880001@s.whatsapp.net",
+    "status": "DELIVERY_ACK",
+    "instanceId": "00000000-0000-0000-0000-000000000001"
+  },
+  "date_time": "2026-11-04T10:38:40.000Z"
+}
