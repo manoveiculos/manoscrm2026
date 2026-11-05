@@ -3,6 +3,7 @@ import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@/lib/supabase/admin';
 import { distribuirLead } from '@/lib/services/slaEngine';
 import { detectClosingIntent, lossReasonFor } from '@/lib/services/conversationIntent';
+import { parseEvolutionWebhook, textoResumo, type EventoMensagem } from '@/lib/whatsapp/evolutionParser';
 
 // Handler para Verificação do Webhook (GET)
 export async function GET(req: NextRequest) {
@@ -30,49 +31,33 @@ export async function POST(req: NextRequest) {
     try {
         const payload = await req.json();
 
-        // Evolution API manda em payload.data.{key,message,pushName}.
-        // Filtramos eventos não-mensagem cedo (CONNECTION_UPDATE, etc).
+        // Interpretação da Evolution centralizada em lib/whatsapp/evolutionParser
+        // (a mesma da ingestão nova /api/wa/ingest). Aqui só interessa mensagem
+        // nova de cliente: status, edição, apagada e fromMe são ignorados.
         const evt = payload.event || payload.type || '';
-        const evolutionData = payload.data;
+        const eventos = parseEvolutionWebhook(payload);
+        const mensagem = eventos.find((e): e is EventoMensagem => e.kind === 'mensagem');
+        const ehEvolution = Boolean(payload?.data?.key || payload?.body?.data?.key || evt);
 
-        // Pula eventos que não são mensagem (status conexão, presence, etc)
-        if (evt && !/messages\.?upsert|messages\.?new/i.test(evt)) {
-            return NextResponse.json({ success: true, ignored: evt }, { status: 200 });
+        if (ehEvolution && !mensagem) {
+            const ign = eventos[0];
+            const motivo = ign?.kind === 'ignorado' ? ign.motivo : (ign?.kind || evt || 'sem_mensagem');
+            return NextResponse.json({ success: true, ignored: motivo }, { status: 200 });
         }
 
         // Pula mensagens que NÓS enviamos (fromMe=true). Senão eco-loop.
-        if (evolutionData?.key?.fromMe === true) {
+        if (mensagem?.fromMe) {
             return NextResponse.json({ success: true, ignored: 'fromMe' }, { status: 200 });
         }
 
-        // Extrai campos com suporte a 4 formatos: Evolution, n8n, Cloud API, direto.
-        const phoneRaw =
-            // Evolution API: data.key.remoteJid = "554799...@s.whatsapp.net"
-            (evolutionData?.key?.remoteJid && String(evolutionData.key.remoteJid).split('@')[0]) ||
-            payload.phone ||
-            payload.wa_id ||
-            payload.sender;
+        // Formatos antigos sem Evolution (n8n/Cloud API/direto) continuam aceitos.
+        const phoneRaw = mensagem?.telefone || payload.phone || payload.wa_id || payload.sender;
 
-        const messageText =
-            // Evolution API: text na message.conversation OU message.extendedTextMessage.text
-            evolutionData?.message?.conversation ||
-            evolutionData?.message?.extendedTextMessage?.text ||
-            evolutionData?.message?.imageMessage?.caption ||
-            evolutionData?.message?.videoMessage?.caption ||
-            payload.message ||
-            payload.text ||
-            payload.body;
+        const messageText = (mensagem ? textoResumo(mensagem) : null) || payload.message || payload.text || payload.body;
 
-        const messageId =
-            evolutionData?.key?.id ||
-            payload.message_id ||
-            payload.id;
+        const messageId = mensagem?.providerMessageId || payload.message_id || payload.id;
 
-        const senderName =
-            evolutionData?.pushName ||
-            payload.name ||
-            payload.pushName ||
-            'Lead WhatsApp';
+        const senderName = mensagem?.nomeContato || payload.name || payload.pushName || 'Lead WhatsApp';
 
         if (!phoneRaw || !messageText) {
             console.error(`[Webhook WA] Rejeitado: campos faltando. Event=${evt} Phone=${phoneRaw} Msg=${typeof messageText} Payload keys=${Object.keys(payload).join(',')}`);

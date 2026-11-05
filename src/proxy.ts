@@ -53,6 +53,7 @@ export async function middleware(request: NextRequest) {
         '/api/meta-capi/vehicle',       // site do veiculo — valida META_CAPI_SITE_SECRET
         '/api/compras/webhooks',        // trigger do Postgres
         '/api/leads/rescue-stale',      // agendador externo, tem segredo proprio
+        '/api/wa/ingest',               // n8n (WhatsApp da loja) — valida WHATSAPP_INGEST_SECRET
     ];
     const isPublicApi = PUBLIC_API_PREFIXES.some(prefix => path === prefix || path.startsWith(prefix + '/'));
     const isEmbed = path === '/pipeline/embed';
