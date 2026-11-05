@@ -10,6 +10,7 @@ import {
     parseEvolutionWebhook, telefoneKey, mapearStatus, statusAvanca, payloadSeguro, textoResumo, numero,
 } from '../evolutionParser.ts';
 import { caminhoMidia, extensaoMidia, excedeLimite, corteRetencao, mimeBase } from '../midia.ts';
+import { decidirAutor } from '../autor.ts';
 
 const DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '__fixtures__', 'evolution');
 const fx = nome => JSON.parse(readFileSync(join(DIR, `${nome}.json`), 'utf8'));
@@ -274,4 +275,12 @@ test('regras de mídia: limite, extensão, caminho e corte de 30 dias', () => {
     assert.equal(caminhoMidia('c0nv-1', 'm5g/..', 'jpg', '2026-11-04T10:00:00Z'), '2026/11/c0nv-1/m5g.jpg');
     const corte = corteRetencao(new Date('2026-12-04T00:00:00Z'));
     assert.equal(corte.toISOString(), '2026-11-04T00:00:00.000Z');
+});
+
+test('autor: cliente, Laura e aviso do CRM ao vendedor (sistema)', () => {
+    assert.equal(decidirAutor(false, false), 'cliente');
+    assert.equal(decidirAutor(false, true), 'cliente'); // vendedor escrevendo para a loja continua sendo quem escreveu
+    assert.equal(decidirAutor(true, false), 'laura');
+    assert.equal(decidirAutor(true, true), 'sistema'); // aviso de lead/SLA mandado pela instância da loja
+    assert.equal(decidirAutor(true, false, 'vendedor'), 'vendedor');
 });
