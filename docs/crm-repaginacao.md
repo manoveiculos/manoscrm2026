@@ -22,7 +22,7 @@ Conferido no código deste branch e no banco (só leitura, sem dado pessoal) em 
 | Componentes | `src/components/qualificacao/SeloQualificacao.tsx`, `QualificacaoCard.tsx`, `FichaIACard.tsx` | `SeloQualificacao` em cada card da fila. `QualificacaoCard` e `FichaIACard` ficam para a ficha do lead (Fases 3 e 5). |
 | Alerta de 15 min (quente sem resposta) | `src/lib/services/alertaQuente.ts` | A Minha Fila usa a **mesma regra** de "esperando um humano" (última mensagem do cliente sem resposta humana depois; sem histórico, nenhum contato humano registrado). |
 | Próximo passo da IA | `src/app/api/lead/next-steps/route.ts` → `runEliteCloser` grava `resumo_consultor`/`ai_reason` ("… \| ORIENTAÇÃO: …") e `proxima_acao` | O topo da Minha Fila mostra a ORIENTAÇÃO já gravada do 1º lead da fila. **Não chama a IA** a cada abertura (custo e latência); sem orientação gravada, usa uma frase montada pela regra do card. |
-| Origem do lead / CAPI | `src/lib/services/leadOrigin.ts`, `metaFunnelEvents.ts` | Fase 2: o parser novo extrai `externalAdReply` (fixture `02-texto-anuncio-ctwa.json`). |
+| Origem do lead / CAPI | `src/lib/services/leadOrigin.ts`, `metaFunnelEvents.ts` | Fase 2: o parser novo extrai `contextInfo.externalAdReply` (anúncio Click-to-WhatsApp). |
 | Agenda de visitas | `src/app/api/agenda` (`requireVendedor`, `startOfTodayBRT`), tabela `agendamentos` (`lead_uid` texto) | Card "Visitas de hoje e de amanhã" e botão **Agendar → Visita** (mesma rota `POST /api/agenda`, que já dispara o webhook de lembrete). |
 | Cliente que voltou | `cowork_alerts` tipo `cliente_voltou`, título "Cliente voltou — lead #N" (27 em 30 dias) | Card "Cliente voltou a escrever". |
 | Follow-ups | tabela `follow_ups` (`lead_id uuid`, `user_id text`, `metadata jsonb`) | **Agendar → Retorno** grava aqui. Como 99% dos leads ativos estão em `leads_distribuicao_crm_26` (id inteiro), o lead vai em `metadata.lead_uid` e `lead_id` fica nulo (a coluna já é anulável). |
@@ -42,7 +42,7 @@ Conferido no código deste branch e no banco (só leitura, sem dado pessoal) em 
 | O quê | Onde | Uso |
 |---|---|---|
 | Parser de eventos Evolution | `src/app/api/webhook/whatsapp/route.ts` (texto e legendas, ignora `fromMe`) e `src/app/api/billing/whatsapp-webhook/route.ts` (mídia, grupo, dedup por id) | Fase 2: juntar os dois em `lib/whatsapp/evolutionParser.ts`. |
-| Fixtures sem dado pessoal | `tests/fixtures/evolution/` (19 arquivos, ver README) | Testes do parser. |
+| Fixtures de webhook sem dado pessoal | — | **Responsabilidade da sessão da Fase 2** (ajuste de escopo de 04/11), junto com `src/lib/whatsapp/`, `src/app/api/webhook/whatsapp/`, `src/app/api/wa/` e as migrations `wa_*`. Este branch não mexe nesses caminhos. |
 | Transcrição de áudio | `src/app/api/lead/analyze-audio/route.ts` (Gemini Flash, JSON com `transcricao`) | Fase 2: chamar na ingestão de todo áudio. |
 | Envio pela Evolution | `src/lib/services/whatsappSender.ts`, `vendorNotifyService.ts`, `cobrancaWhatsappSender.ts` | Base do `EvolutionProvider` (Fase 2). |
 | Respostas rápidas | `src/components/CannedResponses.tsx` | Fase 3 (envio). |

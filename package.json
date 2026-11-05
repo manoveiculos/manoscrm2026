@@ -10,8 +10,7 @@
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",
-    "test:fila": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/fila/montarFila.test.ts",
-    "test:fixtures": "node tests/fixtures/evolution/verificar-sem-dado-pessoal.mjs"
+    "test:fila": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/fila/montarFila.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",
