@@ -39,11 +39,20 @@
 --        public.wa_ia_pode_responder(text), public.wa_sync_vendedor_do_lead(),
 --        public.wa_tocar_conversa(), public.wa_ve_todas(), public.wa_meu_consultant_id(),
 --        public.wa_telefone_key(text);
---   bucket: esvaziar pela API do Storage e depois
---   delete from storage.buckets where id = 'whatsapp-midia';
+--   bucket: apagar pelo painel (Storage → whatsapp-midia → Delete) ou pela API do
+--   Storage. DELETE direto em storage.buckets é bloqueado pelo Supabase.
+--   (Reversão ensaiada em 05/11/2026 dentro de transação desfeita: tudo saiu,
+--    as tabelas de lead voltaram aos 7 gatilhos originais, nenhum lead mudou.)
+--
+-- APLICADA em produção em 05/11/2026 (~09:30), com o "aprovado" do Alexandre.
 --
 -- Teste de RLS: supabase/tests/wa_rls.test.sql (roda dentro de BEGIN … ROLLBACK).
 -- ===========================================================================
+
+-- Os gatilhos em leads_distribuicao_crm_26 / leads_master pedem trava rápida
+-- nessas tabelas. Se ela não vier em 5 s, a migration falha inteira em vez de
+-- ficar na fila travando a roleta.
+SET lock_timeout = '5s';
 
 
 -- ---------------------------------------------------------------------------

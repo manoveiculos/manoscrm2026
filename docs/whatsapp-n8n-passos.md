@@ -12,11 +12,13 @@ em frente mesmo com erro).
 
 **Ordem:**
 
-1. Migration aplicada (`supabase/migrations/20261104_wa_whatsapp_loja.sql`) e bucket criado — depende do seu "aprovado".
-2. Variáveis no servidor do CRM (passo 1).
-3. Nó novo no fluxo da Laura (passo 2).
-4. Teste com número interno (passo 4).
-5. Ligar o modo sombra por 48 h (`WA_INGEST_ATIVO=true`) — depende do seu "ok".
+1. ✅ Migration aplicada (`supabase/migrations/20261104_wa_whatsapp_loja.sql`) e bucket `whatsapp-midia`
+   criado em 05/11/2026, com o "aprovado" do Alexandre. Tabelas vazias; nada existente mudou.
+2. Código do CRM publicado (deploy do branch `feat/crm-whatsapp-fase2`) — precisa de "aprovado" próprio,
+   fora do horário comercial. Sem isso a rota `/api/wa/ingest` não existe no ar e o passo 4 não funciona.
+3. Variáveis no servidor do CRM (passo 1), com `WA_INGEST_ATIVO=false`.
+4. Nó novo no fluxo da Laura (passo 2) e teste com número interno (passo 4).
+5. Ligar o modo sombra por 48 h (`WA_INGEST_ATIVO=true`) — aprovado pelo Alexandre em 05/11, depois do passo 4.
 6. A checagem "vendedor assumiu" antes da Laura responder (passo 3) pode entrar
    já: até a Fase 3 ninguém assume conversa, então ela sempre deixa a Laura responder.
 
@@ -27,13 +29,16 @@ em frente mesmo com erro).
 | Variável | Valor | Para quê |
 |---|---|---|
 | `WHATSAPP_INGEST_SECRET` | um segredo novo e longo (ex.: 40 caracteres aleatórios) | o n8n manda no header; sem ele a rota recusa |
-| `WA_LOJA_INSTANCIA` | **nome da instância da Evolution do (47) 3300-1352** | só eventos dessa instância são gravados; também é usada para baixar a mídia |
-| `WA_LOJA_TOKEN` | apikey dessa instância (ou a chave global da Evolution) | baixar foto/áudio/vídeo/documento |
+| `WA_LOJA_INSTANCIA` | `teste` (confirmado em 05/11: é o (47) 3300-1352, perfil "Manos Veiculos") | só eventos dessa instância são gravados; também é usada para baixar a mídia |
+| `WA_LOJA_TOKEN` | o mesmo valor de `EVOLUTION_INSTANCE_TOKEN` (apikey da instância `teste`) | baixar foto/áudio/vídeo/documento |
 | `WA_LOJA_EVOLUTION_URL` | opcional; só se a instância da loja estiver em outro servidor Evolution | sem ela usa `EVOLUTION_BASE_URL` |
 | `WA_INGEST_ATIVO` | `false` agora; `true` para ligar o modo sombra | chave geral: com `false` a rota responde 200 e não grava |
 
-> Não use `EVOLUTION_INSTANCE_NAME`: no `.env.local` ele está como `"teste"` e
-> serve aos avisos para vendedor. O CRM lê a instância da loja só de `WA_LOJA_INSTANCIA`.
+> A instância `teste` é o número da loja **e** também é por ela que o CRM manda os
+> avisos de lead/SLA aos vendedores (`EVOLUTION_INSTANCE_NAME`). Esses avisos chegam
+> ao CRM como mensagem enviada e são gravados como autor **sistema** (não como Laura),
+> com a marca `telefone_de_consultor`. A ingestão continua lendo a instância só de
+> `WA_LOJA_INSTANCIA`, para as duas coisas poderem se separar no futuro.
 
 Gerar um segredo (PowerShell):
 
@@ -89,7 +94,9 @@ Na configuração do webhook da instância da loja (Evolution → Instância →
 ⚠️ Antes de ligar os 3 últimos, confira que o primeiro nó da Laura depois do
 Webhook **ignora** evento que não seja `messages.upsert` de cliente
 (`fromMe = false`). Se ela não filtra, não ligue: use a alternativa abaixo para
-as respostas da Laura e fique sem status/edição por enquanto.
+as respostas da Laura e fique sem status/edição por enquanto. Atenção redobrada:
+com `SEND_MESSAGE` ligado, **cada aviso que o CRM manda a vendedor** pela instância
+`teste` também passa a chegar no fluxo da Laura.
 
 **Alternativa para as respostas da Laura (sem ligar `SEND_MESSAGE`):** depois de
 **cada** nó que envia mensagem pela Evolution (sendText, sendMedia…), ponha outro
@@ -143,7 +150,8 @@ Nenhum cliente fica sem resposta por causa do CRM.
 ## Passo 4 — teste com número interno (antes das 48 h)
 
 1. `WA_INGEST_ATIVO=true` só durante o teste (ou já no início das 48 h, com o seu ok).
-2. Do celular de alguém da loja, mande para o (47) 3300-1352: um texto, uma foto
+2. De um celular interno **que não esteja cadastrado como consultor** no CRM (senão
+   as respostas da Laura para ele entram como `sistema`), mande para o (47) 3300-1352: um texto, uma foto
    com legenda, um áudio de voz e um documento PDF. Responda uma mensagem da Laura
    citando ("responder") e apague uma.
 3. Confira no SQL Editor:
@@ -223,11 +231,23 @@ Isso só dá leitura/execução sob demanda pelo conector. Não muda o funcionam
 
 ## Como desligar (reversão)
 
-- Rápido, sem mexer no n8n: `WA_INGEST_ATIVO=false` no servidor do CRM. A rota
-  responde 200 e não grava nada.
-- Completo: apague o nó `CRM - ingestão WhatsApp` (e os de `send.message`, se
-  usou a alternativa) e o par Postgres/IF do passo 3.
-- Nada disso toca na Laura nem em `concessionaria_mensagens`.
+Do mais rápido ao mais completo:
+
+1. **Chave geral** (segundos, sem mexer no n8n): `WA_INGEST_ATIVO=false` no
+   servidor do CRM. A rota responde 200 e não grava nada.
+2. **n8n:** desative ou apague o nó `CRM - ingestão WhatsApp` (e os de
+   `send.message`, se usou a alternativa) e o par Postgres/IF do passo 3.
+   Mesmo ligado, o nó tem "On Error → Continue" e fica abaixo do ramo da Laura:
+   CRM lento ou fora do ar não atrasa nem para a Laura.
+3. **Código:** `git revert` do commit da Fase 2 no `main` (nunca push forçado).
+4. **Banco:** bloco REVERSÃO no topo da migration (remove cron, gatilhos,
+   tabelas `wa_*` e funções; o bucket se esvazia pela API do Storage e depois é
+   apagado). Ensaiado em 05/11 dentro de transação desfeita.
+
+O que o modo sombra **nunca faz**: enviar mensagem, responder cliente, marcar
+como lida ou mexer em lead. A ingestão só lê o evento, grava em `wa_*`, baixa a
+mídia da Evolution e transcreve áudio. Nada disso toca na Laura nem em
+`concessionaria_mensagens`.
 
 ## Limitação conhecida
 

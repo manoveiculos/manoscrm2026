@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/admin';
 import {
-    parseEvolutionWebhook, payloadSeguro,
+    parseEvolutionWebhook, payloadSeguro, telefoneKey,
     type EventoMensagem, type EventoWa, type WaStatusEntrega,
 } from './evolutionParser';
 import { providerLoja } from './evolutionProvider';
@@ -9,6 +9,7 @@ import type { WhatsAppProvider } from './provider';
 import { BUCKET_MIDIA, caminhoMidia, excedeLimite, extensaoMidia, mimeBase, tipoTemMidia } from './midia';
 import { transcreverAudio } from './transcricao';
 import { msgErro } from './erro';
+import { decidirAutor } from './autor';
 
 /**
  * Ingestão do WhatsApp da loja em "modo sombra": grava tudo em wa_conversas /
@@ -28,6 +29,7 @@ export interface MidiaPendente {
     mensagemId: string;
     conversaId: string;
     evento: EventoMensagem;
+    deConsultor?: boolean;
 }
 
 export interface ResultadoIngestao {
@@ -45,7 +47,7 @@ export interface ResultadoIngestao {
 export interface OpcoesIngestao {
     /** Só aceita eventos desta instância (WA_LOJA_INSTANCIA). */
     instancia: string;
-    /** fromMe que chega pelo n8n é a Laura. Envio do CRM já existe e não é sobrescrito. */
+    /** fromMe que chega pelo n8n é a Laura (menos aviso a consultor = sistema). Envio do CRM já existe e não é sobrescrito. */
     autorFromMe?: 'laura' | 'vendedor' | 'sistema';
     supabase?: SupabaseClient;
 }
@@ -71,8 +73,35 @@ function contar(map: Record<string, number>, k: string) {
     map[k] = (map[k] || 0) + 1;
 }
 
-function extraDe(e: EventoMensagem): Record<string, unknown> {
+/**
+ * Telefones (telefone_key) dos consultores, com cache de 5 min. Serve para
+ * separar o aviso que o CRM manda ao vendedor pelo número da loja da fala da Laura.
+ * Se a consulta falhar, devolve vazio (a mensagem é gravada do mesmo jeito).
+ */
+let cacheConsultores: { em: number; chaves: Set<string> } | null = null;
+
+async function telefonesDeConsultores(supabase: SupabaseClient): Promise<Set<string>> {
+    if (cacheConsultores && Date.now() - cacheConsultores.em < 5 * 60_000) return cacheConsultores.chaves;
+    const chaves = new Set<string>();
+    try {
+        const { data, error } = await supabase.from('consultants_manos_crm').select('phone, personal_whatsapp');
+        if (error) throw new Error(error.message);
+        for (const c of data || []) {
+            for (const t of [c.phone, c.personal_whatsapp]) {
+                const k = telefoneKey(t);
+                if (k) chaves.add(k);
+            }
+        }
+        cacheConsultores = { em: Date.now(), chaves };
+    } catch (e) {
+        console.warn('[wa] telefones de consultores indisponíveis:', msgErro(e));
+    }
+    return chaves;
+}
+
+function extraDe(e: EventoMensagem, telefoneDeConsultor = false): Record<string, unknown> {
     const extra: Record<string, unknown> = { tipo_original: e.tipoOriginal };
+    if (telefoneDeConsultor) extra.telefone_de_consultor = true;
     if (e.localizacao) extra.localizacao = e.localizacao;
     if (e.contatos) extra.contatos = e.contatos;
     if (e.dispositivo) extra.dispositivo = e.dispositivo;
@@ -81,14 +110,14 @@ function extraDe(e: EventoMensagem): Record<string, unknown> {
     return extra;
 }
 
-function paramsMensagem(e: EventoMensagem, autorFromMe: string) {
-    const extra = extraDe(e);
+function paramsMensagem(e: EventoMensagem, autorFromMe: 'laura' | 'vendedor' | 'sistema', telefoneDeConsultor: boolean) {
+    const extra = extraDe(e, telefoneDeConsultor);
     return {
         telefone: e.telefone,
         remote_jid: e.remoteJid,
         nome_contato: e.nomeContato,
         provider_message_id: e.providerMessageId,
-        autor: e.fromMe ? autorFromMe : 'cliente',
+        autor: decidirAutor(e.fromMe, telefoneDeConsultor, autorFromMe),
         tipo: e.tipo,
         texto: e.texto,
         legenda: e.legenda,
@@ -116,18 +145,20 @@ async function aplicarEvento(
     e: EventoWa,
     opts: Required<Pick<OpcoesIngestao, 'instancia' | 'autorFromMe'>>,
     r: ResultadoIngestao,
+    consultores: Set<string>,
 ): Promise<void> {
     if (e.kind === 'ignorado') { contar(r.ignorados, e.motivo); return; }
     if (e.instancia && e.instancia !== opts.instancia) { contar(r.ignorados, 'outra_instancia'); return; }
 
     if (e.kind === 'mensagem') {
-        const { data, error } = await supabase.rpc('wa_registrar_mensagem', { p: paramsMensagem(e, opts.autorFromMe) });
+        const deConsultor = consultores.has(e.telefoneKey);
+        const { data, error } = await supabase.rpc('wa_registrar_mensagem', { p: paramsMensagem(e, opts.autorFromMe, deConsultor) });
         if (error) throw new Error(`wa_registrar_mensagem: ${error.message}`);
         const out = data as { conversa_id: string; mensagem_id: string; nova: boolean };
         if (!out?.nova) { r.repetidas++; return; }
         r.gravadas++;
         if (tipoTemMidia(e.tipo) && e.midia) {
-            r.midiasPendentes.push({ mensagemId: out.mensagem_id, conversaId: out.conversa_id, evento: e });
+            r.midiasPendentes.push({ mensagemId: out.mensagem_id, conversaId: out.conversa_id, evento: e, deConsultor });
         }
         return;
     }
@@ -179,9 +210,12 @@ export async function ingerirWebhook(payload: unknown, opcoes: OpcoesIngestao): 
 
     const eventos = parseEvolutionWebhook(payload);
     r.eventos = eventos.length;
+    const consultores = eventos.some(e => e.kind === 'mensagem')
+        ? await telefonesDeConsultores(supabase)
+        : new Set<string>();
     for (const e of eventos) {
         try {
-            await aplicarEvento(supabase, e, opts, r);
+            await aplicarEvento(supabase, e, opts, r, consultores);
         } catch (err) {
             const msg = msgErro(err);
             r.erros.push(msg);
@@ -323,7 +357,7 @@ export async function processarMidiasPendentes(pendentes: MidiaPendente[]): Prom
             midia_nome: e.midia?.nomeArquivo ?? null,
             midia_tentativas: 0,
             transcricao_tentativas: 0,
-            extra: extraDe(e),
+            extra: extraDe(e, p.deConsultor),
             criada_em: e.enviadaEm,
         }, e);
     }
