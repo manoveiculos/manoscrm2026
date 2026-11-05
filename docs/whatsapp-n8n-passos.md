@@ -14,7 +14,7 @@ em frente mesmo com erro).
 
 1. ✅ Migration aplicada (`supabase/migrations/20261104_wa_whatsapp_loja.sql`) e bucket `whatsapp-midia`
    criado em 05/11/2026, com o "aprovado" do Alexandre. Tabelas vazias; nada existente mudou.
-2. Código do CRM publicado (deploy do branch `feat/crm-whatsapp-fase2`) — precisa de "aprovado" próprio,
+2. Código do CRM publicado (deploy do branch `feat/crm-whatsapp-fase2-sem-e04`, que é a Fase 2 sobre o `main` sem o E04) — precisa de "aprovado" próprio,
    fora do horário comercial. Sem isso a rota `/api/wa/ingest` não existe no ar e o passo 4 não funciona.
 3. Variáveis no servidor do CRM (passo 1), com `WA_INGEST_ATIVO=false`.
 4. Nó novo no fluxo da Laura (passo 2) e teste com número interno (passo 4).
