@@ -119,6 +119,8 @@ test('menu: vendedor vê só os 5 itens; gestor +4; admin em 5 grupos', () => {
 
     const admin = secoesDoMenu({ perfil: 'admin', email: 'alexandre_gorges@hotmail.com' });
     assert.deepEqual(admin.map(s => s.label), ['Vendas', 'Compras', 'Financeiro', 'Gestão', 'Marketing']);
+    // Admin vê todos os leads: rótulo "Leads", não "Meus Leads".
+    assert.ok(admin[0].itens.some(i => i.label === 'Leads') && !admin[0].itens.some(i => i.label === 'Meus Leads'));
     // Os 27 itens de antes + Minha Fila + Conversas.
     assert.equal(admin.reduce((n, s) => n + s.itens.length, 0), 29);
 });

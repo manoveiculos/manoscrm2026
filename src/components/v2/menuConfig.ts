@@ -53,6 +53,8 @@ export interface NavItem {
     emBreve?: boolean;
     /** Admin não precisa: já tem o cartão do usuário no rodapé do menu. */
     ocultoParaAdmin?: boolean;
+    /** Rótulo no menu do admin, quando diferente (ex.: "Leads" em vez de "Meus Leads"). */
+    labelAdmin?: string;
 }
 
 export const NAV_ITEMS: NavItem[] = [
@@ -60,7 +62,7 @@ export const NAV_ITEMS: NavItem[] = [
     { id: 'fila', label: 'Minha Fila', curto: 'Fila', icon: ListTodo, href: '/fila', grupo: 'vendas', nivel: 'base' },
     { id: 'conversas', label: 'Conversas', icon: MessagesSquare, href: '/conversas', grupo: 'vendas', nivel: 'base', emBreve: true },
     { id: 'agenda', label: 'Agenda', icon: CalendarClock, href: '/agenda', grupo: 'vendas', nivel: 'base' },
-    { id: 'leads', label: 'Meus Leads', curto: 'Leads', icon: Users, href: '/leads', grupo: 'vendas', nivel: 'base' },
+    { id: 'leads', label: 'Meus Leads', curto: 'Leads', icon: Users, href: '/leads', grupo: 'vendas', nivel: 'base', labelAdmin: 'Leads' },
     { id: 'perfil', label: 'Perfil', icon: CircleUser, href: '#perfil', grupo: 'vendas', nivel: 'base', acao: 'perfil', ocultoParaAdmin: true },
     { id: 'inbox', label: 'Inbox geral', icon: Inbox, href: '/inbox', grupo: 'vendas', nivel: 'gestor' },
     { id: 'prioridade48h', label: 'Painel 48h', icon: Flame, href: '/admin/prioridade48h', grupo: 'vendas', nivel: 'gestor' },
@@ -153,7 +155,8 @@ export function secoesDoMenu({ perfil, email }: ContextoMenu): SecaoMenu[] {
             itens: NAV_ITEMS.filter(i =>
                 i.grupo === g.id
                 && !i.ocultoParaAdmin
-                && (!i.exclusivo || podeVerExclusivo(i.exclusivo, e, true))),
+                && (!i.exclusivo || podeVerExclusivo(i.exclusivo, e, true)))
+                .map(i => (i.labelAdmin ? { ...i, label: i.labelAdmin } : i)),
         })).filter(s => s.itens.length > 0);
     }
 
