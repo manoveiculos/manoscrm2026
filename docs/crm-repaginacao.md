@@ -99,7 +99,7 @@ Wilson (Terceiros + Leads WhatsApp, em "Seus módulos"), Ledra (Financeiro), Mil
 3. "Ligar" conta só como contato humano (`ultima_interacao_humana` + nota); não grava `first_contact_at`. O 1º atendimento passa a
    ser medido pela 1ª mensagem humana quando a Fase 2 estiver no ar.
 
-**Decisões do Alexandre (06/11, depois do teste no ar):**
+**Decisões do Alexandre (05/11 à noite, depois do teste no ar):**
 4. Saem do menu do vendedor: "Seus módulos" com Negociação Terceiros e Leads WhatsApp (seguem no menu do admin e abrem pelo
    endereço) e os sinos "Pressão de Cobrança" e "Notificações", que só gestor e admin veem. Junto com os sinos saem os sons de
    "lead esfriando" e "lead novo na pesca" para o vendedor. O "Financeiro" do Ledra continua no menu dele.
@@ -182,7 +182,7 @@ A fila carrega em ~0,7–1,1 s para os dois vendedores.
 
 ---
 
-## App instalável no celular (PWA) — 1ª etapa, 06/11/2026
+## App instalável no celular (PWA) — 1ª etapa, 05/11/2026 (noite)
 
 Pedido do Alexandre: "um app para mobile no estilo do GarimpoCar". O GarimpoCar (`D:\OLX EXTRATOR`) é um PWA: manifesto,
 service worker, ícone na tela inicial, abre em tela cheia, aviso offline, botão de instalar e notificação no celular (push).
@@ -202,19 +202,19 @@ Testado com `next start` (modo produção, env falso): manifesto e ícones servi
 **2ª etapa (push), quando aprovado:** tabela de inscrições (com RLS), chaves VAPID nas variáveis da Hostinger, `web-push` no
 servidor e os avisos: "lead quente esperando há 15 min", "cliente voltou a escrever", "visita amanhã".
 
-### 2ª etapa — aviso no celular (web push), preparado em 06/11/2026
+### 2ª etapa — aviso no celular (web push), preparado em 05/11/2026 (noite)
 
 | Peça | Onde |
 |---|---|
 | Tabela de inscrições | `supabase/migrations/20261106_push_inscricoes.sql` — RLS: o vendedor lê só as dele (`wa_meu_consultant_id()`), anon nada, escrita só pelo servidor. **Não aplicada.** |
-| Ensaio + teste de RLS | `supabase/tests/push_rls.test.sql` — rodado em 06/11 01:2x: "A vê 1, B vê 1, anon bloqueado, insert do navegador bloqueado"; tudo desfeito (a tabela não ficou). |
+| Ensaio + teste de RLS | `supabase/tests/push_rls.test.sql` — rodado em 05/11 ~22:20 (Brasília): "A vê 1, B vê 1, anon bloqueado, insert do navegador bloqueado"; tudo desfeito (a tabela não ficou). |
 | Envio | `src/lib/push/enviarPush.ts` (`web-push` 3.6.7). Desligado sozinho sem `VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY` ou sem a tabela. Inscrição que morre (404/410) ou falha 5 vezes é desativada. |
 | Rotas | `GET/POST /api/push/inscrever`, `POST /api/push/cancelar`, `POST /api/push/teste` (todas exigem sessão). |
 | Celular | `public/sw.js` (eventos `push` e `notificationclick`, cache `manos-crm-v2`) e o cartão "Aviso no celular" na Minha Fila (`AtivarAvisos`): pede permissão, inscreve e manda um aviso de teste. No iPhone só aparece com o app instalado. |
 | Avisos ligados | "🔥 Lead quente esperando há 15 min" (em `alertaQuente`, só para o dono, 1 vez por lead) e "📅 Visita hoje/amanhã às HH:MM" / "⏰ Visita em 2 horas" (em `/api/cron/agenda-lembretes`, junto com os lembretes do n8n). Sem nome nem telefone do cliente (tela bloqueada). |
 | Para a Fase 2 | "Cliente escreveu": chamar `enviarPushParaConsultor(consultorId, { titulo, corpo, url, tag })` na ingestão do WhatsApp. |
 
-**Situação em 06/11/2026 01:35:** migration **aplicada** (~01:25) e código **publicado** (merge b5dcaf6, no ar 01:35).
+**Situação em 05/11/2026 22:35 (Brasília):** migration **aplicada** (~22:25) e código **publicado** (merge b5dcaf6, no ar 22:35).
 Falta só o passo 3 (chaves na Hostinger) para os avisos ligarem.
 
 **Ordem para ligar:** (1) publicar o código — seguro, os avisos ficam desligados; (2) aplicar a migration (aprovado);
@@ -223,3 +223,18 @@ nas variáveis da Hostinger, reiniciando o app; (4) no celular: Minha Fila → "
 
 **Não testado de ponta a ponta** (precisa de chaves, tabela e um celular de verdade). Testado: tipos, build, `test:push`
 (desligado sem chaves), sintaxe do `sw.js` e o ensaio de RLS.
+
+### Horários dos deploys (correção)
+
+Os horários informados na conversa e em alguns commits ("06/11 00:24", "01:01"…) estavam em **UTC**. Em Brasília, todos foram
+na **quinta, 05/11/2026**, depois do expediente (loja: seg–sex 8h–18h, sáb 8h–12h):
+
+| Deploy | Merge | Publicado | No ar |
+|---|---|---|---|
+| Fase 1 — menu por perfil + Minha Fila | 6dbbac6 | 21:24 | 21:28 |
+| Menu do vendedor sem Terceiros e sinos | 2026524 | 21:40 | 21:44 |
+| App instalável (PWA) | 55ddbaf | 22:01 | 22:05 |
+| Migration `push_inscricoes` | — | ~22:25 | — |
+| Aviso no celular (push) | b5dcaf6 | 22:29 | 22:35 |
+
+1º aviso de teste entregue à Apple (iPhone do Alexandre) às 22:41.
