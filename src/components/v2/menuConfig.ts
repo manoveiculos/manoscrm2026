@@ -65,7 +65,7 @@ export const NAV_ITEMS: NavItem[] = [
     { id: 'fila', label: 'Minha Fila', curto: 'Fila', icon: ListTodo, href: '/fila', grupo: 'vendas', nivel: 'base' },
     // Pesca de lead sem dono: decisão do Alexandre (05/11) — continua no menu do vendedor.
     { id: 'inbox', label: 'Pegar leads', curto: 'Pegar', icon: Inbox, href: '/inbox', grupo: 'vendas', nivel: 'base', labelAdmin: 'Inbox geral', labelGestor: 'Inbox geral' },
-    { id: 'conversas', label: 'Conversas', icon: MessagesSquare, href: '/conversas', grupo: 'vendas', nivel: 'base', emBreve: true },
+    { id: 'conversas', label: 'Conversas', icon: MessagesSquare, href: '/conversas', grupo: 'vendas', nivel: 'base' },
     { id: 'agenda', label: 'Agenda', icon: CalendarClock, href: '/agenda', grupo: 'vendas', nivel: 'base' },
     { id: 'leads', label: 'Meus Leads', curto: 'Leads', icon: Users, href: '/leads', grupo: 'vendas', nivel: 'base', labelAdmin: 'Leads' },
     { id: 'perfil', label: 'Perfil', icon: CircleUser, href: '#perfil', grupo: 'vendas', nivel: 'base', acao: 'perfil', ocultoParaAdmin: true },

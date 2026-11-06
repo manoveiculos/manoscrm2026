@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "next dev",
     "test:whatsapp": "node --test src/lib/whatsapp/__tests__/evolutionParser.test.mjs",
+    "test:conversas": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/whatsapp/conversasView.test.ts",
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",
