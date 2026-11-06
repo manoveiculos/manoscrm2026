@@ -1,0 +1,24 @@
+{
+  "event": "messages.upsert",
+  "instance": "loja-exemplo",
+  "data": {
+    "key": {
+      "remoteJid": "5547988880001@s.whatsapp.net",
+      "fromMe": false,
+      "id": "3EB0A1B2C3D4E5F6A7B806"
+    },
+    "pushName": "Cliente Exemplo",
+    "message": {
+      "stickerMessage": {
+        "url": "https://mmg.whatsapp.net/exemplo-sticker.enc",
+        "mimetype": "image/webp",
+        "fileLength": "20480",
+        "isAnimated": false
+      }
+    },
+    "messageType": "stickerMessage",
+    "messageTimestamp": 1793800300,
+    "source": "android"
+  },
+  "date_time": "2026-11-04T13:51:40.000Z"
+}

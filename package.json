@@ -7,9 +7,13 @@
   },
   "scripts": {
     "dev": "next dev",
+    "test:whatsapp": "node --test src/lib/whatsapp/__tests__/evolutionParser.test.mjs",
+    "test:conversas": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/whatsapp/conversasView.test.ts",
     "build": "next build --webpack",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:fila": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/fila/montarFila.test.ts",
+    "test:push": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/push/enviarPush.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",
@@ -35,7 +39,8 @@
     "recharts": "^3.7.0",
     "sharp": "^0.35.5",
     "tailwind-merge": "^3.5.0",
-    "unpdf": "^1.8.1"
+    "unpdf": "^1.8.1",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -43,6 +48,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/web-push": "^3.6.4",
     "eslint": "^9",
     "eslint-config-next": "^16.3.6",
     "tailwindcss": "^4",

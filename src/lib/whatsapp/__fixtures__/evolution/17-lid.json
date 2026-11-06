@@ -1,0 +1,20 @@
+{
+  "event": "messages.upsert",
+  "instance": "loja-exemplo",
+  "data": {
+    "key": {
+      "remoteJid": "123456789012345@lid",
+      "fromMe": false,
+      "id": "3EB0A1B2C3D4E5F6A7B817",
+      "remoteJidAlt": "5547988880004@s.whatsapp.net"
+    },
+    "pushName": "Cliente Com LID",
+    "message": {
+      "conversation": "Bom dia"
+    },
+    "messageType": "conversation",
+    "messageTimestamp": 1793800780,
+    "source": "android"
+  },
+  "date_time": "2026-11-04T13:59:40.000Z"
+}
