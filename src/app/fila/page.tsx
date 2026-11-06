@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import PrizeWheelModal from '@/app/components/roleta/PrizeWheelModal';
+import { BannerInstalarApp } from '@/components/v2/AppInstalavel';
 import type { CardFila, Fila } from '@/lib/fila/montarFila';
 import { FilaView } from './_components/FilaView';
 import type { FilaApi, RespostaApi, Resultado } from './_components/tipos';
@@ -133,6 +134,7 @@ export default function MinhaFilaPage() {
                 api={api}
                 onAtualizar={carregar}
                 onResultadoGravado={aoGravar}
+                topo={<BannerInstalarApp />}
             />
             {roleta && (
                 <PrizeWheelModal open veiculoId={roleta.veiculoId} veiculoModelo={roleta.modelo} onClose={() => setRoleta(null)} />
