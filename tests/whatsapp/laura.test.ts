@@ -151,6 +151,8 @@ test('contexto da rodada: hora de Rio do Sul, ficha e o que falta', () => {
     assert.match(bloco, /nome: Carlos; carro_interesse: Onix/);
     assert.match(bloco, /Falta na ficha: forma de pagamento/);
     assert.match(LAURA_CRM_PROMPT, /sujeito a análise de crédito/);
+    // ensaio de 06/11: corrigir erro de outro atendente sem comentar o atendimento anterior
+    assert.match(LAURA_CRM_PROMPT, /nunca comente sobre o atendimento anterior/);
 });
 
 test('custo do Sonnet 5.5: entrada, saída e cache', () => {

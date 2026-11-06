@@ -5,7 +5,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { resumoMensagem } from '../conversasView';
-import { inicioDoDiaSP, respostasReais } from './regras';
+import { inicioDoDiaSP, respostasReais, type MensagemComparavel } from './regras';
 import { resumirRodadas, type LinhaResumo, type RodadaEnsaio, type ResumoEnsaio, type StatusRodada } from './ensaioView';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -43,14 +43,19 @@ export async function rodadasDaConversa(sessao: SupabaseClient, conversaId: stri
             .order('criada_em', { ascending: true }).limit(500);
         depois = (ms || []) as Linha[];
     }
-    const comparaveis = depois.map(m => ({ ...m, criadaEm: m.criada_em as string }));
+    const comparaveis = depois.map(m => ({
+        id: m.id as string,
+        autor: m.autor as MensagemComparavel['autor'],
+        criadaEm: m.criada_em as string,
+        linha: m,
+    }));
 
     return linhas.map(l => {
         const g = l.gatilho_mensagem_id ? gatilhos.get(l.gatilho_mensagem_id) : null;
         const reais = g
             ? respostasReais(g.criada_em, comparaveis)
                 .filter(m => m.autor === 'laura' || m.autor === 'vendedor')
-                .map(m => ({ autor: m.autor as 'laura' | 'vendedor', texto: resumo(m, 1000), em: m.criada_em as string }))
+                .map(m => ({ autor: m.autor as 'laura' | 'vendedor', texto: resumo(m.linha, 1000), em: m.criadaEm }))
             : [];
         const ferramentas = Array.isArray(l.ferramentas) ? l.ferramentas as Linha[] : [];
         const fotos = Array.isArray(l.fotos) ? l.fotos as Linha[] : [];
