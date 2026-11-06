@@ -40,6 +40,8 @@ next-env.d.ts
 *.mjs
 !eslint.config.mjs
 !postcss.config.mjs
+# scripts de teste versionados (alias do node:test)
+!tests/**/*.mjs
 *.py
 test-payload.json
 .vercel

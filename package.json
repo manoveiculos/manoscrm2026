@@ -10,7 +10,8 @@
     "test:whatsapp": "node --test src/lib/whatsapp/__tests__/evolutionParser.test.mjs",
     "build": "next build --webpack",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:fila": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/fila/montarFila.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",

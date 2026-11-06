@@ -58,13 +58,16 @@ export async function middleware(request: NextRequest) {
     ];
     const isPublicApi = PUBLIC_API_PREFIXES.some(prefix => path === prefix || path.startsWith(prefix + '/'));
     const isEmbed = path === '/pipeline/embed';
+    // Prévias com dados fictícios (src/app/dev): só fora de produção. Em
+    // produção a página responde 404 e esta exceção não existe.
+    const isDevPreview = process.env.NODE_ENV !== 'production' && path.startsWith('/dev/');
     // Um ponto no caminho marcava "asset estatico" e pulava a autenticacao.
     // Em /api isso seria uma porta dos fundos (ex: /api/algo.json), entao a
     // regra do ponto nao vale pra API.
     const isStaticAsset = (!isApi && path.includes('.')) || path.startsWith('/_next');
 
     // Se for um asset estático, API pública ou Embed, ignoramos
-    if (isStaticAsset || isPublicApi || isEmbed) {
+    if (isStaticAsset || isPublicApi || isEmbed || isDevPreview) {
         return supabaseResponse;
     }
 
