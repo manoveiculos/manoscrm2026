@@ -201,3 +201,22 @@ Testado com `next start` (modo produção, env falso): manifesto e ícones servi
 
 **2ª etapa (push), quando aprovado:** tabela de inscrições (com RLS), chaves VAPID nas variáveis da Hostinger, `web-push` no
 servidor e os avisos: "lead quente esperando há 15 min", "cliente voltou a escrever", "visita amanhã".
+
+### 2ª etapa — aviso no celular (web push), preparado em 06/11/2026
+
+| Peça | Onde |
+|---|---|
+| Tabela de inscrições | `supabase/migrations/20261106_push_inscricoes.sql` — RLS: o vendedor lê só as dele (`wa_meu_consultant_id()`), anon nada, escrita só pelo servidor. **Não aplicada.** |
+| Ensaio + teste de RLS | `supabase/tests/push_rls.test.sql` — rodado em 06/11 01:2x: "A vê 1, B vê 1, anon bloqueado, insert do navegador bloqueado"; tudo desfeito (a tabela não ficou). |
+| Envio | `src/lib/push/enviarPush.ts` (`web-push` 3.6.7). Desligado sozinho sem `VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY` ou sem a tabela. Inscrição que morre (404/410) ou falha 5 vezes é desativada. |
+| Rotas | `GET/POST /api/push/inscrever`, `POST /api/push/cancelar`, `POST /api/push/teste` (todas exigem sessão). |
+| Celular | `public/sw.js` (eventos `push` e `notificationclick`, cache `manos-crm-v2`) e o cartão "Aviso no celular" na Minha Fila (`AtivarAvisos`): pede permissão, inscreve e manda um aviso de teste. No iPhone só aparece com o app instalado. |
+| Avisos ligados | "🔥 Lead quente esperando há 15 min" (em `alertaQuente`, só para o dono, 1 vez por lead) e "📅 Visita hoje/amanhã às HH:MM" / "⏰ Visita em 2 horas" (em `/api/cron/agenda-lembretes`, junto com os lembretes do n8n). Sem nome nem telefone do cliente (tela bloqueada). |
+| Para a Fase 2 | "Cliente escreveu": chamar `enviarPushParaConsultor(consultorId, { titulo, corpo, url, tag })` na ingestão do WhatsApp. |
+
+**Ordem para ligar:** (1) publicar o código — seguro, os avisos ficam desligados; (2) aplicar a migration (aprovado);
+(3) gerar as chaves (`npx web-push generate-vapid-keys`) e cadastrar `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` e `VAPID_SUBJECT`
+nas variáveis da Hostinger, reiniciando o app; (4) no celular: Minha Fila → "Ativar avisos".
+
+**Não testado de ponta a ponta** (precisa de chaves, tabela e um celular de verdade). Testado: tipos, build, `test:push`
+(desligado sem chaves), sintaxe do `sw.js` e o ensaio de RLS.

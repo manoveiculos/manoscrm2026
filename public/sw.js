@@ -6,8 +6,10 @@
 //  - Sem internet, a navegação mostra /offline.html.
 //  - Guarda só arquivos fixos com versão no nome (/_next/static/*) e os ícones,
 //    para o app abrir mais rápido.
-//  - Notificação (push) fica para a 2ª etapa.
-const CACHE = 'manos-crm-v1';
+//  - Notificação (push): mostra o aviso e, ao tocar, abre o CRM na tela certa.
+//    O servidor nunca manda nome nem telefone de cliente (aparece na tela
+//    bloqueada).
+const CACHE = 'manos-crm-v2';
 const OFFLINE = '/offline.html';
 
 self.addEventListener('install', (event) => {
@@ -52,4 +54,36 @@ self.addEventListener('fetch', (event) => {
     );
   }
   // Todo o resto (API, imagens de fora, etc.): rede, sem cache.
+});
+
+// ── Notificação no celular ────────────────────────────────────────────────
+self.addEventListener('push', (event) => {
+  let d = {};
+  try { d = event.data ? event.data.json() : {}; } catch (e) { d = { body: event.data && event.data.text() }; }
+  const url = typeof d.url === 'string' && d.url.startsWith('/') ? d.url : '/fila';
+  event.waitUntil(self.registration.showNotification(d.title || 'Manos CRM', {
+    body: d.body || 'Tem novidade na sua fila.',
+    icon: '/icons/icon-192.png',
+    badge: '/icons/icon-192.png',
+    tag: d.tag || undefined,
+    renotify: !!d.tag,
+    vibrate: [120, 60, 120],
+    data: { url },
+  }));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const destino = new URL((event.notification.data && event.notification.data.url) || '/fila', self.location.origin).href;
+  event.waitUntil((async () => {
+    const janelas = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const j of janelas) {
+      if (new URL(j.url).origin === self.location.origin && 'focus' in j) {
+        await j.focus();
+        if ('navigate' in j) await j.navigate(destino);
+        return;
+      }
+    }
+    await self.clients.openWindow(destino);
+  })());
 });
