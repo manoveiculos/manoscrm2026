@@ -1,5 +1,6 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import { useMemo, useState } from 'react';
 import { Bot, Loader2, MessagesSquare, RefreshCw, Search, UserRound } from 'lucide-react';
 import { SeloQualificacao } from '@/components/qualificacao/SeloQualificacao';
@@ -8,7 +9,7 @@ import {
     type ConversaItem, type FiltroConversa,
 } from '@/lib/whatsapp/conversasView';
 
-export function ListaConversas({ conversas, selecionada, carregando, erro, gestao, agora, onSelecionar, onAtualizar }: {
+export function ListaConversas({ conversas, selecionada, carregando, erro, gestao, agora, onSelecionar, onAtualizar, topo }: {
     conversas: ConversaItem[] | null;
     selecionada: string | null;
     carregando: boolean;
@@ -18,6 +19,8 @@ export function ListaConversas({ conversas, selecionada, carregando, erro, gesta
     agora: Date;
     onSelecionar: (id: string) => void;
     onAtualizar: () => void;
+    /** Faixa abaixo do título (gestor/admin: Laura do CRM). */
+    topo?: ReactNode;
 }) {
     const [filtro, setFiltro] = useState<FiltroConversa>('todas');
     const [busca, setBusca] = useState('');
@@ -43,6 +46,8 @@ export function ListaConversas({ conversas, selecionada, carregando, erro, gesta
                         {carregando ? <Loader2 size={18} className="animate-spin" /> : <RefreshCw size={18} />}
                     </button>
                 </div>
+
+                {topo}
 
                 <label className="flex items-center gap-2 rounded-xl bg-white/[0.04] border border-white/[0.08] px-3 h-11">
                     <Search size={16} className="text-white/40 shrink-0" />

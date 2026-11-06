@@ -31,6 +31,8 @@ export interface AltimusVehicle {
     combustivel?: string;
     cor?: string;
     link?: string;
+    /** URLs das fotos reais do anúncio (<fotos><imagem>), na ordem do feed. */
+    fotos?: string[];
 }
 
 interface CacheEntry {
@@ -185,6 +187,11 @@ function parseAltimusXml(xml: string): AltimusVehicle[] {
         const link = tag(block, 'link') || tag(block, 'url') || undefined;
         // ID interno pra compor link Altimus se quisermos no futuro
         const idInterno = tag(block, 'id');
+        // Fotos reais do anúncio (a Laura do CRM só envia estas)
+        const fotosXml = block.match(/<fotos\b[^>]*>([\s\S]*?)<\/fotos>/i)?.[1] || '';
+        const fotos = [...fotosXml.matchAll(/<imagem\b[^>]*>([\s\S]*?)<\/imagem>/gi)]
+            .map(m => decodeXmlEntities(m[1].replace(/^\s*<!\[CDATA\[|\]\]>\s*$/g, '').trim()))
+            .filter(u => /^https?:\/\//i.test(u));
 
         // Regra Anti-Alucinação: Se o preço for incoerente (ex: popular > 300k), ignora o veículo
         // Lista simples de modelos populares para o filtro
@@ -208,6 +215,7 @@ function parseAltimusXml(xml: string): AltimusVehicle[] {
             combustivel: combustivel || undefined,
             cor: cor || undefined,
             link: link || (idInterno ? `https://manosveiculos.com.br/veiculo/${idInterno}` : undefined),
+            fotos: fotos.length ? fotos : undefined,
         });
     }
     return out;

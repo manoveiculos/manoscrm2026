@@ -8,6 +8,7 @@ import { ListaConversas } from './ListaConversas';
 import { PainelConversa } from './PainelConversa';
 import { FichaLead } from './FichaLead';
 import { urlMidiaPadrao, type UrlMidia } from './Midias';
+import { BarraLauraCrm, EnsaioDaConversa } from './LauraCrm';
 
 /**
  * Tela Conversas (Fase 3, leitura) — o WhatsApp da loja dentro do CRM.
@@ -20,7 +21,7 @@ export function ConversasView({
     conversas, perfil, carregandoLista, erroLista,
     selecionada, detalhe, carregandoDetalhe, carregandoAntigas, erroDetalhe,
     onSelecionar, onAtualizar, onCarregarAntigas,
-    urlMidia = urlMidiaPadrao, renderFicha, agoraFixo,
+    urlMidia = urlMidiaPadrao, renderFicha, agoraFixo, renderBarraIa, renderEnsaio,
 }: {
     conversas: ConversaItem[] | null;
     perfil: 'vendedor' | 'gestor' | 'admin' | null;
@@ -38,6 +39,9 @@ export function ConversasView({
     /** A prévia troca a ficha real (que busca dados) por uma fictícia. */
     renderFicha?: (c: ConversaItem) => ReactNode;
     agoraFixo?: number;
+    /** Prévia: troca a barra e o ensaio da Laura do CRM (que buscam dados) por fictícios. */
+    renderBarraIa?: () => ReactNode;
+    renderEnsaio?: (c: ConversaItem, agora: Date) => ReactNode;
 }) {
     const [fichaAberta, setFichaAberta] = useState(false);
     // relógio para "Hoje"/"Ontem" e horários da lista (fixo na prévia)
@@ -52,6 +56,11 @@ export function ConversasView({
     const aberta = Boolean(selecionada);
     const conversa = detalhe?.conversa ?? null;
     const ficha = conversa ? (renderFicha ? renderFicha(conversa) : <FichaLead conversa={conversa} />) : null;
+    // Laura do CRM (etapa B, ensaio): só gestor/admin vê
+    const barraIa = gestao ? (renderBarraIa ? renderBarraIa() : <BarraLauraCrm />) : null;
+    const ensaio = gestao && conversa
+        ? (renderEnsaio ? renderEnsaio(conversa, agora) : <EnsaioDaConversa key={conversa.id} conversaId={conversa.id} agora={agora} />)
+        : undefined;
 
     return (
         <div className="w-full md:h-screen md:flex md:overflow-hidden">
@@ -69,6 +78,7 @@ export function ConversasView({
                     agora={agora}
                     onSelecionar={(id) => onSelecionar(id)}
                     onAtualizar={onAtualizar}
+                    topo={barraIa}
                 />
             </aside>
 
@@ -85,6 +95,7 @@ export function ConversasView({
                     onAbrirFicha={() => setFichaAberta(true)}
                     onCarregarAntigas={onCarregarAntigas}
                     mostrarBotaoFicha={Boolean(conversa)}
+                    ensaio={ensaio}
                 />
             </main>
 

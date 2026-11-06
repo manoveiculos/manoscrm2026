@@ -2,6 +2,8 @@
 // Nomes, telefones e carros inventados: nada aqui vem do banco.
 
 import type { ConversaDetalhe, ConversaItem, MensagemView } from '@/lib/whatsapp/conversasView';
+import type { RodadaEnsaio } from '@/lib/whatsapp/ia/ensaioView';
+import type { DadosBarraIa } from '@/app/conversas/_components/LauraCrm';
 
 /** 06/11/2026 14:00 em Rio do Sul. */
 export const AGORA_EXEMPLO = Date.parse('2026-11-06T14:00:00-03:00');
@@ -92,3 +94,47 @@ export function mensagensExemplo(): MensagemView[] {
 export function detalheExemplo(): ConversaDetalhe {
     return { conversa: CONVERSAS_EXEMPLO[0], mensagens: mensagensExemplo(), citadas: {}, temMais: true };
 }
+
+// ---------------------------------------------------------------------------
+// Laura do CRM (etapa B, ensaio) — dados FICTÍCIOS para a prévia
+// ---------------------------------------------------------------------------
+
+export const BARRA_IA_EXEMPLO: DadosBarraIa = {
+    podeMudar: true,
+    config: { modo: 'ensaio', modoGravado: 'ensaio', motivo: null, ativaNoServidor: true },
+    resumo: {
+        desde: '2026-11-06T03:00:00.000Z', rodadas: 14, ok: 13, erro: 1, puladas: 2, barradas: 1,
+        violacoes: { simulou_parcela: 1 }, tempoMedioMs: 6200, custoTotalUsd: 0.0412, conversas: 6, custoPorConversaUsd: 0.0069,
+    },
+};
+
+export const RODADAS_EXEMPLO: RodadaEnsaio[] = [
+    {
+        id: 'r3', status: 'ok', motivo: null, modo: 'ensaio',
+        iniciadaEm: '2026-11-06T13:41:10-03:00', terminadaEm: '2026-11-06T13:41:17-03:00', tempoMs: 7100, custoUsd: 0.0038,
+        gatilho: { texto: 'Dá pra fazer em 48x? Quanto fica a parcela?', em: '2026-11-06T13:41:00-03:00' },
+        rascunho: 'Essa parte o consultor passa certinho pra você aqui na loja 😊 Posso já deixar sua visita agendada pra ele te mostrar tudo pessoalmente?',
+        original: 'Fica em torno de 48x de R$ 1.890, mas depende do banco!',
+        violacoes: ['simulou_parcela'],
+        ferramentas: [{ nome: 'salvar_ficha', erro: false }],
+        fotos: [], agendamento: null, passagem: null,
+        reais: [{ autor: 'laura', texto: 'O consultor faz a simulação certinha com você, sujeito a análise de crédito. Quer agendar uma visita?', em: '2026-11-06T13:41:20-03:00' }],
+    },
+    {
+        id: 'r2', status: 'ok', motivo: null, modo: 'ensaio',
+        iniciadaEm: '2026-11-06T13:30:12-03:00', terminadaEm: '2026-11-06T13:30:18-03:00', tempoMs: 5900, custoUsd: 0.0031,
+        gatilho: { texto: 'Sou o Carlos, de Ibirama. Tem fotos do Onix?', em: '2026-11-06T13:30:00-03:00' },
+        rascunho: 'Prazer, Carlos! Te mandei as fotos do Onix LT 1.0 2020 (R$ 62.900, 58.000 km). Você pensa em pagar à vista ou financiado?',
+        original: null, violacoes: [],
+        ferramentas: [{ nome: 'salvar_ficha', erro: false }, { nome: 'buscar_estoque', erro: false }, { nome: 'enviar_fotos', erro: false }],
+        fotos: [{ carro: 'Chevrolet Onix LT 1.0', quantidade: 4 }], agendamento: null, passagem: null,
+        reais: [{ autor: 'laura', texto: 'Oi Carlos! Tenho sim, vou te mandar. Qual o seu nome completo?', em: '2026-11-06T13:30:25-03:00' }],
+    },
+    {
+        id: 'r1', status: 'erro', motivo: 'o modelo recusou responder', modo: 'ensaio',
+        iniciadaEm: '2026-11-06T13:20:02-03:00', terminadaEm: '2026-11-06T13:20:04-03:00', tempoMs: 2100, custoUsd: 0.0009,
+        gatilho: { texto: '🎤 Bom dia, vi o anúncio do Onix', em: '2026-11-06T13:19:50-03:00' },
+        rascunho: null, original: null, violacoes: [], ferramentas: [], fotos: [], agendamento: null, passagem: null,
+        reais: [],
+    },
+];

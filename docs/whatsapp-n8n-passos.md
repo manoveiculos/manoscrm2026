@@ -19,6 +19,9 @@ em frente mesmo com erro).
 3. Variáveis no servidor do CRM (passo 1), com `WA_INGEST_ATIVO=false`.
 4. Nó novo no fluxo da Laura (passo 2) e teste com número interno (passo 4).
 5. Ligar o modo sombra por 48 h (`WA_INGEST_ATIVO=true`) — aprovado pelo Alexandre em 05/11, depois do passo 4.
+   **Atualização 06/11/2026:** a ingestão virou **PERMANENTE** (decisão do Alexandre).
+   `WA_INGEST_ATIVO=true` continua ligado depois das 48 h: a tela Conversas e a Laura
+   do CRM (`docs/laura-crm-ensaio.md`) dependem dela. Não desligar no fim do modo sombra.
 6. A checagem "vendedor assumiu" antes da Laura responder (passo 3) pode entrar
    já: até a Fase 3 ninguém assume conversa, então ela sempre deixa a Laura responder.
 

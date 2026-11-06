@@ -13,7 +13,8 @@
     "start": "next start",
     "lint": "eslint",
     "test:fila": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/fila/montarFila.test.ts",
-    "test:push": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/push/enviarPush.test.ts"
+    "test:push": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/push/enviarPush.test.ts",
+    "test:laura": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/whatsapp/laura.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",

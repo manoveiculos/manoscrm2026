@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import type { ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Bot, IdCard, Loader2, MessageCircle, Phone } from 'lucide-react';
 import { SeloQualificacao } from '@/components/qualificacao/SeloQualificacao';
 import {
@@ -10,7 +11,7 @@ import {
 import { Bolha } from './Bolha';
 import type { UrlMidia } from './Midias';
 
-export function PainelConversa({ detalhe, carregando, carregandoAntigas, erro, agora, url, onVoltar, onAbrirFicha, onCarregarAntigas, mostrarBotaoFicha }: {
+export function PainelConversa({ detalhe, carregando, carregandoAntigas, erro, agora, url, onVoltar, onAbrirFicha, onCarregarAntigas, mostrarBotaoFicha, ensaio }: {
     detalhe: ConversaDetalhe | null;
     carregando: boolean;
     carregandoAntigas: boolean;
@@ -22,11 +23,16 @@ export function PainelConversa({ detalhe, carregando, carregandoAntigas, erro, a
     onCarregarAntigas: () => void;
     /** Abaixo de xl a ficha abre numa gaveta; em xl ela fica na coluna da direita. */
     mostrarBotaoFicha: boolean;
+    /** Gestor/admin: aba "Ensaio da Laura" (rascunho do CRM × resposta enviada). */
+    ensaio?: ReactNode;
 }) {
     const rolagem = useRef<HTMLDivElement | null>(null);
     const fim = useRef<HTMLDivElement | null>(null);
     const ultimoId = useRef<string | null>(null);
     const conversaId = detalhe?.conversa.id ?? null;
+    // aba guardada por conversa: trocar de conversa volta para "Conversa"
+    const [abaEnsaioDe, setAbaEnsaioDe] = useState<string | null>(null);
+    const verEnsaio = Boolean(ensaio) && abaEnsaioDe !== null && abaEnsaioDe === conversaId;
 
     const { grupos, reacoes, citadasNaPagina } = useMemo(() => {
         const msgs = detalhe?.mensagens || [];
@@ -42,7 +48,7 @@ export function PainelConversa({ detalhe, carregando, carregandoAntigas, erro, a
         const primeira = ultimoId.current === null;
         ultimoId.current = ultimaMsg;
         fim.current?.scrollIntoView({ block: 'end', behavior: primeira ? 'auto' : 'smooth' });
-    }, [ultimaMsg]);
+    }, [ultimaMsg, verEnsaio]);
     useEffect(() => { ultimoId.current = null; }, [conversaId]);
 
     if (!detalhe) {
@@ -93,6 +99,33 @@ export function PainelConversa({ detalhe, carregando, carregandoAntigas, erro, a
                 )}
             </header>
 
+            {ensaio && (
+                <div className="mx-1 md:mx-4 mt-3 grid grid-cols-2 gap-1 rounded-xl bg-white/[0.04] p-1" role="tablist" aria-label="Ver conversa ou ensaio">
+                    {([['conversa', 'Conversa'], ['ensaio', 'Ensaio da Laura']] as const).map(([k, rot]) => {
+                        const ativa = k === 'ensaio' ? verEnsaio : !verEnsaio;
+                        return (
+                            <button
+                                key={k}
+                                type="button"
+                                role="tab"
+                                aria-selected={ativa}
+                                onClick={() => {
+                                    // voltando para a conversa: rola de novo até a última mensagem
+                                    if (k === 'conversa') ultimoId.current = null;
+                                    setAbaEnsaioDe(k === 'ensaio' ? conversaId : null);
+                                }}
+                                className={`min-h-[40px] rounded-lg text-[12px] font-black ${ativa ? 'bg-white text-black' : 'text-white/60'}`}
+                            >
+                                {k === 'ensaio' && <Bot size={12} className="inline mr-1 -mt-0.5" />}{rot}
+                            </button>
+                        );
+                    })}
+                </div>
+            )}
+
+            {verEnsaio ? (
+                <div className="md:flex-1 md:overflow-y-auto px-1 md:px-4 py-3">{ensaio}</div>
+            ) : (<>
             {/* Aviso: tela só de leitura nesta etapa */}
             <div className="mx-1 md:mx-4 mt-3 rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-[11px] text-white/45">
                 Só leitura por enquanto: a Laura segue atendendo pelo WhatsApp da loja. Responder por aqui vem na próxima etapa.
@@ -137,6 +170,7 @@ export function PainelConversa({ detalhe, carregando, carregandoAntigas, erro, a
                 )}
                 <div ref={fim} />
             </div>
+            </>)}
         </div>
     );
 }
