@@ -52,7 +52,8 @@ export function CardLead({ card, agora, relogio, pendente, destacado, onLigar, o
 }) {
     const tel = telParaDiscar(card.telefone);
     const msg = card.ultimaMensagem;
-    const hrefConversa = card.uid ? `/lead/${encodeURIComponent(card.uid)}` : '/agenda';
+    // Abre a conversa do WhatsApp da loja; sem conversa, a tela leva ao perfil do lead.
+    const hrefConversa = card.uid ? `/conversas?lead=${encodeURIComponent(card.uid)}` : '/agenda';
     const restante = pendente ? Math.max(0, Math.ceil((pendente.ate - relogio) / 1000)) : 0;
 
     return (
