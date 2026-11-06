@@ -11,7 +11,7 @@ import { useAIAlerts } from '@/hooks/useAIAlerts';
 import { NotificationBell } from '@/components/v2/NotificationBell';
 import { CobrancaPressureBell } from '@/components/v2/CobrancaPressureBell';
 import { perfilDoConsultor, EMAIL_ALEXANDRE, type Perfil } from '@/lib/perfil';
-import { secoesDoMenu, itensBarraInferior, itemAtivo, type NavItem } from '@/components/v2/menuConfig';
+import { secoesDoMenu, itensBarraInferior, itemAtivo, mostrarSinos, type NavItem } from '@/components/v2/menuConfig';
 import { MenuSecoes } from '@/components/v2/MenuSecoes';
 import { BarraInferior } from '@/components/v2/BarraInferior';
 
@@ -171,15 +171,17 @@ export const NavigationV2 = () => {
                 />
             </div>
 
-            {/* Sino de Pressão de Cobrança — lê inactivity_alerts (leads esfriando) */}
-            <div className={`w-full ${isCollapsed ? 'px-2' : 'px-3'} py-1`}>
-                <CobrancaPressureBell isCollapsed={isCollapsed} role={role} />
-            </div>
-
-            {/* Sininho de Notificação de Novos Leads */}
-            <div className={`w-full ${isCollapsed ? 'px-2' : 'px-3'} py-1`}>
-                <NotificationBell isCollapsed={isCollapsed} role={role} />
-            </div>
+            {/* Sinos (Pressão de Cobrança + lead novo na pesca): só gestor e admin. */}
+            {mostrarSinos(perfil) && (
+                <>
+                    <div className={`w-full ${isCollapsed ? 'px-2' : 'px-3'} py-1`}>
+                        <CobrancaPressureBell isCollapsed={isCollapsed} role={role} />
+                    </div>
+                    <div className={`w-full ${isCollapsed ? 'px-2' : 'px-3'} py-1`}>
+                        <NotificationBell isCollapsed={isCollapsed} role={role} />
+                    </div>
+                </>
+            )}
 
             <div className={`mt-auto w-full ${isCollapsed ? 'px-2' : 'px-3'} pt-4 border-t border-white/[0.06] pb-4`}>
                 <div className={`flex items-center ${isCollapsed ? 'flex-col gap-3' : 'justify-between gap-2'}`}>
