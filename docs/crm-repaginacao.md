@@ -83,14 +83,21 @@ Wilson (Terceiros + Leads WhatsApp, em "Seus módulos"), Ledra (Financeiro), Mil
 
 ### Menu (`src/components/v2/menuConfig.ts`, `MenuSecoes.tsx`, `BarraInferior.tsx`)
 
-- **Vendedor:** Minha Fila · Conversas (em breve, Fase 3) · Agenda · Meus Leads · Perfil. No celular, os 5 ficam numa barra fixa
-  embaixo (alvos de 60 px); o menu lateral continua com os sinos e o "Sair".
-- **Gestor:** os 5 do vendedor + Inbox geral, Conversão, Perdidos e Painel 48h.
+- **Vendedor:** Minha Fila · Pegar leads (`/inbox`, a pesca) · Conversas (em breve, Fase 3) · Agenda · Meus Leads · Perfil.
+  No celular, os 6 ficam numa barra fixa embaixo (63 px por item em 375 px, alvos de 60 px de altura); o menu lateral continua
+  com os sinos e o "Sair".
+- **Gestor:** os do vendedor (a pesca aparece como "Inbox geral") + Conversão, Perdidos e Painel 48h.
 - **Admin:** os 27 itens de antes + Minha Fila e Conversas, em 5 grupos recolhíveis (Vendas · Compras · Financeiro · Gestão · Marketing).
-  O grupo aberto fica salvo no navegador.
+  O grupo aberto fica salvo no navegador. No admin, "Meus Leads" aparece como "Leads" (a tela mostra todos).
 - Tela inicial: vendedor e gestor vão para `/fila`; admin continua no War Room (`/`).
-- **Saíram do menu do vendedor:** Inbox (pesca), Atendimento (Kanban), Precificar, Compras, Cobrança Acordos e Repasse.
+- **Saíram do menu do vendedor:** Atendimento (Kanban), Precificar, Compras, Cobrança Acordos e Repasse.
   As rotas continuam abrindo pelo endereço. O menu só esconde: quem protege o dado é o RLS e as rotas de API.
+
+**Decisões do Alexandre (05/11):**
+1. A pesca continua: "Pegar leads" volta ao menu do vendedor (a spec tirava).
+2. A seção "Em aberto" fica, no fim da fila.
+3. "Ligar" conta só como contato humano (`ultima_interacao_humana` + nota); não grava `first_contact_at`. O 1º atendimento passa a
+   ser medido pela 1ª mensagem humana quando a Fase 2 estiver no ar.
 
 ### Minha Fila (`/fila`)
 

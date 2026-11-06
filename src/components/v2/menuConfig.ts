@@ -1,7 +1,8 @@
 // src/components/v2/menuConfig.ts — MENU POR PERFIL (Fase 1 da repaginação)
 //
-//   Vendedor: Minha Fila · Conversas · Agenda · Meus Leads · Perfil
-//   Gestor:   o do vendedor + Inbox geral · Conversão · Perdidos · Painel 48h
+//   Vendedor: Minha Fila · Pegar leads · Conversas · Agenda · Meus Leads · Perfil
+//             ("Pegar leads" = Inbox/pesca: decisão do Alexandre em 05/11)
+//   Gestor:   o do vendedor (com a Inbox como "Inbox geral") + Conversão · Perdidos · Painel 48h
 //   Admin:    tudo, em 5 grupos recolhíveis (Vendas · Compras · Financeiro ·
 //             Gestão · Marketing)
 //
@@ -55,16 +56,19 @@ export interface NavItem {
     ocultoParaAdmin?: boolean;
     /** Rótulo no menu do admin, quando diferente (ex.: "Leads" em vez de "Meus Leads"). */
     labelAdmin?: string;
+    /** Rótulo no menu do gestor, quando diferente. */
+    labelGestor?: string;
 }
 
 export const NAV_ITEMS: NavItem[] = [
     // ── Vendas ────────────────────────────────────────────────────────────
     { id: 'fila', label: 'Minha Fila', curto: 'Fila', icon: ListTodo, href: '/fila', grupo: 'vendas', nivel: 'base' },
+    // Pesca de lead sem dono: decisão do Alexandre (05/11) — continua no menu do vendedor.
+    { id: 'inbox', label: 'Pegar leads', curto: 'Pegar', icon: Inbox, href: '/inbox', grupo: 'vendas', nivel: 'base', labelAdmin: 'Inbox geral', labelGestor: 'Inbox geral' },
     { id: 'conversas', label: 'Conversas', icon: MessagesSquare, href: '/conversas', grupo: 'vendas', nivel: 'base', emBreve: true },
     { id: 'agenda', label: 'Agenda', icon: CalendarClock, href: '/agenda', grupo: 'vendas', nivel: 'base' },
     { id: 'leads', label: 'Meus Leads', curto: 'Leads', icon: Users, href: '/leads', grupo: 'vendas', nivel: 'base', labelAdmin: 'Leads' },
     { id: 'perfil', label: 'Perfil', icon: CircleUser, href: '#perfil', grupo: 'vendas', nivel: 'base', acao: 'perfil', ocultoParaAdmin: true },
-    { id: 'inbox', label: 'Inbox geral', icon: Inbox, href: '/inbox', grupo: 'vendas', nivel: 'gestor' },
     { id: 'prioridade48h', label: 'Painel 48h', icon: Flame, href: '/admin/prioridade48h', grupo: 'vendas', nivel: 'gestor' },
     { id: 'perdidos', label: 'Perdidos', icon: ClipboardCheck, href: '/admin/perdidos', grupo: 'vendas', nivel: 'gestor' },
     { id: 'atendimento', label: 'Atendimento', icon: PlayCircle, href: '/atendimento', grupo: 'vendas', nivel: 'admin' },
@@ -161,8 +165,10 @@ export function secoesDoMenu({ perfil, email }: ContextoMenu): SecaoMenu[] {
     }
 
     // Vendedor (e enquanto o perfil carrega) / gestor
+    const base = NAV_ITEMS.filter(i => i.nivel === 'base')
+        .map(i => (perfil === 'gestor' && i.labelGestor ? { ...i, label: i.labelGestor } : i));
     const secoes: SecaoMenu[] = [
-        { id: 'principal', label: null, recolhivel: false, itens: NAV_ITEMS.filter(i => i.nivel === 'base') },
+        { id: 'principal', label: null, recolhivel: false, itens: base },
     ];
     if (perfil === 'gestor') {
         secoes.push({ id: 'gestao', label: 'Gestão', recolhivel: false, itens: NAV_ITEMS.filter(i => i.nivel === 'gestor') });
@@ -173,7 +179,7 @@ export function secoesDoMenu({ perfil, email }: ContextoMenu): SecaoMenu[] {
     return secoes;
 }
 
-/** Barra fixa do celular: os 5 itens do vendedor. Admin e logins restritos usam só o menu lateral. */
+/** Barra fixa do celular: os itens do vendedor. Admin e logins restritos usam só o menu lateral. */
 export function itensBarraInferior({ perfil, email }: ContextoMenu): NavItem[] {
     const e = (email || '').toLowerCase();
     if (perfil !== 'vendedor' && perfil !== 'gestor') return [];

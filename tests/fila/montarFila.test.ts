@@ -109,13 +109,13 @@ test('carro compatível pelo modelo', () => {
     assert.equal(carroCompativel('HB20', estoque), null);
 });
 
-test('menu: vendedor vê só os 5 itens; gestor +4; admin em 5 grupos', () => {
+test('menu: vendedor vê os 6 itens (com a pesca); gestor +3; admin em 5 grupos', () => {
     const vendedor = secoesDoMenu({ perfil: 'vendedor', email: 'x@exemplo.test' });
-    assert.deepEqual(vendedor.flatMap(s => s.itens.map(i => i.label)), ['Minha Fila', 'Conversas', 'Agenda', 'Meus Leads', 'Perfil']);
-    assert.equal(itensBarraInferior({ perfil: 'vendedor', email: 'x@exemplo.test' }).length, 5);
+    assert.deepEqual(vendedor.flatMap(s => s.itens.map(i => i.label)), ['Minha Fila', 'Pegar leads', 'Conversas', 'Agenda', 'Meus Leads', 'Perfil']);
+    assert.equal(itensBarraInferior({ perfil: 'vendedor', email: 'x@exemplo.test' }).length, 6);
 
     const gestor = secoesDoMenu({ perfil: 'gestor', email: 'g@exemplo.test' }).flatMap(s => s.itens.map(i => i.label));
-    assert.deepEqual(gestor, ['Minha Fila', 'Conversas', 'Agenda', 'Meus Leads', 'Perfil', 'Inbox geral', 'Painel 48h', 'Perdidos', 'Conversão']);
+    assert.deepEqual(gestor, ['Minha Fila', 'Inbox geral', 'Conversas', 'Agenda', 'Meus Leads', 'Perfil', 'Painel 48h', 'Perdidos', 'Conversão']);
 
     const admin = secoesDoMenu({ perfil: 'admin', email: 'alexandre_gorges@hotmail.com' });
     assert.deepEqual(admin.map(s => s.label), ['Vendas', 'Compras', 'Financeiro', 'Gestão', 'Marketing']);

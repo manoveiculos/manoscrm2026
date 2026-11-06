@@ -12,8 +12,8 @@ interface Props {
 }
 
 /**
- * Barra fixa do celular com os 5 itens do vendedor (Fila, Conversas, Agenda,
- * Leads, Perfil). Cada alvo tem pelo menos 56 px de altura.
+ * Barra fixa do celular com os itens do vendedor (Fila, Pegar, Conversas,
+ * Agenda, Leads, Perfil). Cada alvo tem pelo menos 60 px de altura.
  */
 export function BarraInferior({ itens, ativo, onAcao, estatica = false }: Props) {
     if (itens.length === 0) return null;
@@ -25,7 +25,9 @@ export function BarraInferior({ itens, ativo, onAcao, estatica = false }: Props)
             <ul className="grid" style={{ gridTemplateColumns: `repeat(${itens.length}, minmax(0, 1fr))` }}>
                 {itens.map(item => {
                     const isAtivo = item.id === ativo;
-                    const classe = `relative flex flex-col items-center justify-center gap-1 min-h-[60px] w-full px-1 text-[11px] font-bold transition-colors ${
+                    // 6 itens em 375 px: ~62 px por coluna; fonte menor para "Conversas" caber.
+                    const fonte = itens.length > 5 ? 'text-[10px] tracking-tight' : 'text-[11px]';
+                    const classe = `relative flex flex-col items-center justify-center gap-1 min-h-[60px] w-full px-0.5 ${fonte} font-bold transition-colors ${
                         isAtivo ? 'text-white' : item.emBreve ? 'text-white/25' : 'text-white/50 active:text-white'
                     }`;
                     const conteudo = (
