@@ -9,6 +9,7 @@ import { secoesDoMenu, itensBarraInferior, itemAtivo } from '@/components/v2/men
 import { MenuSecoes } from '@/components/v2/MenuSecoes';
 import { BarraInferior } from '@/components/v2/BarraInferior';
 import { FilaView } from '@/app/fila/_components/FilaView';
+import { BannerInstalarApp } from '@/components/v2/AppInstalavel';
 import type { FilaApi } from '@/app/fila/_components/tipos';
 import { AGORA_EXEMPLO, entradaExemplo } from './exemplo';
 
@@ -28,7 +29,7 @@ const EMAIL_FICTICIO: Record<Perfil, string> = {
     admin: 'admin@exemplo.test',
 };
 
-export function PreviewFila({ vista, perfil }: { vista: 'fila' | 'menu'; perfil: Perfil }) {
+export function PreviewFila({ vista, perfil, instalar = null }: { vista: 'fila' | 'menu'; perfil: Perfil; instalar?: 'android' | 'ios' | null }) {
     const fila = useMemo(() => montarFila(entradaExemplo()), []);
     const ctx = { perfil, email: EMAIL_FICTICIO[perfil] };
     const secoes = secoesDoMenu(ctx);
@@ -61,6 +62,7 @@ export function PreviewFila({ vista, perfil }: { vista: 'fila' | 'menu'; perfil:
                     api={apiFicticia}
                     onAtualizar={() => { /* prévia */ }}
                     agoraFixo={AGORA_EXEMPLO}
+                    topo={instalar ? <BannerInstalarApp forcar={instalar} /> : null}
                 />
             </main>
 

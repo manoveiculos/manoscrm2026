@@ -34,11 +34,13 @@ interface Props {
     onResultadoGravado?: (card: CardFila, r: Resultado) => void;
     /** Relógio fixo (prévia/print). */
     agoraFixo?: number;
+    /** Conteúdo logo abaixo do título (ex.: convite para instalar o app). */
+    topo?: React.ReactNode;
 }
 
 const fmtHora = (d: Date) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 
-export function FilaView({ fila, dica, nome, aviso, carregando, erro, atualizadoEm, api, onAtualizar, onResultadoGravado, agoraFixo }: Props) {
+export function FilaView({ fila, dica, nome, aviso, carregando, erro, atualizadoEm, api, onAtualizar, onResultadoGravado, agoraFixo, topo }: Props) {
     const [agora, setAgora] = useState(() => agoraFixo ?? Date.now());
     const [cardAgendar, setCardAgendar] = useState<CardFila | null>(null);
     const [cardResultado, setCardResultado] = useState<CardFila | null>(null);
@@ -167,6 +169,8 @@ export function FilaView({ fila, dica, nome, aviso, carregando, erro, atualizado
                     {carregando ? <Loader2 size={18} className="animate-spin" /> : <RefreshCw size={18} />}
                 </button>
             </div>
+
+            {topo}
 
             {erro && (
                 <div className="mb-4 rounded-2xl border border-red-500/40 bg-red-600/10 px-4 py-3 text-sm text-red-200">

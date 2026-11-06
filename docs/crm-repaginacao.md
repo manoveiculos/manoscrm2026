@@ -179,3 +179,25 @@ Primeira versão: 176 de 185 leads caíam em "Follow-up vencido", com os mais an
 
 Resultado depois do ajuste: 34 leads em "Cliente voltou a escrever" (19 + 15), 149 em follow-up (começando pelos D1), 2 em aberto.
 A fila carrega em ~0,7–1,1 s para os dois vendedores.
+
+---
+
+## App instalável no celular (PWA) — 1ª etapa, 06/11/2026
+
+Pedido do Alexandre: "um app para mobile no estilo do GarimpoCar". O GarimpoCar (`D:\OLX EXTRATOR`) é um PWA: manifesto,
+service worker, ícone na tela inicial, abre em tela cheia, aviso offline, botão de instalar e notificação no celular (push).
+Decisão: **app agora, push depois** (o push precisa de tabela nova → migration com "aprovado" + chaves VAPID).
+
+| Peça | Onde | O que faz |
+|---|---|---|
+| Manifesto | `src/app/manifest.ts` → `/manifest.webmanifest` | "Manos CRM", tela cheia, em pé, abre em `/?app=1` (cada um cai na própria tela inicial: vendedor na Minha Fila, admin no War Room). |
+| Ícones | `public/icons/` (192, 512, maskable 512, apple-touch 180) | Logo da Manos no tamanho original sobre fundo escuro com brilho vermelho. |
+| Service worker | `public/sw.js` (+ cabeçalhos em `next.config.ts`) | **Nunca guarda página nem API** (dado de cliente; cada vendedor vê só o dele). Guarda só `/_next/static/*` e ícones. Sem internet, mostra `public/offline.html`. Só registra em produção. |
+| iPhone | `src/app/layout.tsx` (`appleWebApp`, `apple-touch-icon`, `themeColor`) | Ícone e título certos ao "Adicionar à Tela de Início". |
+| Convite | `src/components/v2/AppInstalavel.tsx` → topo da Minha Fila | Android/Chrome: botão "Instalar o app". iPhone: passo a passo do Safari. Fechou → volta em 7 dias; instalado → some. |
+
+Testado com `next start` (modo produção, env falso): manifesto e ícones servidos, `sw.js` com `Cache-Control: no-cache` e CSP
+`'self'`, service worker registrado e ativo, cache só com arquivos fixos (0 páginas, 0 respostas de API).
+
+**2ª etapa (push), quando aprovado:** tabela de inscrições (com RLS), chaves VAPID nas variáveis da Hostinger, `web-push` no
+servidor e os avisos: "lead quente esperando há 15 min", "cliente voltou a escrever", "visita amanhã".
