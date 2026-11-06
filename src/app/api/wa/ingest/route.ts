@@ -3,9 +3,12 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { createClient } from '@/lib/supabase/admin';
 import { ingerirWebhook, processarMidiasPendentes, registrarErro } from '@/lib/whatsapp/ingestao';
 import { msgErro } from '@/lib/whatsapp/erro';
+import { rodarLauraDepoisDaIngestao } from '@/lib/whatsapp/ia/motor';
 
 /**
- * POST /api/wa/ingest — ingestão do WhatsApp da loja (modo sombra, Fase 2).
+ * POST /api/wa/ingest — ingestão do WhatsApp da loja (Fase 2). PERMANENTE:
+ * a tela Conversas e a Laura do CRM dependem dela; não desligar no fim do
+ * modo sombra (decisão do Alexandre, 06/11/2026).
  *
  * Quem chama: nó HTTP do n8n, em paralelo ao fluxo da Laura, com o corpo cru
  * do webhook da Evolution. Passo a passo: docs/whatsapp-n8n-passos.md.
@@ -70,6 +73,18 @@ export async function POST(req: NextRequest) {
                     await processarMidiasPendentes(pendentes);
                 } catch (e) {
                     await registrarErro(createClient(), `pós-resposta (mídia): ${msgErro(e)}`, payload, 'wa_midia');
+                }
+            });
+        }
+        // Laura do CRM (etapa B = ensaio: escreve o rascunho, não envia). Desligada
+        // por padrão: só roda com WA_IA_ATIVA=true e o botão do admin em "ensaio".
+        const gatilhos = r.novasDoCliente;
+        if (gatilhos.length && process.env.WA_IA_ATIVA?.trim() === 'true') {
+            after(async () => {
+                try {
+                    await rodarLauraDepoisDaIngestao(gatilhos);
+                } catch (e) {
+                    await registrarErro(createClient(), `pós-resposta (laura-crm): ${msgErro(e)}`, null, 'wa_ia');
                 }
             });
         }

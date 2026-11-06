@@ -74,11 +74,12 @@ export function paraMensagemView(r: Linha): MensagemView {
     };
 }
 
-function paraConversaItem(r: Linha, extras: { selo?: ConversaItem['selo']; carro?: string | null; vendedorNome?: string | null }): ConversaItem {
+function paraConversaItem(r: Linha, extras: { selo?: ConversaItem['selo']; carro?: string | null; vendedorNome?: string | null; nomeCliente?: string | null }): ConversaItem {
     const ult = Array.isArray(r.wa_mensagens) ? r.wa_mensagens[0] : null;
     return {
         id: r.id,
-        nome: r.nome_contato ?? null,
+        // nome que o cliente disse (Laura do CRM) vence o nome do perfil do WhatsApp
+        nome: extras.nomeCliente || r.nome_contato || null,
         telefoneKey: r.telefone_key,
         leadUid: r.lead_uid ?? null,
         vendedorId: r.assigned_consultant_id ?? null,
@@ -120,6 +121,23 @@ async function enriquecerLeads(admin: SupabaseClient, uids: string[]): Promise<M
     return out;
 }
 
+/**
+ * Nome que o cliente informou (wa_conversas.nome_cliente, gravado pela Laura do
+ * CRM). Consulta à parte e tolerante: antes da migration 20261106 a coluna não
+ * existe e a tela segue com o nome do perfil do WhatsApp.
+ */
+async function nomesInformados(sessao: SupabaseClient, id?: string): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    try {
+        let q = sessao.from('wa_conversas').select('id, nome_cliente').not('nome_cliente', 'is', null);
+        q = id ? q.eq('id', id) : q.order('ultima_mensagem_em', { ascending: false, nullsFirst: false }).limit(1000);
+        const { data, error } = await q;
+        if (error) return out;
+        for (const r of (data || []) as Linha[]) if (r.nome_cliente) out.set(r.id, r.nome_cliente);
+    } catch { /* coluna ainda não existe */ }
+    return out;
+}
+
 // O "!wa_mensagens_conversa_id_fkey" diz ao PostgREST qual caminho usar: wa_acessos_log
 // também liga wa_conversas a wa_mensagens e, sem a dica, a consulta fica ambígua.
 const SELECT_CONVERSA =
@@ -143,8 +161,9 @@ export async function listarConversas(ctx: Extract<ContextoWa, { ok: true }>, op
     const gestao = ctx.eu.perfil === 'admin' || ctx.eu.perfil === 'gestor';
     const vendedores = new Map<string, string>();
     const idsVendedor = [...new Set(linhas.map(r => r.assigned_consultant_id).filter(Boolean))] as string[];
-    const [leads] = await Promise.all([
+    const [leads, nomes] = await Promise.all([
         enriquecerLeads(ctx.admin, uids),
+        nomesInformados(ctx.sessao),
         gestao && idsVendedor.length
             ? ctx.admin.from('consultants_manos_crm').select('id, name').in('id', idsVendedor)
                 .then(({ data: vs }) => { for (const v of vs || []) vendedores.set(v.id, v.name); })
@@ -154,6 +173,7 @@ export async function listarConversas(ctx: Extract<ContextoWa, { ok: true }>, op
     return linhas.map(r => paraConversaItem(r, {
         ...(r.lead_uid ? leads.get(r.lead_uid) : undefined),
         vendedorNome: r.assigned_consultant_id ? vendedores.get(r.assigned_consultant_id) ?? null : null,
+        nomeCliente: nomes.get(r.id) ?? null,
     }));
 }
 
@@ -196,14 +216,17 @@ export async function detalheConversa(
     }
 
     const c = conv as Linha;
-    const leads = c.lead_uid ? await enriquecerLeads(ctx.admin, [c.lead_uid]) : new Map();
+    const [leads, nomes] = await Promise.all([
+        c.lead_uid ? enriquecerLeads(ctx.admin, [c.lead_uid]) : Promise.resolve(new Map()),
+        nomesInformados(ctx.sessao, c.id),
+    ]);
     let vendedorNome: string | null = null;
     if (c.assigned_consultant_id) {
         const { data: v } = await ctx.admin.from('consultants_manos_crm').select('name').eq('id', c.assigned_consultant_id).maybeSingle();
         vendedorNome = v?.name ?? null;
     }
     return {
-        conversa: paraConversaItem(c, { ...(c.lead_uid ? leads.get(c.lead_uid) : undefined), vendedorNome }),
+        conversa: paraConversaItem(c, { ...(c.lead_uid ? leads.get(c.lead_uid) : undefined), vendedorNome, nomeCliente: nomes.get(c.id) ?? null }),
         mensagens,
         citadas,
         temMais,

@@ -5,7 +5,8 @@ import { SeloQualificacao } from '@/components/qualificacao/SeloQualificacao';
 import { ConversasView } from '@/app/conversas/_components/ConversasView';
 import type { UrlMidia } from '@/app/conversas/_components/Midias';
 import type { ConversaItem } from '@/lib/whatsapp/conversasView';
-import { AGORA_EXEMPLO, CONVERSAS_EXEMPLO, detalheExemplo } from './exemplo';
+import { BarraLauraCrmView, CartoesEnsaio } from '@/app/conversas/_components/LauraCrm';
+import { AGORA_EXEMPLO, BARRA_IA_EXEMPLO, CONVERSAS_EXEMPLO, RODADAS_EXEMPLO, detalheExemplo } from './exemplo';
 
 /** Foto fictícia desenhada na hora (sem arquivo, sem rede). */
 function fotoSvg(texto: string): string {
@@ -78,6 +79,8 @@ export function PreviewConversas({ vista, perfil }: { vista: 'lista' | 'conversa
             urlMidia={url}
             renderFicha={(c) => <FichaFicticia c={c} />}
             agoraFixo={AGORA_EXEMPLO}
+            renderBarraIa={() => <BarraLauraCrmView dados={BARRA_IA_EXEMPLO} salvando={false} erro={null} onMudar={() => undefined} />}
+            renderEnsaio={(_c, agora) => <CartoesEnsaio rodadas={RODADAS_EXEMPLO} carregando={false} erro={null} agora={agora} onAtualizar={() => undefined} />}
         />
         </div>
     );

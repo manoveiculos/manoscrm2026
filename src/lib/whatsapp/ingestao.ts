@@ -42,6 +42,8 @@ export interface ResultadoIngestao {
     ignorados: Record<string, number>;
     erros: string[];
     midiasPendentes: MidiaPendente[];
+    /** Mensagens novas de cliente (não de consultor, não reação): disparam a Laura do CRM. */
+    novasDoCliente: { conversaId: string; mensagemId: string; criadaEm: string }[];
 }
 
 export interface OpcoesIngestao {
@@ -157,6 +159,9 @@ async function aplicarEvento(
         const out = data as { conversa_id: string; mensagem_id: string; nova: boolean };
         if (!out?.nova) { r.repetidas++; return; }
         r.gravadas++;
+        if (!e.fromMe && !deConsultor && e.tipo !== 'reacao') {
+            r.novasDoCliente.push({ conversaId: out.conversa_id, mensagemId: out.mensagem_id, criadaEm: e.enviadaEm });
+        }
         if (tipoTemMidia(e.tipo) && e.midia) {
             r.midiasPendentes.push({ mensagemId: out.mensagem_id, conversaId: out.conversa_id, evento: e, deConsultor });
         }
@@ -205,7 +210,7 @@ export async function ingerirWebhook(payload: unknown, opcoes: OpcoesIngestao): 
     const opts = { instancia: opcoes.instancia, autorFromMe: opcoes.autorFromMe ?? 'laura' } as const;
     const r: ResultadoIngestao = {
         eventos: 0, gravadas: 0, repetidas: 0, edicoes: 0, apagadas: 0, status: 0,
-        ignorados: {}, erros: [], midiasPendentes: [],
+        ignorados: {}, erros: [], midiasPendentes: [], novasDoCliente: [],
     };
 
     const eventos = parseEvolutionWebhook(payload);
