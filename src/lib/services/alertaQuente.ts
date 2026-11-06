@@ -4,6 +4,7 @@ import { pisoEstoque } from './qualificacaoService';
 import { notifyConsultant } from './consultantNotifier';
 import { businessSecondsBetween, horarioLoja, isOpenNow } from './slaEngine';
 import { etapaDoStatus, triagemAtrasada } from '@/constants/funil';
+import { enviarPushParaConsultor } from '@/lib/push/enviarPush';
 
 /**
  * O ÚNICO alerta de SLA que sobra: "lead Quente sem resposta humana há 15 min".
@@ -148,6 +149,16 @@ export async function alertarQuentesSemResposta(): Promise<{ candidatos: number;
                 message: `Cliente com entrada/troca e compra em até 30 dias esperando um humano. Abra: ${link}`,
                 blocking: consultantId === c.consultantId,
             });
+        }
+        // Aviso no celular só para o dono (o gestor já recebe o alerta acima).
+        // Best-effort: sem chaves/tabela de push, não faz nada.
+        if (c.consultantId) {
+            await enviarPushParaConsultor(c.consultantId, {
+                titulo: '🔥 Lead quente esperando há 15 min',
+                corpo: 'Cliente com entrada ou troca e compra em até 30 dias está esperando um humano. Toque para abrir a Minha Fila.',
+                url: '/fila',
+                tag: `quente-${c.uid}`,
+            }).catch(() => null);
         }
         alertados++;
     }
