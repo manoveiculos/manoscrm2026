@@ -1,6 +1,8 @@
 -- ===========================================================================
 -- NOTIFICAÇÃO NO CELULAR (web push) — app instalável, 2ª etapa
--- Data: 2026-11-06 · Programa Growth 360 · NÃO APLICAR sem o "aprovado" do Alexandre
+-- Data: 2026-11-06 · Programa Growth 360
+-- APLICADA em produção em 06/11/2026 (~01:25 BRT), com o "aprovado" do Alexandre.
+-- Conferido depois: RLS ligado, 0 linhas, anon sem privilégio, authenticated só SELECT.
 --
 -- O que cria (só objetos NOVOS; nenhuma definição existente é alterada):
 --   tabela push_inscricoes — um registro por celular/navegador que aceitou
