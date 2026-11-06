@@ -99,6 +99,11 @@ Wilson (Terceiros + Leads WhatsApp, em "Seus módulos"), Ledra (Financeiro), Mil
 3. "Ligar" conta só como contato humano (`ultima_interacao_humana` + nota); não grava `first_contact_at`. O 1º atendimento passa a
    ser medido pela 1ª mensagem humana quando a Fase 2 estiver no ar.
 
+**Decisões do Alexandre (06/11, depois do teste no ar):**
+4. Saem do menu do vendedor: "Seus módulos" com Negociação Terceiros e Leads WhatsApp (seguem no menu do admin e abrem pelo
+   endereço) e os sinos "Pressão de Cobrança" e "Notificações", que só gestor e admin veem. Junto com os sinos saem os sons de
+   "lead esfriando" e "lead novo na pesca" para o vendedor. O "Financeiro" do Ledra continua no menu dele.
+
 ### Minha Fila (`/fila`)
 
 - Dados: `GET /api/fila`. O servidor confere a sessão e monta a fila só do consultor logado; a chave de serviço não vai ao navegador.

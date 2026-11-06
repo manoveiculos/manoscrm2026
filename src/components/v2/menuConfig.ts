@@ -173,10 +173,25 @@ export function secoesDoMenu({ perfil, email }: ContextoMenu): SecaoMenu[] {
     if (perfil === 'gestor') {
         secoes.push({ id: 'gestao', label: 'Gestão', recolhivel: false, itens: NAV_ITEMS.filter(i => i.nivel === 'gestor') });
     }
-    // Módulos dados a uma pessoa específica (ex.: Wilson → Terceiros; Ledra → Financeiro).
-    const extras = NAV_ITEMS.filter(i => i.nivel === 'admin' && i.exclusivo && podeVerExclusivo(i.exclusivo, e, false));
+    // Módulos dados a uma pessoa específica (ex.: Ledra → Financeiro).
+    // Negociação Terceiros e Leads WhatsApp saíram do menu do vendedor por
+    // decisão do Alexandre (06/11): continuam no menu dele (admin) e abrem
+    // pelo endereço para o Wilson.
+    const extras = NAV_ITEMS.filter(i =>
+        i.nivel === 'admin' && i.exclusivo && i.exclusivo !== 'terceiros'
+        && podeVerExclusivo(i.exclusivo, e, false));
     if (extras.length) secoes.push({ id: 'extras', label: 'Seus módulos', recolhivel: false, itens: extras });
     return secoes;
+}
+
+/**
+ * Sinos "Pressão de Cobrança" (leads esfriando) e "Notificações" (lead novo na
+ * pesca) no menu lateral: só gestor e admin. Saíram do menu do vendedor por
+ * decisão do Alexandre (06/11). Com eles saem também os sons desses avisos;
+ * o vendedor trabalha pela Minha Fila e pelo "Pegar leads".
+ */
+export function mostrarSinos(perfil: Perfil | null): boolean {
+    return perfil === 'gestor' || perfil === 'admin';
 }
 
 /** Barra fixa do celular: os itens do vendedor. Admin e logins restritos usam só o menu lateral. */

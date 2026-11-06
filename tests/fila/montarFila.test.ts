@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { montarFila, cadenciaVencida, carroCompativel, type LeadFila } from '@/lib/fila/montarFila';
 import { AGORA_EXEMPLO, entradaExemplo } from '@/app/dev/fila/exemplo';
-import { secoesDoMenu, itensBarraInferior } from '@/components/v2/menuConfig';
+import { secoesDoMenu, itensBarraInferior, mostrarSinos } from '@/components/v2/menuConfig';
 import { perfilDoConsultor } from '@/lib/perfil';
 
 const nomesDa = (fila: ReturnType<typeof montarFila>, secao: string) =>
@@ -128,8 +128,21 @@ test('menu: vendedor vê os 6 itens (com a pesca); gestor +3; admin em 5 grupos'
 test('menu: regras por pessoa continuam (Camila, Paulo, Wilson)', () => {
     assert.deepEqual(secoesDoMenu({ perfil: 'vendedor', email: 'camilarenatta@hotmail.com' }).flatMap(s => s.itens.map(i => i.href)), ['/admin/cobranca']);
     assert.deepEqual(secoesDoMenu({ perfil: 'vendedor', email: 'paulo@manoscrm.com' }).flatMap(s => s.itens.map(i => i.href)), ['/compras', '/repasse']);
-    const wilson = secoesDoMenu({ perfil: 'vendedor', email: 'dultra49@gmail.com' }).flatMap(s => s.itens.map(i => i.href));
-    assert.ok(wilson.includes('/negociacao-terceiros') && wilson.includes('/fila'));
+    // Decisão de 06/11: Terceiros e Leads WhatsApp saem do menu do vendedor (Wilson)…
+    const wilson = secoesDoMenu({ perfil: 'vendedor', email: 'dultra49@gmail.com' });
+    const wilsonHrefs = wilson.flatMap(s => s.itens.map(i => i.href));
+    assert.ok(wilsonHrefs.includes('/fila') && !wilsonHrefs.includes('/negociacao-terceiros') && !wilsonHrefs.includes('/leads-whatsapp'));
+    assert.ok(!wilson.some(s => s.id === 'extras'));
+    // …mas continuam no menu do Alexandre, e o Financeiro do Ledra fica.
+    const alexandre = secoesDoMenu({ perfil: 'admin', email: 'alexandre_gorges@hotmail.com' }).flatMap(s => s.itens.map(i => i.href));
+    assert.ok(alexandre.includes('/negociacao-terceiros') && alexandre.includes('/leads-whatsapp'));
+    const ledra = secoesDoMenu({ perfil: 'vendedor', email: 'hgledra@hotmail.com' }).flatMap(s => s.itens.map(i => i.href));
+    assert.ok(ledra.includes('/financeiro'));
+    // Sinos: só gestor e admin.
+    assert.equal(mostrarSinos('vendedor'), false);
+    assert.equal(mostrarSinos(null), false);
+    assert.equal(mostrarSinos('gestor'), true);
+    assert.equal(mostrarSinos('admin'), true);
     // Admin que não é o Alexandre não vê o Milhão.
     const outroAdmin = secoesDoMenu({ perfil: 'admin', email: 'outro@exemplo.test' }).flatMap(s => s.itens.map(i => i.href));
     assert.ok(!outroAdmin.includes('/admin/milhao'));
