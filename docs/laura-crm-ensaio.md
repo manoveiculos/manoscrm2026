@@ -61,9 +61,10 @@ Evolution → n8n → nó HTTP → POST /api/wa/ingest (grava em wa_mensagens)
 
 ## Ligar o ensaio (depois do "aprovado")
 
-1. Aplicar a migration `supabase/migrations/20261106_wa_ia_ensaio.sql`
-   (ensaiada em 06/11 em `BEGIN…ROLLBACK` com `supabase/tests/wa_ia_rls.test.sql`:
-   22/22 ok, nada ficou). Ela nasce com o botão **desligado**.
+1. ✅ Migration `supabase/migrations/20261106_wa_ia_ensaio.sql` **APLICADA em
+   06/11/2026 ~08:45** com o "aprovado" do Alexandre (ensaiada antes em
+   `BEGIN…ROLLBACK`; teste `supabase/tests/wa_ia_rls.test.sql` no banco real: 22/22).
+   O botão nasceu **desligado**.
 2. Deploy do código (fora do horário comercial, fast-forward no `main`).
 3. Na Hostinger: `WA_IA_ATIVA=true`. Conferir que `API_CLAUDE` existe (é a chave
    da Anthropic que o CRM já usa). **Não** criar `WA_IA_ENVIO_LIBERADO`.

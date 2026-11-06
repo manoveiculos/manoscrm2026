@@ -30,6 +30,11 @@
 -- ENSAIADA em produção em 06/11/2026 ~06:15 (Brasília), dentro de
 -- BEGIN … ROLLBACK junto com o teste: "WA_IA PASSOU — 22 verificações ok".
 -- Conferido em seguida: 0 tabelas wa_ia_*, 0 colunas novas, 0 dados de teste.
+--
+-- APLICADA em produção em 06/11/2026 ~08:45 (Brasília), com o "aprovado" do
+-- Alexandre (versão no histórico do Supabase: 20261106114138 wa_ia_ensaio).
+-- Teste de acesso rodado no banco real logo depois: 22/22 ok. Botão nasceu
+-- "desligada"; 5 conversas e 55 mensagens intactas; ingestão sem erro.
 -- ===========================================================================
 
 SET lock_timeout = '5s';
