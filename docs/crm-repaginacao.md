@@ -214,6 +214,9 @@ servidor e os avisos: "lead quente esperando há 15 min", "cliente voltou a escr
 | Avisos ligados | "🔥 Lead quente esperando há 15 min" (em `alertaQuente`, só para o dono, 1 vez por lead) e "📅 Visita hoje/amanhã às HH:MM" / "⏰ Visita em 2 horas" (em `/api/cron/agenda-lembretes`, junto com os lembretes do n8n). Sem nome nem telefone do cliente (tela bloqueada). |
 | Para a Fase 2 | "Cliente escreveu": chamar `enviarPushParaConsultor(consultorId, { titulo, corpo, url, tag })` na ingestão do WhatsApp. |
 
+**Situação em 06/11/2026 01:35:** migration **aplicada** (~01:25) e código **publicado** (merge b5dcaf6, no ar 01:35).
+Falta só o passo 3 (chaves na Hostinger) para os avisos ligarem.
+
 **Ordem para ligar:** (1) publicar o código — seguro, os avisos ficam desligados; (2) aplicar a migration (aprovado);
 (3) gerar as chaves (`npx web-push generate-vapid-keys`) e cadastrar `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` e `VAPID_SUBJECT`
 nas variáveis da Hostinger, reiniciando o app; (4) no celular: Minha Fila → "Ativar avisos".
