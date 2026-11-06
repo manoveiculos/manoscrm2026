@@ -7,6 +7,7 @@
   },
   "scripts": {
     "dev": "next dev",
+    "test:whatsapp": "node --test src/lib/whatsapp/__tests__/evolutionParser.test.mjs",
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",

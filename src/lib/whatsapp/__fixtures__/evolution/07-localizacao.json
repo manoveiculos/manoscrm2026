@@ -1,0 +1,25 @@
+{
+  "event": "messages.upsert",
+  "instance": "loja-exemplo",
+  "data": {
+    "key": {
+      "remoteJid": "5547988880001@s.whatsapp.net",
+      "fromMe": false,
+      "id": "3EB0A1B2C3D4E5F6A7B807"
+    },
+    "pushName": "Cliente Exemplo",
+    "message": {
+      "locationMessage": {
+        "degreesLatitude": -27.2142,
+        "degreesLongitude": -49.6431,
+        "name": "Ponto de referência",
+        "address": "Centro, Rio do Sul - SC",
+        "jpegThumbnail": "/9j/4AAQ"
+      }
+    },
+    "messageType": "locationMessage",
+    "messageTimestamp": 1793800360,
+    "source": "android"
+  },
+  "date_time": "2026-11-04T13:52:40.000Z"
+}

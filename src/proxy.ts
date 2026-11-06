@@ -54,6 +54,7 @@ export async function middleware(request: NextRequest) {
         '/api/compras/webhooks',        // trigger do Postgres
         '/api/laura',                   // ferramentas da IA no n8n — valida LAURA_API_KEY
         '/api/leads/rescue-stale',      // agendador externo, tem segredo proprio
+        '/api/wa/ingest',               // n8n (WhatsApp da loja) — valida WHATSAPP_INGEST_SECRET
     ];
     const isPublicApi = PUBLIC_API_PREFIXES.some(prefix => path === prefix || path.startsWith(prefix + '/'));
     const isEmbed = path === '/pipeline/embed';

@@ -1,0 +1,27 @@
+{
+  "event": "messages.upsert",
+  "instance": "loja-exemplo",
+  "data": {
+    "key": {
+      "remoteJid": "5547988880001@s.whatsapp.net",
+      "fromMe": false,
+      "id": "3EB0A1B2C3D4E5F6A7B809"
+    },
+    "pushName": "Cliente Exemplo",
+    "message": {
+      "reactionMessage": {
+        "key": {
+          "remoteJid": "5547988880001@s.whatsapp.net",
+          "fromMe": true,
+          "id": "3EB0LAURA00000000000001"
+        },
+        "text": "👍",
+        "senderTimestampMs": "1793800480000"
+      }
+    },
+    "messageType": "reactionMessage",
+    "messageTimestamp": 1793800480,
+    "source": "android"
+  },
+  "date_time": "2026-11-04T13:54:40.000Z"
+}

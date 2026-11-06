@@ -1,0 +1,10 @@
+{
+  "event": "messages.delete",
+  "instance": "loja-exemplo",
+  "data": {
+    "remoteJid": "5547988880001@s.whatsapp.net",
+    "fromMe": false,
+    "id": "3EB0A1B2C3D4E5F6A7B802"
+  },
+  "date_time": "2026-11-04T10:41:40.000Z"
+}
