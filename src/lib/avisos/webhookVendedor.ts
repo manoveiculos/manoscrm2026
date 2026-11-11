@@ -6,11 +6,21 @@
 //
 // O corpo leva os campos do fluxo (vendedor, vendedor_lower, mensagem) e também os que o CRM
 // já mandava (consultant_name, type, message, meta), para nada antigo quebrar.
+//
+// Telefone: sempre 55 + DDD + número, só dígitos (ex.: 5547988467855), em `telefone` e em
+// `consultant_phone`. Número que não fecha nesse formato vai vazio (nunca meio número).
+
+import { normalizarTelefoneBR } from '@/lib/telefone';
 
 export const WEBHOOK_VENDEDOR_PADRAO = 'https://n8n.drivvoo.com/webhook/chamadavendedorcrm';
 
 export function urlWebhookVendedor(): string {
     return (process.env.N8N_VENDOR_WEBHOOK_URL || WEBHOOK_VENDEDOR_PADRAO).trim();
+}
+
+/** Telefone do consultor no formato do webhook: "5547988467855", ou "" se não for válido. */
+export function telefoneDoAviso(bruto: string | null | undefined): string {
+    return normalizarTelefoneBR(bruto) ?? '';
 }
 
 /** "Sérgio Silva" → "sergio": primeiro nome, minúsculo, sem acento (é a chave do Switch no n8n). */
@@ -33,10 +43,11 @@ export function corpoDoAviso(a: AvisoVendedor): Record<string, unknown> {
         vendedor: (a.nome || '').trim(),
         vendedor_lower: chaveDoNome(a.nome),
         mensagem: a.mensagem,
+        telefone: telefoneDoAviso(a.telefone),
         tipo: a.tipo,
         // formato antigo do CRM (mantido)
         consultant_name: (a.nome || '').trim(),
-        consultant_phone: (a.telefone || '').replace(/\D/g, ''),
+        consultant_phone: telefoneDoAviso(a.telefone),
         type: a.tipo,
         message: a.mensagem,
         meta: a.meta ?? {},
@@ -44,8 +55,14 @@ export function corpoDoAviso(a: AvisoVendedor): Record<string, unknown> {
 }
 
 /** Acrescenta os campos de rota por nome a um corpo no formato antigo ({ consultant_name, message }). */
-export function comRotaPorNome<T extends { consultant_name?: string | null; message?: string | null }>(corpo: T): T & { vendedor: string; vendedor_lower: string; mensagem: string } {
-    return { ...corpo, vendedor: (corpo.consultant_name || '').trim(), vendedor_lower: chaveDoNome(corpo.consultant_name), mensagem: corpo.message || '' };
+export function comRotaPorNome<T extends { consultant_name?: string | null; consultant_phone?: string | null; message?: string | null }>(
+    corpo: T,
+): T & { vendedor: string; vendedor_lower: string; mensagem: string; telefone: string; consultant_phone: string } {
+    const telefone = telefoneDoAviso(corpo.consultant_phone);
+    return {
+        ...corpo, consultant_phone: telefone, telefone,
+        vendedor: (corpo.consultant_name || '').trim(), vendedor_lower: chaveDoNome(corpo.consultant_name), mensagem: corpo.message || '',
+    };
 }
 
 /** Envia o aviso. Nunca lança: devolve ok/erro para quem chamou decidir o que fazer. */
