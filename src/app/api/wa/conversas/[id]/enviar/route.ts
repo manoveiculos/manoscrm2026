@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { contextoWa } from '@/lib/whatsapp/leituraServidor';
 import { providerLoja } from '@/lib/whatsapp/evolutionProvider';
-import { enviarPeloCrm, envioPeloCrmLiberado, type ConteudoEnvio } from '@/lib/whatsapp/envio';
+import { enviarFotosPorUrl, enviarPeloCrm, envioPeloCrmLiberado, type ConteudoEnvio } from '@/lib/whatsapp/envio';
+import { estoqueAtual } from '@/lib/estoque';
 import { msgErro } from '@/lib/whatsapp/erro';
 
 /**
@@ -39,8 +40,17 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const { data: conv } = await ctx.sessao.from('wa_conversas').select('id, telefone_key, remote_jid').eq('id', id).maybeSingle();
     if (!conv) return NextResponse.json({ success: false, error: 'conversa não encontrada' }, { status: 404, headers: SEM_CACHE });
 
+    // Fotos do estoque junto com o texto: { texto, carroId, fotos: 1..6 }. As URLs vêm do feed, não do navegador.
+    const carroId = typeof corpo?.carroId === 'string' ? corpo.carroId.trim() : '';
+    const qtdFotos = Math.min(Math.max(Math.floor(Number(corpo?.fotos) || 0), 0), 6);
+
     try {
-        const r = await enviarPeloCrm(ctx.admin, providerLoja(), conv, conteudo, { autor: 'vendedor', consultantId: ctx.eu.consultorId });
+        const quem = { autor: 'vendedor' as const, consultantId: ctx.eu.consultorId };
+        const r = await enviarPeloCrm(ctx.admin, providerLoja(), conv, conteudo, quem);
+        if (r.ok && carroId && qtdFotos > 0) {
+            const carro = (await estoqueAtual()).carros.find(c => c.id === carroId);
+            if (carro) await enviarFotosPorUrl(ctx.admin, providerLoja(), conv, carro.fotos.slice(0, qtdFotos), quem);
+        }
         if (!r.ok) return NextResponse.json({ success: false, error: r.erro || 'não foi possível enviar' }, { status: 502, headers: SEM_CACHE });
         return NextResponse.json({ success: true, providerMessageId: r.providerMessageId }, { headers: SEM_CACHE });
     } catch (e) {

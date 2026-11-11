@@ -108,7 +108,7 @@ export function ConversasView({
                     mostrarBotaoFicha={Boolean(conversa)}
                     ensaio={ensaio}
                     rodape={conversa && process.env.NEXT_PUBLIC_WA_ENVIO === 'true'
-                        ? <Compositor key={conversa.id} conversaId={conversa.id} status={conversa.status} onAtualizar={onAtualizar} />
+                        ? <Compositor key={conversa.id} conversaId={conversa.id} status={conversa.status} onAtualizar={onAtualizar} consultor={conversa.vendedorNome} cliente={conversa.nome} />
                         : undefined}
                 />
             </main>

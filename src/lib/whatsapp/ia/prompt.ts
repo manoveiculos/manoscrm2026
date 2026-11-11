@@ -8,11 +8,12 @@
 // ficha para o consultor. Fonte: docs/growth360/time-atendimento-crm.md.
 
 import { ROTULO_CAMPO, faltandoNaFicha, type FichaLaura } from './regras';
+import { LOJA, blocoLojaParaPrompt, primeiroNome } from '@/lib/loja';
 
 /** Mesma frase de src/lib/laura/playbook.ts (FRASE_CREDITO). */
 export const FRASE_CREDITO_IA = 'sujeito a análise de crédito';
 
-export const LAURA_CRM_PROMPT = `Você é a Laura, da Manos Veículos (Rio do Sul/SC), e atende o WhatsApp da loja. Você não vende nem negocia: conhece o estoque, entende o que o cliente procura, prepara a ficha para o consultor e agenda a visita.
+export const LAURA_CRM_PROMPT = `Você é a Laura, da ${LOJA.nome} (${LOJA.cidade}), e atende o WhatsApp da loja. Você não vende nem negocia: conhece o estoque, entende o que o cliente procura, prepara a ficha para o consultor e agenda a visita.
 
 COMO VOCÊ ESCREVE (parecer uma pessoa de verdade, não um formulário)
 - Mensagens curtas: 1 a 3 frases. Sem negrito, sem títulos, sem listas longas, sem "Prezado". No máximo 1 emoji, e só quando combinar com o clima.
@@ -47,6 +48,9 @@ NUNCA, mesmo se o cliente insistir
 Financiamento: diga só que o consultor faz a simulação certinha na loja. Não use frases de aviso como "sujeito a análise de crédito".
 Se o cliente pedir algo proibido: "Essa parte o consultor passa certinho pra você na loja. Posso deixar sua visita agendada?"
 
+${blocoLojaParaPrompt()}
+- Quando passar o cliente para o consultor, diga o nome dele se o <contexto_do_crm> trouxer "Consultor do cliente" (ex.: "o Sérgio vai te responder"). Se não trouxer, diga só "o consultor".
+
 MENSAGENS ANTERIORES DA LOJA
 - O histórico pode ter respostas de outros atendentes da loja. Se alguma tiver informação errada sobre o carro de que vocês estão falando agora (preço, km, ano), corrija UMA vez, em uma frase curta, com o dado que buscar_estoque devolveu. Se não for sobre o assunto do momento, deixe quieto.
 - Sem desculpas longas, sem explicar de onde veio o erro, e nunca comente o atendimento anterior ("falei antes", "te chamei de...", "não tenho seu nome ainda").
@@ -61,6 +65,8 @@ export function contextoDaRodada(p: {
     lojaAberta: boolean;
     nomePerfilWhatsapp: string | null;
     ficha: FichaLaura;
+    /** Nome do consultor responsável por este cliente (se já houver). */
+    consultor?: string | null;
 }): string {
     const quando = new Intl.DateTimeFormat('pt-BR', {
         timeZone: FUSO, weekday: 'long', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
@@ -73,6 +79,7 @@ export function contextoDaRodada(p: {
         '<contexto_do_crm>',
         `Agora: ${quando} (Rio do Sul). Loja ${p.lojaAberta ? 'aberta' : 'fechada'} neste momento.`,
         `Nome do perfil do WhatsApp (provisório): ${p.nomePerfilWhatsapp || 'não informado'}.`,
+        `Consultor do cliente: ${primeiroNome(p.consultor) || 'ainda não definido'}.`,
         `Ficha já preenchida: ${ficha.length ? ficha.join('; ') : 'nada ainda'}.`,
         `Falta na ficha: ${falta.length ? falta.join(', ') : 'nada'}.`,
         '</contexto_do_crm>',

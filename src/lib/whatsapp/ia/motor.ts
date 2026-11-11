@@ -221,7 +221,13 @@ export async function rodarLaura(g: GatilhoIa): Promise<void> {
         ctx.estoque = estoque;
         ctx.horario = horario;
 
+        let consultor: string | null = null;
+        if (conversa.assigned_consultant_id) {
+            const { data: cn } = await supabase.from('consultants_manos_crm').select('name').eq('id', conversa.assigned_consultant_id).maybeSingle();
+            consultor = (cn?.name as string | null) ?? null;
+        }
         const bloco = contextoDaRodada({
+            consultor,
             agora: ctx.agora,
             lojaAberta: isOpenNow(ctx.agora, horario.horas, horario.feriados),
             nomePerfilWhatsapp: conversa.nome_contato,

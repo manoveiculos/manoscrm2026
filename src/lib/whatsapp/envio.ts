@@ -149,3 +149,32 @@ export async function marcarHumanoSeNecessario(
     }
     return n;
 }
+
+/**
+ * Fotos do estoque (por URL) depois do texto do carro. Registra cada uma como do vendedor, igual ao envio normal.
+ * As URLs vêm do feed da Altimus (o servidor confere o carro; nunca aceita URL solta do navegador).
+ */
+export async function enviarFotosPorUrl(
+    admin: SupabaseClient,
+    provider: WhatsAppProvider,
+    conv: ConversaEnvio,
+    urls: string[],
+    quem: QuemEnviou,
+    pausaMs = 1200,
+): Promise<number> {
+    const para = conv.remote_jid || conv.telefone_key;
+    let enviadas = 0;
+    for (const url of urls) {
+        if (enviadas > 0 && pausaMs > 0) await new Promise(r => setTimeout(r, pausaMs));
+        const r = await provider.enviarMidia(para, { tipo: 'imagem', url, mime: 'image/jpeg' }).catch(() => null);
+        if (!r?.ok || !r.providerMessageId) continue;
+        enviadas++;
+        await admin.rpc('wa_registrar_mensagem', { p: {
+            telefone: conv.telefone_key, remote_jid: conv.remote_jid, provider_message_id: r.providerMessageId,
+            autor: quem.autor, consultant_id: quem.consultantId ?? null, tipo: 'imagem', midia_mime: 'image/jpeg',
+            status_entrega: 'enviada', origem: 'crm', criada_em: new Date().toISOString(),
+        } });
+        await admin.from('wa_mensagens').update({ autor: quem.autor, consultant_id: quem.consultantId ?? null, origem: 'crm' }).eq('provider_message_id', r.providerMessageId);
+    }
+    return enviadas;
+}
