@@ -21,6 +21,7 @@
     "test:identificacao": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/identificacao/identificacao.test.ts",
     "test:prontidao": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/whatsapp/prontidao.test.ts",
     "test:atalhos": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/whatsapp/atalhos.test.ts",
+    "test:passagens": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/whatsapp/passagens.test.ts",
     "test:laura": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/whatsapp/laura.test.ts"
   },
   "dependencies": {
