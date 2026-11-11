@@ -10,6 +10,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/admin';
 import { getInventory } from '@/lib/services/altimusInventory';
 import { msgErro } from '@/lib/whatsapp/erro';
+import { identificacaoLigada } from './chave';
 import { extrairNome, nomeDoPerfilAceito } from './nome';
 import { carroDoAnuncio, carroDoLinkDoSite, carrosCitados, type CarroInteresse } from './veiculo';
 import { atualizarNomeLead, registrarInteresse } from './gravar';
@@ -19,10 +20,7 @@ export interface MensagemParaIdentificar {
     mensagemId: string;
 }
 
-/** Desligada por padrão: só liga com WA_IDENTIFICACAO=on, depois da migration 20261107_nome_interesse_auto. */
-export function identificacaoLigada(): boolean {
-    return (process.env.WA_IDENTIFICACAO || '').trim().toLowerCase() === 'on';
-}
+export { identificacaoLigada };
 
 const POR = 'crm:ingestao';
 

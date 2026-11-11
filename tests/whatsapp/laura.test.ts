@@ -273,7 +273,9 @@ function bancoFicticio(tabelas: Record<string, Linha[]>) {
         };
         return b;
     };
-    return { supabase: { from } as unknown as ContextoRodada['supabase'], updates, tabelas };
+    const rpcs: { nome: string; args: Linha }[] = [];
+    const rpc = async (nome: string, args: Linha) => { rpcs.push({ nome, args }); return { data: nome === 'atualizar_cidade_lead' ? 1 : { ok: true, aplicados: 1 }, error: null }; };
+    return { supabase: { from, rpc } as unknown as ContextoRodada['supabase'], updates, tabelas, rpcs };
 }
 
 function contexto(banco: ReturnType<typeof bancoFicticio>, conversa: Partial<ConversaIa>, textosDoCliente: string[]): ContextoRodada {
@@ -293,35 +295,39 @@ test('as 5 ferramentas pedidas existem para o Claude', () => {
     assert.deepEqual(FERRAMENTAS.map(f => f.name), ['buscar_estoque', 'enviar_fotos', 'salvar_ficha', 'agendar_visita', 'passar_para_consultor']);
 });
 
-test('salvar_ficha: nome dito pelo cliente vai para o lead com nome genérico e para a conversa', async () => {
+test('salvar_ficha (identificação ligada): nome, cidade e carro vão pelas funções do banco, que aplicam a prioridade', async () => {
+    process.env.WA_IDENTIFICACAO = 'on';
+    try {
+        const banco = bancoFicticio({ wa_conversas: [{ id: 'conv-1' }] });
+        const ctx = contexto(banco, {}, ['oi', 'sou o carlos, de ibirama']);
+        const { saida, erro } = await executarFerramenta('salvar_ficha', { nome: 'carlos', cidade: 'Ibirama', carro_interesse: 'onix 2018' }, ctx);
+        assert.equal(erro, false);
+        assert.deepEqual(saida.anotado, ['nome', 'cidade', 'carro_interesse']);
+        assert.equal(banco.tabelas.wa_conversas[0].ficha.carro_interesse, 'onix 2018');
+        const nome = banco.rpcs.find(r => r.nome === 'atualizar_nome_lead')!;
+        assert.equal(nome.args.p_nome, 'Carlos');
+        assert.equal(nome.args.p_origem, 'cliente_disse');
+        assert.equal(nome.args.p_por, 'laura-crm');
+        assert.equal(banco.rpcs.find(r => r.nome === 'atualizar_cidade_lead')!.args.p_cidade, 'Ibirama');
+        assert.ok(banco.rpcs.some(r => r.nome === 'registrar_interesse_lead' && r.args.p_modelo_chave === 'onix' && r.args.p_origem === 'cliente_citou'));
+        // o lead nunca é escrito direto por aqui
+        assert.equal(banco.updates.filter(u => u.tabela.startsWith('leads_')).length, 0);
+        assert.ok((saida.falta as string[]).includes('prazo de compra'));
+    } finally { delete process.env.WA_IDENTIFICACAO; }
+});
+
+test('salvar_ficha (identificação desligada, padrão): só a conversa guarda o nome; o lead não é tocado', async () => {
     const banco = bancoFicticio({
         leads_distribuicao_crm_26: [{ id: 10, nome: 'Analisar Perfil', cidade: null }],
         wa_conversas: [{ id: 'conv-1' }],
     });
-    const ctx = contexto(banco, {}, ['oi', 'sou o carlos, de ibirama']);
-    const { saida, erro } = await executarFerramenta('salvar_ficha', { nome: 'carlos', cidade: 'Ibirama', carro_interesse: 'Onix' }, ctx);
-    assert.equal(erro, false);
-    assert.deepEqual(saida.anotado, ['nome', 'cidade', 'carro_interesse']);
-    assert.equal(banco.tabelas.leads_distribuicao_crm_26[0].nome, 'Carlos');
-    assert.equal(banco.tabelas.leads_distribuicao_crm_26[0].cidade, 'Ibirama');
+    const ctx = contexto(banco, {}, ['sou o carlos']);
+    await executarFerramenta('salvar_ficha', { nome: 'carlos', cidade: 'Ibirama' }, ctx);
     const conv = banco.tabelas.wa_conversas[0];
     assert.equal(conv.nome_cliente, 'Carlos');
     assert.equal(conv.nome_cliente_origem, 'ia');
-    assert.equal(conv.nome_ia_no_lead, 'Carlos');
-    assert.equal(conv.ficha.carro_interesse, 'Onix');
-    assert.ok((saida.falta as string[]).includes('prazo de compra'));
-});
-
-test('salvar_ficha: nome que o consultor editou à mão fica', async () => {
-    const banco = bancoFicticio({
-        leads_master: [{ id: '0f8fad5b-d9cb-469f-a165-70867728950e', name: 'Carlos Eduardo Souza', city: 'Rio do Sul' }],
-        wa_conversas: [{ id: 'conv-1' }],
-    });
-    const ctx = contexto(banco, { lead_uid: 'leads_master:0f8fad5b-d9cb-469f-a165-70867728950e', nome_ia_no_lead: 'Carlos' }, ['é o carlos']);
-    await executarFerramenta('salvar_ficha', { nome: 'Carlos', cidade: 'Ibirama' }, ctx);
-    assert.equal(banco.tabelas.leads_master[0].name, 'Carlos Eduardo Souza');
-    assert.equal(banco.tabelas.leads_master[0].city, 'Rio do Sul'); // cidade só preenche vazio
-    assert.ok(!banco.updates.some(u => u.tabela === 'leads_master'));
+    assert.equal(banco.tabelas.leads_distribuicao_crm_26[0].nome, 'Analisar Perfil');
+    assert.equal(banco.rpcs.length, 0);
 });
 
 test('salvar_ficha: nome que o cliente não disse não é anotado; nome manual da conversa não é trocado', async () => {

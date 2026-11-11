@@ -5,7 +5,6 @@
 // 20261107_nome_interesse_auto.sql). Aqui só chamamos e registramos erro.
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { cadastrarAlertaAbaixoDaFaixa } from '@/lib/services/alertaCarroAbaixoFaixa';
 import type { OrigemNome } from './nome';
 import type { CarroInteresse } from './veiculo';
 
@@ -60,6 +59,7 @@ export async function registrarInteresse(
             const i = uid.indexOf(':');
             const tabela = uid.slice(0, i);
             if (tabela !== 'leads_distribuicao_crm_26') continue;
+            const { cadastrarAlertaAbaixoDaFaixa } = await import('@/lib/services/alertaCarroAbaixoFaixa');
             await cadastrarAlertaAbaixoDaFaixa(admin, tabela, uid.slice(i + 1)).catch(() => null);
         }
     }

@@ -20,7 +20,7 @@ import {
 } from './regras';
 import { msgErro } from '../erro';
 import { atualizarNomeLead, registrarInteresse } from '@/lib/identificacao/gravar';
-import { identificacaoLigada } from '@/lib/identificacao/processar';
+import { identificacaoLigada } from '@/lib/identificacao/chave';
 import { carrosCitados, descricaoDoFeed, type CarroInteresse } from '@/lib/identificacao/veiculo';
 
 // ---------------------------------------------------------------------------
