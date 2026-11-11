@@ -14,7 +14,7 @@
 // dado é o RLS e as rotas de API.
 
 import {
-    Activity, BarChart3, Bike, Bot, CalendarClock, Calculator, CircleUser, ClipboardCheck, DollarSign,
+    Activity, BarChart3, Bike, Bot, Network, CalendarClock, Calculator, CircleUser, ClipboardCheck, DollarSign,
     Flame, Handshake, Inbox, KanbanSquare, LayoutDashboard, ListTodo, Megaphone, MessageCircle,
     MessagesSquare, PieChart, PlayCircle, Radar, Banknote, Shield, SlidersHorizontal, Store, Users,
     WalletCards,
@@ -90,6 +90,7 @@ export const NAV_ITEMS: NavItem[] = [
     { id: 'milhao', label: 'Milhão', icon: Banknote, href: '/admin/milhao', grupo: 'financeiro', nivel: 'admin', exclusivo: 'alexandre' },
 
     // ── Gestão ────────────────────────────────────────────────────────────
+    { id: 'agentes', label: 'Central dos Agentes', icon: Network, href: '/agentes', grupo: 'gestao', nivel: 'admin' },
     { id: 'dashboard', label: 'Dashboard', icon: BarChart3, href: '/', grupo: 'gestao', nivel: 'admin' },
     { id: 'war-room', label: 'War Room', icon: Activity, href: '/admin/live', grupo: 'gestao', nivel: 'admin' },
     { id: 'conversao', label: 'Conversão', icon: LayoutDashboard, href: '/admin/conversion', grupo: 'gestao', nivel: 'gestor' },
