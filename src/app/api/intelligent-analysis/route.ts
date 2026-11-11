@@ -1,3 +1,4 @@
+import { veiculosDoEstoque } from '@/lib/estoque';
 import { OpenAI } from 'openai';
 import { NextResponse } from 'next/server';
 import { dataService } from '@/lib/dataService';
@@ -22,13 +23,15 @@ export async function POST(req: Request) {
     // 1. Get Consultants, Inventory and FRESH Leads using Admin client
     // CRITICAL: use consultants_manos_crm (V1 table) — assigned_consultant_id in leads_manos_crm references these IDs
     // use 'leads' unified VIEW to capture all leads (leads_manos_crm + leads_distribuicao_crm_26 + leads_master)
-    const [{ data: consultants }, { data: inventory }, { data: dbLeads }] = await Promise.all([
+    const [{ data: consultants }, inventoryFeed, { data: dbLeads }] = await Promise.all([
       supabaseAdmin.from('consultants_manos_crm').select('*').eq('is_active', true),
-      supabaseAdmin.from('estoque').select('id, marca, modelo, ano, preco, status').neq('status', 'sold').limit(30),
+      // estoque pelo feed da Altimus (a tabela `estoque` está obsoleta)
+      veiculosDoEstoque().catch(() => []),
       supabaseAdmin.from('leads').select('id, name, status, source, vehicle_interest, assigned_consultant_id, ai_score, created_at, response_time_seconds').order('created_at', { ascending: false }).limit(800)
     ]);
 
-    if (!consultants || !inventory || !dbLeads) throw new Error("Falha ao carregar dados do banco.");
+    if (!consultants || !dbLeads) throw new Error("Falha ao carregar dados do banco.");
+    const inventory = inventoryFeed.map(v => ({ marca: v.marca, modelo: v.modelo, ano: v.ano, preco: v.preco != null ? v.preco.toLocaleString('pt-BR') : '' }));
 
     const allLeads = dbLeads.map(l => ({
       ...l,

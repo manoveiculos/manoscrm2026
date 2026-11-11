@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { parseValorBR } from '@/lib/qualificacao';
+import { precosAnunciadosDoEstoque } from '@/lib/estoque';
 
 /**
  * As rotas /api/laura/* são ferramentas do agente no n8n (servidor → servidor).
@@ -38,7 +38,7 @@ export async function leadPorTelefone(admin: SupabaseClient, telefone: string): 
 }
 
 /** Preços anunciados do estoque (R$), para o filtro de "preço diferente do anunciado". */
-export async function precosAnunciados(admin: SupabaseClient): Promise<number[]> {
-    const { data } = await admin.from('estoque').select('preco').limit(500);
-    return (data || []).map((v: any) => parseValorBR(v.preco)).filter((n): n is number => n != null && n > 0);
+// Fonte: feed da Altimus (a tabela `estoque` está obsoleta). O parâmetro fica por compatibilidade.
+export async function precosAnunciados(_admin?: SupabaseClient): Promise<number[]> {
+    return precosAnunciadosDoEstoque();
 }

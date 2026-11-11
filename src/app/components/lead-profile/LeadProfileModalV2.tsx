@@ -222,8 +222,18 @@ export const LeadProfileModalV2: React.FC<LeadProfileModalV2Props> = ({
     // Fetch inventory for Arsenal
     useEffect(() => {
         const fetchInventory = async () => {
-            const { data } = await supabase.from('estoque').select('*');
-            if (data) setInventory(data);
+            // estoque pelo feed da Altimus (a tabela `estoque` está obsoleta)
+            try {
+                const r = await fetch('/api/estoque?limite=50', { cache: 'no-store' });
+                const j = await r.json();
+                if (r.ok && j.success) {
+                    setInventory((j.carros as any[]).map((c, i) => ({
+                        id: Number(c.id) || i + 1, marca: c.marca, modelo: c.modelo, ano: c.ano ?? '', cor: c.cor ?? '',
+                        preco: c.preco, km: c.km, cambio: c.cambio, combustivel: c.combustivel, status: 'available',
+                        descricao: c.descricao, imagem_url: c.fotos?.[0],
+                    })));
+                }
+            } catch { /* sem estoque agora: a aba fica vazia */ }
         };
         if (activeTab === 'arsenal') fetchInventory();
     }, [activeTab, supabase]);

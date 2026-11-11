@@ -22,10 +22,8 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: 'vehicleName é obrigatório' }, { status: 400 });
         }
 
-        // Marca o veículo como vendido no estoque
-        if (vehicleId) {
-            await supabase.from('estoque').update({ status: 'sold' }).eq('id', vehicleId);
-        }
+        // O estoque vem do feed da Altimus: carro vendido sai de lá sozinho. A tabela
+        // `estoque` está obsoleta e não é mais atualizada por aqui.
 
         // Extrai palavras-chave do veículo vendido para busca por interesse
         const keywords = extractKeywords(vehicleName + ' ' + (vehicleModel || ''));

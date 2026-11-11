@@ -121,8 +121,12 @@ test('menu: vendedor vê os 6 itens (com a pesca); gestor +3; admin em 5 grupos'
     assert.deepEqual(admin.map(s => s.label), ['Vendas', 'Compras', 'Financeiro', 'Gestão', 'Marketing']);
     // Admin vê todos os leads: rótulo "Leads", não "Meus Leads".
     assert.ok(admin[0].itens.some(i => i.label === 'Leads') && !admin[0].itens.some(i => i.label === 'Meus Leads'));
-    // Os 27 itens de antes + Minha Fila + Conversas.
-    assert.equal(admin.reduce((n, s) => n + s.itens.length, 0), 29);
+    // Os 27 itens de antes + Minha Fila + Conversas + Central dos Agentes.
+    assert.equal(admin.reduce((n, s) => n + s.itens.length, 0), 30);
+    assert.ok(admin.find(s => s.label === 'Gestão')!.itens.some(i => i.href === '/agentes'));
+    // Vendedor e gestor não veem a Central dos Agentes.
+    assert.ok(!vendedor.flatMap(s => s.itens).some(i => i.href === '/agentes'));
+    assert.ok(!secoesDoMenu({ perfil: 'gestor', email: 'g@exemplo.test' }).flatMap(s => s.itens).some(i => i.href === '/agentes'));
 });
 
 test('menu: regras por pessoa continuam (Camila, Paulo, Wilson)', () => {

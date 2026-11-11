@@ -19,8 +19,9 @@ export interface MensagemParaIdentificar {
     mensagemId: string;
 }
 
+/** Desligada por padrão: só liga com WA_IDENTIFICACAO=on, depois da migration 20261107_nome_interesse_auto. */
 export function identificacaoLigada(): boolean {
-    return (process.env.WA_IDENTIFICACAO || '').trim().toLowerCase() !== 'off';
+    return (process.env.WA_IDENTIFICACAO || '').trim().toLowerCase() === 'on';
 }
 
 const POR = 'crm:ingestao';

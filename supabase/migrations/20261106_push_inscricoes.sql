@@ -1,7 +1,8 @@
 -- ===========================================================================
 -- NOTIFICAÇÃO NO CELULAR (web push) — app instalável, 2ª etapa
 -- Data: 2026-11-06 · Programa Growth 360
--- APLICADA em produção em 06/11/2026 (~01:25 BRT), com o "aprovado" do Alexandre.
+-- APLICADA em produção em 05/11/2026 (~22:25, horário de Brasília), com o "aprovado" do Alexandre.
+-- (O nome do arquivo diz 20261106 porque foi escrito com o relógio em UTC.)
 -- Conferido depois: RLS ligado, 0 linhas, anon sem privilégio, authenticated só SELECT.
 --
 -- O que cria (só objetos NOVOS; nenhuma definição existente é alterada):

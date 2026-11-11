@@ -44,6 +44,8 @@ export interface ResultadoIngestao {
     midiasPendentes: MidiaPendente[];
     /** Mensagens novas de cliente (não de consultor, não reação): disparam a Laura do CRM. */
     novasDoCliente: { conversaId: string; mensagemId: string; criadaEm: string; tipo: string }[];
+    /** Mensagens da loja gravadas como 'vendedor' (n8n fora): candidatas a "humano assumiu". */
+    novasDoVendedor: { conversaId: string; mensagemId: string }[];
 }
 
 export interface OpcoesIngestao {
@@ -162,6 +164,9 @@ async function aplicarEvento(
         if (!e.fromMe && !deConsultor && e.tipo !== 'reacao') {
             r.novasDoCliente.push({ conversaId: out.conversa_id, mensagemId: out.mensagem_id, criadaEm: e.enviadaEm, tipo: e.tipo });
         }
+        if (e.fromMe && !deConsultor && opts.autorFromMe === 'vendedor') {
+            r.novasDoVendedor.push({ conversaId: out.conversa_id, mensagemId: out.mensagem_id });
+        }
         if (tipoTemMidia(e.tipo) && e.midia) {
             r.midiasPendentes.push({ mensagemId: out.mensagem_id, conversaId: out.conversa_id, evento: e, deConsultor });
         }
@@ -210,7 +215,7 @@ export async function ingerirWebhook(payload: unknown, opcoes: OpcoesIngestao): 
     const opts = { instancia: opcoes.instancia, autorFromMe: opcoes.autorFromMe ?? 'laura' } as const;
     const r: ResultadoIngestao = {
         eventos: 0, gravadas: 0, repetidas: 0, edicoes: 0, apagadas: 0, status: 0,
-        ignorados: {}, erros: [], midiasPendentes: [], novasDoCliente: [],
+        ignorados: {}, erros: [], midiasPendentes: [], novasDoCliente: [], novasDoVendedor: [],
     };
 
     const eventos = parseEvolutionWebhook(payload);

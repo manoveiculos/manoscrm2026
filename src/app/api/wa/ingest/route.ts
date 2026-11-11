@@ -3,7 +3,9 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { createClient } from '@/lib/supabase/admin';
 import { ingerirWebhook, processarMidiasPendentes, registrarErro } from '@/lib/whatsapp/ingestao';
 import { msgErro } from '@/lib/whatsapp/erro';
+import { marcarHumanoSeNecessario } from '@/lib/whatsapp/envio';
 import { rodarLauraDepoisDaIngestao } from '@/lib/whatsapp/ia/motor';
+import { criarLeadLigado, garantirLeadsDasConversas, registrarOrigemDoPayload } from '@/lib/whatsapp/criarLead';
 import { identificarNomeECarro } from '@/lib/identificacao/processar';
 
 /**
@@ -44,7 +46,9 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ ok: false, erro: 'ingestao_nao_configurada' }, { status: 503, headers: SEM_CACHE });
     }
     const bearer = req.headers.get('authorization')?.replace(/^Bearer\s+/i, '') ?? null;
-    const recebido = req.headers.get('x-ingest-secret') || bearer;
+    // A Evolution (tela do manager) não tem campo de cabeçalho: aceita também ?s=<segredo> na URL do webhook.
+    const daUrl = new URL(req.url).searchParams.get('s');
+    const recebido = req.headers.get('x-ingest-secret') || bearer || daUrl;
     if (!segredoConfere(recebido, esperado)) {
         return NextResponse.json({ ok: false, erro: 'nao_autorizado' }, { status: 401, headers: SEM_CACHE });
     }
@@ -66,11 +70,30 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-        const r = await ingerirWebhook(payload, { instancia, autorFromMe: 'laura' });
+        // Com o n8n fora (WA_SEM_N8N=true), mensagem da loja que o CRM não mandou veio do celular: é humano.
+        const semN8n = process.env.WA_SEM_N8N?.trim().toLowerCase() === 'true';
+        const r = await ingerirWebhook(payload, { instancia, autorFromMe: semN8n ? 'vendedor' : 'laura' });
+        if (r.novasDoVendedor.length) {
+            const alvos = r.novasDoVendedor;
+            after(async () => { await marcarHumanoSeNecessario(createClient(), alvos); });
+        }
         const pendentes = r.midiasPendentes;
         // Nome e carro do cliente (spec nome-e-interesse-automaticos): áudio espera a transcrição.
         const audiosDoCliente = r.novasDoCliente.filter(g => g.tipo === 'audio');
         const outrasDoCliente = r.novasDoCliente.filter(g => g.tipo !== 'audio');
+        // O CRM cria o lead na 1ª mensagem (WA_CRIAR_LEAD=true; padrão desligado) e a roleta distribui.
+        // Ordem: origem → lead → nome e carro (o nome precisa do lead já criado para ir para ele).
+        if (r.novasDoCliente.length) {
+            const conversas = r.novasDoCliente.map(g => g.conversaId);
+            after(async () => {
+                if (criarLeadLigado()) {
+                    // origem ANTES do lead: se o lead ainda não existe, a origem fica pendente e entra no INSERT
+                    await registrarOrigemDoPayload(payload);
+                    await garantirLeadsDasConversas(conversas);
+                }
+                await identificarNomeECarro(outrasDoCliente);
+            });
+        }
         if (pendentes.length) {
             after(async () => {
                 try {
@@ -80,9 +103,6 @@ export async function POST(req: NextRequest) {
                 }
                 await identificarNomeECarro(audiosDoCliente);
             });
-        }
-        if (outrasDoCliente.length) {
-            after(() => identificarNomeECarro(outrasDoCliente));
         }
         // Laura do CRM (etapa B = ensaio: escreve o rascunho, não envia). Desligada
         // por padrão: só roda com WA_IA_ATIVA=true e o botão do admin em "ensaio".

@@ -16,7 +16,8 @@
 const ALTIMUS_URL = process.env.ALTIMUS_XML_URL ||
     'https://estoque.altimus.com.br/api/estoquexml?estoque=997c9e91-40d7-4bec-95cb-68e18a2668a3';
 
-const CACHE_TTL_MS = 30 * 60 * 1000; // 30min
+const CACHE_TTL_MS = 10 * 60 * 1000; // 10min (decisão 06/11: estoque sempre fresco)
+const RETRY_APOS_FALHA_MS = 60 * 1000;
 
 export interface AltimusVehicle {
     id_externo?: string;
@@ -33,16 +34,21 @@ export interface AltimusVehicle {
     link?: string;
     /** URLs das fotos reais do anúncio (<fotos><imagem>), na ordem do feed. */
     fotos?: string[];
+    /** Opcionais do feed (<opcionais><opcional>). A Laura só cita estes. */
+    opcionais?: string[];
 }
 
 interface CacheEntry {
     vehicles: AltimusVehicle[];
     fetchedAt: number;
+    /** Última tentativa falhou: a lista é a última cópia boa. */
+    desatualizado: boolean;
+    /** Quando a lista foi lida da Altimus de verdade. */
+    copiaDe: number;
     error?: string;
 }
 
 let cache: CacheEntry | null = null;
-let inflightFetch: Promise<AltimusVehicle[]> | null = null;
 
 /* ----------------------------- PARSING ---------------------------- */
 
@@ -193,6 +199,11 @@ function parseAltimusXml(xml: string): AltimusVehicle[] {
             .map(m => decodeXmlEntities(m[1].replace(/^\s*<!\[CDATA\[|\]\]>\s*$/g, '').trim()))
             .filter(u => /^https?:\/\//i.test(u));
 
+        const opcionaisXml = block.match(/<opcionais\b[^>]*>([\s\S]*?)<\/opcionais>/i)?.[1] || '';
+        const opcionais = [...opcionaisXml.matchAll(/<opcional\b[^>]*>([\s\S]*?)<\/opcional>/gi)]
+            .map(m => decodeXmlEntities(m[1].replace(/^\s*<!\[CDATA\[|\]\]>\s*$/g, '').trim()))
+            .filter(Boolean);
+
         // Regra Anti-Alucinação: Se o preço for incoerente (ex: popular > 300k), ignora o veículo
         // Lista simples de modelos populares para o filtro
         const populares = ['gol', 'uno', 'palio', 'onix', 'hb20', 'ka', 'kwid', 'mobi', 'sandero', 'fiesta', 'corsa', 'celta'];
@@ -216,6 +227,7 @@ function parseAltimusXml(xml: string): AltimusVehicle[] {
             cor: cor || undefined,
             link: link || (idInterno ? `https://manosveiculos.com.br/veiculo/${idInterno}` : undefined),
             fotos: fotos.length ? fotos : undefined,
+            opcionais: opcionais.length ? opcionais : undefined,
         });
     }
     return out;
@@ -223,46 +235,71 @@ function parseAltimusXml(xml: string): AltimusVehicle[] {
 
 /* ----------------------------- FETCH ----------------------------- */
 
-async function fetchAltimus(): Promise<AltimusVehicle[]> {
+/** Lista do feed, ou null se a Altimus falhou ou veio vazia (nunca devolve lista vazia como se fosse verdade). */
+async function fetchAltimus(): Promise<AltimusVehicle[] | null> {
     try {
         const res = await fetch(ALTIMUS_URL, {
             signal: AbortSignal.timeout(8000),
             headers: { 'Accept': 'application/xml, text/xml, */*' },
         });
         if (!res.ok) {
-            console.warn(`[altimus] HTTP ${res.status} no fetch — usando lista vazia`);
-            return [];
+            console.warn(`[altimus] HTTP ${res.status} no fetch — mantendo a última cópia boa`);
+            return null;
         }
         const xml = await res.text();
         const vehicles = parseAltimusXml(xml);
         if (vehicles.length === 0) {
             console.warn(`[altimus] Parse retornou 0 veículos. XML head: ${xml.slice(0, 200)}`);
+            return null;
         }
         return vehicles;
     } catch (e: any) {
         console.warn('[altimus] fetch falhou:', e?.message || e);
-        return [];
+        return null;
     }
 }
 
+export interface EstadoInventario {
+    vehicles: AltimusVehicle[];
+    /** A Altimus não respondeu na última tentativa: a lista é a última cópia boa. */
+    desatualizado: boolean;
+    /** Quando a lista foi lida da Altimus (ms). null = nunca leu. */
+    copiaDe: number | null;
+}
+
 /**
- * Cache layer com proteção contra concurrent fetches.
+ * Cache com proteção contra fetches concorrentes e ÚLTIMA CÓPIA BOA: se a Altimus
+ * falhar, devolve a lista anterior marcada como desatualizada (e tenta de novo em
+ * 1 min). Nunca cai para a tabela `estoque`. Só devolve vazio se nunca houve cópia.
  */
-export async function getInventory(forceRefresh = false): Promise<AltimusVehicle[]> {
+let inflightInfo: Promise<EstadoInventario> | null = null;
+
+export async function getInventoryInfo(forceRefresh = false): Promise<EstadoInventario> {
     const now = Date.now();
-    if (!forceRefresh && cache && now - cache.fetchedAt < CACHE_TTL_MS) {
-        return cache.vehicles;
-    }
-    if (inflightFetch) return inflightFetch;
-    inflightFetch = fetchAltimus().then(vehicles => {
-        cache = { vehicles, fetchedAt: now };
-        inflightFetch = null;
-        return vehicles;
-    }).catch(() => {
-        inflightFetch = null;
-        return [];
+    const estado = (): EstadoInventario => ({
+        vehicles: cache?.vehicles ?? [], desatualizado: cache ? cache.desatualizado : true, copiaDe: cache?.copiaDe ?? null,
     });
-    return inflightFetch;
+    if (!forceRefresh && cache && now - cache.fetchedAt < CACHE_TTL_MS) return estado();
+    if (inflightInfo) return inflightInfo;
+    inflightInfo = fetchAltimus().then(vehicles => {
+        if (vehicles) {
+            cache = { vehicles, fetchedAt: now, copiaDe: now, desatualizado: false };
+        } else if (cache) {
+            // falhou: mantém a última cópia boa, marca e tenta de novo logo
+            cache = { ...cache, desatualizado: true, fetchedAt: now - CACHE_TTL_MS + RETRY_APOS_FALHA_MS };
+        }
+        inflightInfo = null;
+        return estado();
+    }).catch(() => {
+        inflightInfo = null;
+        return estado();
+    });
+    return inflightInfo;
+}
+
+/** Só a lista (compatível com o uso antigo). Em falha da Altimus devolve a última cópia boa. */
+export async function getInventory(forceRefresh = false): Promise<AltimusVehicle[]> {
+    return (await getInventoryInfo(forceRefresh)).vehicles;
 }
 
 /* ----------------------------- MATCH ----------------------------- */

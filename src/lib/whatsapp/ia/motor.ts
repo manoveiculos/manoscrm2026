@@ -20,19 +20,23 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/admin';
-import { getInventory, type AltimusVehicle } from '@/lib/services/altimusInventory';
+import { agenteLigado } from '@/lib/agentes/config';
+import { getInventory } from '@/lib/services/altimusInventory';
+import { precosAnunciadosDoEstoque } from '@/lib/estoque';
 import { horarioLoja, isOpenNow } from '@/lib/services/slaEngine';
 import { revisarResposta } from '@/lib/laura/guardrails';
 import { entradaEmReais, parseValorBR } from '@/lib/qualificacao';
 import { enviarPushParaConsultor } from '@/lib/push/enviarPush';
 import { providerLoja } from '../evolutionProvider';
+import { enviarPeloCrm } from '../envio';
+import { notifyConsultant } from '@/lib/services/consultantNotifier';
 import { msgErro } from '../erro';
 import { lerConfigIa } from './config';
 import { FERRAMENTAS, executarFerramenta, type ContextoRodada, type ConversaIa } from './ferramentas';
 import { LAURA_CRM_PROMPT, contextoDaRodada } from './prompt';
 import {
     custoUsd, iaPodeResponder, inicioDoDiaSP, limiteDiario, montarHistorico, somarUso, textoParaIa,
-    valoresCitados, type FichaLaura, type MensagemParaIa, type UsoTokens,
+    repeteMensagemAnterior, valoresCitados, type FichaLaura, type MensagemParaIa, type UsoTokens,
 } from './regras';
 
 export const MODELO_PADRAO = 'claude-sonnet-5-5';
@@ -118,16 +122,9 @@ async function registrarPulada(supabase: SupabaseClient, g: GatilhoIa, modo: 'en
     });
 }
 
-async function precosDoEstoque(supabase: SupabaseClient, altimus: AltimusVehicle[]): Promise<number[]> {
-    const precos = altimus.map(v => v.preco).filter((n): n is number => typeof n === 'number' && n > 0);
-    try {
-        const { data } = await supabase.from('estoque').select('preco').limit(500);
-        for (const v of data || []) {
-            const n = parseValorBR((v as { preco: string | null }).preco);
-            if (n && n > 0) precos.push(n);
-        }
-    } catch { /* tabela estoque fora: fica só a Altimus */ }
-    return precos;
+// Preços anunciados: feed da Altimus (a tabela `estoque` está obsoleta).
+async function precosDoEstoque(): Promise<number[]> {
+    return precosAnunciadosDoEstoque();
 }
 
 const COLUNAS_CONVERSA =
@@ -139,6 +136,14 @@ export async function rodarLaura(g: GatilhoIa): Promise<void> {
     if (cfg.modo === 'desligada') return;
     const modo = cfg.modo;
     const modelo = (process.env.WA_IA_MODELO || MODELO_PADRAO).trim();
+
+    // Interruptor geral da Central dos Agentes (agentes_config.ia_geral): desligado = a Laura
+    // não roda, nem em ensaio. Sem tabela ou sem linha = ligado (agenteLigado nunca lança).
+    const geral = await agenteLigado('ia_geral');
+    if (!geral.ligado) {
+        await registrarPulada(supabase, g, modo, 'ia_geral desligada');
+        return;
+    }
 
     // 2. junta mensagens seguidas
     await esperar(Number(process.env.WA_IA_ESPERA_MS) || 8000);
@@ -229,6 +234,10 @@ export async function rodarLaura(g: GatilhoIa): Promise<void> {
         // 6. laço do Claude
         let texto = '';
         let parada: string | null = null;
+        // Últimas 3 mensagens da loja (Laura ou vendedor): a resposta não pode repetir nenhuma
+        const anteriores = msgs.filter(m => m.autor === 'laura' || m.autor === 'vendedor')
+            .slice(0, 3).map(m => textoParaIa(m) || '');
+        let repeticaoTratada = false;
         while (iteracoes < MAX_ITERACOES) {
             iteracoes++;
             // Sonnet 5.5: pensamento adaptativo (padrão) em esforço baixo. O pensamento
@@ -256,6 +265,14 @@ export async function rodarLaura(g: GatilhoIa): Promise<void> {
                 continue;
             }
             texto = resp.content.filter((b): b is Anthropic.TextBlock => b.type === 'text').map(b => b.text).join('\n').trim();
+            if (!repeticaoTratada && texto && repeteMensagemAnterior(texto, anteriores)) {
+                // repetiu: pede UMA nova tentativa, só com o que o cliente acabou de escrever
+                repeticaoTratada = true;
+                messages.push({ role: 'assistant', content: resp.content });
+                messages.push({ role: 'user', content: '<aviso_do_crm>Essa resposta repete o que a loja já disse ou já perguntou. Reescreva respondendo só ao que o cliente acabou de escrever, sem repetir carros, preços, correções nem a pergunta anterior. Se não houver nada novo a perguntar, faça só a próxima etapa (ex.: oferecer fotos ou a visita).</aviso_do_crm>' });
+                texto = '';
+                continue;
+            }
             break;
         }
 
@@ -265,11 +282,11 @@ export async function rodarLaura(g: GatilhoIa): Promise<void> {
         if (!texto) { await finalizar({ status: 'erro', motivo: parada === 'max_tokens' ? 'resposta cortada (max_tokens)' : 'resposta vazia' }); return; }
 
         // 7. filtro de regras
-        const precos = await precosDoEstoque(supabase, estoque);
+        const precos = await precosDoEstoque();
         const valoresCliente = valoresCitados(ctx.textosDoCliente);
         const entrada = entradaEmReais(ctx.ficha.entrada);
         if (entrada) valoresCliente.push(entrada);
-        const rev = revisarResposta(texto, precos, valoresCliente);
+        const rev = revisarResposta(texto, precos, valoresCliente, { fraseDeCredito: false });
 
         // 8. grava (e, só na etapa C, envia)
         let envio: Record<string, unknown> = {};
@@ -285,6 +302,33 @@ export async function rodarLaura(g: GatilhoIa): Promise<void> {
         });
     } catch (e) {
         await finalizar({ status: 'erro', motivo: msgErro(e).slice(0, 300) });
+        if (modo === 'envia') await falhaDaIa(supabase, conversa, g.conversaId);
+    }
+}
+
+/**
+ * A IA falhou com o cliente esperando (só no modo "envia"): manda UMA mensagem de espera
+ * (no máximo 1 a cada 30 min por conversa) e avisa o consultor para assumir.
+ */
+async function falhaDaIa(supabase: SupabaseClient, conversa: ConversaIa, conversaId: string): Promise<void> {
+    try {
+        if ((process.env.WA_IA_ENVIO_LIBERADO || '').trim() !== 'true') return;
+        const desde = new Date(Date.now() - 30 * 60_000).toISOString();
+        const { count } = await supabase.from('wa_mensagens').select('id', { count: 'exact', head: true })
+            .eq('conversa_id', conversaId).eq('autor', 'laura').ilike('texto', '%Já te respondo%').gte('criada_em', desde);
+        if (!count) {
+            await enviarPeloCrm(supabase, providerLoja(), { id: conversaId, telefone_key: conversa.telefone_key, remote_jid: conversa.remote_jid }, { tipo: 'texto', texto: 'Já te respondo 😉' }, { autor: 'laura' });
+        }
+        if (conversa.assigned_consultant_id) {
+            await notifyConsultant({
+                consultantId: conversa.assigned_consultant_id, level: 2,
+                title: 'A Laura não conseguiu responder um cliente',
+                message: 'A IA falhou numa conversa do WhatsApp. Assuma o atendimento na tela Conversas.',
+                type: 'laura_falhou',
+            });
+        }
+    } catch (e) {
+        console.error('[laura-crm] falha ao tratar erro da IA:', msgErro(e));
     }
 }
 
@@ -302,13 +346,24 @@ async function executarEnvio(supabase: SupabaseClient, ctx: ContextoRodada, g: G
 
     const provider = providerLoja();
     const para = ctx.conversa.remote_jid || ctx.conversa.telefone_key;
-    const r = await provider.enviarTexto(para, texto);
+    const conv = { id: ctx.conversa.id, telefone_key: ctx.conversa.telefone_key, remote_jid: ctx.conversa.remote_jid };
+    // Pausa de digitação natural: ~35 ms por caractere, entre 1,5 s e 7 s.
+    await esperar(Math.min(7000, Math.max(1500, texto.length * 35)));
+    const r = await enviarPeloCrm(supabase, provider, conv, { tipo: 'texto', texto }, { autor: 'laura' });
     if (!r.ok) return { motivo: `envio falhou: ${r.erro || 'sem detalhe'}` };
 
     for (const f of ctx.fotos) {
         for (const url of f.urls) {
             await esperar(1500);
-            await provider.enviarMidia(para, { tipo: 'imagem', url, mime: 'image/jpeg' }).catch(() => null);
+            const foto = await provider.enviarMidia(para, { tipo: 'imagem', url, mime: 'image/jpeg' }).catch(() => null);
+            if (foto?.ok && foto.providerMessageId) {
+                // registra como da Laura (senão o eco do webhook entraria como "celular da loja")
+                await supabase.rpc('wa_registrar_mensagem', { p: {
+                    telefone: conv.telefone_key, remote_jid: conv.remote_jid, provider_message_id: foto.providerMessageId,
+                    autor: 'laura', tipo: 'imagem', midia_mime: 'image/jpeg', status_entrega: 'enviada', origem: 'crm', criada_em: new Date().toISOString(),
+                } });
+                await supabase.from('wa_mensagens').update({ autor: 'laura', origem: 'crm' }).eq('provider_message_id', foto.providerMessageId);
+            }
         }
     }
     if (ctx.agendamento && !ctx.agendamento.gravada) {

@@ -41,7 +41,12 @@ export interface ResultadoRevisao {
  * @param precosAnunciados preços do estoque (R$) — qualquer outro valor de carro é proibido
  * @param valoresDoCliente números que o próprio cliente disse (faixa, entrada) — podem ser repetidos
  */
-export function revisarResposta(texto: string, precosAnunciados: number[], valoresDoCliente: number[] = []): ResultadoRevisao {
+export function revisarResposta(
+    texto: string,
+    precosAnunciados: number[],
+    valoresDoCliente: number[] = [],
+    opcoes: { fraseDeCredito?: boolean } = {},
+): ResultadoRevisao {
     const t = (texto || '').trim();
     const violacoes = new Set<Violacao>();
     for (const r of REGRAS) if (r.rx.test(t)) violacoes.add(r.tipo);
@@ -60,7 +65,8 @@ export function revisarResposta(texto: string, precosAnunciados: number[], valor
 
     // Falou de financiamento? A frase de crédito é obrigatória.
     let seguro = t;
-    if (/\b(financ\w*|cr[eé]dito|parcel\w*|cdc)\b/i.test(t) && !/an[aá]lise de cr[eé]dito/i.test(t)) {
+    // (a Laura do CRM não usa: decisão do Alexandre em 11/11 — soava robótico, até em pergunta simples)
+    if (opcoes.fraseDeCredito !== false && /\b(financ\w*|cr[eé]dito|parcel\w*|cdc)\b/i.test(t) && !/an[aá]lise de cr[eé]dito/i.test(t)) {
         seguro = `${t.replace(/[.!\s]*$/, '')} (${FRASE_CREDITO}).`;
     }
     return { ok: true, violacoes: [], texto_seguro: seguro };

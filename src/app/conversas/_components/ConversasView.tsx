@@ -9,6 +9,7 @@ import { PainelConversa } from './PainelConversa';
 import { FichaLead } from './FichaLead';
 import { urlMidiaPadrao, type UrlMidia } from './Midias';
 import { BarraLauraCrm, EnsaioDaConversa } from './LauraCrm';
+import { Compositor } from './Compositor';
 
 /**
  * Tela Conversas (Fase 3, leitura) — o WhatsApp da loja dentro do CRM.
@@ -96,6 +97,9 @@ export function ConversasView({
                     onCarregarAntigas={onCarregarAntigas}
                     mostrarBotaoFicha={Boolean(conversa)}
                     ensaio={ensaio}
+                    rodape={conversa && process.env.NEXT_PUBLIC_WA_ENVIO === 'true'
+                        ? <Compositor key={conversa.id} conversaId={conversa.id} status={conversa.status} onAtualizar={onAtualizar} />
+                        : undefined}
                 />
             </main>
 

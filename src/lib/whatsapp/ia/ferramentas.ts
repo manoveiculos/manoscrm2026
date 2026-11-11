@@ -20,6 +20,7 @@ import {
 } from './regras';
 import { msgErro } from '../erro';
 import { atualizarNomeLead, registrarInteresse } from '@/lib/identificacao/gravar';
+import { identificacaoLigada } from '@/lib/identificacao/processar';
 import { carrosCitados, descricaoDoFeed, type CarroInteresse } from '@/lib/identificacao/veiculo';
 
 // ---------------------------------------------------------------------------
@@ -275,6 +276,16 @@ async function gravarFichaNaConversa(ctx: ContextoRodada, nova: FichaLaura): Pro
     const { error } = await ctx.supabase.from('wa_conversas').update({ ficha: ctx.ficha }).eq('id', c.id);
     if (error) throw new Error(`ficha: ${error.message}`);
     ctx.gravacoes.push('ficha na conversa');
+
+    // Antes da migration 20261107 (WA_IDENTIFICACAO != on): só a conversa guarda o nome dito.
+    if (!identificacaoLigada()) {
+        if (nova.nome && c.nome_cliente_origem !== 'manual') {
+            await ctx.supabase.from('wa_conversas').update({ nome_cliente: nova.nome, nome_cliente_origem: 'ia' }).eq('id', c.id);
+            c.nome_cliente = nova.nome;
+            c.nome_cliente_origem = 'ia';
+        }
+        return;
+    }
 
     if (nova.nome) {
         const r = await atualizarNomeLead(ctx.supabase, {
