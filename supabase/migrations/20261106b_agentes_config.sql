@@ -1,6 +1,9 @@
 -- ===========================================================================
 -- CENTRAL DOS AGENTES — interruptor de cada agente (aba /agentes)
--- Data: 2026-11-06 · Programa Growth 360 · NÃO APLICAR sem o "aprovado" do Alexandre
+-- Data: 2026-11-06 · Programa Growth 360
+-- APLICADA em produção em 11/11/2026 (~07:45, Brasília), com o "aprovado" do Alexandre.
+-- Conferido: RLS ligado, ia_geral=ligado, anon sem privilégio, authenticated só SELECT;
+-- teste real: admin vê 1, vendedor 0, outro app 0, anon bloqueado, escrita bloqueada.
 --
 -- O que cria (só objeto NOVO; nada existente muda):
 --   tabela agentes_config — uma linha por agente com o modo atual:
