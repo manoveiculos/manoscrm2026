@@ -41,6 +41,10 @@
 --     (antes, update wa_conversas set nome_cliente_origem = 'ia' where nome_cliente_origem not in ('ia','manual'))
 --
 -- Teste: supabase/tests/nome_interesse.test.sql (bloco DO que sempre termina em erro).
+--
+-- ENSAIADA em produção em 11/11/2026 dentro de BEGIN … ROLLBACK junto com o teste:
+-- "NOME_INTERESSE PASSOU — 33 verificações ok". Conferido depois: 0 tabelas, 0 funções,
+-- 0 dados de teste, gatilho original intacto. NÃO APLICADA (precisa do "aprovado").
 -- ===========================================================================
 
 SET lock_timeout = '5s';
@@ -120,7 +124,7 @@ CREATE TABLE IF NOT EXISTS public.lead_veiculos_interesse (
     trecho         text,
     por            text,
     criado_em      timestamptz NOT NULL DEFAULT now(),
-    atualizado_em  timestamptz NOT NULL DEFAULT now()
+    atualizado_em  timestamptz NOT NULL DEFAULT clock_timestamp()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS lead_veiculos_interesse_unico
     ON public.lead_veiculos_interesse (telefone_key, modelo_chave, coalesce(ano, 0));
@@ -446,7 +450,7 @@ BEGIN
                AND position(public.fn_sem_acento(descricao) IN public.fn_sem_acento(v_cur)) = 0;
         END IF;
         INSERT INTO public.lead_veiculos_interesse (telefone_key, descricao, modelo_chave, origem, por, atualizado_em)
-        VALUES (v_key, left(v_cur, 120), 'anterior:' || md5(public.fn_sem_acento(v_cur)), 'anterior', 'crm', now() - interval '1 second')
+        VALUES (v_key, left(v_cur, 120), 'anterior:' || md5(public.fn_sem_acento(v_cur)), 'anterior', 'crm', clock_timestamp() - interval '1 second')
         ON CONFLICT (telefone_key, modelo_chave, coalesce(ano, 0)) DO UPDATE SET oculto = false;
     END LOOP;
 
@@ -457,7 +461,7 @@ BEGIN
      ORDER BY (origem = 'anterior') DESC LIMIT 1;
     IF v_igual IS NOT NULL THEN
         UPDATE public.lead_veiculos_interesse
-           SET atualizado_em = now(),
+           SET atualizado_em = clock_timestamp(),
                descricao   = CASE WHEN origem <> 'anterior' AND p_codigo_feed IS NOT NULL THEN v_desc ELSE descricao END,
                codigo_feed = CASE WHEN origem <> 'anterior' THEN coalesce(p_codigo_feed, codigo_feed) ELSE codigo_feed END,
                em_estoque  = CASE WHEN origem <> 'anterior' THEN p_em_estoque ELSE em_estoque END
@@ -467,7 +471,7 @@ BEGIN
             (telefone_key, descricao, modelo_chave, ano, codigo_feed, origem, em_estoque, trecho, por)
         VALUES (v_key, v_desc, p_modelo_chave, p_ano, p_codigo_feed, p_origem, p_em_estoque, left(p_trecho, 300), p_por)
         ON CONFLICT (telefone_key, modelo_chave, coalesce(ano, 0)) DO UPDATE
-           SET atualizado_em = now(), oculto = false, descricao = EXCLUDED.descricao,
+           SET atualizado_em = clock_timestamp(), oculto = false, descricao = EXCLUDED.descricao,
                codigo_feed = coalesce(EXCLUDED.codigo_feed, lead_veiculos_interesse.codigo_feed),
                em_estoque = EXCLUDED.em_estoque;
     END IF;

@@ -48,6 +48,7 @@ const NAO_E_NOME = new Set([
     'lead', 'whatsapp', 'zap', 'teste', 'contato', 'atendimento', 'vendedor', 'consultor', 'dono', 'proprietario',
     'gerente', 'pai', 'mae', 'filho', 'filha', 'esposa', 'marido', 'amigo', 'amiga', 'sobrinho', 'sobrinha',
     'completo', 'usado', 'novo', 'seminovo', 'automatico', 'manual', 'flex', 'diesel', 'cidade', 'rua', 'centro',
+    'ja', 'comprei', 'vendi', 'fechei', 'desisti', 'obgdo', 'nada', 'nenhum', 'errado', 'certo', 'entendi', 'beleza', 'blz', 'pode', 'ta',
     'kkk', 'kkkk', 'rs', 'haha', 'hehe', 'favor', 'por', 'pra', 'para', 'com', 'sem', 'um', 'uma', 'o', 'a', 'os', 'as',
 ]);
 
@@ -74,7 +75,7 @@ export const MODELOS = [
 const CARROS = new Set([...MARCAS, ...MODELOS].map(norm));
 
 const EMOJI = /[\p{Extended_Pictographic}\u{1F3FB}-\u{1F3FF}\u{FE0F}\u{200D}]/gu;
-const SAUDACAO_INICIO = /^(?:(?:oi+e*|ol[aá]|opa|e\s*a[ií]|eae|salve|hey|al[oô]|bom\s+dia|boa\s+tarde|boa\s+noite|tudo\s+bem|td\s+bem|blz|beleza)[\s,!.;:-]*)+/i;
+const SAUDACAO_INICIO = /^(?:(?:oi+e*|ol[aá]|opa|e\s*a[ií]|eae|salve|hey|al[oô]|bom\s+dia|boa\s+tarde|boa\s+noite|boa\s+madrugada|dia|tarde|noite|tudo\s+bem|td\s+bem|blz|beleza)[\s,!.;:-]*)+/i;
 
 /** Tira emoji, título ("Prof."), pontuação nas pontas e espaços repetidos. */
 function limparTrecho(s: string): string {
@@ -131,7 +132,7 @@ export function pediuNome(textoDaLoja: string | null | undefined): boolean {
 
 // Frase com o nome. Grupo 1 = o que vem depois da expressão.
 const FRASES: RegExp[] = [
-    /\bmeu\s+nome\s+(?:[eé]|eh)\s+(?:o\s+|a\s+)?(.+)/i,
+    /\b(?:meu\s+)?nome\s+(?:[eé]|eh)\s+(?:o\s+|a\s+)?(.+)/i,
     /\bme\s+chamo\s+(.+)/i,
     /\bpode\s+me\s+chamar\s+de\s+(.+)/i,
     /\baqui\s+(?:[eé]|eh|quem\s+fala\s+[eé])\s+(?:o|a)\s+(.+)/i,
