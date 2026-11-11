@@ -13,6 +13,8 @@ import {
     type RetornoFila, type VisitaFila, type VoltouFila,
 } from './montarFila';
 
+import { veiculosDoEstoque } from '@/lib/estoque';
+
 const DIA = 86_400_000;
 /** Orientação do next-steps mais velha que isso não aparece no topo. */
 const ORIENTACAO_VALIDA_DIAS = 7;
@@ -163,10 +165,11 @@ export async function carregarEntradaFila(
         ...((perdidosRaw || []) as any[]).map(p => `leads_distribuicao_crm_26:${p.id}`),
     ];
 
-    const [piso, qualificacao, estoqueRes, visitasRes, retornosRes, voltouRes] = await Promise.all([
+    const [piso, qualificacao, estoqueFeed, visitasRes, retornosRes, voltouRes] = await Promise.all([
         pisoEstoque(admin).catch(() => null),
         buscarQualificacao(admin, uidsQualificacao).catch(() => new Map()),
-        admin.from('estoque').select('marca, modelo, ano, preco').limit(500),
+        // estoque pelo feed da Altimus (a tabela `estoque` está obsoleta)
+        veiculosDoEstoque().catch(() => []),
         admin.from('agendamentos')
             .select('id, lead_uid, cliente_nome, cliente_telefone, cliente_whatsapp, veiculo_interesse, tipo, data_hora, status')
             .eq('vendedor_id', eu.authId)
@@ -186,7 +189,6 @@ export async function carregarEntradaFila(
             .gte('created_at', new Date(agora - 3 * DIA).toISOString())
             .limit(100),
     ]);
-    avisar('estoque', estoqueRes.error);
     avisar('agendamentos', visitasRes.error);
     avisar('follow_ups', retornosRes.error);
     avisar('cowork_alerts', voltouRes.error);
@@ -270,7 +272,12 @@ export async function carregarEntradaFila(
         pisoEstoque: piso,
         leads,
         perdidos,
-        estoque: (estoqueRes.data || []) as ItemEstoque[],
+        estoque: estoqueFeed.map((v): ItemEstoque => ({
+            marca: v.marca || null,
+            modelo: v.modelo || null,
+            ano: v.ano != null ? String(v.ano) : null,
+            preco: v.preco != null ? `R$ ${v.preco.toLocaleString('pt-BR')}` : null,
+        })),
         visitas,
         retornos,
         voltou,

@@ -20,7 +20,8 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/admin';
-import { getInventory, type AltimusVehicle } from '@/lib/services/altimusInventory';
+import { getInventory } from '@/lib/services/altimusInventory';
+import { precosAnunciadosDoEstoque } from '@/lib/estoque';
 import { horarioLoja, isOpenNow } from '@/lib/services/slaEngine';
 import { revisarResposta } from '@/lib/laura/guardrails';
 import { entradaEmReais, parseValorBR } from '@/lib/qualificacao';
@@ -118,16 +119,9 @@ async function registrarPulada(supabase: SupabaseClient, g: GatilhoIa, modo: 'en
     });
 }
 
-async function precosDoEstoque(supabase: SupabaseClient, altimus: AltimusVehicle[]): Promise<number[]> {
-    const precos = altimus.map(v => v.preco).filter((n): n is number => typeof n === 'number' && n > 0);
-    try {
-        const { data } = await supabase.from('estoque').select('preco').limit(500);
-        for (const v of data || []) {
-            const n = parseValorBR((v as { preco: string | null }).preco);
-            if (n && n > 0) precos.push(n);
-        }
-    } catch { /* tabela estoque fora: fica só a Altimus */ }
-    return precos;
+// Preços anunciados: feed da Altimus (a tabela `estoque` está obsoleta).
+async function precosDoEstoque(): Promise<number[]> {
+    return precosAnunciadosDoEstoque();
 }
 
 const COLUNAS_CONVERSA =
@@ -265,7 +259,7 @@ export async function rodarLaura(g: GatilhoIa): Promise<void> {
         if (!texto) { await finalizar({ status: 'erro', motivo: parada === 'max_tokens' ? 'resposta cortada (max_tokens)' : 'resposta vazia' }); return; }
 
         // 7. filtro de regras
-        const precos = await precosDoEstoque(supabase, estoque);
+        const precos = await precosDoEstoque();
         const valoresCliente = valoresCitados(ctx.textosDoCliente);
         const entrada = entradaEmReais(ctx.ficha.entrada);
         if (entrada) valoresCliente.push(entrada);

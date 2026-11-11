@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { ehMoto, parseValorBR, getPrazo, type QualificacaoCampos } from '@/lib/qualificacao';
+import { parseValorBR, getPrazo, type QualificacaoCampos } from '@/lib/qualificacao';
+import { pisoDoEstoque } from '@/lib/estoque';
 
 /**
  * Leitura e gravação dos 4 campos de qualificação nas tabelas-base.
@@ -116,26 +117,11 @@ export async function salvarQualificacao(
 }
 
 // ── Piso do estoque (carro mais barato à venda) ─────────────────────────────
-let pisoCache: { valor: number | null; em: number } | null = null;
-const PISO_TTL_MS = 10 * 60 * 1000;
-
 /**
- * Preço do carro mais barato do estoque (tabela `estoque`, a mesma da vitrine).
- * Motos ficam de fora: uma Biz de R$ 12.900 não pode virar o piso de quem
- * procura carro.
+ * Preço do carro mais barato do estoque, lido do feed da Altimus (a tabela `estoque`
+ * está obsoleta). Motos ficam de fora: uma Biz de R$ 12.900 não pode virar o piso de
+ * quem procura carro. O parâmetro fica por compatibilidade.
  */
-export async function pisoEstoque(admin: SupabaseClient): Promise<number | null> {
-    if (pisoCache && Date.now() - pisoCache.em < PISO_TTL_MS) return pisoCache.valor;
-    const { data, error } = await admin.from('estoque').select('marca, modelo, preco').limit(500);
-    if (error) {
-        console.warn('[qualificacao] estoque:', error.message);
-        return pisoCache?.valor ?? null;
-    }
-    const precos = (data || [])
-        .filter((v: any) => !ehMoto(`${v.marca || ''} ${v.modelo || ''}`))
-        .map((v: any) => parseValorBR(v.preco))
-        .filter((n): n is number => n != null && n >= 5000);
-    const valor = precos.length ? Math.min(...precos) : null;
-    pisoCache = { valor, em: Date.now() };
-    return valor;
+export async function pisoEstoque(_admin?: SupabaseClient): Promise<number | null> {
+    return pisoDoEstoque();
 }
