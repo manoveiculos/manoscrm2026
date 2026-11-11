@@ -176,5 +176,9 @@ export async function enviarFotosPorUrl(
         } });
         await admin.from('wa_mensagens').update({ autor: quem.autor, consultant_id: quem.consultantId ?? null, origem: 'crm' }).eq('provider_message_id', r.providerMessageId);
     }
+    // Vendedor mandando fotos pelo CRM também assume a conversa (a Laura para), igual ao envio de texto.
+    if (enviadas > 0 && quem.autor === 'vendedor') {
+        await admin.from('wa_conversas').update({ status: 'humano', ia_silenciada_ate: null }).eq('id', conv.id).eq('status', 'ia');
+    }
     return enviadas;
 }

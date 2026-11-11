@@ -36,6 +36,10 @@ test('texto do carro usa só dados do estoque, sem inventar', () => {
     assert.match(t, /Branco · 54\.000 km · Flex/);
     assert.match(t, /R\$ 39\.900/);
     assert.doesNotMatch(t, /null|undefined/);
+    // o link do anúncio nunca vai ao cliente
+    const comLink = textoDoCarro({ descricao: 'GWM Haval H6 2025', cor: 'Preto', km: 29000, cambio: null, combustivel: 'Gasolina e Híbrido', preco: 219900, link: 'https://exemplo.com.br/veiculo/1' });
+    assert.doesNotMatch(comLink, /https?:|exemplo\.com/);
+    assert.match(comLink, /R\$ 219\.900/);
     assert.equal(textoDoCarro({ descricao: 'X', cor: null, km: null, cambio: null, combustivel: null, preco: null, link: null }), 'X');
 });
 
@@ -58,6 +62,7 @@ test('Laura sabe o endereço e o horário, mas não passa Pix', () => {
 test('fotos do estoque: manda cada URL, registra como do vendedor e segue se uma falhar', async () => {
     const enviadas: string[] = [];
     const rpcs: { p: Record<string, unknown> }[] = [];
+    const updates: { tabela: string; d: Record<string, unknown>; filtros: unknown[] }[] = [];
     const provider = {
         enviarMidia: async (_p: string, m: { url?: string }) => {
             enviadas.push(String(m.url));
@@ -66,7 +71,16 @@ test('fotos do estoque: manda cada URL, registra como do vendedor e segue se uma
     } as unknown as WhatsAppProvider;
     const admin = {
         rpc: async (_n: string, a: { p: Record<string, unknown> }) => { rpcs.push(a); return { error: null }; },
-        from: () => ({ update: () => ({ eq: async () => ({}) }) }),
+        from: (tabela: string) => ({
+            update: (d: Record<string, unknown>) => {
+                const filtros: unknown[] = [];
+                const b: Record<string, unknown> = {
+                    eq: (c: string, v: unknown) => { filtros.push([c, v]); return b; },
+                    then: (ok: (v: unknown) => unknown) => { updates.push({ tabela, d, filtros }); return Promise.resolve({}).then(ok); },
+                };
+                return b;
+            },
+        }),
     } as unknown as SupabaseClient;
     const n = await enviarFotosPorUrl(admin, provider, { id: 'c1', telefone_key: '4799', remote_jid: null }, ['https://x/1.jpg', 'https://x/2.jpg', 'https://x/3.jpg'], { autor: 'vendedor', consultantId: 'k' }, 0);
     assert.equal(n, 2);
@@ -75,4 +89,6 @@ test('fotos do estoque: manda cada URL, registra como do vendedor e segue se uma
     assert.equal(rpcs[0].p.autor, 'vendedor');
     assert.equal(rpcs[0].p.consultant_id, 'k');
     assert.equal(rpcs[0].p.origem, 'crm');
+    // vendedor mandando fotos assume a conversa (a Laura para)
+    assert.ok(updates.some(u => u.tabela === 'wa_conversas' && u.d.status === 'humano'));
 });

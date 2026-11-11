@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/admin';
 import { comRotaPorNome } from '@/lib/avisos/webhookVendedor';
+import { registrarAviso } from '@/lib/avisos/registro';
 import { pickNextConsultant } from './consultantService';
 
 const N8N_WEBHOOK_URL =
@@ -64,8 +65,16 @@ async function pushToVendor(
             signal: AbortSignal.timeout(8000),
         });
         if (!res.ok) console.warn('[reassignment] push falhou', res.status);
+        await registrarAviso({
+            tipo: type, consultorNome: consultantName, telefone: consultantPhone, mensagem: message, ok: res.ok,
+            erro: res.ok ? null : `HTTP ${res.status}`, leadRef: meta.lead_id != null ? String(meta.lead_id) : null, origem: 'reassignmentService', meta,
+        });
     } catch (err: any) {
         console.warn('[reassignment] push erro:', err?.message);
+        await registrarAviso({
+            tipo: type, consultorNome: consultantName, telefone: consultantPhone, mensagem: message, ok: false,
+            erro: err?.message || 'falha de rede', leadRef: meta.lead_id != null ? String(meta.lead_id) : null, origem: 'reassignmentService', meta,
+        });
     }
 }
 

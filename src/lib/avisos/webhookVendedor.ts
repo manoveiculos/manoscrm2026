@@ -11,6 +11,7 @@
 // `consultant_phone`. Número que não fecha nesse formato vai vazio (nunca meio número).
 
 import { normalizarTelefoneBR } from '@/lib/telefone';
+import { registrarAviso } from './registro';
 
 export const WEBHOOK_VENDEDOR_PADRAO = 'https://n8n.drivvoo.com/webhook/chamadavendedorcrm';
 
@@ -65,9 +66,10 @@ export function comRotaPorNome<T extends { consultant_name?: string | null; cons
     };
 }
 
-/** Envia o aviso. Nunca lança: devolve ok/erro para quem chamou decidir o que fazer. */
-export async function enviarAvisoVendedor(a: AvisoVendedor): Promise<{ ok: boolean; erro?: string }> {
+/** Envia o aviso e deixa registrado no histórico do admin. Nunca lança: devolve ok/erro. */
+export async function enviarAvisoVendedor(a: AvisoVendedor & { consultorId?: string | null; leadRef?: string | null; conversaId?: string | null; origem?: string | null }): Promise<{ ok: boolean; erro?: string }> {
     if (!chaveDoNome(a.nome) || !a.mensagem.trim()) return { ok: false, erro: 'aviso sem nome ou sem mensagem' };
+    let r: { ok: boolean; erro?: string };
     try {
         const segredo = (process.env.N8N_VENDOR_WEBHOOK_SECRET || '').trim();
         const res = await fetch(urlWebhookVendedor(), {
@@ -76,8 +78,13 @@ export async function enviarAvisoVendedor(a: AvisoVendedor): Promise<{ ok: boole
             body: JSON.stringify(corpoDoAviso(a)),
             signal: AbortSignal.timeout(8000),
         });
-        return res.ok ? { ok: true } : { ok: false, erro: `HTTP ${res.status}` };
+        r = res.ok ? { ok: true } : { ok: false, erro: `HTTP ${res.status}` };
     } catch (e) {
-        return { ok: false, erro: e instanceof Error ? e.message : 'falha de rede' };
+        r = { ok: false, erro: e instanceof Error ? e.message : 'falha de rede' };
     }
+    await registrarAviso({
+        tipo: a.tipo, consultorNome: a.nome, consultorId: a.consultorId, telefone: a.telefone, mensagem: a.mensagem,
+        ok: r.ok, erro: r.erro, leadRef: a.leadRef, conversaId: a.conversaId, origem: a.origem ?? 'avisoVendedor', meta: a.meta,
+    });
+    return r;
 }

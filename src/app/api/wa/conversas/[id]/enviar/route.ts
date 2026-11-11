@@ -26,6 +26,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     if (!ctx.ok) return NextResponse.json({ success: false, error: ctx.erro }, { status: ctx.status, headers: SEM_CACHE });
 
     const corpo = await req.json().catch(() => null) as Record<string, unknown> | null;
+    // Só as fotos do carro (sem texto): { carroId, fotos: 1..10, soFotos: true }
+    const soFotos = corpo?.soFotos === true && typeof corpo?.carroId === 'string';
     let conteudo: ConteudoEnvio | null = null;
     if (typeof corpo?.texto === 'string') conteudo = { tipo: 'texto', texto: corpo.texto };
     else if (corpo?.imagem && typeof corpo.imagem === 'object') {
@@ -34,19 +36,26 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     } else if (corpo?.audio && typeof corpo.audio === 'object') {
         conteudo = { tipo: 'audio', base64: String((corpo.audio as Record<string, unknown>).base64 || '') };
     }
-    if (!conteudo) return NextResponse.json({ success: false, error: 'envie texto, imagem ou áudio' }, { status: 400, headers: SEM_CACHE });
+    if (!conteudo && !soFotos) return NextResponse.json({ success: false, error: 'envie texto, imagem ou áudio' }, { status: 400, headers: SEM_CACHE });
 
     // A sessão só enxerga a conversa se tiver permissão (RLS): 404 igual a "não existe"
     const { data: conv } = await ctx.sessao.from('wa_conversas').select('id, telefone_key, remote_jid').eq('id', id).maybeSingle();
     if (!conv) return NextResponse.json({ success: false, error: 'conversa não encontrada' }, { status: 404, headers: SEM_CACHE });
 
-    // Fotos do estoque junto com o texto: { texto, carroId, fotos: 1..6 }. As URLs vêm do feed, não do navegador.
+    // Fotos do estoque junto com o texto: { texto, carroId, fotos: 1..10 }. As URLs vêm do feed, não do navegador.
     const carroId = typeof corpo?.carroId === 'string' ? corpo.carroId.trim() : '';
-    const qtdFotos = Math.min(Math.max(Math.floor(Number(corpo?.fotos) || 0), 0), 6);
+    const qtdFotos = Math.min(Math.max(Math.floor(Number(corpo?.fotos) || 0), 0), 10);
 
     try {
         const quem = { autor: 'vendedor' as const, consultantId: ctx.eu.consultorId };
-        const r = await enviarPeloCrm(ctx.admin, providerLoja(), conv, conteudo, quem);
+        if (soFotos) {
+            const carro = qtdFotos > 0 ? (await estoqueAtual()).carros.find(c => c.id === carroId) : null;
+            if (!carro || !carro.fotos.length) return NextResponse.json({ success: false, error: 'esse carro não tem fotos no estoque' }, { status: 404, headers: SEM_CACHE });
+            const n = await enviarFotosPorUrl(ctx.admin, providerLoja(), conv, carro.fotos.slice(0, qtdFotos), quem);
+            if (!n) return NextResponse.json({ success: false, error: 'não foi possível enviar as fotos' }, { status: 502, headers: SEM_CACHE });
+            return NextResponse.json({ success: true, enviadas: n }, { headers: SEM_CACHE });
+        }
+        const r = await enviarPeloCrm(ctx.admin, providerLoja(), conv, conteudo as ConteudoEnvio, quem);
         if (r.ok && carroId && qtdFotos > 0) {
             const carro = (await estoqueAtual()).carros.find(c => c.id === carroId);
             if (carro) await enviarFotosPorUrl(ctx.admin, providerLoja(), conv, carro.fotos.slice(0, qtdFotos), quem);

@@ -53,7 +53,7 @@ export interface CarroParaTexto {
 
 const brl = (n: number) => `R$ ${Math.round(n).toLocaleString('pt-BR')}`;
 
-/** Texto do carro para o cliente: só dados do estoque, do jeito que vieram. */
+/** Texto do carro para o cliente: só dados do estoque, do jeito que vieram. NUNCA leva o link do anúncio (decisão do Alexandre, 11/11/2026): o cliente recebe as fotos, não o link. */
 export function textoDoCarro(c: CarroParaTexto): string {
     const linha2 = [
         c.cor,
@@ -61,5 +61,5 @@ export function textoDoCarro(c: CarroParaTexto): string {
         c.cambio,
         c.combustivel,
     ].filter(Boolean).join(' · ');
-    return [c.descricao, linha2, c.preco != null && c.preco > 0 ? brl(c.preco) : null, c.link].filter(Boolean).join('\n');
+    return [c.descricao, linha2, c.preco != null && c.preco > 0 ? brl(c.preco) : null].filter(Boolean).join('\n');
 }

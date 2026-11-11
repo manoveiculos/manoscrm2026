@@ -71,6 +71,7 @@ export const NAV_ITEMS: NavItem[] = [
     { id: 'perfil', label: 'Perfil', icon: CircleUser, href: '#perfil', grupo: 'vendas', nivel: 'base', acao: 'perfil', ocultoParaAdmin: true },
     { id: 'prioridade48h', label: 'Painel 48h', icon: Flame, href: '/admin/prioridade48h', grupo: 'vendas', nivel: 'gestor' },
     { id: 'perdidos', label: 'Perdidos', icon: ClipboardCheck, href: '/admin/perdidos', grupo: 'vendas', nivel: 'gestor' },
+    { id: 'avisos', label: 'Avisos e cobranças', curto: 'Avisos', icon: Megaphone, href: '/admin/avisos', grupo: 'vendas', nivel: 'gestor' },
     { id: 'atendimento', label: 'Atendimento', icon: PlayCircle, href: '/atendimento', grupo: 'vendas', nivel: 'admin' },
     { id: 'pipeline', label: 'Pipeline', icon: KanbanSquare, href: '/pipeline', grupo: 'vendas', nivel: 'admin' },
     { id: 'resgate', label: 'Resgate', icon: Bot, href: '/admin/rescue', grupo: 'vendas', nivel: 'admin' },

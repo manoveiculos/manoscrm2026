@@ -8,7 +8,8 @@ import { textoApresentacao } from '@/lib/loja';
 interface CarroLista extends CarroParaTexto { id: string; fotos: string[] }
 interface Opcao { chave: string; titulo: string; detalhe?: string; escolher: () => void }
 
-const MAX_FOTOS = 4;
+const PADRAO_FOTOS = 4;
+const MAX_FOTOS = 10;
 
 /**
  * Responder pelo CRM, no número da loja, e Assumir / Devolver para a IA.
@@ -32,10 +33,12 @@ export function Compositor({ conversaId, status, onAtualizar, consultor, cliente
     const [enviando, setEnviando] = useState(false);
     const [erro, setErro] = useState<string | null>(null);
     const campo = useRef<HTMLTextAreaElement | null>(null);
+    const carroTexto = useRef('');
 
     // carro escolhido pelo atalho: as fotos vão junto com o texto
     const [carro, setCarro] = useState<{ id: string; descricao: string; fotos: number } | null>(null);
     const [comFotos, setComFotos] = useState(true);
+    const [qtdFotos, setQtdFotos] = useState(PADRAO_FOTOS);
 
     // busca no estoque enquanto digita "@algo"
     const [carros, setCarros] = useState<CarroLista[]>([]);
@@ -84,10 +87,19 @@ export function Compositor({ conversaId, status, onAtualizar, consultor, cliente
         const t = texto.trim();
         if (!t || enviando) return;
         setEnviando(true);
-        const fotos = carro && comFotos ? Math.min(carro.fotos, MAX_FOTOS) : 0;
+        const fotos = carro && comFotos ? Math.min(carro.fotos, qtdFotos) : 0;
         const ok = await chamar(`/api/wa/conversas/${conversaId}/enviar`, { texto: t, ...(carro && fotos ? { carroId: carro.id, fotos } : {}) });
         setEnviando(false);
         if (ok) { setTexto(''); setCarro(null); onAtualizar(); }
+    };
+
+    // manda só as fotos do carro (sem o texto); o texto do carro sai do campo
+    const enviarSoFotos = async () => {
+        if (!carro || enviando) return;
+        setEnviando(true);
+        const ok = await chamar(`/api/wa/conversas/${conversaId}/enviar`, { carroId: carro.id, fotos: Math.min(carro.fotos, qtdFotos), soFotos: true });
+        setEnviando(false);
+        if (ok) { setCarro(null); setTexto(t => t.replace(carroTexto.current, '').trim()); onAtualizar(); }
     };
 
     const mudar = async (acao: 'assumir' | 'devolver') => {
@@ -112,7 +124,7 @@ export function Compositor({ conversaId, status, onAtualizar, consultor, cliente
         ...carros.map((c): Opcao => ({
             chave: `c-${c.id}`, titulo: c.descricao,
             detalhe: [c.km != null ? `${c.km.toLocaleString('pt-BR')} km` : null, c.preco ? `R$ ${Math.round(c.preco).toLocaleString('pt-BR')}` : null, c.fotos.length ? `${c.fotos.length} fotos` : 'sem fotos'].filter(Boolean).join(' · '),
-            escolher: () => colocar(textoDoCarro(c), () => { setCarro({ id: c.id, descricao: c.descricao, fotos: c.fotos.length }); setComFotos(c.fotos.length > 0); }),
+            escolher: () => colocar(textoDoCarro(c), () => { carroTexto.current = textoDoCarro(c); setCarro({ id: c.id, descricao: c.descricao, fotos: c.fotos.length }); setComFotos(c.fotos.length > 0); setQtdFotos(Math.min(PADRAO_FOTOS, c.fotos.length) || 1); }),
         })),
     ];
     const aberto = Boolean(atalho) && (opcoes.length > 0 || buscando || busca.trim().length >= 2);
@@ -171,13 +183,28 @@ export function Compositor({ conversaId, status, onAtualizar, consultor, cliente
             </div>
 
             {carro && carro.fotos > 0 && (
-                <div className="flex items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-[12px] text-white/70">
-                    <Camera size={14} className="shrink-0 text-emerald-300" />
-                    <label className="flex flex-1 min-w-0 items-center gap-2">
-                        <input type="checkbox" checked={comFotos} onChange={(e) => setComFotos(e.target.checked)} />
-                        <span className="truncate">Enviar {Math.min(carro.fotos, MAX_FOTOS)} foto{Math.min(carro.fotos, MAX_FOTOS) > 1 ? 's' : ''} de {carro.descricao}</span>
-                    </label>
-                    <button type="button" onClick={() => setCarro(null)} aria-label="Tirar o carro" className="h-8 w-8 shrink-0 rounded-lg flex items-center justify-center text-white/50"><X size={14} /></button>
+                <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-[12px] text-white/70 space-y-2">
+                    <div className="flex items-center gap-2">
+                        <Camera size={14} className="shrink-0 text-emerald-300" />
+                        <span className="flex-1 min-w-0 truncate font-bold text-white/85">{carro.descricao}</span>
+                        <button type="button" onClick={() => setCarro(null)} aria-label="Tirar o carro" className="h-8 w-8 shrink-0 rounded-lg flex items-center justify-center text-white/50"><X size={14} /></button>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                        <label className="flex items-center gap-1.5">
+                            Fotos:
+                            <select value={Math.min(qtdFotos, carro.fotos)} onChange={(e) => setQtdFotos(Number(e.target.value))} aria-label="Quantas fotos enviar" className="min-h-[36px] rounded-lg bg-white/[0.08] border border-white/[0.1] px-2 text-white">
+                                {Array.from({ length: Math.min(carro.fotos, MAX_FOTOS) }, (_, i) => i + 1).map(n => <option key={n} value={n}>{n}</option>)}
+                            </select>
+                            <span className="text-white/40">de {carro.fotos}</span>
+                        </label>
+                        <label className="flex items-center gap-1.5">
+                            <input type="checkbox" checked={comFotos} onChange={(e) => setComFotos(e.target.checked)} />
+                            Mandar junto com o texto
+                        </label>
+                        <button type="button" onClick={() => void enviarSoFotos()} disabled={enviando} className="ml-auto min-h-[36px] rounded-lg bg-emerald-500 px-3 text-[12px] font-black text-black active:scale-95 disabled:opacity-50">
+                            Enviar só as fotos
+                        </button>
+                    </div>
                 </div>
             )}
 

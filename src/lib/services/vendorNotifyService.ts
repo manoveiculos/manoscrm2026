@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/admin';
 import { comRotaPorNome } from '@/lib/avisos/webhookVendedor';
+import { registrarAviso } from '@/lib/avisos/registro';
 
 const N8N_WEBHOOK_URL =
     process.env.N8N_VENDOR_WEBHOOK_URL ||
@@ -41,6 +42,11 @@ function classificationEmoji(c?: string): string {
 }
 
 async function sendToWebhook(payload: NotifyPayload): Promise<void> {
+    // histórico do admin (/admin/avisos): grava o resultado de TODO aviso, ok ou falha
+    const registrar = (ok: boolean, erro?: string) => registrarAviso({
+        tipo: payload.type, consultorNome: payload.consultant_name, telefone: payload.consultant_phone, mensagem: payload.message,
+        ok, erro, leadRef: payload.meta?.lead_id != null ? String(payload.meta.lead_id) : null, origem: 'vendorNotifyService', meta: payload.meta,
+    });
     try {
         const res = await fetch(N8N_WEBHOOK_URL, {
             method: 'POST',
@@ -49,8 +55,10 @@ async function sendToWebhook(payload: NotifyPayload): Promise<void> {
             body: JSON.stringify(comRotaPorNome(payload)),
             signal: AbortSignal.timeout(8000),
         });
+        if (res.ok) await registrar(true);
         if (!res.ok) {
             const errorText = await res.text().catch(() => '');
+            await registrar(false, `HTTP ${res.status}`);
             console.warn(`[vendorNotify] webhook ${res.status}`, errorText);
             
             // Log de falha no banco (Auditoria Forense)
@@ -70,6 +78,7 @@ async function sendToWebhook(payload: NotifyPayload): Promise<void> {
     } catch (err: any) {
         const msg = err?.message || 'Erro de conexão/timeout';
         console.warn('[vendorNotify] webhook error:', msg);
+        await registrar(false, msg);
 
         // Log de falha no banco (Auditoria Forense)
         try {
