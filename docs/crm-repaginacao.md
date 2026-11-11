@@ -238,3 +238,40 @@ na **quinta, 05/11/2026**, depois do expediente (loja: seg–sex 8h–18h, sáb 
 | Aviso no celular (push) | b5dcaf6 | 22:29 | 22:35 |
 
 1º aviso de teste entregue à Apple (iPhone do Alexandre) às 22:41.
+
+---
+
+## Central dos Agentes (`/agentes`) — 06/11/2026
+
+Pedido do Alexandre: ver todos os agentes trabalhando em tempo real, com ele no meio orquestrando. Especificação:
+`D:\Agentes de marketing\docs\growth360\aba-agentes-tempo-real.md`. **Só admin**; item "Central dos Agentes" no grupo Gestão.
+
+**Regra de ouro: nada de atividade falsa.** Todo estado vem de registro real; sem registro recente = ocioso; desligado = desligado;
+Laura em ensaio = etiqueta ENSAIO.
+
+| Peça | Onde |
+|---|---|
+| Catálogo (16 agentes, 3 arcos) | `src/lib/agentes/catalogo.ts` |
+| `estadoDosAgentes()` — função pura | `src/lib/agentes/estado.ts` (13 testes: `npm run test:agentes`) |
+| Leitura dos registros reais (só leitura) | `src/lib/agentes/carregar.ts` |
+| Interruptor (`agenteLigado()`) | `src/lib/agentes/config.ts` — sem a tabela, tudo "ligado" (como hoje) |
+| API | `GET /api/agentes`, `POST /api/agentes/config` (só admin; 401/403 para os demais) |
+| Tela | `src/app/agentes/` (desktop: constelação + feed; celular: card do Alexandre, listas, feed) |
+| Prévia com dados reais, só leitura | `/dev/agentes` (só fora de produção) |
+| Migration **NÃO aplicada** | `supabase/migrations/20261106b_agentes_config.sql` + `supabase/tests/agentes_config_rls.test.sql` |
+
+Fontes: Laura = `wa_ia_config` + `wa_ia_execucoes` + `wa_mensagens` (autor laura, n8n); Distribuidor = `lead_distribuicao`;
+Supervisor = `cron_heartbeats` + `sla_escalations` + alerta lead quente; Reengajamento = `historico_followup` + `follow_ups`;
+Copiloto = `ai_last_run_at`; Consultores = `consultant_active_chats`, `wa_mensagens` (vendedor), `interactions_manos_crm`;
+Marketing/Growth = `marketing_agent_runs` por squad. Decisões = `pending_approval`, conversas sem dono, alertas críticos.
+O feed junta ações iguais ("×21") e esconde a rotina de 5 min do SLA (só aparece se der erro).
+
+**Tempo real:** um canal Realtime por tabela + consulta a cada 10 s (várias tabelas não estão na publicação do Realtime; as
+de `wa_*` são da sessão da Laura e não foram mexidas) e "reconectando…" se a leitura falhar.
+
+**Ensaio da migration (BEGIN…RAISE, desfeito):** "admin vê 2, vendedor vê 0, outro app vê 0, anon bloqueado, escrita do
+navegador bloqueada"; tabela não ficou.
+
+**Pendente / limites:** (1) migration com "aprovado" (sem ela: "IA geral sem interruptor" e a gaveta avisa); (2) a Laura ainda não
+checa `ia_geral` (combinado com a sessão dela); (3) "dar uma ordem a um agente" precisa de `growth_ordens`; (4) Growth Intelligence,
+Perito e Reengajamento ainda não têm registros reais, então aparecem ociosos com "Nenhum registro ainda."; (5) custo só da Laura (US$).
