@@ -19,6 +19,7 @@
     "test:criar-lead": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/whatsapp/criarLead.test.ts",
     "test:envio": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/whatsapp/envio.test.ts",
     "test:identificacao": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/identificacao/identificacao.test.ts",
+    "test:prontidao": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/whatsapp/prontidao.test.ts",
     "test:laura": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/whatsapp/laura.test.ts"
   },
   "dependencies": {

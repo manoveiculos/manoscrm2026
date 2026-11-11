@@ -23,15 +23,17 @@ export interface DadosBarraIa {
         modoGravado: 'desligada' | 'ensaio' | 'envia';
         motivo: string | null;
         ativaNoServidor: boolean;
+        envioLiberado?: boolean;
     };
     resumo: ResumoEnsaio | null;
 }
 
-export function BarraLauraCrmView({ dados, salvando, erro, onMudar }: {
+export function BarraLauraCrmView({ dados, salvando, erro, onMudar, prontidao }: {
     dados: DadosBarraIa | null;
     salvando: boolean;
     erro: string | null;
-    onMudar: (modo: 'ensaio' | 'desligada') => void;
+    onMudar: (modo: 'ensaio' | 'desligada' | 'envia') => void;
+    prontidao?: ReactNode;
 }) {
     if (!dados) {
         return erro
@@ -65,6 +67,16 @@ export function BarraLauraCrmView({ dados, salvando, erro, onMudar }: {
                     </button>
                 )}
             </div>
+            {podeMudar && config.modoGravado === 'ensaio' && config.envioLiberado && (
+                <button
+                    type="button"
+                    disabled={salvando}
+                    onClick={() => { if (window.confirm('Ligar o envio? A Laura vai responder os clientes DE VERDADE pelo WhatsApp da loja.')) onMudar('envia'); }}
+                    className="w-full min-h-[40px] rounded-xl bg-emerald-500 text-black text-[12px] font-black active:scale-95 disabled:opacity-50"
+                >
+                    Ligar envio ao cliente
+                </button>
+            )}
             {config.motivo && (
                 <p className="flex items-start gap-1.5 text-[11px] text-amber-200/90">
                     <AlertTriangle size={12} className="mt-0.5 shrink-0" />
@@ -82,6 +94,7 @@ export function BarraLauraCrmView({ dados, salvando, erro, onMudar }: {
                 <p className="text-[11px] text-white/45">Nenhuma rodada hoje ainda.</p>
             )}
             {erro && <p className="text-[11px] text-red-200">{erro}</p>}
+            {prontidao}
         </section>
     );
 }
@@ -109,7 +122,7 @@ export function BarraLauraCrm() {
         return () => clearInterval(t);
     }, [carregar]);
 
-    const mudar = async (modo: 'ensaio' | 'desligada') => {
+    const mudar = async (modo: 'ensaio' | 'desligada' | 'envia') => {
         setSalvando(true);
         try {
             const r = await fetch('/api/wa/ia/config', {
@@ -127,7 +140,7 @@ export function BarraLauraCrm() {
         }
     };
 
-    return <BarraLauraCrmView dados={dados} salvando={salvando} erro={erro} onMudar={mudar} />;
+    return <BarraLauraCrmView dados={dados} salvando={salvando} erro={erro} onMudar={mudar} prontidao={dados?.podeMudar ? <PainelProntidao /> : null} />;
 }
 
 // ---------------------------------------------------------------------------
@@ -241,4 +254,64 @@ export function EnsaioDaConversa({ conversaId, agora }: { conversaId: string; ag
     useEffect(() => { void carregar(); }, [carregar]);
 
     return <CartoesEnsaio rodadas={rodadas} carregando={carregando} erro={erro} agora={agora} onAtualizar={() => void carregar()} />;
+}
+
+// ---------------------------------------------------------------------------
+// Prontidão: o que falta para a Laura atender de verdade (só admin)
+// ---------------------------------------------------------------------------
+
+interface ItemPront { id: string; grupo: 'base' | 'troca' | 'opcional'; ok: boolean; titulo: string; como: string }
+
+export function PainelProntidaoView({ itens, carregando, erro, onAtualizar }: {
+    itens: ItemPront[] | null; carregando: boolean; erro: string | null; onAtualizar: () => void;
+}) {
+    const grupos: [ItemPront['grupo'], string][] = [['base', 'Base (ensaio e envio)'], ['troca', 'Dia da troca do n8n'], ['opcional', 'Opcional']];
+    const falta = itens ? itens.filter(i => i.grupo === 'base' && !i.ok).length : 0;
+    return (
+        <details className="rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-2" onToggle={(e) => { if ((e.target as HTMLDetailsElement).open && !itens) onAtualizar(); }}>
+            <summary className="cursor-pointer text-[12px] font-bold text-white/80">
+                Prontidão{itens && (falta ? <span className="ml-2 text-amber-200">{falta} item(ns) da base faltando</span> : <span className="ml-2 text-emerald-200">base ok</span>)}
+            </summary>
+            <div className="mt-2 space-y-2">
+                {carregando && <Loader2 size={14} className="animate-spin text-white/50" />}
+                {erro && <p className="text-[11px] text-red-200">{erro}</p>}
+                {itens && grupos.map(([g, rotulo]) => (
+                    <div key={g}>
+                        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/40 mb-1">{rotulo}</p>
+                        <ul className="space-y-1">
+                            {itens.filter(i => i.grupo === g).map(i => (
+                                <li key={i.id} className="text-[11px]">
+                                    <span className={i.ok ? 'text-emerald-300' : 'text-amber-200'}>{i.ok ? '✓' : '✗'}</span>{' '}
+                                    <span className="text-white/80">{i.titulo}</span>
+                                    {!i.ok && <span className="block text-white/45 pl-4">{i.como}</span>}
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                ))}
+                <button type="button" onClick={onAtualizar} className="text-[11px] font-bold text-white/60 underline">Conferir de novo</button>
+            </div>
+        </details>
+    );
+}
+
+export function PainelProntidao() {
+    const [itens, setItens] = useState<ItemPront[] | null>(null);
+    const [carregando, setCarregando] = useState(false);
+    const [erro, setErro] = useState<string | null>(null);
+    const carregar = useCallback(async () => {
+        setCarregando(true);
+        try {
+            const r = await fetch('/api/wa/ia/prontidao', { cache: 'no-store' });
+            const j = await r.json();
+            if (!r.ok || !j.success) throw new Error(j.error || 'indisponível');
+            setItens(j.itens);
+            setErro(null);
+        } catch (e) {
+            setErro(e instanceof Error ? e.message : 'indisponível');
+        } finally {
+            setCarregando(false);
+        }
+    }, []);
+    return <PainelProntidaoView itens={itens} carregando={carregando} erro={erro} onAtualizar={() => void carregar()} />;
 }
