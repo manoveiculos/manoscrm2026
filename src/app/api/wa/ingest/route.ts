@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/admin';
 import { ingerirWebhook, processarMidiasPendentes, registrarErro } from '@/lib/whatsapp/ingestao';
 import { msgErro } from '@/lib/whatsapp/erro';
 import { rodarLauraDepoisDaIngestao } from '@/lib/whatsapp/ia/motor';
+import { criarLeadLigado, garantirLeadsDasConversas } from '@/lib/whatsapp/criarLead';
 
 /**
  * POST /api/wa/ingest — ingestão do WhatsApp da loja (Fase 2). PERMANENTE:
@@ -67,6 +68,11 @@ export async function POST(req: NextRequest) {
     try {
         const r = await ingerirWebhook(payload, { instancia, autorFromMe: 'laura' });
         const pendentes = r.midiasPendentes;
+        // O CRM cria o lead na 1ª mensagem (WA_CRIAR_LEAD=true; padrão desligado) e a roleta distribui.
+        if (r.novasDoCliente.length && criarLeadLigado()) {
+            const conversas = r.novasDoCliente.map(g => g.conversaId);
+            after(() => garantirLeadsDasConversas(conversas));
+        }
         if (pendentes.length) {
             after(async () => {
                 try {
