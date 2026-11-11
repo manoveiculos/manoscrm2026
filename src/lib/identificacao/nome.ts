@@ -114,6 +114,15 @@ export function validarNome(bruto: string | null | undefined): string | null {
     return s.length <= 60 ? s : null;
 }
 
+const LUGARES = new Set(['sao', 'santa', 'santo', 'rio', 'porto', 'balneario', 'jaragua', 'blumenau', 'joinville', 'itajai', 'curitiba',
+    'florianopolis', 'brusque', 'gaspar', 'indaial', 'timbo', 'pomerode', 'ibirama', 'lontras', 'camboriu', 'sul', 'norte', 'centro']);
+
+/** Nome com 2+ palavras que não parece cidade (usado quando o nome vem na 2ª linha da mensagem). */
+function nomeCompletoSemLugar(nome: string): boolean {
+    const p = nome.split(' ').filter(x => !PARTICULAS.has(norm(x)));
+    return p.length >= 2 && !p.some(x => LUGARES.has(norm(x)));
+}
+
 /** A mensagem da loja pediu o nome do cliente? */
 export function pediuNome(textoDaLoja: string | null | undefined): boolean {
     const t = norm(textoDaLoja);
@@ -169,10 +178,15 @@ export function extrairNome(texto: string | null | undefined, ultimaDaLoja?: str
     // "Prof. Jayme…": o ponto do título não fecha a frase
     const semTitulo = bruto.replace(/(^|\n)\s*(prof|profa|dr|dra|sr|sra|srta|eng)\.\s+/gi, '$1');
     const trechos = semTitulo.split(/\n+|(?<=[.!?])\s+/).map(t => limparTrecho(t.replace(EMOJI, ' ')).replace(SAUDACAO_INICIO, '').trim());
+    let primeiro = true;
     for (const t of trechos.slice(0, 4)) {
         if (!t) continue; // trecho que era só saudação/emoji
         const nome = validarNome(t);
-        return nome ? { nome, regra: 'resposta_ao_pedido', trecho: t.slice(0, 160) } : null;
+        if (nome && (primeiro || nomeCompletoSemLugar(nome))) return { nome, regra: 'resposta_ao_pedido', trecho: t.slice(0, 160) };
+        // 1ª linha que não é nome ("Gostaria de financiar um carrinho"): o nome pode vir na linha seguinte,
+        // mas só se for nome COMPLETO (2+ palavras e que não seja cidade): "São Paulo" ou "Rio do Sul" não valem.
+        if (primeiro && nome === null && t.split(' ').length <= 12 && !t.includes('?')) { primeiro = false; continue; }
+        return null;
     }
     return null;
 }
