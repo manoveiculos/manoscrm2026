@@ -52,7 +52,7 @@ export interface GatilhoIa {
 const esperar = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 let clienteClaude: Anthropic | null = null;
-function claude(): Anthropic | null {
+export function claude(): Anthropic | null {
     if (clienteClaude) return clienteClaude;
     const apiKey = (process.env.API_CLAUDE || process.env.ANTHROPIC_API_KEY || '').trim();
     if (!apiKey) return null;
