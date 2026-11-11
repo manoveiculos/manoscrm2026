@@ -5,13 +5,14 @@ import assert from 'node:assert/strict';
 import {
     custoUsd, faltandoNaFicha, iaPodeResponder, inicioDoDiaSP, limiteDiario, limparNome, mesclarFicha,
     modoEfetivo, montarHistorico, nomeDitoPeloCliente, nomeEhGenerico, podeGravarNomeNoLead, respostasReais,
-    somarUso, valoresCitados, type MensagemParaIa,
+    repeteMensagemAnterior, semelhanca, somarUso, valoresCitados, type MensagemParaIa,
 } from '@/lib/whatsapp/ia/regras';
 import { contextoDaRodada, LAURA_CRM_PROMPT } from '@/lib/whatsapp/ia/prompt';
 import { acharCarro, buscarNoEstoque, idDoCarro } from '@/lib/whatsapp/ia/estoque';
 import { resumirRodadas } from '@/lib/whatsapp/ia/ensaioView';
 import { FERRAMENTAS, executarFerramenta, type ContextoRodada, type ConversaIa } from '@/lib/whatsapp/ia/ferramentas';
 import { horariosDeVisita, horariosDeVisitaDetalhados } from '@/lib/laura/playbook';
+import { revisarResposta } from '@/lib/laura/guardrails';
 import type { AltimusVehicle } from '@/lib/services/altimusInventory';
 import type { HorarioConfig } from '@/lib/services/slaEngine';
 
@@ -150,9 +151,12 @@ test('contexto da rodada: hora de Rio do Sul, ficha e o que falta', () => {
     assert.match(bloco, /Loja aberta/);
     assert.match(bloco, /nome: Carlos; carro_interesse: Onix/);
     assert.match(bloco, /Falta na ficha: forma de pagamento/);
-    assert.match(LAURA_CRM_PROMPT, /sujeito a análise de crédito/);
+    // 11/11: a Laura do CRM não manda mais "sujeito a análise de crédito"
+    assert.match(LAURA_CRM_PROMPT, /Não use frases de aviso como "sujeito a análise de crédito"/);
+    assert.match(LAURA_CRM_PROMPT, /NÃO REPITA/);
+    assert.match(LAURA_CRM_PROMPT, /UMA pergunta por mensagem/);
     // ensaio de 06/11: corrigir erro de outro atendente sem comentar o atendimento anterior
-    assert.match(LAURA_CRM_PROMPT, /nunca comente sobre o atendimento anterior/);
+    assert.match(LAURA_CRM_PROMPT, /nunca comente o atendimento anterior/i);
 });
 
 test('custo do Sonnet 5.5: entrada, saída e cache', () => {
@@ -363,4 +367,32 @@ test('passar_para_consultor no ensaio: só anota', async () => {
     assert.deepEqual(ctx.passagem, { motivo: 'pediu_pessoa', resumo: 'Carlos quer falar com alguém sobre o Onix' });
     assert.equal(banco.updates.length, 0);
     assert.equal(ctx.chamadas.length, 1);
+});
+
+// ---------------------------------------------------------------------------
+// Humanização (11/11): sem frase de crédito, sem repetir
+// ---------------------------------------------------------------------------
+
+test('Laura do CRM não recebe "(sujeito a análise de crédito)"; o n8n (padrão) continua recebendo', () => {
+    const pergunta = 'Você pretende pagar à vista, financiar ou dar um carro na troca?';
+    assert.equal(revisarResposta(pergunta, [], [], { fraseDeCredito: false }).texto_seguro, pergunta);
+    assert.match(revisarResposta(pergunta, []).texto_seguro, /sujeito a análise de crédito/);
+    // as regras de segurança continuam valendo sem a frase
+    assert.equal(revisarResposta('Fica em 48x de R$ 1.200', [], [], { fraseDeCredito: false }).ok, false);
+});
+
+test('repetição: mesma pergunta ou mesmo conteúdo das últimas mensagens da loja', () => {
+    const antes = [
+        'Mandei as fotos da Haval preta. É a GWM Haval H6 34 1.5 AWD híbrida 2025, com 29.000 km, por R$ 219.900. Você pretende pagar à vista, financiar ou dar um carro na troca?',
+        'Oi! Só ajustando: o valor certo do Onix 2025 é R$ 88.900.',
+    ];
+    // mesma pergunta de pagamento, com outras palavras na frente
+    assert.equal(repeteMensagemAnterior('Show! E você pretende pagar à vista, financiar ou dar um carro na troca?', antes), true);
+    // mesmo carro e preço de novo
+    assert.equal(repeteMensagemAnterior('A GWM Haval H6 34 1.5 AWD híbrida 2025 tem 29.000 km e custa R$ 219.900.', antes), true);
+    // resposta nova de verdade
+    assert.equal(repeteMensagemAnterior('Perfeito! Quer passar na loja amanhã às 10h pra ver ela de perto?', antes), false);
+    assert.equal(repeteMensagemAnterior('Tudo certo, qual a sua cidade?', antes), false);
+    assert.equal(repeteMensagemAnterior('Oi!', []), false);
+    assert.ok(semelhanca('Onix 2018 prata', 'o Onix 2018 prata automático') > 0.9);
 });

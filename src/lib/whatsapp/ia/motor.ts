@@ -36,7 +36,7 @@ import { FERRAMENTAS, executarFerramenta, type ContextoRodada, type ConversaIa }
 import { LAURA_CRM_PROMPT, contextoDaRodada } from './prompt';
 import {
     custoUsd, iaPodeResponder, inicioDoDiaSP, limiteDiario, montarHistorico, somarUso, textoParaIa,
-    valoresCitados, type FichaLaura, type MensagemParaIa, type UsoTokens,
+    repeteMensagemAnterior, valoresCitados, type FichaLaura, type MensagemParaIa, type UsoTokens,
 } from './regras';
 
 export const MODELO_PADRAO = 'claude-sonnet-5-5';
@@ -234,6 +234,10 @@ export async function rodarLaura(g: GatilhoIa): Promise<void> {
         // 6. laço do Claude
         let texto = '';
         let parada: string | null = null;
+        // Últimas 3 mensagens da loja (Laura ou vendedor): a resposta não pode repetir nenhuma
+        const anteriores = msgs.filter(m => m.autor === 'laura' || m.autor === 'vendedor')
+            .slice(0, 3).map(m => textoParaIa(m) || '');
+        let repeticaoTratada = false;
         while (iteracoes < MAX_ITERACOES) {
             iteracoes++;
             // Sonnet 5.5: pensamento adaptativo (padrão) em esforço baixo. O pensamento
@@ -261,6 +265,14 @@ export async function rodarLaura(g: GatilhoIa): Promise<void> {
                 continue;
             }
             texto = resp.content.filter((b): b is Anthropic.TextBlock => b.type === 'text').map(b => b.text).join('\n').trim();
+            if (!repeticaoTratada && texto && repeteMensagemAnterior(texto, anteriores)) {
+                // repetiu: pede UMA nova tentativa, só com o que o cliente acabou de escrever
+                repeticaoTratada = true;
+                messages.push({ role: 'assistant', content: resp.content });
+                messages.push({ role: 'user', content: '<aviso_do_crm>Essa resposta repete o que a loja já disse ou já perguntou. Reescreva respondendo só ao que o cliente acabou de escrever, sem repetir carros, preços, correções nem a pergunta anterior. Se não houver nada novo a perguntar, faça só a próxima etapa (ex.: oferecer fotos ou a visita).</aviso_do_crm>' });
+                texto = '';
+                continue;
+            }
             break;
         }
 
@@ -274,7 +286,7 @@ export async function rodarLaura(g: GatilhoIa): Promise<void> {
         const valoresCliente = valoresCitados(ctx.textosDoCliente);
         const entrada = entradaEmReais(ctx.ficha.entrada);
         if (entrada) valoresCliente.push(entrada);
-        const rev = revisarResposta(texto, precos, valoresCliente);
+        const rev = revisarResposta(texto, precos, valoresCliente, { fraseDeCredito: false });
 
         // 8. grava (e, só na etapa C, envia)
         let envio: Record<string, unknown> = {};

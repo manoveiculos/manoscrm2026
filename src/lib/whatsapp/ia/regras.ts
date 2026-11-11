@@ -334,3 +334,47 @@ export function respostasReais<T extends MensagemComparavel>(gatilhoEm: string, 
     }
     return out;
 }
+
+// ---------------------------------------------------------------------------
+// Repetição (ensaio de 11/11: a Laura repetia a mesma pergunta e o mesmo carro)
+// ---------------------------------------------------------------------------
+
+const PALAVRAS_VAZIAS = new Set(['de', 'da', 'do', 'e', 'o', 'a', 'os', 'as', 'um', 'uma', 'que', 'com', 'pra', 'para', 'por', 'em', 'no', 'na', 'te', 'me', 'se', 'ou', 'voce', 'vc', 'tem', 'sim']);
+
+function palavrasChave(s: string): Set<string> {
+    return new Set(
+        (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9\s]/g, ' ')
+            .split(/\s+/).filter(p => p.length >= 3 && !PALAVRAS_VAZIAS.has(p)),
+    );
+}
+
+/** Quanto do texto novo já foi dito antes: 0 a 1 (palavras do menor que aparecem no outro). */
+export function semelhanca(novo: string, anterior: string): number {
+    const n = palavrasChave(novo), a = palavrasChave(anterior);
+    if (!n.size || !a.size) return 0;
+    let comum = 0;
+    for (const p of n) if (a.has(p)) comum++;
+    return comum / Math.min(n.size, a.size);
+}
+
+/** Pergunta final da mensagem (última frase com "?"), ou null. */
+export function perguntaFinal(texto: string): string | null {
+    const frases = (texto || '').split(/(?<=[.!?])\s+|\n+/).map(s => s.trim()).filter(Boolean);
+    for (let i = frases.length - 1; i >= 0; i--) if (frases[i].includes('?')) return frases[i];
+    return null;
+}
+
+/**
+ * A resposta repete uma das últimas mensagens da loja? Repete se for muito parecida com
+ * alguma delas (70% ou mais das palavras) ou se termina com a mesma pergunta.
+ */
+export function repeteMensagemAnterior(texto: string, anteriores: string[]): boolean {
+    const pergunta = perguntaFinal(texto);
+    for (const a of anteriores) {
+        if (!a) continue;
+        if (semelhanca(texto, a) >= 0.7 && palavrasChave(texto).size >= 6) return true;
+        const pa = perguntaFinal(a);
+        if (pergunta && pa && semelhanca(pergunta, pa) >= 0.8 && palavrasChave(pergunta).size >= 3) return true;
+    }
+    return false;
+}
