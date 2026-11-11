@@ -13,6 +13,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/admin';
 import { distribuirLead } from '@/lib/services/slaEngine';
+import { extrairOrigemWhatsApp, registrarOrigemLead } from '@/lib/services/leadOrigin';
 import { msgErro } from './erro';
 
 export type TipoContato = 'cliente' | 'fornecedor' | 'emprego' | 'vender_carro';
@@ -161,6 +162,28 @@ export async function garantirLead(admin: SupabaseClient, conversaId: string, de
         console.warn('[wa/criar-lead] distribuirLead falhou:', msgErro(e));
     }
     return { acao: 'criado', leadUid: uid ?? `leads_distribuicao_crm_26:${id}`, distribuicao };
+}
+
+/**
+ * Origem do anúncio (Click-to-WhatsApp): o referral só vem na 1ª mensagem, dentro do
+ * evento da Evolution (externalAdReply). Grava ctwa_clid e ID do anúncio por
+ * registrar_origem_lead, que NÃO sobrescreve origem já gravada (first touch) e deixa
+ * pendente se o lead ainda não existe. Não lança.
+ */
+export async function registrarOrigemDoPayload(payload: unknown): Promise<'registrada' | 'sem_origem' | 'erro'> {
+    try {
+        const o = extrairOrigemWhatsApp(payload);
+        if (!o) return 'sem_origem';
+        const r = await registrarOrigemLead(createClient(), o);
+        if (!r.ok) {
+            console.warn('[wa/origem] não registrou:', r.motivo);
+            return 'erro';
+        }
+        return 'registrada';
+    } catch (e) {
+        console.warn('[wa/origem] falhou:', msgErro(e));
+        return 'erro';
+    }
 }
 
 /** Para cada conversa com mensagem nova do cliente. Não lança: erro vai para webhook_errors. */

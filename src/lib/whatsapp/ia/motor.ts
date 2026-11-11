@@ -28,6 +28,8 @@ import { revisarResposta } from '@/lib/laura/guardrails';
 import { entradaEmReais, parseValorBR } from '@/lib/qualificacao';
 import { enviarPushParaConsultor } from '@/lib/push/enviarPush';
 import { providerLoja } from '../evolutionProvider';
+import { enviarPeloCrm } from '../envio';
+import { notifyConsultant } from '@/lib/services/consultantNotifier';
 import { msgErro } from '../erro';
 import { lerConfigIa } from './config';
 import { FERRAMENTAS, executarFerramenta, type ContextoRodada, type ConversaIa } from './ferramentas';
@@ -288,6 +290,33 @@ export async function rodarLaura(g: GatilhoIa): Promise<void> {
         });
     } catch (e) {
         await finalizar({ status: 'erro', motivo: msgErro(e).slice(0, 300) });
+        if (modo === 'envia') await falhaDaIa(supabase, conversa, g.conversaId);
+    }
+}
+
+/**
+ * A IA falhou com o cliente esperando (só no modo "envia"): manda UMA mensagem de espera
+ * (no máximo 1 a cada 30 min por conversa) e avisa o consultor para assumir.
+ */
+async function falhaDaIa(supabase: SupabaseClient, conversa: ConversaIa, conversaId: string): Promise<void> {
+    try {
+        if ((process.env.WA_IA_ENVIO_LIBERADO || '').trim() !== 'true') return;
+        const desde = new Date(Date.now() - 30 * 60_000).toISOString();
+        const { count } = await supabase.from('wa_mensagens').select('id', { count: 'exact', head: true })
+            .eq('conversa_id', conversaId).eq('autor', 'laura').ilike('texto', '%Já te respondo%').gte('criada_em', desde);
+        if (!count) {
+            await enviarPeloCrm(supabase, providerLoja(), { id: conversaId, telefone_key: conversa.telefone_key, remote_jid: conversa.remote_jid }, { tipo: 'texto', texto: 'Já te respondo 😉' }, { autor: 'laura' });
+        }
+        if (conversa.assigned_consultant_id) {
+            await notifyConsultant({
+                consultantId: conversa.assigned_consultant_id, level: 2,
+                title: 'A Laura não conseguiu responder um cliente',
+                message: 'A IA falhou numa conversa do WhatsApp. Assuma o atendimento na tela Conversas.',
+                type: 'laura_falhou',
+            });
+        }
+    } catch (e) {
+        console.error('[laura-crm] falha ao tratar erro da IA:', msgErro(e));
     }
 }
 
@@ -305,13 +334,24 @@ async function executarEnvio(supabase: SupabaseClient, ctx: ContextoRodada, g: G
 
     const provider = providerLoja();
     const para = ctx.conversa.remote_jid || ctx.conversa.telefone_key;
-    const r = await provider.enviarTexto(para, texto);
+    const conv = { id: ctx.conversa.id, telefone_key: ctx.conversa.telefone_key, remote_jid: ctx.conversa.remote_jid };
+    // Pausa de digitação natural: ~35 ms por caractere, entre 1,5 s e 7 s.
+    await esperar(Math.min(7000, Math.max(1500, texto.length * 35)));
+    const r = await enviarPeloCrm(supabase, provider, conv, { tipo: 'texto', texto }, { autor: 'laura' });
     if (!r.ok) return { motivo: `envio falhou: ${r.erro || 'sem detalhe'}` };
 
     for (const f of ctx.fotos) {
         for (const url of f.urls) {
             await esperar(1500);
-            await provider.enviarMidia(para, { tipo: 'imagem', url, mime: 'image/jpeg' }).catch(() => null);
+            const foto = await provider.enviarMidia(para, { tipo: 'imagem', url, mime: 'image/jpeg' }).catch(() => null);
+            if (foto?.ok && foto.providerMessageId) {
+                // registra como da Laura (senão o eco do webhook entraria como "celular da loja")
+                await supabase.rpc('wa_registrar_mensagem', { p: {
+                    telefone: conv.telefone_key, remote_jid: conv.remote_jid, provider_message_id: foto.providerMessageId,
+                    autor: 'laura', tipo: 'imagem', midia_mime: 'image/jpeg', status_entrega: 'enviada', origem: 'crm', criada_em: new Date().toISOString(),
+                } });
+                await supabase.from('wa_mensagens').update({ autor: 'laura', origem: 'crm' }).eq('provider_message_id', foto.providerMessageId);
+            }
         }
     }
     if (ctx.agendamento && !ctx.agendamento.gravada) {

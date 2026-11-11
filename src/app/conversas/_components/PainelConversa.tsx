@@ -11,7 +11,7 @@ import {
 import { Bolha } from './Bolha';
 import type { UrlMidia } from './Midias';
 
-export function PainelConversa({ detalhe, carregando, carregandoAntigas, erro, agora, url, onVoltar, onAbrirFicha, onCarregarAntigas, mostrarBotaoFicha, ensaio }: {
+export function PainelConversa({ detalhe, carregando, carregandoAntigas, erro, agora, url, onVoltar, onAbrirFicha, onCarregarAntigas, mostrarBotaoFicha, ensaio, rodape }: {
     detalhe: ConversaDetalhe | null;
     carregando: boolean;
     carregandoAntigas: boolean;
@@ -25,6 +25,8 @@ export function PainelConversa({ detalhe, carregando, carregandoAntigas, erro, a
     mostrarBotaoFicha: boolean;
     /** Gestor/admin: aba "Ensaio da Laura" (rascunho do CRM × resposta enviada). */
     ensaio?: ReactNode;
+    /** Responder pelo CRM + Assumir/Devolver (aparece com NEXT_PUBLIC_WA_ENVIO=true). */
+    rodape?: ReactNode;
 }) {
     const rolagem = useRef<HTMLDivElement | null>(null);
     const fim = useRef<HTMLDivElement | null>(null);
@@ -127,9 +129,9 @@ export function PainelConversa({ detalhe, carregando, carregandoAntigas, erro, a
                 <div className="md:flex-1 md:overflow-y-auto px-1 md:px-4 py-3">{ensaio}</div>
             ) : (<>
             {/* Aviso: tela só de leitura nesta etapa */}
-            <div className="mx-1 md:mx-4 mt-3 rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-[11px] text-white/45">
+            {!rodape && <div className="mx-1 md:mx-4 mt-3 rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-[11px] text-white/45">
                 Só leitura por enquanto: a Laura segue atendendo pelo WhatsApp da loja. Responder por aqui vem na próxima etapa.
-            </div>
+            </div>}
 
             {/* Mensagens */}
             <div ref={rolagem} className="md:flex-1 md:overflow-y-auto px-1 md:px-4 py-3 space-y-4">
@@ -170,6 +172,7 @@ export function PainelConversa({ detalhe, carregando, carregandoAntigas, erro, a
                 )}
                 <div ref={fim} />
             </div>
+            {rodape}
             </>)}
         </div>
     );
