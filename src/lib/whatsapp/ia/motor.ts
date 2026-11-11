@@ -20,6 +20,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/admin';
+import { agenteLigado } from '@/lib/agentes/config';
 import { getInventory } from '@/lib/services/altimusInventory';
 import { precosAnunciadosDoEstoque } from '@/lib/estoque';
 import { horarioLoja, isOpenNow } from '@/lib/services/slaEngine';
@@ -133,6 +134,14 @@ export async function rodarLaura(g: GatilhoIa): Promise<void> {
     if (cfg.modo === 'desligada') return;
     const modo = cfg.modo;
     const modelo = (process.env.WA_IA_MODELO || MODELO_PADRAO).trim();
+
+    // Interruptor geral da Central dos Agentes (agentes_config.ia_geral): desligado = a Laura
+    // não roda, nem em ensaio. Sem tabela ou sem linha = ligado (agenteLigado nunca lança).
+    const geral = await agenteLigado('ia_geral');
+    if (!geral.ligado) {
+        await registrarPulada(supabase, g, modo, 'ia_geral desligada');
+        return;
+    }
 
     // 2. junta mensagens seguidas
     await esperar(Number(process.env.WA_IA_ESPERA_MS) || 8000);
