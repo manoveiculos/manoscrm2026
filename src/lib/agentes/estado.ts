@@ -18,7 +18,19 @@ export type EstadoAgente = 'trabalhando' | 'ocioso' | 'aguardando' | 'erro' | 'd
 export type ModoAgente = 'ligado' | 'ensaio' | 'desligado';
 export type StatusRegistro = 'rodando' | 'ok' | 'erro' | 'aguardando' | 'decidido' | 'pulada';
 
+/** O que a cena do escritório faz quando este registro chega (só registros reais têm evento). */
+export type EventoRegistro =
+    | { tipo: 'lead_distribuido'; para?: string; nome?: string; carro?: string }
+    | { tipo: 'fala' }
+    | { tipo: 'lead_quente'; texto?: string }
+    | { tipo: 'venda' }
+    | { tipo: 'aprovacao' }
+    | { tipo: 'erro' };
+
 export interface RegistroAgente {
+    /** Identificador estável do registro (tabela:id) — o escritório só anima ids que ainda não viu. */
+    id?: string;
+    evento?: EventoRegistro;
     agenteId: string;
     /** Início (ISO). */
     em: string;

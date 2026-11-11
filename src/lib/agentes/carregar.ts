@@ -122,6 +122,7 @@ export async function carregarEntradaAgentes(admin: SupabaseClient, agora: numbe
             : st === 'pulada' ? `não respondeu ${nome}: ${corta(x.motivo, 60) || 'regra da Laura'}`
             : ensaio ? `rascunhou resposta para ${nome}${segundos(x.tempo_ms)}` : `respondeu ${nome}${segundos(x.tempo_ms)}`;
         registros.push({
+            id: `laura:${x.id}:${st}`, evento: st === 'erro' ? { tipo: 'erro' } : st === 'rodando' ? { tipo: 'fala' } : st === 'ok' ? { tipo: 'fala' } : undefined,
             agenteId: 'laura', em: x.iniciada_em, fimEm: x.terminada_em, status: st, frase,
             custoUsd: x.custo_usd != null ? Number(x.custo_usd) : null, duracaoMs: x.tempo_ms,
             link: x.conversa_id ? `/conversas?conversa=${x.conversa_id}` : null,
@@ -130,6 +131,7 @@ export async function carregarEntradaAgentes(admin: SupabaseClient, agora: numbe
     // ── Laura do n8n (mensagens que ela mandou pelo número da loja) ──────
     for (const m of msgsLaura) {
         registros.push({
+            id: `laura-n8n:${m.id}`, evento: { tipo: 'fala' },
             agenteId: 'laura', em: m.criada_em, status: 'ok',
             frase: `respondeu ${nomeDe(m.conversa_id)} no WhatsApp (n8n)`,
             link: m.conversa_id ? `/conversas?conversa=${m.conversa_id}` : null,
@@ -140,6 +142,8 @@ export async function carregarEntradaAgentes(admin: SupabaseClient, agora: numbe
     for (const d of distrib) {
         if (d.distribuido_em) {
             registros.push({
+                id: `dist:${d.lead_uid}:${d.distribuido_em}`,
+                evento: { tipo: 'lead_distribuido', para: consultorDoAgente.get(d.assigned_consultant_id) },
                 agenteId: 'distribuidor', em: d.distribuido_em, status: 'ok',
                 frase: `lead → ${nomeConsultor.get(d.assigned_consultant_id) || 'vendedor'}`,
             });
@@ -156,6 +160,7 @@ export async function carregarEntradaAgentes(admin: SupabaseClient, agora: numbe
         const st: StatusRegistro = aberto ? 'rodando' : b.success === false ? 'erro' : 'ok';
         const nome = CRONS_SUPERVISOR[b.cron_name] || b.cron_name;
         registros.push({
+            id: `beat:${b.cron_name}:${b.started_at}:${st}`, evento: st === 'erro' ? { tipo: 'erro' } : b.cron_name === 'sla-watcher' ? undefined : { tipo: 'fala' },
             agenteId: 'supervisor', em: b.started_at, fimEm: b.finished_at, status: st, duracaoMs: b.duration_ms,
             frase: st === 'erro' ? `erro na ${nome}: ${corta(b.error_message, 60)}` : st === 'rodando' ? `rodando a ${nome}` : `${nome}${segundos(b.duration_ms)}`,
             // A varredura de SLA roda a cada ~5 min: só aparece no feed se der erro.
@@ -163,23 +168,23 @@ export async function carregarEntradaAgentes(admin: SupabaseClient, agora: numbe
         });
     }
     for (const s of escal) {
-        registros.push({ agenteId: 'supervisor', em: s.triggered_at, status: 'ok', frase: `escalou um lead parado (nível ${s.level})` });
+        registros.push({ id: `sla:${s.id}`, evento: { tipo: 'fala' }, agenteId: 'supervisor', em: s.triggered_at, status: 'ok', frase: `escalou um lead parado (nível ${s.level})` });
     }
     for (const a of alertas) {
-        if (a.type === 'lead_quente') registros.push({ agenteId: 'supervisor', em: a.created_at, status: 'ok', frase: 'alertou: lead quente sem resposta há 15 min' });
+        if (a.type === 'lead_quente') registros.push({ id: `alerta:${a.id}`, evento: { tipo: 'lead_quente', texto: 'Lead quente sem resposta há 15 min' }, agenteId: 'supervisor', em: a.created_at, status: 'ok', frase: 'alertou: lead quente sem resposta há 15 min' });
     }
 
     // ── Reengajamento ─────────────────────────────────────────────────────
     for (const f of followHist) {
-        registros.push({ agenteId: 'reengajamento', em: f.enviado_em, status: 'ok', frase: `mandou follow-up (tentativa ${f.attempt_number ?? '?'})` });
+        registros.push({ id: `follow:${f.id}`, evento: { tipo: 'fala' }, agenteId: 'reengajamento', em: f.enviado_em, status: 'ok', frase: `mandou follow-up (tentativa ${f.attempt_number ?? '?'})` });
     }
     for (const f of followAi) {
-        registros.push({ agenteId: 'reengajamento', em: f.completed_at || f.created_at, status: 'ok', frase: 'mandou mensagem automática de retomada' });
+        registros.push({ id: `follow-ai:${f.id}`, evento: { tipo: 'fala' }, agenteId: 'reengajamento', em: f.completed_at || f.created_at, status: 'ok', frase: 'mandou mensagem automática de retomada' });
     }
 
     // ── Copiloto ──────────────────────────────────────────────────────────
     for (const c of copiloto) {
-        registros.push({ agenteId: 'copiloto', em: c.ai_last_run_at, status: 'ok', frase: 'analisou uma conversa e sugeriu o próximo passo', link: `/lead/${encodeURIComponent(`leads_distribuicao_crm_26:${c.id}`)}` });
+        registros.push({ id: `copiloto:${c.id}:${c.ai_last_run_at}`, evento: { tipo: 'fala' }, agenteId: 'copiloto', em: c.ai_last_run_at, status: 'ok', frase: 'analisou uma conversa e sugeriu o próximo passo', link: `/lead/${encodeURIComponent(`leads_distribuicao_crm_26:${c.id}`)}` });
     }
 
     // ── Consultores ───────────────────────────────────────────────────────
@@ -189,20 +194,21 @@ export async function carregarEntradaAgentes(admin: SupabaseClient, agora: numbe
     };
     for (const i of interacoes) {
         const agente = consultorDoAgente.get(i.consultant_id);
-        if (agente) registros.push({ agenteId: agente, em: i.created_at, status: 'ok', frase: fraseInteracao[i.type] || 'mexeu num lead no CRM' });
+        if (agente) registros.push({ id: `inter:${i.id}`, evento: i.type === 'sale' ? { tipo: 'venda' } : { tipo: 'fala' }, agenteId: agente, em: i.created_at, status: 'ok', frase: fraseInteracao[i.type] || 'mexeu num lead no CRM' });
     }
     for (const c of chats) {
         const agente = consultorDoAgente.get(c.consultant_id);
         if (!agente) continue;
         const vivo = !c.closed_at && c.last_heartbeat_at && agora - new Date(c.last_heartbeat_at).getTime() < 2 * MIN;
         registros.push({
+            id: `chat:${c.id}`, evento: { tipo: 'fala' },
             agenteId: agente, em: vivo ? c.last_heartbeat_at : c.opened_at, status: vivo ? 'rodando' : 'ok',
             frase: `${vivo ? 'atendendo' : 'atendeu'} ${primeiroNome(c.lead_name)} pelo WhatsApp`,
         });
     }
     for (const m of msgsVend) {
         const agente = consultorDoAgente.get(m.consultant_id);
-        if (agente) registros.push({ agenteId: agente, em: m.criada_em, status: 'ok', frase: `respondeu ${nomeDe(m.conversa_id)} pelo CRM`, link: `/conversas?conversa=${m.conversa_id}` });
+        if (agente) registros.push({ id: `msg-vend:${m.id}`, evento: { tipo: 'fala' }, agenteId: agente, em: m.criada_em, status: 'ok', frase: `respondeu ${nomeDe(m.conversa_id)} pelo CRM`, link: `/conversas?conversa=${m.conversa_id}` });
     }
 
     // ── Marketing / Growth (marketing_agent_runs) ─────────────────────────
@@ -215,6 +221,8 @@ export async function carregarEntradaAgentes(admin: SupabaseClient, agora: numbe
         const st = statusRun[r.status] || 'ok';
         const titulo = corta(r.title || r.skill_name || r.squad, 80);
         registros.push({
+            id: `run:${r.id}:${st}`,
+            evento: st === 'erro' ? { tipo: 'erro' } : st === 'aguardando' ? { tipo: 'aprovacao' } : st === 'ok' || st === 'rodando' ? { tipo: 'fala' } : undefined,
             agenteId: agente.id, em: r.created_at, status: st, duracaoMs: r.duration_ms,
             frase: st === 'erro' ? `erro: ${titulo}` : st === 'aguardando' ? `pediu aprovação: ${titulo}` : st === 'decidido' ? `rejeitado por você: ${titulo}` : titulo,
             link: '/admin/marketing',

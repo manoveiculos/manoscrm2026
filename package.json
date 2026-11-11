@@ -15,7 +15,7 @@
     "test:fila": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/fila/montarFila.test.ts",
     "test:push": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/push/enviarPush.test.ts",
     "test:estoque": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/estoque/estoque.test.ts",
-    "test:agentes": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/agentes/estado.test.ts",
+    "test:agentes": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/agentes/estado.test.ts tests/agentes/eventos.test.ts",
     "test:criar-lead": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/whatsapp/criarLead.test.ts",
     "test:envio": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/whatsapp/envio.test.ts",
     "test:identificacao": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/identificacao/identificacao.test.ts",
