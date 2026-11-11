@@ -60,7 +60,7 @@ export function ListaConversas({ conversas, selecionada, carregando, erro, gesta
                     />
                 </label>
 
-                <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 [scrollbar-width:none]" role="tablist" aria-label="Filtrar conversas">
+                <div className="flex flex-wrap gap-2" role="tablist" aria-label="Filtrar conversas">
                     {FILTROS.map(f => (
                         <button
                             key={f.id}
@@ -68,7 +68,7 @@ export function ListaConversas({ conversas, selecionada, carregando, erro, gesta
                             role="tab"
                             aria-selected={filtro === f.id}
                             onClick={() => setFiltro(f.id)}
-                            className={`h-9 shrink-0 rounded-full px-3 text-[12px] font-bold border transition ${filtro === f.id
+                            className={`h-9 rounded-full px-3 text-[12px] font-bold border transition ${filtro === f.id
                                 ? 'bg-white text-black border-white'
                                 : 'bg-white/[0.04] text-white/70 border-white/[0.08]'}`}
                         >

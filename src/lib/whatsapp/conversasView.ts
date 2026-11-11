@@ -11,7 +11,7 @@ export type TipoMensagem =
     | 'texto' | 'imagem' | 'audio' | 'video' | 'documento'
     | 'figurinha' | 'localizacao' | 'contato' | 'reacao';
 export type StatusConversa = 'ia' | 'humano' | 'encerrada';
-export type FiltroConversa = 'todas' | 'nao_lidas' | 'aguardando' | 'ia' | 'quentes';
+export type FiltroConversa = 'todas' | 'nao_lidas' | 'aguardando' | 'ia' | 'quentes' | 'arquivadas';
 
 export const FILTROS: { id: FiltroConversa; label: string }[] = [
     { id: 'todas', label: 'Todas' },
@@ -19,6 +19,7 @@ export const FILTROS: { id: FiltroConversa; label: string }[] = [
     { id: 'aguardando', label: 'Aguardando eu' },
     { id: 'ia', label: 'IA atendendo' },
     { id: 'quentes', label: 'Quentes' },
+    { id: 'arquivadas', label: 'Arquivadas' },
 ];
 
 export interface UltimaMensagem {
@@ -193,6 +194,9 @@ export function filtrarConversas(lista: ConversaItem[], filtro: FiltroConversa, 
     const termo = busca.trim().toLowerCase();
     const digitos = termo.replace(/\D/g, '');
     return lista.filter((c) => {
+        // arquivada (status 'encerrada') só aparece no filtro "Arquivadas"; nos outros fica de fora
+        if (filtro === 'arquivadas') { if (c.status !== 'encerrada') return false; }
+        else if (c.status === 'encerrada') return false;
         if (filtro === 'nao_lidas' && c.naoLidas <= 0) return false;
         if (filtro === 'aguardando' && !aguardandoResposta(c)) return false;
         if (filtro === 'ia' && c.status !== 'ia') return false;
@@ -205,7 +209,7 @@ export function filtrarConversas(lista: ConversaItem[], filtro: FiltroConversa, 
 }
 
 export function contarFiltros(lista: ConversaItem[]): Record<FiltroConversa, number> {
-    const out = { todas: 0, nao_lidas: 0, aguardando: 0, ia: 0, quentes: 0 } as Record<FiltroConversa, number>;
+    const out = { todas: 0, nao_lidas: 0, aguardando: 0, ia: 0, quentes: 0, arquivadas: 0 } as Record<FiltroConversa, number>;
     for (const f of FILTROS) out[f.id] = filtrarConversas(lista, f.id).length;
     return out;
 }

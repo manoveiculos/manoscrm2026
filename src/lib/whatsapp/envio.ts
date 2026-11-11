@@ -98,14 +98,32 @@ export async function enviarPeloCrm(
     return { ok: true, providerMessageId: r.providerMessageId };
 }
 
-export type AcaoHumano = 'assumir' | 'devolver';
+export type AcaoHumano = 'assumir' | 'devolver' | 'arquivar' | 'desarquivar';
 
-/** Botões "Assumir" e "Devolver para a IA". */
+/**
+ * Botões "Assumir", "Devolver para a IA", "Arquivar" e "Desarquivar".
+ * Arquivar = status 'encerrada': sai da lista, a Laura não responde. Assumir/Devolver não reabrem arquivada.
+ */
 export async function mudarAtendimento(admin: SupabaseClient, conversaId: string, acao: AcaoHumano): Promise<boolean> {
+    if (acao === 'arquivar') {
+        const { error } = await admin.from('wa_conversas').update({ status: 'encerrada', ia_silenciada_ate: null }).eq('id', conversaId);
+        return !error;
+    }
+    if (acao === 'desarquivar') {
+        const { error } = await admin.from('wa_conversas').update({ status: 'ia', ia_silenciada_ate: null }).eq('id', conversaId).eq('status', 'encerrada');
+        return !error;
+    }
     const { error } = await admin.from('wa_conversas')
         .update(acao === 'assumir' ? { status: 'humano', ia_silenciada_ate: null } : { status: 'ia', ia_silenciada_ate: null })
         .eq('id', conversaId).neq('status', 'encerrada');
     return !error;
+}
+
+/** O cliente escreveu de novo numa conversa arquivada: ela volta para a lista (nunca perde cliente). */
+export async function reabrirArquivadas(admin: SupabaseClient, conversaIds: string[]): Promise<number> {
+    if (!conversaIds.length) return 0;
+    const { data } = await admin.from('wa_conversas').update({ status: 'ia' }).in('id', conversaIds).eq('status', 'encerrada').select('id');
+    return data?.length ?? 0;
 }
 
 /**
