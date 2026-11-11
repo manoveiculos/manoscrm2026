@@ -1,0 +1,22 @@
+{
+  "event": "send.message",
+  "instance": "loja-exemplo",
+  "data": {
+    "key": {
+      "remoteJid": "5547988880001@s.whatsapp.net",
+      "fromMe": true,
+      "id": "3EB0LAURA00000000000001"
+    },
+    "pushName": "Manos Veículos",
+    "status": "PENDING",
+    "message": {
+      "extendedTextMessage": {
+        "text": "Qual o melhor dia para a visita?"
+      }
+    },
+    "messageType": "extendedTextMessage",
+    "messageTimestamp": 1793800020,
+    "source": "unknown"
+  },
+  "date_time": "2026-11-04T10:27:00.000Z"
+}

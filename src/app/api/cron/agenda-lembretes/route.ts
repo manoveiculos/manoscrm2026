@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/admin';
 import { postAgendaWebhook } from '@/lib/agendaWebhook';
+import { enviarPushParaConsultor } from '@/lib/push/enviarPush';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -40,7 +41,7 @@ export async function GET(req: NextRequest) {
     const vendIds = [...new Set((rows || []).map((r) => r.vendedor_id))];
     const vendById = new Map<string, any>();
     if (vendIds.length) {
-        const { data: cons } = await supabaseAdmin.from('consultants_manos_crm').select('auth_id, name, email').in('auth_id', vendIds);
+        const { data: cons } = await supabaseAdmin.from('consultants_manos_crm').select('id, auth_id, name, email').in('auth_id', vendIds);
         for (const c of cons || []) vendById.set(c.auth_id, c);
     }
 
@@ -64,6 +65,7 @@ export async function GET(req: NextRequest) {
             const v = vendById.get(a.vendedor_id);
             if (due2h) {
                 await postAgendaWebhook(a, { evento: 'lembrete_visita', tipo_lembrete: '2h_antes' }, v);
+                await avisarCelular(v, a, '2h_antes');
                 const patch: any = { lembrete_2h_enviado_em: nowIso() };
                 if (!a.lembrete_dia_enviado_em) patch.lembrete_dia_enviado_em = nowIso();
                 if (!a.lembrete_1d_enviado_em) patch.lembrete_1d_enviado_em = nowIso();
@@ -71,12 +73,14 @@ export async function GET(req: NextRequest) {
                 enviados++;
             } else if (dueDia) {
                 await postAgendaWebhook(a, { evento: 'lembrete_visita', tipo_lembrete: 'no_dia' }, v);
+                await avisarCelular(v, a, 'no_dia');
                 const patch: any = { lembrete_dia_enviado_em: nowIso() };
                 if (!a.lembrete_1d_enviado_em) patch.lembrete_1d_enviado_em = nowIso();
                 await supabaseAdmin.from('agendamentos').update(patch).eq('id', a.id);
                 enviados++;
             } else if (due24h) {
                 await postAgendaWebhook(a, { evento: 'lembrete_visita', tipo_lembrete: '24h_antes' }, v);
+                await avisarCelular(v, a, '24h_antes');
                 await supabaseAdmin.from('agendamentos').update({ lembrete_1d_enviado_em: nowIso() }).eq('id', a.id);
                 enviados++;
             }
@@ -86,4 +90,28 @@ export async function GET(req: NextRequest) {
     }
 
     return NextResponse.json({ success: erros.length === 0, enviados, candidatos: rows?.length || 0, erros, timestamp: new Date().toISOString() });
+}
+
+/**
+ * Aviso no celular do vendedor junto com cada lembrete (2ª etapa do app).
+ * Best-effort: sem chaves/tabela de push não faz nada, e falha aqui nunca
+ * impede o lembrete do n8n. Sem nome nem telefone do cliente (tela bloqueada).
+ */
+async function avisarCelular(v: any, a: any, tipo: '24h_antes' | 'no_dia' | '2h_antes') {
+    if (!v?.id) return;
+    try {
+        const dh = new Date(a.data_hora).getTime();
+        const brt = (t: number) => new Date(t - 3 * 3600_000);
+        const diaBRT = (t: number) => Math.floor((t - 3 * 3600_000) / 86400_000);
+        const hora = `${String(brt(dh).getUTCHours()).padStart(2, '0')}:${String(brt(dh).getUTCMinutes()).padStart(2, '0')}`;
+        const dif = diaBRT(dh) - diaBRT(Date.now());
+        const quando = dif === 0 ? 'hoje' : dif === 1 ? 'amanhã' : `dia ${String(brt(dh).getUTCDate()).padStart(2, '0')}/${String(brt(dh).getUTCMonth() + 1).padStart(2, '0')}`;
+        const titulo = tipo === '2h_antes' ? `⏰ Visita em 2 horas (${hora})` : `📅 Visita ${quando} às ${hora}`;
+        const corpo = tipo === '24h_antes'
+            ? 'Confirme com o cliente e deixe o carro separado.'
+            : 'Deixe o carro pronto e confira a agenda.';
+        await enviarPushParaConsultor(v.id, { titulo, corpo, url: '/agenda', tag: `visita-${a.id}` });
+    } catch (e: any) {
+        console.warn('[agenda-lembretes] push:', e?.message);
+    }
 }

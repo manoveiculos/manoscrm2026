@@ -1,0 +1,26 @@
+{
+  "event": "messages.upsert",
+  "instance": "loja-exemplo",
+  "data": {
+    "key": {
+      "remoteJid": "554788880002@s.whatsapp.net",
+      "fromMe": false,
+      "id": "3EB0A1B2C3D4E5F6A7B804"
+    },
+    "pushName": "Outro Cliente",
+    "message": {
+      "videoMessage": {
+        "url": "https://mmg.whatsapp.net/exemplo-video.enc",
+        "mimetype": "video/mp4",
+        "fileLength": 5242880,
+        "seconds": 21,
+        "caption": "Barulho no motor",
+        "gifPlayback": false
+      }
+    },
+    "messageType": "videoMessage",
+    "messageTimestamp": 1793800180,
+    "source": "android"
+  },
+  "date_time": "2026-11-04T13:49:40.000Z"
+}

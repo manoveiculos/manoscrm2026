@@ -148,6 +148,11 @@ export async function POST(req: NextRequest) {
         if (finish_type === 'venda' && !veiculoVenda) {
             return NextResponse.json({ error: 'Informe o veículo vendido.' }, { status: 400 });
         }
+        // Minha Fila manda exige_valor: venda sem valor não é aceita. As telas
+        // antigas não mandam o sinal e seguem como antes.
+        if (finish_type === 'venda' && body?.exige_valor === true && valorVenda <= 0) {
+            return NextResponse.json({ error: 'Informe o valor da venda.' }, { status: 400 });
+        }
 
         // ── 1. Status do lead ───────────────────────────────────────────────
         const oldStatus: string | null = lead.status || null;

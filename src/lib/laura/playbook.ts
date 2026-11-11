@@ -30,8 +30,13 @@ const pad = (n: number) => String(n).padStart(2, '0');
  * Fuso fixo UTC-3 (mesma premissa do slaEngine).
  */
 export function horariosDeVisita(horas: HorarioConfig, feriados: Set<string>, agora = new Date(), quantidade = 3): string[] {
+    return horariosDeVisitaDetalhados(horas, feriados, agora, quantidade).map(h => h.rotulo);
+}
+
+/** Mesmos horários de horariosDeVisita, com a data/hora exata (para gravar na agenda). */
+export function horariosDeVisitaDetalhados(horas: HorarioConfig, feriados: Set<string>, agora = new Date(), quantidade = 3): { rotulo: string; iso: string }[] {
     const preferidos = [10, 14, 16, 9, 11, 15, 17];
-    const out: string[] = [];
+    const out: { rotulo: string; iso: string }[] = [];
     const minimo = agora.getTime() + 2 * 3600 * 1000;
     for (let d = 0; d < 8 && out.length < quantidade; d++) {
         const base = new Date(agora.getTime() - 3 * 3600 * 1000 + d * 86400_000); // "relógio" de SP
@@ -43,7 +48,7 @@ export function horariosDeVisita(horas: HorarioConfig, feriados: Set<string>, ag
             if (!isOpenNow(slot, horas, feriados)) continue;
             if (businessSecondsBetween(slot, new Date(slot.getTime() + 3600_000), horas, feriados) < 3600) continue;
             const quando = d === 0 ? 'hoje' : d === 1 ? 'amanhã' : `${DIAS[wd]} ${pad(dd)}/${pad(m + 1)}`;
-            out.push(`${quando} às ${h}h`);
+            out.push({ rotulo: `${quando} às ${h}h`, iso: slot.toISOString() });
             break; // um horário por dia: dá opção sem confundir
         }
     }

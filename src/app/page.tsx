@@ -1,7 +1,9 @@
 'use client';
 
 import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import { perfilDoConsultor, telaInicial } from '@/lib/perfil';
 import { Pause, Play, Activity, DollarSign, ShieldAlert, Hourglass } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -18,6 +20,7 @@ const CAMILA_EMAILS = ['camila.renatta@hotmail.com', 'camilarenatta@hotmail.com'
 
 export default function Dashboard() {
     const supabase = useMemo(() => createClient(), []);
+    const router = useRouter();
     const [ready, setReady] = useState(false);
     const [authId, setAuthId] = useState<string | null>(null);
     const [userEmail, setUserEmail] = useState<string | null>(null);
@@ -44,14 +47,30 @@ export default function Dashboard() {
     }, [billingToast]);
 
     // Resolve a identidade do usuário (email + authId) uma vez.
+    // Vendedor e gestor começam na Minha Fila (Fase 1 da repaginação); o War
+    // Room continua sendo a tela inicial do admin.
     useEffect(() => {
         (async () => {
             const { data: sess } = await supabase.auth.getSession();
-            setAuthId(sess?.session?.user?.id || null);
-            setUserEmail(sess?.session?.user?.email || null);
+            const u = sess?.session?.user || null;
+            const email = u?.email || null;
+            if (u && !CAMILA_EMAILS.includes(email || '')) {
+                const { data: cons } = await supabase
+                    .from('consultants_manos_crm')
+                    .select('role')
+                    .or(`user_id.eq.${u.id},auth_id.eq.${u.id}`)
+                    .maybeSingle();
+                const destino = telaInicial(perfilDoConsultor(cons?.role, email));
+                if (destino !== '/') {
+                    router.replace(destino);
+                    return;
+                }
+            }
+            setAuthId(u?.id || null);
+            setUserEmail(email);
             setReady(true);
         })();
-    }, [supabase]);
+    }, [supabase, router]);
 
     // Carregamento de cobranças se for a Camila
     useEffect(() => {
