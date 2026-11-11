@@ -1,11 +1,13 @@
 'use client';
 
-import { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { AlertTriangle, CheckCircle2, Crown, ExternalLink, Inbox, MessageSquareWarning, Power, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Crown, ExternalLink, Inbox, LayoutGrid, MessageSquareWarning, Power, Tv, XCircle } from 'lucide-react';
 import { Sheet } from '@/app/fila/_components/Sheet';
 import { ARCOS } from '@/lib/agentes/catalogo';
 import type { AgenteVisao, CentralAgentes, ItemDecisao, ModoAgente } from '@/lib/agentes/estado';
+import type { EventoCena } from '@/lib/agentes/eventos';
+import { EscritorioView } from './escritorio/EscritorioView';
 import { COR_ESTADO, ICONES, ROTULO_ESTADO, dolar, horaBRT, quandoFoi } from './icones';
 
 type Resposta = { ok: boolean; error?: string };
@@ -16,6 +18,12 @@ export interface CentralProps {
     agora: number;
     /** Prévia: nada grava (botões desligados). */
     somenteLeitura?: boolean;
+    /** Eventos novos para o escritório animar (vêm do diff de leituras da página). */
+    eventos?: EventoCena[];
+    /** Modo TV (?tv=1): só o escritório, tela cheia, sem cliques. */
+    tv?: boolean;
+    onEntrarTv?: () => void;
+    onSairTv?: () => void;
     onModo?: (agenteId: string, modo: ModoAgente) => Promise<Resposta>;
     onDecidir?: (runId: string, acao: 'approve' | 'reject', motivo?: string) => Promise<Resposta>;
 }
@@ -380,11 +388,29 @@ function Constelacao({ dados, agora, onAbrir, onFila }: { dados: CentralAgentes;
 }
 
 // ── Tela ───────────────────────────────────────────────────────────────────
-export function CentralView({ dados, conexao, agora, somenteLeitura, onModo, onDecidir }: CentralProps) {
+type Visao = 'escritorio' | 'constelacao';
+const CHAVE_VISAO = 'agentes:visao';
+
+export function CentralView({ dados, conexao, agora, somenteLeitura, eventos = [], tv = false, onEntrarTv, onSairTv, onModo, onDecidir }: CentralProps) {
+    const [visao, setVisao] = useState<Visao>('constelacao');
+    // Preferência guardada no navegador; sem preferência, o escritório é o padrão no desktop.
+    useEffect(() => {
+        try { setVisao(localStorage.getItem(CHAVE_VISAO) === 'constelacao' ? 'constelacao' : 'escritorio'); } catch { setVisao('escritorio'); }
+    }, []);
+    const trocarVisao = (v: Visao) => { setVisao(v); try { localStorage.setItem(CHAVE_VISAO, v); } catch { /* sem storage: só não lembra */ } };
     const [aberto, setAberto] = useState<string | null>(null);
     const [filaAberta, setFilaAberta] = useState(false);
     const agenteAberto = aberto ? dados.agentes.find(a => a.id === aberto) || null : null;
     const m = dados.maestro;
+
+    if (tv) {
+        return (
+            <div className="fixed inset-0 z-[80] bg-[#03060b] overflow-hidden flex items-start justify-center px-3 pt-2" style={{ cursor: 'none' }}>
+                <EscritorioView dados={dados} painel={dados.painel ?? null} eventos={eventos} agora={agora} tv />
+                {onSairTv && <button type="button" onClick={onSairTv} className="fixed bottom-3 right-3 rounded-lg bg-white/10 px-3 py-1.5 text-[12px] font-bold text-white/80 opacity-0 hover:opacity-100 focus:opacity-100" style={{ cursor: 'pointer' }}>Sair do modo TV</button>}
+            </div>
+        );
+    }
 
     return (
         <div className="w-full max-w-[1500px] mx-auto md:px-6 md:py-6">
@@ -395,7 +421,12 @@ export function CentralView({ dados, conexao, agora, somenteLeitura, onModo, onD
                     <span className={`h-2 w-2 rounded-full ${conexao === 'reconectando' ? 'bg-amber-400' : 'bg-emerald-400 motion-safe:animate-pulse'}`} />
                     {conexao === 'reconectando' ? 'reconectando…' : conexao === 'previa' ? 'prévia com dados reais (só leitura)' : 'ao vivo'}
                 </span>
-                <div className="flex items-center gap-3 md:ml-auto">
+                <div className="hidden lg:flex items-center rounded-xl border border-white/10 overflow-hidden text-[12px] font-bold md:ml-auto">
+                    <button type="button" onClick={() => trocarVisao('escritorio')} className={`flex items-center gap-1.5 px-3 py-1.5 ${visao === 'escritorio' ? 'bg-white/15 text-white' : 'text-white/55'}`}><Tv size={13} /> Escritório</button>
+                    <button type="button" onClick={() => trocarVisao('constelacao')} className={`flex items-center gap-1.5 px-3 py-1.5 ${visao === 'constelacao' ? 'bg-white/15 text-white' : 'text-white/55'}`}><LayoutGrid size={13} /> Lista</button>
+                    {onEntrarTv && <button type="button" onClick={onEntrarTv} className="flex items-center gap-1.5 px-3 py-1.5 border-l border-white/10 text-white/55 hover:text-white"><Tv size={13} /> Modo TV</button>}
+                </div>
+                <div className="flex items-center gap-3">
                     <InterruptorGeral dados={dados} somenteLeitura={somenteLeitura} onModo={onModo} />
                     <span className="text-[12px] text-white/55">hoje: <b className="text-white">{dolar(m.custoHojeUsd)}</b> de IA</span>
                 </div>
@@ -417,11 +448,17 @@ export function CentralView({ dados, conexao, agora, somenteLeitura, onModo, onD
                 <Feed dados={dados} />
             </div>
 
-            {/* Desktop: constelação + feed */}
-            <div className="hidden lg:grid grid-cols-[minmax(0,1fr)_320px] gap-6">
-                <Constelacao dados={dados} agora={agora} onAbrir={a => setAberto(a.id)} onFila={() => setFilaAberta(true)} />
-                <div className="max-h-[78vh] overflow-y-auto pr-1"><Feed dados={dados} /></div>
-            </div>
+            {/* Desktop: escritório animado (padrão) ou constelação + feed */}
+            {visao === 'escritorio' ? (
+                <div className="hidden lg:block">
+                    <EscritorioView dados={dados} painel={dados.painel ?? null} eventos={eventos} agora={agora} cabecalho={false} onFila={() => setFilaAberta(true)} onAbrirAgente={a => setAberto(a.id)} />
+                </div>
+            ) : (
+                <div className="hidden lg:grid grid-cols-[minmax(0,1fr)_320px] gap-6">
+                    <Constelacao dados={dados} agora={agora} onAbrir={a => setAberto(a.id)} onFila={() => setFilaAberta(true)} />
+                    <div className="max-h-[78vh] overflow-y-auto pr-1"><Feed dados={dados} /></div>
+                </div>
+            )}
 
             {/* Barra da fila */}
             <div className="mt-5 rounded-2xl border border-white/[0.08] bg-[#0F0F14] px-4 py-3 flex flex-wrap items-center gap-3">

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, ShieldAlert } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import type { CentralAgentes, ModoAgente } from '@/lib/agentes/estado';
+import { novosEventos, type EventoCena } from '@/lib/agentes/eventos';
 import { CentralView } from './_components/CentralView';
 
 /**
@@ -33,11 +34,34 @@ async function postar(url: string, body: unknown) {
 
 export default function CentralDosAgentesPage() {
     const supabase = useMemo(() => createClient(), []);
+    // Modo TV: /agentes?tv=1 — só o escritório, tela cheia, tela sempre acesa.
+    const [tv, setTv] = useState(false);
+    useEffect(() => { setTv(new URLSearchParams(window.location.search).get('tv') === '1'); }, []);
+    const mudarTv = useCallback((ligado: boolean) => {
+        setTv(ligado);
+        const u = new URL(window.location.href);
+        if (ligado) u.searchParams.set('tv', '1'); else u.searchParams.delete('tv');
+        window.history.replaceState(null, '', u);
+    }, []);
+    // Mantém a tela acesa no modo TV (quando o navegador permite).
+    useEffect(() => {
+        if (!tv) return;
+        let trava: { release: () => Promise<void> } | null = null;
+        const pedir = async () => { try { trava = await (navigator as any).wakeLock?.request('screen'); } catch { /* sem suporte: segue sem */ } };
+        pedir();
+        const vis = () => { if (document.visibilityState === 'visible') pedir(); };
+        document.addEventListener('visibilitychange', vis);
+        return () => { document.removeEventListener('visibilitychange', vis); trava?.release().catch(() => {}); };
+    }, [tv]);
     const [dados, setDados] = useState<CentralAgentes | null>(null);
     const [erro, setErro] = useState<string | null>(null);
     const [negado, setNegado] = useState(false);
     const [falhou, setFalhou] = useState(false);
     const [agora, setAgora] = useState(() => Date.now());
+    const [eventos, setEventos] = useState<EventoCena[]>([]);
+    // ids de registros já vistos: a 1ª leitura só marca (nada do passado é animado).
+    const vistos = useRef<Set<string>>(new Set());
+    const primeiraLeitura = useRef(true);
     const emCurso = useRef(false);
     const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -49,6 +73,9 @@ export default function CentralDosAgentesPage() {
             if (res.status === 403) { setNegado(true); return; }
             const d = await res.json().catch(() => ({}));
             if (!res.ok || !d?.success) throw new Error(d?.error || `erro ${res.status}`);
+            const novos = novosEventos(d as CentralAgentes, vistos.current, primeiraLeitura.current);
+            primeiraLeitura.current = false;
+            if (novos.length) setEventos(v => [...v.slice(-30), ...novos]);
             setDados(d as CentralAgentes);
             setErro(null);
             setFalhou(false);
@@ -121,7 +148,7 @@ export default function CentralDosAgentesPage() {
     }
     return (
         <div className="w-full">
-            <CentralView dados={dados} conexao={falhou ? 'reconectando' : 'ao_vivo'} agora={agora} onModo={onModo} onDecidir={onDecidir} />
+            <CentralView dados={dados} conexao={falhou ? 'reconectando' : 'ao_vivo'} agora={agora} eventos={eventos} tv={tv} onEntrarTv={() => mudarTv(true)} onSairTv={() => mudarTv(false)} onModo={onModo} onDecidir={onDecidir} />
         </div>
     );
 }

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { consultorLogado } from '@/lib/fila/servidor';
-import { carregarEntradaAgentes } from '@/lib/agentes/carregar';
+import { carregarEntradaAgentes, carregarPainel } from '@/lib/agentes/carregar';
 import { estadoDosAgentes } from '@/lib/agentes/estado';
 
 export const dynamic = 'force-dynamic';
@@ -18,8 +18,8 @@ export async function GET() {
         return NextResponse.json({ success: false, error: 'Só o admin vê a Central dos Agentes.' }, { status: 403 });
     }
     try {
-        const entrada = await carregarEntradaAgentes(ctx.admin);
-        return NextResponse.json({ success: true, ...estadoDosAgentes(entrada) }, { headers: { 'Cache-Control': 'no-store' } });
+        const [entrada, painel] = await Promise.all([carregarEntradaAgentes(ctx.admin), carregarPainel(ctx.admin)]);
+        return NextResponse.json({ success: true, ...estadoDosAgentes(entrada), painel }, { headers: { 'Cache-Control': 'no-store' } });
     } catch (e: any) {
         console.error('[agentes]', e?.message || e);
         return NextResponse.json({ success: false, error: 'Não consegui montar a Central agora.' }, { status: 500 });
