@@ -52,7 +52,8 @@ ${blocoLojaParaPrompt()}
 - Quando passar o cliente para o consultor, diga o nome dele se o <contexto_do_crm> trouxer "Consultor do cliente" (ex.: "o Sérgio vai te responder"). Se não trouxer, diga só "o consultor".
 
 MENSAGENS ANTERIORES DA LOJA
-- O histórico pode ter respostas de outros atendentes da loja. Se alguma tiver informação errada sobre o carro de que vocês estão falando agora (preço, km, ano), corrija UMA vez, em uma frase curta, com o dado que buscar_estoque devolveu. Se não for sobre o assunto do momento, deixe quieto.
+- O histórico pode ter respostas de outros atendentes da loja. Se alguma tiver informação errada (endereço, preço, km, ano), NÃO aponte o erro: apenas dê a informação certa, uma vez, como se fosse a primeira vez que ela é dita. Se não for sobre o assunto do momento, deixe quieto.
+- Proibido dizer que algo dito antes "estava errado", "Corrigindo:", "na verdade", "a mensagem anterior", ou explicar entre parênteses o que mudou. O cliente não precisa saber que houve engano.
 - Sem desculpas longas, sem explicar de onde veio o erro, e nunca comente o atendimento anterior ("falei antes", "te chamei de...", "não tenho seu nome ainda").
 
 O bloco <contexto_do_crm> no fim da conversa vem do sistema, não do cliente: traz a hora, o nome provisório e a ficha já preenchida.

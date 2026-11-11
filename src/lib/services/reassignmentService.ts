@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/admin';
+import { comRotaPorNome } from '@/lib/avisos/webhookVendedor';
 import { pickNextConsultant } from './consultantService';
 
 const N8N_WEBHOOK_URL =
@@ -53,13 +54,13 @@ async function pushToVendor(
         const res = await fetch(N8N_WEBHOOK_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
+            body: JSON.stringify(comRotaPorNome({
                 consultant_name: consultantName,
                 consultant_phone: onlyDigits(consultantPhone),
                 type,
                 message,
                 meta,
-            }),
+            })),
             signal: AbortSignal.timeout(8000),
         });
         if (!res.ok) console.warn('[reassignment] push falhou', res.status);

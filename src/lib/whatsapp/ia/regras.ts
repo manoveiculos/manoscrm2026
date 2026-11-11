@@ -378,3 +378,21 @@ export function repeteMensagemAnterior(texto: string, anteriores: string[]): boo
     }
     return false;
 }
+
+// ---------------------------------------------------------------------------
+// Comentário sobre o atendimento anterior (caso "Canoas", 11/11/2026)
+// ---------------------------------------------------------------------------
+
+const RX_COMENTA_ANTERIOR = new RegExp([
+    'corrigindo\\s*:',
+    '(mensagem|informa[cç][aã]o|resposta|endere[cç]o)\\s+(anterior|de antes|passad[ao])[^.!?\\n]{0,60}(errad|incorret|equivocad)',
+    'estava\\s+(errad|incorret|equivocad)',
+    'foi\\s+(um\\s+)?(engano|erro)\\s+(noss|meu|da loja|do atendente)',
+    'te\\s+(passaram|informaram|falaram)\\s+errado',
+    'desculp[ea][^.!?\\n]{0,40}(informa[cç][aã]o|mensagem)\\s+errad',
+].join('|'), 'i');
+
+/** A resposta aponta erro do atendimento anterior? (a Laura deve só dar a informação certa) */
+export function comentaAtendimentoAnterior(texto: string): boolean {
+    return RX_COMENTA_ANTERIOR.test(texto || '');
+}

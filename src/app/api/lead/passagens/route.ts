@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { contextoWa } from '@/lib/whatsapp/leituraServidor';
 import { montarPassagens, type MsgPassagem } from '@/lib/whatsapp/passagens';
+import { SITUACOES, type CodigoSituacao } from '@/lib/whatsapp/ia/analista';
 
 export const dynamic = 'force-dynamic';
 const SEM_CACHE = { 'Cache-Control': 'no-store, private' };
@@ -30,5 +31,19 @@ export async function GET(req: NextRequest) {
         criadaEm: m.criada_em, apagadaEm: m.apagada_em,
     }));
     const passagens = montarPassagens(msgs);
-    return NextResponse.json({ success: true, total: passagens.length, passagens: passagens.slice(0, 30) }, { headers: SEM_CACHE });
+
+    // Situação lida pelo Analista de contexto (consulta à parte: se a coluna ainda não existir, só fica sem).
+    let situacao: Record<string, unknown> | null = null;
+    const { data: sit } = await ctx.sessao.from('wa_conversas').select('situacao, situacao_em, ultima_mensagem_em').in('id', ids)
+        .order('ultima_mensagem_em', { ascending: false }).limit(1).maybeSingle();
+    const s = sit?.situacao as Record<string, unknown> | null | undefined;
+    if (s && SITUACOES.includes(s.situacao as CodigoSituacao) && s.situacao !== 'indefinida') {
+        situacao = {
+            situacao: s.situacao, resumo: s.resumo || '', proximaAcao: s.proximaAcao || '', quando: s.quando || null, confianca: s.confianca || 'baixa',
+            analisadaEm: sit?.situacao_em || null,
+            // a conversa andou depois da análise: a tela avisa que pode estar desatualizada
+            desatualizada: Boolean(sit?.situacao_em && sit?.ultima_mensagem_em && Date.parse(sit.ultima_mensagem_em) > Date.parse(sit.situacao_em)),
+        };
+    }
+    return NextResponse.json({ success: true, total: passagens.length, passagens: passagens.slice(0, 30), situacao }, { headers: SEM_CACHE });
 }

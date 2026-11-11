@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { History } from 'lucide-react';
+import { Compass, History } from 'lucide-react';
+import { ROTULO_SITUACAO, type CodigoSituacao } from '@/lib/whatsapp/ia/analista';
 import { ROTULO_FIM, resumoDaPassagem, type Passagem } from '@/lib/whatsapp/passagens';
 
 const fmt = (iso: string) => new Intl.DateTimeFormat('pt-BR', {
@@ -12,23 +13,42 @@ const fmt = (iso: string) => new Intl.DateTimeFormat('pt-BR', {
  * Todas as passagens do cliente pelo WhatsApp da loja, da mais recente para a mais antiga.
  * Some se o cliente nunca falou com a loja pelo CRM.
  */
+interface SituacaoView { situacao: CodigoSituacao; resumo: string; proximaAcao: string; quando: string | null; confianca: string; analisadaEm: string | null; desatualizada: boolean }
+
+const dataBR = (d: string) => { const [a, m, dia] = d.split('-'); return `${dia}/${m}/${a}`; };
+
 export function PassagensCard({ uid, className = '' }: { uid: string; className?: string }) {
-    const [dados, setDados] = useState<{ total: number; passagens: Passagem[] } | null>(null);
+    const [dados, setDados] = useState<{ total: number; passagens: Passagem[]; situacao: SituacaoView | null } | null>(null);
     const [todas, setTodas] = useState(false);
 
     useEffect(() => {
         let vivo = true;
         fetch(`/api/lead/passagens?uid=${encodeURIComponent(uid)}`, { cache: 'no-store' })
             .then(r => r.json())
-            .then(d => { if (vivo && d?.success) setDados({ total: d.total, passagens: d.passagens }); })
+            .then(d => { if (vivo && d?.success) setDados({ total: d.total, passagens: d.passagens, situacao: d.situacao || null }); })
             .catch(() => { /* informativo */ });
         return () => { vivo = false; };
     }, [uid]);
 
     if (!dados || !dados.passagens.length) return null;
     const lista = todas ? dados.passagens : dados.passagens.slice(0, 3);
+    const s = dados.situacao;
     return (
-        <div className={`bg-sky-500/[0.06] border border-sky-500/20 rounded-xl px-4 py-3 ${className}`}>
+        <div className={`space-y-2 ${className}`}>
+        {s && (
+            <div className="bg-emerald-500/[0.06] border border-emerald-500/20 rounded-xl px-4 py-3">
+                <p className="flex items-center gap-2 text-[11px] font-bold text-emerald-300 uppercase tracking-widest mb-1">
+                    <Compass size={14} /> Situação agora
+                </p>
+                <p className="text-[13px] font-bold text-white/90">{ROTULO_SITUACAO[s.situacao]}{s.quando ? ` · ${dataBR(s.quando)}` : ''}</p>
+                {s.resumo && <p className="text-[12px] text-white/70 leading-relaxed mt-0.5">{s.resumo}</p>}
+                {s.proximaAcao && s.proximaAcao.toLowerCase() !== 'nada' && <p className="text-[12px] text-emerald-200/90 leading-relaxed mt-1">Próximo passo: {s.proximaAcao}</p>}
+                <p className="text-[10px] text-white/35 mt-1">
+                    Lido pela IA{s.analisadaEm ? ` em ${fmt(s.analisadaEm)}` : ''}{s.confianca === 'baixa' ? ' · pouca certeza' : ''}{s.desatualizada ? ' · a conversa andou depois disso' : ''}
+                </p>
+            </div>
+        )}
+        <div className="bg-sky-500/[0.06] border border-sky-500/20 rounded-xl px-4 py-3">
             <p className="flex items-center gap-2 text-[11px] font-bold text-sky-300 uppercase tracking-widest mb-2">
                 <History size={14} /> Passagens pelo WhatsApp da loja · {dados.total}
             </p>
@@ -52,6 +72,7 @@ export function PassagensCard({ uid, className = '' }: { uid: string; className?
                     {todas ? 'Mostrar menos' : `Ver todas (${dados.passagens.length})`}
                 </button>
             )}
+        </div>
         </div>
     );
 }

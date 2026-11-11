@@ -18,6 +18,19 @@ export const MIN_HORAS_ENTRE_TOQUES = 20;
 /** Conversas mais antigas que isso não recebem follow-up (lead morto: fica para o gestor). */
 export const MAX_DIAS_DESDE_ANCORA = 30;
 
+/**
+ * Data de corte: silêncio que começou ANTES disto nunca recebe follow-up. Sem isso, ao ligar o
+ * follow-up as conversas antigas (44 paradas em 11/11/2026) receberiam toque de uma vez.
+ * WA_FOLLOWUP_DESDE (ISO) troca a data; valor inválido cai no padrão.
+ */
+export const CORTE_PADRAO = '2026-11-12T03:00:00.000Z'; // 12/11/2026 00:00 em Brasília
+
+export function dataDeCorte(env: string | null | undefined): string {
+    const v = (env || '').trim();
+    const ms = v ? Date.parse(v) : NaN;
+    return Number.isFinite(ms) ? new Date(ms).toISOString() : CORTE_PADRAO;
+}
+
 const DIA_MS = 86_400_000;
 
 export interface MsgFollowup {
@@ -69,6 +82,8 @@ export interface EntradaDecisao {
     temVisitaMarcada: boolean;
     lojaAberta: boolean;
     agora: Date;
+    /** Silêncio que começou antes desta data (ISO) não recebe follow-up. */
+    corte?: string | null;
 }
 
 export function decidirFollowup(e: EntradaDecisao): Decisao {
@@ -79,6 +94,7 @@ export function decidirFollowup(e: EntradaDecisao): Decisao {
     if (e.temVisitaMarcada) return pula('visita marcada');
     const ancora = ancoraDoSilencio(e.msgs);
     if (!ancora) return pula('cliente aguardando resposta ou sem histórico');
+    if (e.corte && Date.parse(ancora) < Date.parse(e.corte)) return pula('silêncio anterior ao início do follow-up');
     if (pediuParar(e.msgs)) return pula('cliente pediu para parar ou já resolveu');
 
     const desdeAncora = e.agora.getTime() - Date.parse(ancora);

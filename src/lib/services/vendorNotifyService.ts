@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/admin';
+import { comRotaPorNome } from '@/lib/avisos/webhookVendedor';
 
 const N8N_WEBHOOK_URL =
     process.env.N8N_VENDOR_WEBHOOK_URL ||
@@ -44,7 +45,8 @@ async function sendToWebhook(payload: NotifyPayload): Promise<void> {
         const res = await fetch(N8N_WEBHOOK_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
+            // o n8n direciona pelo nome: vendedor_lower + mensagem (ver webhookVendedor.ts)
+            body: JSON.stringify(comRotaPorNome(payload)),
             signal: AbortSignal.timeout(8000),
         });
         if (!res.ok) {

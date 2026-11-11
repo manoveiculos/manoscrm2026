@@ -20,7 +20,7 @@ import { LAURA_CRM_PROMPT } from './prompt';
 import { custoUsd, inicioDoDiaSP, limiteDiario, somarUso, textoParaIa, type MensagemParaIa, type UsoTokens } from './regras';
 import {
     ESPERA_ENTRE_ENVIOS_MS, LIMITE_DIA_PADRAO, MAX_DIAS_DESDE_ANCORA, MAX_POR_RODADA,
-    ancoraDoSilencio, decidirFollowup, instrucaoDoToque, type MsgFollowup,
+    ancoraDoSilencio, dataDeCorte, decidirFollowup, instrucaoDoToque, type MsgFollowup,
 } from './followup';
 
 export interface ResumoFollowup {
@@ -106,7 +106,7 @@ export async function rodarFollowups(supabase: SupabaseClient, opts: { agora?: D
             status: c.status, iaSilenciadaAte: c.ia_silenciada_ate, msgs, enviadosDepoisDaAncora: enviados,
             rascunhoDaEtapaExiste: (e) => rascunhos.has(e),
             leadFechado: await leadFechado(supabase, c.lead_uid), temVisitaMarcada: await temVisita(supabase, c.lead_uid, agora),
-            lojaAberta: true, agora,
+            lojaAberta: true, agora, corte: dataDeCorte(process.env.WA_FOLLOWUP_DESDE),
         });
         if (d.acao === 'pular') { pular(d.motivo); continue; }
 

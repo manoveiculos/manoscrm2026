@@ -25,6 +25,8 @@ export async function GET(req: NextRequest) {
         // Rede de segurança da fila anti-ban dos alertas de compra: o pg_cron
         // drena de minuto em minuto, mas se ele cair o aviso não fica preso.
         { name: 'alertas-pendentes', path: '/api/cron/alertas-pendentes' },
+        // Analista de contexto: lê as conversas do WhatsApp que pararam e grava a situação (não envia nada).
+        { name: 'wa-analista', path: '/api/cron/wa-analista' },
     ];
 
     const results: Record<string, string> = {};

@@ -23,6 +23,7 @@
     "test:atalhos": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/whatsapp/atalhos.test.ts",
     "test:passagens": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/whatsapp/passagens.test.ts",
     "test:followup": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/whatsapp/followup.test.ts",
+    "test:time-agentes": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/whatsapp/agentes.test.ts",
     "test:laura": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/whatsapp/laura.test.ts"
   },
   "dependencies": {

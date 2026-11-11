@@ -36,7 +36,7 @@ import { FERRAMENTAS, executarFerramenta, type ContextoRodada, type ConversaIa }
 import { LAURA_CRM_PROMPT, contextoDaRodada } from './prompt';
 import {
     custoUsd, iaPodeResponder, inicioDoDiaSP, limiteDiario, montarHistorico, somarUso, textoParaIa,
-    repeteMensagemAnterior, valoresCitados, type FichaLaura, type MensagemParaIa, type UsoTokens,
+    comentaAtendimentoAnterior, repeteMensagemAnterior, valoresCitados, type FichaLaura, type MensagemParaIa, type UsoTokens,
 } from './regras';
 
 export const MODELO_PADRAO = 'claude-sonnet-5-5';
@@ -244,6 +244,7 @@ export async function rodarLaura(g: GatilhoIa): Promise<void> {
         const anteriores = msgs.filter(m => m.autor === 'laura' || m.autor === 'vendedor')
             .slice(0, 3).map(m => textoParaIa(m) || '');
         let repeticaoTratada = false;
+        let comentarioTratado = false;
         while (iteracoes < MAX_ITERACOES) {
             iteracoes++;
             // Sonnet 5.5: pensamento adaptativo (padrão) em esforço baixo. O pensamento
@@ -276,6 +277,14 @@ export async function rodarLaura(g: GatilhoIa): Promise<void> {
                 repeticaoTratada = true;
                 messages.push({ role: 'assistant', content: resp.content });
                 messages.push({ role: 'user', content: '<aviso_do_crm>Essa resposta repete o que a loja já disse ou já perguntou. Reescreva respondendo só ao que o cliente acabou de escrever, sem repetir carros, preços, correções nem a pergunta anterior. Se não houver nada novo a perguntar, faça só a próxima etapa (ex.: oferecer fotos ou a visita).</aviso_do_crm>' });
+                texto = '';
+                continue;
+            }
+            if (!comentarioTratado && texto && comentaAtendimentoAnterior(texto)) {
+                // apontou erro de quem atendeu antes: pede UMA reescrita só com a informação certa
+                comentarioTratado = true;
+                messages.push({ role: 'assistant', content: resp.content });
+                messages.push({ role: 'user', content: '<aviso_do_crm>Essa resposta comenta ou corrige o atendimento anterior. Reescreva dando só a informação certa, sem dizer que algo estava errado, sem "corrigindo", sem parênteses explicando. Mantenha o resto da resposta.</aviso_do_crm>' });
                 texto = '';
                 continue;
             }
