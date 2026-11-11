@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/admin';
 import { ingerirWebhook, processarMidiasPendentes, registrarErro } from '@/lib/whatsapp/ingestao';
 import { msgErro } from '@/lib/whatsapp/erro';
 import { rodarLauraDepoisDaIngestao } from '@/lib/whatsapp/ia/motor';
+import { identificarNomeECarro } from '@/lib/identificacao/processar';
 
 /**
  * POST /api/wa/ingest — ingestão do WhatsApp da loja (Fase 2). PERMANENTE:
@@ -67,6 +68,9 @@ export async function POST(req: NextRequest) {
     try {
         const r = await ingerirWebhook(payload, { instancia, autorFromMe: 'laura' });
         const pendentes = r.midiasPendentes;
+        // Nome e carro do cliente (spec nome-e-interesse-automaticos): áudio espera a transcrição.
+        const audiosDoCliente = r.novasDoCliente.filter(g => g.tipo === 'audio');
+        const outrasDoCliente = r.novasDoCliente.filter(g => g.tipo !== 'audio');
         if (pendentes.length) {
             after(async () => {
                 try {
@@ -74,7 +78,11 @@ export async function POST(req: NextRequest) {
                 } catch (e) {
                     await registrarErro(createClient(), `pós-resposta (mídia): ${msgErro(e)}`, payload, 'wa_midia');
                 }
+                await identificarNomeECarro(audiosDoCliente);
             });
+        }
+        if (outrasDoCliente.length) {
+            after(() => identificarNomeECarro(outrasDoCliente));
         }
         // Laura do CRM (etapa B = ensaio: escreve o rascunho, não envia). Desligada
         // por padrão: só roda com WA_IA_ATIVA=true e o botão do admin em "ensaio".

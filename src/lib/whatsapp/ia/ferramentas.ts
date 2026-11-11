@@ -15,10 +15,12 @@ import { businessSecondsBetween, isOpenNow } from '@/lib/services/slaEngine';
 import { horariosDeVisitaDetalhados } from '@/lib/laura/playbook';
 import { acharCarro, buscarNoEstoque, carroParaIa } from './estoque';
 import {
-    ROTULO_CAMPO, faltandoNaFicha, limparNome, mesclarFicha, mesmoNome, nomeDitoPeloCliente,
-    podeGravarNomeNoLead, type FichaLaura, type FichaTroca, type FormaPagamento,
+    ROTULO_CAMPO, faltandoNaFicha, limparNome, mesclarFicha, nomeDitoPeloCliente,
+    type FichaLaura, type FichaTroca, type FormaPagamento,
 } from './regras';
 import { msgErro } from '../erro';
+import { atualizarNomeLead, registrarInteresse } from '@/lib/identificacao/gravar';
+import { carrosCitados, descricaoDoFeed, type CarroInteresse } from '@/lib/identificacao/veiculo';
 
 // ---------------------------------------------------------------------------
 // Definições (o que o Claude vê)
@@ -108,7 +110,7 @@ export interface ConversaIa {
     lead_uid: string | null;
     nome_contato: string | null;
     nome_cliente: string | null;
-    nome_cliente_origem: 'ia' | 'manual' | null;
+    nome_cliente_origem: 'ia' | 'manual' | 'cliente_disse' | 'formulario' | 'perfil_whatsapp' | 'generico' | null;
     nome_ia_no_lead: string | null;
     cidade: string | null;
     ficha: FichaLaura;
@@ -262,75 +264,52 @@ async function salvarFicha(e: Record<string, unknown>, ctx: ContextoRodada): Pro
     };
 }
 
-/** Grava a ficha na conversa e o nome/cidade no lead, respeitando quem editou à mão. */
+/**
+ * Grava a ficha na conversa e o que vai para o lead pelo caminho único do banco
+ * (atualizar_nome_lead / atualizar_cidade_lead / registrar_interesse_lead): nome
+ * com a regra de prioridade, cidade só se vazia, carro sem apagar o do consultor.
+ * Nada disso mexe em status (ver migration 20261107_nome_interesse_auto.sql).
+ */
 async function gravarFichaNaConversa(ctx: ContextoRodada, nova: FichaLaura): Promise<void> {
     const c = ctx.conversa;
-    const upd: Record<string, unknown> = { ficha: ctx.ficha };
-    if (nova.nome && c.nome_cliente_origem !== 'manual' && !mesmoNome(c.nome_cliente, nova.nome)) {
-        upd.nome_cliente = nova.nome;
-        upd.nome_cliente_origem = 'ia';
-        c.nome_cliente = nova.nome;
-        c.nome_cliente_origem = 'ia';
-    }
-    if (nova.cidade && !c.cidade) {
-        upd.cidade = nova.cidade;
-        c.cidade = nova.cidade;
-    }
-
-    const lead = alvoDoLead(c.lead_uid);
-    if (lead && (nova.nome || nova.cidade)) {
-        const r = await gravarNoLead(ctx.supabase, lead, c, nova);
-        if (r.nome) {
-            upd.nome_ia_no_lead = nova.nome;
-            c.nome_ia_no_lead = nova.nome ?? null;
-            ctx.gravacoes.push('nome no lead');
-        }
-        if (r.cidade) ctx.gravacoes.push('cidade no lead');
-    }
-
-    const { error } = await ctx.supabase.from('wa_conversas').update(upd).eq('id', c.id);
+    const { error } = await ctx.supabase.from('wa_conversas').update({ ficha: ctx.ficha }).eq('id', c.id);
     if (error) throw new Error(`ficha: ${error.message}`);
     ctx.gravacoes.push('ficha na conversa');
+
+    if (nova.nome) {
+        const r = await atualizarNomeLead(ctx.supabase, {
+            telefone: c.telefone_key, nome: nova.nome, origem: 'cliente_disse', por: 'laura-crm', trecho: 'salvar_ficha',
+        });
+        if (r.aplicados > 0) ctx.gravacoes.push('nome no lead');
+        c.nome_cliente = nova.nome;
+        c.nome_cliente_origem = 'cliente_disse';
+    }
+    if (nova.cidade) {
+        const { data } = await ctx.supabase.rpc('atualizar_cidade_lead', { p_telefone: c.telefone_key, p_cidade: nova.cidade });
+        if (Number(data) > 0) ctx.gravacoes.push('cidade no lead');
+        if (!c.cidade) c.cidade = nova.cidade;
+    }
+    // Carro confirmado no estoque (fonte 3) ou citado pelo cliente; nunca o de troca.
+    const confirmado = nova.veiculo_id ? acharCarro(ctx.estoque, nova.veiculo_id) : null;
+    const carros: CarroInteresse[] = confirmado
+        ? [carroConfirmadoNoEstoque(confirmado)]
+        : nova.carro_interesse ? carrosCitados(nova.carro_interesse, ctx.estoque) : [];
+    for (const carro of carros) {
+        const r = await registrarInteresse(ctx.supabase, c.telefone_key, carro, 'laura-crm');
+        if (r.leadsAtualizados.length) ctx.gravacoes.push('carro no lead');
+    }
 }
 
-type AlvoLead = { tabela: 'leads_distribuicao_crm_26' | 'leads_master'; id: string; colNome: string; colCidade: string };
-
-function alvoDoLead(uid: string | null): AlvoLead | null {
-    if (!uid) return null;
-    const i = uid.indexOf(':');
-    if (i < 0) return null;
-    const tabela = uid.slice(0, i), id = uid.slice(i + 1);
-    if (tabela === 'leads_distribuicao_crm_26' && /^\d+$/.test(id)) return { tabela, id, colNome: 'nome', colCidade: 'cidade' };
-    if (tabela === 'leads_master' && /^[0-9a-f-]{36}$/i.test(id)) return { tabela, id, colNome: 'name', colCidade: 'city' };
-    return null;
-}
-
-async function gravarNoLead(
-    supabase: SupabaseClient, lead: AlvoLead, c: ConversaIa, nova: FichaLaura,
-): Promise<{ nome: boolean; cidade: boolean }> {
-    const { data, error } = await supabase.from(lead.tabela)
-        .select(`${lead.colNome}, ${lead.colCidade}`).eq('id', lead.id).maybeSingle();
-    if (error || !data) return { nome: false, cidade: false };
-    const linha = data as unknown as Record<string, string | null>;
-    const nomeAtual = linha[lead.colNome] ?? null;
-    const cidadeAtual = linha[lead.colCidade] ?? null;
-    const out = { nome: false, cidade: false };
-
-    if (nova.nome && !mesmoNome(nomeAtual, nova.nome)
-        && podeGravarNomeNoLead({ nomeAtual, nomePerfilWhatsapp: c.nome_contato, ultimoNomeDaIa: c.nome_ia_no_lead })) {
-        // Só grava se o nome não mudou desde a leitura (um consultor pode ter editado agora).
-        let q = supabase.from(lead.tabela).update({ [lead.colNome]: nova.nome }, { count: 'exact' }).eq('id', lead.id);
-        q = nomeAtual == null ? q.is(lead.colNome, null) : q.eq(lead.colNome, nomeAtual);
-        const { error: e1, count } = await q;
-        out.nome = !e1 && !!count;
-    }
-    if (nova.cidade && !(cidadeAtual || '').trim()) {
-        let q = supabase.from(lead.tabela).update({ [lead.colCidade]: nova.cidade }, { count: 'exact' }).eq('id', lead.id);
-        q = cidadeAtual == null ? q.is(lead.colCidade, null) : q.eq(lead.colCidade, cidadeAtual);
-        const { error: e2, count } = await q;
-        out.cidade = !e2 && !!count;
-    }
-    return out;
+function carroConfirmadoNoEstoque(v: AltimusVehicle): CarroInteresse {
+    return {
+        descricao: descricaoDoFeed(v),
+        modeloChave: (v.modelo || '').trim().split(/\s+/)[0].normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]/g, ''),
+        ano: v.ano ?? null,
+        codigoFeed: v.id_externo ? String(v.id_externo) : null,
+        emEstoque: true,
+        origem: 'laura_estoque',
+        trecho: 'Laura confirmou no estoque',
+    };
 }
 
 const FUSO_SP = 'America/Sao_Paulo';

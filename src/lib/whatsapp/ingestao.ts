@@ -43,7 +43,7 @@ export interface ResultadoIngestao {
     erros: string[];
     midiasPendentes: MidiaPendente[];
     /** Mensagens novas de cliente (não de consultor, não reação): disparam a Laura do CRM. */
-    novasDoCliente: { conversaId: string; mensagemId: string; criadaEm: string }[];
+    novasDoCliente: { conversaId: string; mensagemId: string; criadaEm: string; tipo: string }[];
 }
 
 export interface OpcoesIngestao {
@@ -160,7 +160,7 @@ async function aplicarEvento(
         if (!out?.nova) { r.repetidas++; return; }
         r.gravadas++;
         if (!e.fromMe && !deConsultor && e.tipo !== 'reacao') {
-            r.novasDoCliente.push({ conversaId: out.conversa_id, mensagemId: out.mensagem_id, criadaEm: e.enviadaEm });
+            r.novasDoCliente.push({ conversaId: out.conversa_id, mensagemId: out.mensagem_id, criadaEm: e.enviadaEm, tipo: e.tipo });
         }
         if (tipoTemMidia(e.tipo) && e.midia) {
             r.midiasPendentes.push({ mensagemId: out.mensagem_id, conversaId: out.conversa_id, evento: e, deConsultor });
