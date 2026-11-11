@@ -20,6 +20,10 @@ export interface CentralProps {
     somenteLeitura?: boolean;
     /** Eventos novos para o escritório animar (vêm do diff de leituras da página). */
     eventos?: EventoCena[];
+    /** Modo TV (?tv=1): só o escritório, tela cheia, sem cliques. */
+    tv?: boolean;
+    onEntrarTv?: () => void;
+    onSairTv?: () => void;
     onModo?: (agenteId: string, modo: ModoAgente) => Promise<Resposta>;
     onDecidir?: (runId: string, acao: 'approve' | 'reject', motivo?: string) => Promise<Resposta>;
 }
@@ -387,7 +391,7 @@ function Constelacao({ dados, agora, onAbrir, onFila }: { dados: CentralAgentes;
 type Visao = 'escritorio' | 'constelacao';
 const CHAVE_VISAO = 'agentes:visao';
 
-export function CentralView({ dados, conexao, agora, somenteLeitura, eventos = [], onModo, onDecidir }: CentralProps) {
+export function CentralView({ dados, conexao, agora, somenteLeitura, eventos = [], tv = false, onEntrarTv, onSairTv, onModo, onDecidir }: CentralProps) {
     const [visao, setVisao] = useState<Visao>('constelacao');
     // Preferência guardada no navegador; sem preferência, o escritório é o padrão no desktop.
     useEffect(() => {
@@ -398,6 +402,15 @@ export function CentralView({ dados, conexao, agora, somenteLeitura, eventos = [
     const [filaAberta, setFilaAberta] = useState(false);
     const agenteAberto = aberto ? dados.agentes.find(a => a.id === aberto) || null : null;
     const m = dados.maestro;
+
+    if (tv) {
+        return (
+            <div className="fixed inset-0 z-[80] bg-[#03060b] overflow-hidden flex items-start justify-center px-3 pt-2" style={{ cursor: 'none' }}>
+                <EscritorioView dados={dados} painel={dados.painel ?? null} eventos={eventos} agora={agora} tv />
+                {onSairTv && <button type="button" onClick={onSairTv} className="fixed bottom-3 right-3 rounded-lg bg-white/10 px-3 py-1.5 text-[12px] font-bold text-white/80 opacity-0 hover:opacity-100 focus:opacity-100" style={{ cursor: 'pointer' }}>Sair do modo TV</button>}
+            </div>
+        );
+    }
 
     return (
         <div className="w-full max-w-[1500px] mx-auto md:px-6 md:py-6">
@@ -411,6 +424,7 @@ export function CentralView({ dados, conexao, agora, somenteLeitura, eventos = [
                 <div className="hidden lg:flex items-center rounded-xl border border-white/10 overflow-hidden text-[12px] font-bold md:ml-auto">
                     <button type="button" onClick={() => trocarVisao('escritorio')} className={`flex items-center gap-1.5 px-3 py-1.5 ${visao === 'escritorio' ? 'bg-white/15 text-white' : 'text-white/55'}`}><Tv size={13} /> Escritório</button>
                     <button type="button" onClick={() => trocarVisao('constelacao')} className={`flex items-center gap-1.5 px-3 py-1.5 ${visao === 'constelacao' ? 'bg-white/15 text-white' : 'text-white/55'}`}><LayoutGrid size={13} /> Lista</button>
+                    {onEntrarTv && <button type="button" onClick={onEntrarTv} className="flex items-center gap-1.5 px-3 py-1.5 border-l border-white/10 text-white/55 hover:text-white"><Tv size={13} /> Modo TV</button>}
                 </div>
                 <div className="flex items-center gap-3">
                     <InterruptorGeral dados={dados} somenteLeitura={somenteLeitura} onModo={onModo} />
@@ -437,7 +451,7 @@ export function CentralView({ dados, conexao, agora, somenteLeitura, eventos = [
             {/* Desktop: escritório animado (padrão) ou constelação + feed */}
             {visao === 'escritorio' ? (
                 <div className="hidden lg:block">
-                    <EscritorioView dados={dados} painel={null} eventos={eventos} agora={agora} cabecalho={false} onFila={() => setFilaAberta(true)} onAbrirAgente={a => setAberto(a.id)} />
+                    <EscritorioView dados={dados} painel={dados.painel ?? null} eventos={eventos} agora={agora} cabecalho={false} onFila={() => setFilaAberta(true)} onAbrirAgente={a => setAberto(a.id)} />
                 </div>
             ) : (
                 <div className="hidden lg:grid grid-cols-[minmax(0,1fr)_320px] gap-6">

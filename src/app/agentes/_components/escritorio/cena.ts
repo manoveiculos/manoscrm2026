@@ -11,13 +11,7 @@ export interface Caixa { x: number; y: number; w: number; h: number }
 
 export type { EventoCena } from '@/lib/agentes/eventos';
 
-/** Números do telão que não vêm do estado dos agentes (na tela real viram um bloco `painel` da API). */
-export interface PainelTelao {
-    leads: { quente: number; morno: number; frio: number };
-    vendasHoje: number;
-    vendasMes: number;
-    funil: { rotulo: string; n: number }[];
-}
+export type { PainelTelao } from '@/lib/agentes/painel';
 
 const DESK = { w: 232, h: 108 };
 const COL = { atendimento: [36, 288], marketing: [1082, 1334] };

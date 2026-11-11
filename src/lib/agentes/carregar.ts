@@ -7,6 +7,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { AGENTES, agentePorSquad } from './catalogo';
 import { lerConfigs } from './config';
+import { montarPainel, type PainelTelao } from './painel';
 import type { EntradaAgentes, ItemDecisao, RegistroAgente, StatusRegistro } from './estado';
 
 const MIN = 60_000;
@@ -255,4 +256,29 @@ export async function carregarEntradaAgentes(admin: SupabaseClient, agora: numbe
 
     const modoLaura = (laurCfg[0]?.modo as EntradaAgentes['modoLaura']) ?? null;
     return { agora, registros, configs: cfg.configs, configInstalada: cfg.instalada, modoLaura, decisoes };
+}
+
+/**
+ * Números do telão: leads ativos por temperatura/etapa e vendas de hoje/do mês.
+ * Só leitura. Se qualquer leitura falhar devolve null (o telão então não mostra essas cenas — nada de zero falso).
+ */
+export async function carregarPainel(admin: SupabaseClient, agora: number = Date.now()): Promise<PainelTelao | null> {
+    try {
+        const brt = new Date(agora - 3 * 3_600_000);
+        const inicioHoje = new Date(Date.UTC(brt.getUTCFullYear(), brt.getUTCMonth(), brt.getUTCDate(), 3, 0, 0)).toISOString();
+        const inicioMes = new Date(Date.UTC(brt.getUTCFullYear(), brt.getUTCMonth(), 1, 3, 0, 0)).toISOString();
+        const [leads, hoje, mes] = await Promise.all([
+            admin.from('leads_unified_active').select('status, ai_classification').limit(5000),
+            admin.from('sales_manos_crm').select('id', { count: 'exact', head: true }).gte('sale_date', inicioHoje),
+            admin.from('sales_manos_crm').select('id', { count: 'exact', head: true }).gte('sale_date', inicioMes),
+        ]);
+        if (leads.error || hoje.error || mes.error) {
+            console.warn('[agentes] painel:', leads.error?.message || hoje.error?.message || mes.error?.message);
+            return null;
+        }
+        return montarPainel((leads.data || []) as any[], hoje.count ?? 0, mes.count ?? 0);
+    } catch (e: any) {
+        console.warn('[agentes] painel:', e?.message);
+        return null;
+    }
 }

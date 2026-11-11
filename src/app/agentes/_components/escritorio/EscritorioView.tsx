@@ -55,6 +55,8 @@ export interface EscritorioProps {
     rotuloModo?: string;
     /** false = a página já tem cabeçalho (tela real). */
     cabecalho?: boolean;
+    /** Modo TV: ocupa a tela toda (sem a barra de baixo da página). */
+    tv?: boolean;
     onFila?: () => void;
     onAbrirAgente?: (a: AgenteVisao) => void;
 }
@@ -109,7 +111,7 @@ function Mesa({ a, estado, fala, agora, onAbrir }: { a: AgenteVisao; estado: Est
     );
 }
 
-export function EscritorioView({ dados, painel, eventos, agora, rotuloModo, cabecalho = true, onFila, onAbrirAgente }: EscritorioProps) {
+export function EscritorioView({ dados, painel, eventos, agora, rotuloModo, cabecalho = true, tv = false, onFila, onAbrirAgente }: EscritorioProps) {
     const [tick, setTick] = useState(() => Date.now());
     const [ativos, setAtivos] = useState<Record<string, Ativo>>({});
     const [falas, setFalas] = useState<Record<string, { texto: string; ate: number }>>({});
@@ -210,12 +212,12 @@ export function EscritorioView({ dados, painel, eventos, agora, rotuloModo, cabe
     useLayoutEffect(() => {
         const ajustar = () => {
             const w = caixa.current?.clientWidth ?? window.innerWidth;
-            setEscala(Math.max(0.3, Math.min(w / W, (window.innerHeight - (cabecalho ? 70 : 230)) / H)));
+            setEscala(Math.max(0.3, Math.min(w / W, (window.innerHeight - (tv ? 60 : cabecalho ? 70 : 230)) / H)));
         };
         ajustar();
         window.addEventListener('resize', ajustar);
         return () => window.removeEventListener('resize', ajustar);
-    }, [cabecalho]);
+    }, [cabecalho, tv]);
 
     const estadoVisual = (a: AgenteVisao): EstadoAgente => {
         const o = ativos[a.id];

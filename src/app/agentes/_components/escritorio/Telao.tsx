@@ -55,17 +55,18 @@ function CenaFeed({ linhas }: { linhas: LinhaFeed[] }) {
 }
 
 function CenaLeads({ p }: { p: PainelTelao }) {
-    const total = Math.max(1, p.leads.quente + p.leads.morno + p.leads.frio);
+    const total = Math.max(1, p.leads.quente + p.leads.morno + p.leads.frio + p.leads.semClassificacao);
     const barras = [
         { r: 'Quentes', n: p.leads.quente, c: '#ef4444' },
         { r: 'Mornos', n: p.leads.morno, c: '#f59e0b' },
         { r: 'Frios', n: p.leads.frio, c: '#38bdf8' },
+        { r: 'Sem class.', n: p.leads.semClassificacao, c: '#71717a' },
     ];
     return (
-        <div className="space-y-4 pt-1">
+        <div className="space-y-3 pt-0">
             {barras.map(b => (
                 <div key={b.r} className="flex items-center gap-4">
-                    <span className="w-[100px] text-[19px] font-bold text-white/80">{b.r}</span>
+                    <span className="w-[112px] text-[18px] font-bold text-white/80">{b.r}</span>
                     <div className="flex-1 h-[26px] rounded-full bg-white/[0.07] overflow-hidden">
                         <motion.div className="h-full rounded-full" style={{ background: b.c, boxShadow: `0 0 18px ${b.c}99` }} initial={{ width: 0 }} animate={{ width: `${(b.n / total) * 100}%` }} transition={{ duration: 1.1, ease: 'easeOut' }} />
                     </div>

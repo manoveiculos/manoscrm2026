@@ -13,6 +13,7 @@
 //   ocioso      — o resto
 
 import { AGENTES, ID_IA_GERAL, type AgenteCatalogo, type Arco } from './catalogo';
+import type { PainelTelao } from './painel';
 
 export type EstadoAgente = 'trabalhando' | 'ocioso' | 'aguardando' | 'erro' | 'desligado';
 export type ModoAgente = 'ligado' | 'ensaio' | 'desligado';
@@ -116,6 +117,8 @@ export interface CentralAgentes {
         custoHojeUsd: number;
     };
     decisoes: ItemDecisao[];
+    /** Números do telão (só a API preenche; null = não deu para ler agora). */
+    painel?: PainelTelao | null;
     geradoEm: string;
 }
 

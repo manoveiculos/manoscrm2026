@@ -36,7 +36,7 @@ function entradaDemo(): EntradaAgentes {
 }
 
 const PAINEL: PainelTelao = {
-    leads: { quente: 7, morno: 19, frio: 44 },
+    leads: { quente: 7, morno: 19, frio: 44, semClassificacao: 120 },
     vendasHoje: 2,
     vendasMes: 5,
     funil: [

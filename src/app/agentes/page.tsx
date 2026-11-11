@@ -34,6 +34,25 @@ async function postar(url: string, body: unknown) {
 
 export default function CentralDosAgentesPage() {
     const supabase = useMemo(() => createClient(), []);
+    // Modo TV: /agentes?tv=1 — só o escritório, tela cheia, tela sempre acesa.
+    const [tv, setTv] = useState(false);
+    useEffect(() => { setTv(new URLSearchParams(window.location.search).get('tv') === '1'); }, []);
+    const mudarTv = useCallback((ligado: boolean) => {
+        setTv(ligado);
+        const u = new URL(window.location.href);
+        if (ligado) u.searchParams.set('tv', '1'); else u.searchParams.delete('tv');
+        window.history.replaceState(null, '', u);
+    }, []);
+    // Mantém a tela acesa no modo TV (quando o navegador permite).
+    useEffect(() => {
+        if (!tv) return;
+        let trava: { release: () => Promise<void> } | null = null;
+        const pedir = async () => { try { trava = await (navigator as any).wakeLock?.request('screen'); } catch { /* sem suporte: segue sem */ } };
+        pedir();
+        const vis = () => { if (document.visibilityState === 'visible') pedir(); };
+        document.addEventListener('visibilitychange', vis);
+        return () => { document.removeEventListener('visibilitychange', vis); trava?.release().catch(() => {}); };
+    }, [tv]);
     const [dados, setDados] = useState<CentralAgentes | null>(null);
     const [erro, setErro] = useState<string | null>(null);
     const [negado, setNegado] = useState(false);
@@ -129,7 +148,7 @@ export default function CentralDosAgentesPage() {
     }
     return (
         <div className="w-full">
-            <CentralView dados={dados} conexao={falhou ? 'reconectando' : 'ao_vivo'} agora={agora} eventos={eventos} onModo={onModo} onDecidir={onDecidir} />
+            <CentralView dados={dados} conexao={falhou ? 'reconectando' : 'ao_vivo'} agora={agora} eventos={eventos} tv={tv} onEntrarTv={() => mudarTv(true)} onSairTv={() => mudarTv(false)} onModo={onModo} onDecidir={onDecidir} />
         </div>
     );
 }

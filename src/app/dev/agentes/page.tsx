@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation';
 import { createClient as createAdminClient } from '@/lib/supabase/admin';
-import { carregarEntradaAgentes } from '@/lib/agentes/carregar';
+import { carregarEntradaAgentes, carregarPainel } from '@/lib/agentes/carregar';
 import { estadoDosAgentes } from '@/lib/agentes/estado';
 import { PreviewAgentes } from './PreviewAgentes';
 
@@ -14,6 +14,8 @@ export const dynamic = 'force-dynamic';
 export default async function Page() {
     if (process.env.NODE_ENV === 'production') notFound();
     const agora = Date.now();
-    const dados = estadoDosAgentes(await carregarEntradaAgentes(createAdminClient(), agora));
+    const admin = createAdminClient();
+    const [entrada, painel] = await Promise.all([carregarEntradaAgentes(admin, agora), carregarPainel(admin, agora)]);
+    const dados = { ...estadoDosAgentes(entrada), painel };
     return <PreviewAgentes dados={dados} agora={agora} />;
 }
