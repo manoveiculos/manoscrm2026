@@ -34,6 +34,7 @@ import { msgErro } from '../erro';
 import { lerConfigIa } from './config';
 import { FERRAMENTAS, executarFerramenta, type ContextoRodada, type ConversaIa } from './ferramentas';
 import { LAURA_CRM_PROMPT, contextoDaRodada } from './prompt';
+import { liberarDaTriagem } from './triagemRodada';
 import {
     custoUsd, iaPodeResponder, inicioDoDiaSP, limiteDiario, montarHistorico, somarUso, textoParaIa,
     comentaAtendimentoAnterior, repeteMensagemAnterior, valoresCitados, type FichaLaura, type MensagemParaIa, type UsoTokens,
@@ -327,6 +328,8 @@ export async function rodarLaura(g: GatilhoIa): Promise<void> {
  */
 async function falhaDaIa(supabase: SupabaseClient, conversa: ConversaIa, conversaId: string): Promise<void> {
     try {
+        // a IA falhou: lead preso na triagem nunca fica parado, vai para a roleta
+        if (conversa.lead_uid) await liberarDaTriagem(supabase, conversa.lead_uid, 'laura_indisponivel', { contatado: true, respondeu: true }).catch(() => false);
         if ((process.env.WA_IA_ENVIO_LIBERADO || '').trim() !== 'true') return;
         const desde = new Date(Date.now() - 30 * 60_000).toISOString();
         const { count } = await supabase.from('wa_mensagens').select('id', { count: 'exact', head: true })
@@ -407,6 +410,14 @@ async function executarEnvio(supabase: SupabaseClient, ctx: ContextoRodada, g: G
             tag: `wa-${ctx.conversa.id}`,
         }).catch(() => null);
         ctx.passagem.executada = true;
+        // Lead de anúncio preso na triagem da Laura: qualificado → solta para a roleta, com o resumo.
+        if (ctx.conversa.lead_uid) {
+            const f = ctx.ficha as Record<string, unknown>;
+            await liberarDaTriagem(supabase, ctx.conversa.lead_uid, ctx.passagem.motivo === 'pediu_humano' ? 'pediu_humano' : 'qualificado', {
+                resumoDaLaura: ctx.passagem.resumo, nome: (ctx.ficha.nome as string | null) || ctx.conversa.nome_cliente || ctx.conversa.nome_contato,
+                interesse: typeof f.carro_interesse === 'string' ? f.carro_interesse : null, contatado: true, respondeu: true,
+            }).catch(() => false);
+        }
     }
     return { enviada: true, provider_message_id: r.providerMessageId };
 }

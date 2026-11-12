@@ -95,7 +95,10 @@ export async function rodarFollowups(supabase: SupabaseClient, opts: { agora?: D
             midiaNome: m.midia_nome, apagadaEm: m.apagada_em, criadaEm: m.criada_em,
         }));
         const msgs: MsgFollowup[] = (linhas || []).filter(m => !m.apagada_em).map(m => ({ autor: m.autor, texto: m.texto || m.legenda, transcricao: m.transcricao, criadaEm: m.criada_em }));
-        const ancora = ancoraDoSilencio(msgs);
+        // Lead de anúncio que a Laura chamou primeiro (wa_triagem): o silêncio conta mesmo sem resposta do cliente
+        const { data: tri } = await supabase.from('wa_triagem').select('lead_uid').eq('conversa_id', c.id).not('contato_em', 'is', null).limit(1).maybeSingle();
+        const iniciadaPelaLoja = Boolean(tri);
+        const ancora = ancoraDoSilencio(msgs, iniciadaPelaLoja);
         if (!ancora) { pular('cliente aguardando resposta ou sem histórico'); continue; }
 
         const { data: fu } = await supabase.from('wa_followups').select('etapa, status, criado_em').eq('conversa_id', c.id).gt('criado_em', ancora);
@@ -106,7 +109,7 @@ export async function rodarFollowups(supabase: SupabaseClient, opts: { agora?: D
             status: c.status, iaSilenciadaAte: c.ia_silenciada_ate, msgs, enviadosDepoisDaAncora: enviados,
             rascunhoDaEtapaExiste: (e) => rascunhos.has(e),
             leadFechado: await leadFechado(supabase, c.lead_uid), temVisitaMarcada: await temVisita(supabase, c.lead_uid, agora),
-            lojaAberta: true, agora, corte: dataDeCorte(process.env.WA_FOLLOWUP_DESDE),
+            lojaAberta: true, iniciadaPelaLoja, agora, corte: dataDeCorte(process.env.WA_FOLLOWUP_DESDE),
         });
         if (d.acao === 'pular') { pular(d.motivo); continue; }
 

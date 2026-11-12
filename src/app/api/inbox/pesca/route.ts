@@ -42,6 +42,10 @@ export async function GET(req: NextRequest) {
         const { searchParams } = new URL(req.url);
         const filter = searchParams.get('filter') || 'priority';
 
+        // Lead de anúncio com a Laura (triagem) ainda não é de ninguém: não aparece na pesca.
+        const { data: presos } = await admin.from('lead_distribuicao').select('lead_uid').eq('status', 'triagem_laura').limit(500);
+        const uidsPresos = (presos || []).map(p => p.lead_uid as string);
+
         let query = admin
             .from('leads_unified_active')
             .select('uid, table_name, native_id, name, phone, vehicle_interest, source, ai_score, ai_classification, status, updated_at, created_at, proxima_acao, first_contact_at, first_contact_channel, assigned_consultant_id, atendimento_iniciado_em, atendimento_iniciado_por, flagged_reversao, ultima_interacao_humana, descarte_financeiro, diagnostico_atendimento')
@@ -49,6 +53,7 @@ export async function GET(req: NextRequest) {
             .is('atendimento_iniciado_em', null)
             .neq('descarte_financeiro', true)
             .limit(300);
+        if (uidsPresos.length) query = query.not('uid', 'in', `(${uidsPresos.map(u => `"${u}"`).join(',')})`);
 
         if (filter === 'today') {
             const todayStart = new Date();

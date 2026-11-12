@@ -66,7 +66,7 @@ export async function GET() {
         .from('lead_distribuicao')
         .select('lead_uid')
         .in('lead_uid', candidatos.map((l: any) => l.uid))
-        .eq('status', 'esgotado');
+        .in('status', ['esgotado', 'triagem_laura']); // triagem_laura = com a Laura, ainda não é órfão
 
     const excluir = new Set((foraDoRodizio || []).map((d: any) => d.lead_uid));
     const leads = candidatos.filter((l: any) => !excluir.has(l.uid));

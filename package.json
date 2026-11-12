@@ -27,6 +27,7 @@
     "test:telefone": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/telefone/telefone.test.ts",
     "test:avisos": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/telefone/avisos.test.ts",
     "test:cobranca": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/telefone/cobranca.test.ts",
+    "test:triagem": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/whatsapp/triagem.test.ts",
     "test:laura": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/whatsapp/laura.test.ts"
   },
   "dependencies": {

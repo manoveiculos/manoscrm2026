@@ -45,11 +45,12 @@ export interface MsgFollowup {
  * Retorna null quando o cliente ainda espera resposta (quem responde é a Laura normal),
  * quando ele nunca falou, ou quando a conversa está vazia.
  */
-export function ancoraDoSilencio(msgs: MsgFollowup[]): string | null {
+export function ancoraDoSilencio(msgs: MsgFollowup[], iniciadaPelaLoja = false): string | null {
     const o = msgs.slice().sort((a, b) => a.criadaEm.localeCompare(b.criadaEm));
     let ultCliente = -1;
     o.forEach((m, i) => { if (m.autor === 'cliente') ultCliente = i; });
-    if (ultCliente < 0) return null;
+    // Conversa que a Laura puxou (lead de anúncio) e o cliente nunca respondeu: a âncora é a 1ª mensagem da loja.
+    if (ultCliente < 0) return iniciadaPelaLoja ? (o.find(m => m.autor === 'laura')?.criadaEm ?? null) : null;
     const depois = o.slice(ultCliente + 1).find(m => m.autor === 'laura' || m.autor === 'vendedor');
     return depois ? depois.criadaEm : null;
 }
@@ -80,6 +81,8 @@ export interface EntradaDecisao {
     rascunhoDaEtapaExiste?: (etapa: number) => boolean;
     leadFechado: boolean;
     temVisitaMarcada: boolean;
+    /** A Laura puxou a conversa (triagem de lead de anúncio): vale mesmo sem mensagem do cliente. */
+    iniciadaPelaLoja?: boolean;
     lojaAberta: boolean;
     agora: Date;
     /** Silêncio que começou antes desta data (ISO) não recebe follow-up. */
@@ -92,7 +95,7 @@ export function decidirFollowup(e: EntradaDecisao): Decisao {
     if (e.iaSilenciadaAte && new Date(e.iaSilenciadaAte).getTime() > e.agora.getTime()) return pula('Laura silenciada');
     if (e.leadFechado) return pula('lead vendido, perdido ou arquivado');
     if (e.temVisitaMarcada) return pula('visita marcada');
-    const ancora = ancoraDoSilencio(e.msgs);
+    const ancora = ancoraDoSilencio(e.msgs, e.iniciadaPelaLoja);
     if (!ancora) return pula('cliente aguardando resposta ou sem histórico');
     if (e.corte && Date.parse(ancora) < Date.parse(e.corte)) return pula('silêncio anterior ao início do follow-up');
     if (pediuParar(e.msgs)) return pula('cliente pediu para parar ou já resolveu');
