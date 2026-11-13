@@ -18,6 +18,11 @@ interface Despesa {
     valor: number;
 }
 
+/** Linha de negociacao_terceiros_despesas como vem do banco. */
+interface DespesaRow extends Despesa {
+    id?: string;
+}
+
 export function ModalNovoNegocio({ onClose, onSuccess, negocioIdToEdit }: ModalNovoNegocioProps) {
     const [step, setStep] = useState(negocioIdToEdit ? 2 : 1);
     const [salvando, setSalvando] = useState(false);
@@ -97,16 +102,16 @@ export function ModalNovoNegocio({ onClose, onSuccess, negocioIdToEdit }: ModalN
                 carregarDadosForm(data);
                 const { data: desp } = await supabase.from('negociacao_terceiros_despesas').select('*').eq('negociacao_id', data.id);
                 if (desp && desp.length > 0) {
-                    setDespesas(desp.filter(d => d.categoria !== 'Imposto' && d.categoria !== 'Taxa').map(d => ({
+                    setDespesas(desp.filter((d: DespesaRow) => d.categoria !== 'Imposto' && d.categoria !== 'Taxa').map((d: DespesaRow) => ({
                         categoria: d.categoria,
                         descricao: d.descricao,
                         valor: d.valor
                     })));
-                    const transf = desp.find(d => d.categoria === 'Taxa' && d.descricao.includes('Transferência'));
+                    const transf = desp.find((d: DespesaRow) => d.categoria === 'Taxa' && d.descricao.includes('Transferência'));
                     if (transf) setIncluirTransferencia(true);
                     else setIncluirTransferencia(false);
 
-                    const nf = desp.find(d => d.categoria === 'Imposto' && d.descricao.includes('Nota Fiscal'));
+                    const nf = desp.find((d: DespesaRow) => d.categoria === 'Imposto' && d.descricao.includes('Nota Fiscal'));
                     if (nf) {
                         // Como agora o cálculo é complexo, apenas definimos o valor caso esteja editando
                         // Mas sem ter NFe Saida e NFe Entrada salvas na DB, não dá pra fazer reversa perfeita.
@@ -155,7 +160,7 @@ export function ModalNovoNegocio({ onClose, onSuccess, negocioIdToEdit }: ModalN
                     .eq('negociacao_id', data.id);
                 
                 if (desp && desp.length > 0) {
-                    setDespesas(desp.map(d => ({
+                    setDespesas(desp.map((d: DespesaRow) => ({
                         categoria: d.categoria,
                         descricao: d.descricao,
                         valor: d.valor

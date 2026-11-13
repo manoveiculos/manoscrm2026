@@ -59,11 +59,15 @@ export async function GET(req: NextRequest) {
         if (flaskSearches.length > 0) {
           searches = flaskSearches;
           // Sincroniza retroativamente no Supabase
-          await supabase.from('app_settings').upsert({
-            key: searchKey,
-            value: JSON.stringify(flaskSearches),
-            updated_at: new Date().toISOString(),
-          }, { onConflict: 'key' }).catch(() => {});
+          try {
+            await supabase.from('app_settings').upsert({
+              key: searchKey,
+              value: JSON.stringify(flaskSearches),
+              updated_at: new Date().toISOString(),
+            }, { onConflict: 'key' });
+          } catch {
+            // a sincronização é só um espelho: se falhar, segue com as buscas do Flask
+          }
         }
       }
     } catch {
