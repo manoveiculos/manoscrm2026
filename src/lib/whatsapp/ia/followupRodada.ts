@@ -98,6 +98,8 @@ export async function rodarFollowups(supabase: SupabaseClient, opts: { agora?: D
         // Lead de anúncio que a Laura chamou primeiro (wa_triagem): o silêncio conta mesmo sem resposta do cliente
         const { data: tri } = await supabase.from('wa_triagem').select('lead_uid').eq('conversa_id', c.id).not('contato_em', 'is', null).limit(1).maybeSingle();
         const iniciadaPelaLoja = Boolean(tri);
+        // lead que a triagem já entregou ao consultor: a Laura não faz mais follow-up dele
+        const { data: entregue } = await supabase.from('wa_triagem').select('lead_uid').eq('conversa_id', c.id).not('liberado_em', 'is', null).limit(1).maybeSingle();
         const ancora = ancoraDoSilencio(msgs, iniciadaPelaLoja);
         if (!ancora) { pular('cliente aguardando resposta ou sem histórico'); continue; }
 
@@ -109,7 +111,7 @@ export async function rodarFollowups(supabase: SupabaseClient, opts: { agora?: D
             status: c.status, iaSilenciadaAte: c.ia_silenciada_ate, msgs, enviadosDepoisDaAncora: enviados,
             rascunhoDaEtapaExiste: (e) => rascunhos.has(e),
             leadFechado: await leadFechado(supabase, c.lead_uid), temVisitaMarcada: await temVisita(supabase, c.lead_uid, agora),
-            lojaAberta: true, iniciadaPelaLoja, agora, corte: dataDeCorte(process.env.WA_FOLLOWUP_DESDE),
+            lojaAberta: true, iniciadaPelaLoja, entregueAoConsultor: Boolean(entregue), agora, corte: dataDeCorte(process.env.WA_FOLLOWUP_DESDE),
         });
         if (d.acao === 'pular') { pular(d.motivo); continue; }
 

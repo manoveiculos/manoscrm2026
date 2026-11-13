@@ -12,6 +12,11 @@ export const LIMITE_SEM_CONTATO_NOITE_H = 16;            // lead da madrugada es
 export const LIMITE_CLIENTE_SEM_LAURA_MIN = 10;          // cliente escreveu e a Laura não respondeu em 10 min: libera
 export const LIMITE_CLIENTE_SEM_CONCLUSAO_H = 4;         // cliente respondeu, a Laura não concluiu em 4 h: libera
 export const LIMITE_SEM_RESPOSTA_DIAS = 11;              // o lead nunca respondeu (4 follow-ups: 1, 2, 4 e 10 dias): vai ao consultor decidir
+// Plano "esfriou" (Alexandre, 13/11/2026): lead que a Laura atendeu e o cliente parou de responder.
+export const SILENCIO_QUENTE_MIN = 60;       // quente: 60 min calado → vai ao consultor
+export const SILENCIO_LEMBRETE_MIN = 120;    // morno: 2 h calado → lembrete da Laura no mesmo dia
+export const SILENCIO_MORNO_SEM_LEMBRETE_MIN = 360;  // morno que não deu para lembrar: 6 h → consultor
+export const LEMBRETE_ESPERA_H = 12;         // morno: 12 h depois do lembrete sem resposta → consultor
 export const MAX_CONTATOS_POR_RODADA = 3;
 export const ESPERA_ENTRE_CONTATOS_MS = 75_000;          // anti-ban: nunca dois envios em menos de ~1 min
 
@@ -25,10 +30,15 @@ export type MotivoLiberacao =
     | 'sem_conclusao'             // o cliente respondeu e a conversa não fechou
     | 'sem_resposta'              // o lead nunca respondeu, nem aos follow-ups
     | 'humano_assumiu'            // um consultor já assumiu a conversa (não adianta segurar)
+    | 'esfriou_quente'            // mostrou interesse forte e parou de responder: ligar é a melhor jogada
+    | 'esfriou_morno'             // interesse médio, parou de responder (com ou sem o lembrete da Laura)
     | 'chave_desligada';          // a triagem foi desligada: tudo que está preso sai
+
+export type NivelInteresse = 'quente' | 'morno' | 'leve';
 
 export type DecisaoTriagem =
     | { acao: 'contatar' }
+    | { acao: 'lembrete' }
     | { acao: 'esperar'; motivo: string }
     | { acao: 'liberar'; motivo: MotivoLiberacao };
 
@@ -46,6 +56,14 @@ export interface EntradaTriagem {
     humanoAssumiu?: boolean;
     /** O cliente escreveu primeiro (lead de conversa no WhatsApp): a Laura responde na hora, sem janela. */
     clienteIniciou?: boolean;
+    /** Hora da última mensagem da conversa (de qualquer lado). */
+    ultimaMsgEm?: string | null;
+    /** Nível de interesse do cliente (calculado por nivelDeInteresse). */
+    nivel?: NivelInteresse;
+    /** Quando a Laura mandou o lembrete do mesmo dia (null = ainda não). */
+    lembreteEm?: string | null;
+    /** O follow-up está ligado (WA_FOLLOWUP_ATIVO): sem ele a Laura não manda lembrete. */
+    lembretePermitido?: boolean;
     /** Chave da triagem ligada no banco. */
     chaveLigada: boolean;
     /** Laura em modo "envia" e com chave do Claude. */
@@ -77,8 +95,11 @@ export function decidirTriagem(e: EntradaTriagem): DecisaoTriagem {
         if (e.ultimaDoClienteEm) {
             const h = (t - Date.parse(e.ultimaDoClienteEm)) / 3_600_000;
             if (h >= LIMITE_CLIENTE_SEM_CONCLUSAO_H && !e.lauraRespondeuDepois) return { acao: 'liberar', motivo: 'sem_conclusao' };
-            if (h >= LIMITE_CLIENTE_SEM_CONCLUSAO_H * 4) return { acao: 'liberar', motivo: 'sem_conclusao' };
+            if (!e.nivel && h >= LIMITE_CLIENTE_SEM_CONCLUSAO_H * 4) return { acao: 'liberar', motivo: 'sem_conclusao' };
         }
+        // A Laura falou por último e o cliente esfriou: decide pelo nível de interesse.
+        const esfriou = e.nivel && e.ultimaMsgEm && (!e.ultimaDoClienteEm || e.lauraRespondeuDepois) ? decidirEsfriou(e) : null;
+        if (esfriou) return esfriou;
         if (!e.ultimaDoClienteEm && (t - Date.parse(e.contatoEm)) / 86_400_000 >= LIMITE_SEM_RESPOSTA_DIAS) return { acao: 'liberar', motivo: 'sem_resposta' };
         return { acao: 'esperar', motivo: e.ultimaDoClienteEm ? 'conversa em andamento' : 'aguardando resposta do lead' };
     }
@@ -101,6 +122,64 @@ export function decidirTriagem(e: EntradaTriagem): DecisaoTriagem {
     const desde = Math.max(Date.parse(e.criadoEm), inicioJanela);
     if ((t - desde) / 60_000 > LIMITE_SEM_CONTATO_MIN) return { acao: 'liberar', motivo: 'laura_nao_conseguiu' };
     return { acao: 'contatar' };
+}
+
+/**
+ * Plano "esfriou": o cliente conversou com a Laura e parou de responder.
+ *   quente → 60 min calado: vai ao consultor (ele liga ou escreve uma vez);
+ *   morno  → 2 h calado: lembrete da Laura (na janela 8h-21h); 12 h depois do lembrete sem resposta → consultor;
+ *            sem lembrete possível (follow-up desligado ou fora da janela por 6 h) → consultor;
+ *   leve   → só a Laura (follow-up de 1, 2, 4 e 10 dias); nada a decidir aqui.
+ */
+function decidirEsfriou(e: EntradaTriagem): DecisaoTriagem | null {
+    const t = e.agora.getTime();
+    const silencioMin = (t - Date.parse(e.ultimaMsgEm as string)) / 60_000;
+    if (e.nivel === 'quente') return silencioMin >= SILENCIO_QUENTE_MIN ? { acao: 'liberar', motivo: 'esfriou_quente' } : null;
+    if (e.nivel !== 'morno') return null;
+    if (e.lembreteEm) {
+        return (t - Date.parse(e.lembreteEm)) / 3_600_000 >= LEMBRETE_ESPERA_H ? { acao: 'liberar', motivo: 'esfriou_morno' } : null;
+    }
+    if (silencioMin >= SILENCIO_MORNO_SEM_LEMBRETE_MIN) return { acao: 'liberar', motivo: 'esfriou_morno' };
+    if (silencioMin >= SILENCIO_LEMBRETE_MIN) {
+        if (!e.lembretePermitido) return { acao: 'liberar', motivo: 'esfriou_morno' };
+        if (dentroDaJanelaLaura(e.agora)) return { acao: 'lembrete' };
+    }
+    return null;
+}
+
+// ── nível de interesse ──────────────────────────────────────────────────────
+
+/** Sinais de quem está perto de comprar: pergunta de preço, financiamento, entrada, troca, foto, visita, endereço. */
+const SINAL_QUENTE = /(quanto\s+(custa|fica|sai|[eé])|pre[cç]o|valor|parcel|financ|entrada|\btroca|\bfotos?\b|v[ií]deo|visita|ver\s+(o|ele|ela|pessoalmente)|posso\s+(ir|passar)|vou\s+(a[ií]|passar|visitar|ir)|passar\s+(a[ií]|na\s+loja)|endere[cç]o|onde\s+fica|aceit[ao]|[àa]\s+vista|quero\s+(comprar|fechar|ver|esse|ele|ela)|fechar\s+neg[oó]cio|hoje|amanh[ãa])/i;
+
+/**
+ * Quente: o selo do Classificador é quente, OU ele deu sinal de compra em pelo menos 2 mensagens.
+ * Morno: 3 mensagens ou mais (ou selo morno) sem sinal forte.
+ * Leve: o resto (1 ou 2 mensagens, sem informação) e quem a regra oficial manda para "fora do perfil".
+ */
+export function nivelDeInteresse(p: { falasDoCliente: string[]; selo?: string | null }): NivelInteresse {
+    const falas = p.falasDoCliente.map(f => (f || '').trim()).filter(Boolean);
+    if (p.selo === 'fora_do_perfil') return 'leve';
+    if (p.selo === 'quente') return 'quente';
+    if (falas.length >= 2 && falas.some(f => SINAL_QUENTE.test(f))) return 'quente';
+    if (falas.length >= 3 || p.selo === 'morno') return 'morno';
+    return 'leve';
+}
+
+/** Instrução do lembrete do mesmo dia (a Laura segue o prompt de sempre como sistema). */
+export function instrucaoLembrete(p: { nome: string | null; carro: string | null; contexto: string }): string {
+    const nome = primeiroNome(p.nome);
+    return [
+        '<tarefa_do_crm>',
+        'O cliente conversou com você hoje e parou de responder faz umas horas. Escreva UMA mensagem muito curta e leve para retomar, como alguém que lembrou dele.',
+        'Retome o último assunto da conversa (o carro, a dúvida ou o que ficou pendente), sem pressão e sem repetir o que já foi dito.',
+        nome ? `Nome: ${nome} (pode usar uma vez).` : 'Você não sabe o nome dele: não invente.',
+        p.carro ? `Carro de interesse: ${p.carro}.` : '',
+        'Uma frase, no máximo 2. Termine com uma pergunta simples que ele responda com uma palavra. Não cite preço, parcela nem crédito, não prometa nada, no máximo 1 emoji.',
+        'Responda só com o texto da mensagem, sem explicar.',
+        p.contexto,
+        '</tarefa_do_crm>',
+    ].filter(Boolean).join('\n');
 }
 
 /** 08:00 de Brasília do dia de `d`, em ms UTC. */
@@ -143,19 +222,22 @@ export const ROTULO_LIBERACAO: Record<MotivoLiberacao, string> = {
     sem_conclusao: 'o cliente respondeu, mas a conversa não fechou',
     sem_resposta: 'o cliente não respondeu ao contato da Laura nem aos follow-ups',
     humano_assumiu: 'um consultor já assumiu a conversa',
+    esfriou_quente: 'o cliente mostrou interesse forte e parou de responder: vale ligar',
+    esfriou_morno: 'o cliente parou de responder (a Laura já tentou retomar)',
     chave_desligada: 'triagem desligada',
 };
 
 /** Resumo que o consultor lê ANTES de chamar o lead (vai para handoff_summary, acima da ficha). */
 export function resumoParaConsultor(p: {
     motivo: MotivoLiberacao; quando: Date; nome: string | null; interesse: string | null; resumoDaLaura: string | null;
-    contatado: boolean; respondeu: boolean;
+    contatado: boolean; respondeu: boolean; lembreteIgnorado?: boolean;
 }): string {
     const fmt = new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
     const linhas = [`RESUMO DA LAURA (atendimento inicial, ${fmt.format(p.quando).replace(',', '')})`];
     if (p.nome) linhas.push(`Cliente: ${primeiroNome(p.nome)}`);
     if (p.interesse) linhas.push(`Interesse no anúncio: ${p.interesse}`);
     linhas.push(p.contatado ? (p.respondeu ? 'A Laura conversou com o cliente.' : 'A Laura chamou o cliente e ele ainda não respondeu.') : 'A Laura não chegou a falar com o cliente.');
+    if (p.lembreteIgnorado) linhas.push('A Laura mandou um lembrete e ele não respondeu.');
     if (p.resumoDaLaura) linhas.push(`O que ela apurou: ${p.resumoDaLaura}`);
     linhas.push(`Passou para você porque: ${ROTULO_LIBERACAO[p.motivo]}.`);
     return linhas.join('\n').slice(0, 900);

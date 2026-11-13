@@ -81,6 +81,8 @@ export interface EntradaDecisao {
     rascunhoDaEtapaExiste?: (etapa: number) => boolean;
     leadFechado: boolean;
     temVisitaMarcada: boolean;
+    /** O lead já foi entregue a um consultor pela triagem: quem chama agora é ele, não a Laura. */
+    entregueAoConsultor?: boolean;
     /** A Laura puxou a conversa (triagem de lead de anúncio): vale mesmo sem mensagem do cliente. */
     iniciadaPelaLoja?: boolean;
     lojaAberta: boolean;
@@ -95,6 +97,7 @@ export function decidirFollowup(e: EntradaDecisao): Decisao {
     if (e.iaSilenciadaAte && new Date(e.iaSilenciadaAte).getTime() > e.agora.getTime()) return pula('Laura silenciada');
     if (e.leadFechado) return pula('lead vendido, perdido ou arquivado');
     if (e.temVisitaMarcada) return pula('visita marcada');
+    if (e.entregueAoConsultor) return pula('lead já entregue ao consultor');
     const ancora = ancoraDoSilencio(e.msgs, e.iniciadaPelaLoja);
     if (!ancora) return pula('cliente aguardando resposta ou sem histórico');
     if (e.corte && Date.parse(ancora) < Date.parse(e.corte)) return pula('silêncio anterior ao início do follow-up');
