@@ -3,24 +3,37 @@
 import { useEffect, useRef } from 'react';
 import type { EventoCena } from '@/lib/agentes/eventos';
 import { MotorJogo } from './motor';
+import { MotorArte } from './motorArte';
+
+interface Motor {
+    hora: number | null;
+    vendasMes: number;
+    leads: { quente: number; morno: number; frio: number };
+    emitir: (ev: EventoCena) => void;
+    atualizar: (dt: number) => void;
+    desenhar: (ctx: CanvasRenderingContext2D, w: number, h: number, dpr: number) => void;
+}
 
 /**
  * Cena isométrica ao vivo (prova de conceito). Recebe os mesmos EventoCena do escritório SVG.
  * O laço usa requestAnimationFrame e, se o navegador pausar os quadros (aba/painel oculto),
  * um temporizador de segurança continua avançando a cena.
  */
-export function JogoView({ eventos, hora = null, vendasMes, leads }: {
+export function JogoView({ eventos, arte = false, hora = null, vendasMes, leads }: {
     eventos: EventoCena[];
+    /** true = cenário realista com personagens recortados; false = desenho procedural. */
+    arte?: boolean;
     hora?: number | null;
     vendasMes?: number;
     leads?: { quente: number; morno: number; frio: number };
 }) {
     const canvas = useRef<HTMLCanvasElement>(null);
     const caixa = useRef<HTMLDivElement>(null);
-    const motor = useRef<MotorJogo | null>(null);
+    const motor = useRef<Motor | null>(null);
     const vistos = useRef<Set<string>>(new Set());
 
-    if (!motor.current) motor.current = new MotorJogo();
+    const arteAtual = useRef(arte);
+    if (!motor.current || arteAtual.current !== arte) { motor.current = arte ? new MotorArte() : new MotorJogo(); arteAtual.current = arte; }
 
     useEffect(() => {
         const m = motor.current!;
@@ -66,7 +79,7 @@ export function JogoView({ eventos, hora = null, vendasMes, leads }: {
         raf = requestAnimationFrame(laco);
         const guarda = setInterval(() => { if (performance.now() - ultimo > 120) passo(); }, 60);
         return () => { cancelAnimationFrame(raf); clearInterval(guarda); ro.disconnect(); };
-    }, []);
+    }, [arte]);
 
     return (
         <div ref={caixa} className="relative w-full h-full">

@@ -15,6 +15,7 @@ export function DemoJogo() {
     const [eventos, setEventos] = useState<EventoCena[]>([]);
     const [auto, setAuto] = useState(true);
     const [hora, setHora] = useState<number | null>(null);
+    const [arte, setArte] = useState(true);
     const n = useRef(0);
 
     const emitir = useCallback((e: SemId<EventoCena>) => {
@@ -42,7 +43,7 @@ export function DemoJogo() {
 
     return (
         <main className="fixed inset-0 bg-[#03050a] text-white">
-            <JogoView eventos={eventos} hora={hora} />
+            <JogoView eventos={eventos} arte={arte} hora={hora} />
             <div className="absolute top-3 left-4 flex items-center gap-3">
                 <h1 className="text-[20px] font-black">Central dos Agentes</h1>
                 <span className="rounded-full border border-amber-400/40 bg-amber-400/10 px-2.5 py-0.5 text-[11px] font-bold text-amber-200">PROVA DE CONCEITO · eventos simulados</span>
@@ -53,6 +54,7 @@ export function DemoJogo() {
                     <button key={k} type="button" onClick={f} className="rounded-lg bg-white/10 hover:bg-white/20 px-2.5 py-1 text-[12px] font-bold">{k}</button>
                 ))}
                 <button type="button" onClick={() => setAuto(v => !v)} className={`rounded-lg px-2.5 py-1 text-[12px] font-black ${auto ? 'bg-emerald-600' : 'bg-white/10'}`}>Auto {auto ? 'ON' : 'OFF'}</button>
+                <button type="button" onClick={() => setArte(v => !v)} className="rounded-lg bg-white/10 px-2.5 py-1 text-[12px] font-bold">{arte ? 'Arte realista' : 'Desenho simples'}</button>
                 <label className="ml-2 flex items-center gap-2 text-[11px] text-white/60">
                     Hora
                     <input type="range" min={0} max={23.5} step={0.5} value={hora ?? 12} onChange={e => setHora(Number(e.target.value))} className="w-28" />
