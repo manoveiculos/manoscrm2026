@@ -62,8 +62,9 @@ export function criarLeadLigado(): boolean {
 }
 
 /** Nome aceitável para o lead novo: o do perfil do WhatsApp, ou o genérico (a correção vem depois). */
-function nomeInicial(nomeContato: string | null | undefined): string {
-    const n = (nomeContato || '').trim();
+export function nomeInicial(nomeContato: string | null | undefined): string {
+    // perfil do WhatsApp costuma ter emoji e enfeite ("Thais✨", "Joce 👨‍👩‍👧"): fica só o nome
+    const n = (nomeContato || '').replace(/[^\p{L}\p{N}\s'.-]/gu, ' ').replace(/\s+/g, ' ').trim();
     return n && /\p{L}{2}/u.test(n) && !/\d{6,}/.test(n) ? n.slice(0, 80) : 'Lead WhatsApp';
 }
 

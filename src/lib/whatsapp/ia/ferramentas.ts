@@ -20,6 +20,7 @@ import {
 } from './regras';
 import { msgErro } from '../erro';
 import { atualizarNomeLead, registrarInteresse } from '@/lib/identificacao/gravar';
+import { gravarInteresseGenerico } from '@/lib/identificacao/interesseGenerico';
 import { identificacaoLigada } from '@/lib/identificacao/chave';
 import { carrosCitados, descricaoDoFeed, type CarroInteresse } from '@/lib/identificacao/veiculo';
 
@@ -330,6 +331,11 @@ async function gravarFichaNaConversa(ctx: ContextoRodada, nova: FichaLaura): Pro
     for (const carro of carros) {
         const r = await registrarInteresse(ctx.supabase, c.telefone_key, carro, 'laura-crm');
         if (r.leadsAtualizados.length) ctx.gravacoes.push('carro no lead');
+    }
+    // Sem carro reconhecido ("sedan ou SUV", "carro popular", "picape até 90 mil"): o que o cliente quer vai para o lead
+    // mesmo assim, se o campo ainda estiver vazio ou com texto de preenchimento.
+    if (!carros.length && !confirmado && nova.carro_interesse) {
+        if (await gravarInteresseGenerico(ctx.supabase, c.lead_uid, nova.carro_interesse)) ctx.gravacoes.push('interesse no lead');
     }
 }
 

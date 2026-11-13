@@ -50,6 +50,12 @@ const NAO_E_NOME = new Set([
     'completo', 'usado', 'novo', 'seminovo', 'automatico', 'manual', 'flex', 'diesel', 'cidade', 'rua', 'centro',
     'ja', 'comprei', 'vendi', 'fechei', 'desisti', 'obgdo', 'nada', 'nenhum', 'errado', 'certo', 'entendi', 'beleza', 'blz', 'pode', 'ta',
     'kkk', 'kkkk', 'rs', 'haha', 'hehe', 'favor', 'por', 'pra', 'para', 'com', 'sem', 'um', 'uma', 'o', 'a', 'os', 'as',
+    // frases de pergunta sobre a loja ("Vocês abrem amanhã?" virou nome em 13/11/2026)
+    'voces', 'abrem', 'abre', 'abrir', 'abriu', 'abertos', 'aberta', 'aberto', 'fecham', 'fecha', 'fechar', 'fechado', 'fechada',
+    'amanha', 'hoje', 'ontem', 'agora', 'depois', 'cedo', 'manha', 'sabado', 'domingo', 'segunda', 'terca', 'quarta', 'quinta', 'sexta',
+    'horario', 'horarios', 'funcionam', 'funciona', 'atendem', 'atende', 'vendem', 'vende', 'aceitam', 'aceita', 'trabalham',
+    'fazem', 'estao', 'estamos', 'ficam', 'tinha', 'existe', 'precisa', 'comprar', 'vender', 'trocar', 'financiam', 'garantia',
+    'documento', 'documentos', 'dinheiro', 'pix', 'boleto', 'cartao', 'reais', 'km', 'anos', 'cor', 'cambio', 'placa', 'ipva', 'seguro',
 ]);
 
 // Marcas e modelos: nome de carro nunca vira nome de cliente ("Onix", "Compass").
