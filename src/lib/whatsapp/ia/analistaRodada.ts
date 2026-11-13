@@ -9,7 +9,8 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type Anthropic from '@anthropic-ai/sdk';
 import { msgErro } from '../erro';
 import { claude } from './motor';
-import { textoParaIa, type MensagemParaIa } from './regras';
+import { PRECO_HAIKU_55, custoUsd, somarUso, textoParaIa, type MensagemParaIa } from './regras';
+import { registrarCustoIa } from './custos';
 import { ANALISTA_PROMPT, lerSituacao, pedidoDoAnalista, precisaAnalisar, transcricaoParaAnalista, type MsgAnalista } from './analista';
 
 export const MODELO_ANALISTA_PADRAO = 'claude-haiku-5-5';
@@ -66,6 +67,8 @@ export async function rodarAnalista(supabase: SupabaseClient, opts: { agora?: Da
                 messages: [{ role: 'user', content: pedidoDoAnalista(transcricao, agora) }],
                 output_config: { effort: 'low' },
             });
+            const uso = somarUso({ input_tokens: 0, output_tokens: 0 }, resp.usage);
+            await registrarCustoIa(supabase, { agente: 'analista', custoUsd: custoUsd(uso, modelo.includes('haiku') ? PRECO_HAIKU_55 : undefined), modelo, uso, conversaId: c.id as string });
             const bruto = resp.content.filter((b): b is Anthropic.TextBlock => b.type === 'text').map(b => b.text).join('\n');
             const s = lerSituacao(bruto);
             if (s.situacao === 'indefinida') r.indefinidas++;

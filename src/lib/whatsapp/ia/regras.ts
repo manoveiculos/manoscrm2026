@@ -285,6 +285,8 @@ export function montarHistorico(msgs: MensagemParaIa[], limite = 40): TurnoTexto
 
 /** US$ por milhão de tokens — Claude Sonnet 5.5, preço de tabela em 06/11/2026. */
 export const PRECO_SONNET_55 = { entrada: 2, saida: 10, cacheLeitura: 0.2, cacheEscrita: 2.5 };
+/** Haiku 5.5: US$ 0,10 / 0,50 por milhão (prompt até 100 mil tokens). Cache: 10% e 125% da entrada (estimativa). */
+export const PRECO_HAIKU_55 = { entrada: 0.1, saida: 0.5, cacheLeitura: 0.01, cacheEscrita: 0.125 };
 
 export interface UsoTokens {
     input_tokens: number;

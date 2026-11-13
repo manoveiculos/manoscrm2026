@@ -9,6 +9,7 @@
 export const JANELA_LAURA = { inicio: 8, fim: 21 };       // a Laura só puxa conversa entre 8h e 21h (Brasília)
 export const LIMITE_SEM_CONTATO_MIN = 20;                // dentro da janela, passou disso sem a Laura conseguir: libera
 export const LIMITE_SEM_CONTATO_NOITE_H = 16;            // lead da madrugada espera até 16 h pelas 8h
+export const LIMITE_CLIENTE_SEM_LAURA_MIN = 10;          // cliente escreveu e a Laura não respondeu em 10 min: libera
 export const LIMITE_CLIENTE_SEM_CONCLUSAO_H = 4;         // cliente respondeu, a Laura não concluiu em 4 h: libera
 export const LIMITE_SEM_RESPOSTA_DIAS = 11;              // o lead nunca respondeu (4 follow-ups: 1, 2, 4 e 10 dias): vai ao consultor decidir
 export const MAX_CONTATOS_POR_RODADA = 3;
@@ -23,6 +24,7 @@ export type MotivoLiberacao =
     | 'fora_do_horario_longo'
     | 'sem_conclusao'             // o cliente respondeu e a conversa não fechou
     | 'sem_resposta'              // o lead nunca respondeu, nem aos follow-ups
+    | 'humano_assumiu'            // um consultor já assumiu a conversa (não adianta segurar)
     | 'chave_desligada';          // a triagem foi desligada: tudo que está preso sai
 
 export type DecisaoTriagem =
@@ -40,6 +42,10 @@ export interface EntradaTriagem {
     /** A Laura já respondeu depois da última mensagem do cliente? */
     lauraRespondeuDepois: boolean;
     telefoneValido: boolean;
+    /** Um consultor já assumiu a conversa (status 'humano'). */
+    humanoAssumiu?: boolean;
+    /** O cliente escreveu primeiro (lead de conversa no WhatsApp): a Laura responde na hora, sem janela. */
+    clienteIniciou?: boolean;
     /** Chave da triagem ligada no banco. */
     chaveLigada: boolean;
     /** Laura em modo "envia" e com chave do Claude. */
@@ -62,6 +68,7 @@ export function dentroDaJanelaLaura(d: Date): boolean {
 export function decidirTriagem(e: EntradaTriagem): DecisaoTriagem {
     if (!e.chaveLigada) return { acao: 'liberar', motivo: 'chave_desligada' };
     if (!e.telefoneValido) return { acao: 'liberar', motivo: 'telefone_invalido' };
+    if (e.humanoAssumiu) return { acao: 'liberar', motivo: 'humano_assumiu' };
     if (!e.lauraPodeEnviar) return { acao: 'liberar', motivo: 'laura_indisponivel' };
     const t = e.agora.getTime();
 
@@ -74,6 +81,13 @@ export function decidirTriagem(e: EntradaTriagem): DecisaoTriagem {
         }
         if (!e.ultimaDoClienteEm && (t - Date.parse(e.contatoEm)) / 86_400_000 >= LIMITE_SEM_RESPOSTA_DIAS) return { acao: 'liberar', motivo: 'sem_resposta' };
         return { acao: 'esperar', motivo: e.ultimaDoClienteEm ? 'conversa em andamento' : 'aguardando resposta do lead' };
+    }
+
+    // O cliente escreveu primeiro e a Laura ainda não respondeu: ela responde na hora, a qualquer hora.
+    // Passou de 10 min sem resposta dela → algo falhou: solta o lead (e o consultor assume).
+    if (e.clienteIniciou && e.ultimaDoClienteEm) {
+        if ((t - Date.parse(e.ultimaDoClienteEm)) / 60_000 > LIMITE_CLIENTE_SEM_LAURA_MIN) return { acao: 'liberar', motivo: 'laura_nao_conseguiu' };
+        return { acao: 'esperar', motivo: 'a Laura está respondendo' };
     }
 
     // Ainda sem contato
@@ -128,6 +142,7 @@ export const ROTULO_LIBERACAO: Record<MotivoLiberacao, string> = {
     fora_do_horario_longo: 'lead de madrugada sem contato',
     sem_conclusao: 'o cliente respondeu, mas a conversa não fechou',
     sem_resposta: 'o cliente não respondeu ao contato da Laura nem aos follow-ups',
+    humano_assumiu: 'um consultor já assumiu a conversa',
     chave_desligada: 'triagem desligada',
 };
 

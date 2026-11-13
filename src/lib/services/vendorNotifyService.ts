@@ -189,6 +189,14 @@ export async function notifyLeadArrival(leadId: string): Promise<void> {
         ? lead.proxima_acao
         : `Olá ${leadFirstName}! Aqui é o ${firstName} da Manos Veículos. Vi seu interesse em ${lead.isCompra ? 'vender seu' : 'comprar um'} ${lead.vehicle_interest || 'veículo'}. Posso te ajudar?`;
 
+    // Resumo da triagem da Laura (handoff_summary começa com "RESUMO DA LAURA"): o consultor já sabe o que ela apurou
+    let resumoLaura = '';
+    if (!lead.isCompra && /^\d+$/.test(cleanId)) {
+        const { data: h } = await admin.from('leads_distribuicao_crm_26').select('handoff_summary').eq('id', parseInt(cleanId, 10)).maybeSingle();
+        const s = (h?.handoff_summary as string | null) || '';
+        if (s.startsWith('RESUMO DA LAURA')) resumoLaura = s.split('\n\n')[0].split('\n').slice(1).join('\n').slice(0, 500);
+    }
+
     const wa = buildWhatsAppLink(lead.phone, script);
     const label = lead.isCompra ? '💰 OFERTA DE COMPRA' : '🚗 INTERESSE DE VENDA';
     const valorLabel = lead.isCompra ? 'Preço cliente' : 'Investimento';
@@ -202,6 +210,7 @@ export async function notifyLeadArrival(leadId: string): Promise<void> {
         interest +
         valorStr +
         `\n📡 ${lead.source || 'Direto'}` +
+        (resumoLaura ? `\n\n🤖 *A LAURA JÁ ATENDEU:*\n${resumoLaura}` : '') +
         `\n\n📋 *SCRIPT SUGERIDO:*` +
         `\n${script}\n` +
         `\n━━━━━━━━━━━━━━━━━━` +

@@ -221,6 +221,9 @@ async function setStatus(admin: any, table: string, native: string, status: stri
 /** Chamado quando um lead novo entra (webhooks). Decide: distribui / standby / aguardando. */
 export async function distribuirLead(table: LeadTable, native: string | number): Promise<{ status: string; consultant?: string }> {
     const admin = createClient();
+    // Triagem da Laura: lead preso não vai para consultor nenhum até ela qualificar (ou o tempo-limite soltar).
+    const { data: preso } = await admin.from('lead_distribuicao').select('status').eq('lead_uid', uidOf(table, native)).maybeSingle();
+    if (preso?.status === 'triagem_laura') return { status: 'triagem_laura' };
     const { horas, feriados } = await loadHorario(admin);
     const now = new Date();
     if (!isOpenNow(now, horas, feriados)) { await setStatus(admin, table, String(native), 'standby'); return { status: 'standby' }; }

@@ -60,6 +60,21 @@ test('lead que nunca respondeu, nem aos follow-ups, vai ao consultor depois de 1
     assert.deepEqual(decidirTriagem(base({ contatoEm: min(11 * 24 * 60) })), { acao: 'liberar', motivo: 'sem_resposta' });
 });
 
+test('WhatsApp: consultor que já assumiu a conversa solta o lead na hora', () => {
+    assert.deepEqual(decidirTriagem(base({ contatoEm: min(30), humanoAssumiu: true })), { acao: 'liberar', motivo: 'humano_assumiu' });
+    assert.deepEqual(decidirTriagem(base({ humanoAssumiu: true })), { acao: 'liberar', motivo: 'humano_assumiu' });
+});
+
+test('WhatsApp: cliente escreveu primeiro, a Laura responde na hora e a qualquer hora', () => {
+    const noite = new Date('2026-11-13T04:00:00Z'); // 01:00 BR, fora da janela de 8h às 21h
+    const cliente = (m: number) => new Date(noite.getTime() - m * 60_000).toISOString();
+    const e = (m: number) => base({ agora: noite, criadoEm: cliente(m), clienteIniciou: true, ultimaDoClienteEm: cliente(m) });
+    assert.deepEqual(decidirTriagem(e(3)), { acao: 'esperar', motivo: 'a Laura está respondendo' });
+    assert.deepEqual(decidirTriagem(e(11)), { acao: 'liberar', motivo: 'laura_nao_conseguiu' });
+    // depois que a Laura respondeu (contato), segue o fluxo normal de espera pelo cliente
+    assert.deepEqual(decidirTriagem(base({ clienteIniciou: true, contatoEm: min(5), ultimaDoClienteEm: null })), { acao: 'esperar', motivo: 'aguardando resposta do lead' });
+});
+
 test('primeiro contato: usa o carro do formulário, não inventa nome nem preço', () => {
     const i = instrucaoPrimeiroContato({ nome: 'Maria Souza', interesse: 'Onix 2019', cidade: 'Rio do Sul' });
     assert.match(i, /ainda NÃO escreveu/);

@@ -10,6 +10,7 @@ import type { EventoCena } from '@/lib/agentes/eventos';
 import { EscritorioView } from './escritorio/EscritorioView';
 import { COR_ESTADO, ICONES, corEstado, dolar, horaBRT, quandoFoi, rotuloEstado } from './icones';
 import { fraseOciosa } from '@/lib/agentes/ocioso';
+import { CustoIa } from './CustoIa';
 
 type Resposta = { ok: boolean; error?: string };
 
@@ -429,7 +430,7 @@ export function CentralView({ dados, conexao, agora, somenteLeitura, eventos = [
                 </div>
                 <div className="flex items-center gap-3">
                     <InterruptorGeral dados={dados} somenteLeitura={somenteLeitura} onModo={onModo} />
-                    <span className="text-[12px] text-white/55">hoje: <b className="text-white">{dolar(m.custoHojeUsd)}</b> de IA</span>
+                    <CustoIa custoHojeUsd={m.custoHojeUsd} />
                 </div>
             </header>
 

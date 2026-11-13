@@ -17,6 +17,7 @@ import { lerConfigIa } from './config';
 import { claude, MODELO_PADRAO } from './motor';
 import { LAURA_CRM_PROMPT } from './prompt';
 import { custoUsd, somarUso, type UsoTokens } from './regras';
+import { registrarCustoIa } from './custos';
 import {
     ESPERA_ENTRE_CONTATOS_MS, MAX_CONTATOS_POR_RODADA, decidirTriagem, instrucaoPrimeiroContato, interesseUtil,
     resumoParaConsultor, type MotivoLiberacao,
@@ -69,9 +70,9 @@ export async function rodarTriagem(supabase: SupabaseClient, opts: { agora?: Dat
     const r: ResumoTriagem = { ok: true, presos: 0, contatados: 0, liberados: {}, esperando: 0, erros: 0 };
     const liberou = (m: string) => { r.liberados[m] = (r.liberados[m] || 0) + 1; };
 
-    const { data: conf, error: eConf } = await supabase.from('wa_ia_config').select('triagem_google').eq('id', 1).maybeSingle();
+    const { data: conf, error: eConf } = await supabase.from('wa_ia_config').select('triagem_google, triagem_whatsapp').eq('id', 1).maybeSingle();
     if (eConf) return { ...r, ok: false, motivo: eConf.message };
-    const chaveLigada = Boolean(conf?.triagem_google);
+    const chaves: Record<string, boolean> = { google: Boolean(conf?.triagem_google), whatsapp: Boolean(conf?.triagem_whatsapp) };
 
     const { data: presos } = await supabase.from('lead_distribuicao').select('lead_uid, criado_em').eq('status', 'triagem_laura').order('criado_em', { ascending: true }).limit(60);
     r.presos = presos?.length ?? 0;
@@ -87,7 +88,8 @@ export async function rodarTriagem(supabase: SupabaseClient, opts: { agora?: Dat
         const id = idDoUid(p.lead_uid);
         if (!id) { await liberarDaTriagem(supabase, p.lead_uid, 'telefone_invalido', { agora }); liberou('telefone_invalido'); continue; }
         try {
-            const { data: lead } = await supabase.from(TABELA).select('nome, telefone, interesse, vehicle_interest, cidade').eq('id', id).maybeSingle();
+            const { data: lead } = await supabase.from(TABELA).select('nome, telefone, interesse, vehicle_interest, cidade, origem').eq('id', id).maybeSingle();
+            const chaveLigada = Boolean(chaves[String((lead?.origem as string | null) || '').toLowerCase()]);
             const telefone = normalizarTelefoneBR(lead?.telefone as string | null);
             const interesse = interesseUtil((lead?.vehicle_interest as string | null) || (lead?.interesse as string | null));
             const nome = (lead?.nome as string | null) ?? null;
@@ -100,28 +102,30 @@ export async function rodarTriagem(supabase: SupabaseClient, opts: { agora?: Dat
             let contatoEm = (tri.contato_em as string | null) ?? null;
             let ultimaDoCliente: string | null = null;
             let lauraRespondeuDepois = false;
+            let humanoAssumiu = false;
+            let clienteIniciou = false;
             if (telefone) {
                 const { data: chave } = await supabase.rpc('wa_telefone_key', { p_telefone: telefone });
                 if (chave) {
-                    const { data: conv } = await supabase.from('wa_conversas').select('id').eq('telefone_key', chave as string).maybeSingle();
-                    if (conv) conversaId = conv.id as string;
+                    const { data: conv } = await supabase.from('wa_conversas').select('id, status').eq('telefone_key', chave as string).maybeSingle();
+                    if (conv) { conversaId = conv.id as string; humanoAssumiu = conv.status === 'humano'; }
                 }
             }
             if (conversaId) {
                 const { data: ms } = await supabase.from('wa_mensagens').select('autor, criada_em').eq('conversa_id', conversaId).order('criada_em', { ascending: false }).limit(30);
                 const lista = ms || [];
+                // 1ª mensagem da LOJA (Laura ou consultor): o contato. Mensagem do cliente não conta como contato.
                 if (!contatoEm) contatoEm = [...lista].reverse().find(m => m.autor === 'laura' || m.autor === 'vendedor')?.criada_em ?? null;
-                const uc = lista.find(m => m.autor === 'cliente');
+                const clientes = lista.filter(m => m.autor === 'cliente');
+                clienteIniciou = clientes.length > 0 && (!contatoEm || clientes[clientes.length - 1].criada_em < contatoEm || clientes.some(m => m.criada_em < (contatoEm as string)));
+                const uc = clientes[0]; // a mais recente (a lista vem do mais novo para o mais antigo)
                 ultimaDoCliente = uc && (!contatoEm || uc.criada_em > contatoEm) ? (uc.criada_em as string) : null;
-                // cliente que escreveu ANTES de ser "contatado" pela Laura: ela já está atendendo
-                if (!contatoEm && uc) contatoEm = uc.criada_em as string;
                 const ult = lista[0];
                 lauraRespondeuDepois = Boolean(ult && ult.autor !== 'cliente');
             }
-
             const d = decidirTriagem({
                 criadoEm: p.criado_em as string, contatoEm, ultimaDoClienteEm: ultimaDoCliente, lauraRespondeuDepois,
-                telefoneValido: Boolean(telefone), chaveLigada, lauraPodeEnviar, agora,
+                telefoneValido: Boolean(telefone), humanoAssumiu, clienteIniciou, chaveLigada, lauraPodeEnviar, agora,
             });
 
             if (d.acao === 'liberar') {
@@ -129,6 +133,8 @@ export async function rodarTriagem(supabase: SupabaseClient, opts: { agora?: Dat
                 continue;
             }
             if (d.acao === 'esperar') { r.esperando++; continue; }
+            // só o lead de anúncio (Google) recebe o primeiro contato da Laura; conversa do WhatsApp quem puxou foi o cliente
+            if (String((lead?.origem as string | null) || '').toLowerCase() !== 'google') { r.esperando++; continue; }
             if (contatos >= MAX_CONTATOS_POR_RODADA || !telefone || !cliente) { r.esperando++; continue; }
 
             // ── primeiro contato ──
@@ -152,6 +158,7 @@ export async function rodarTriagem(supabase: SupabaseClient, opts: { agora?: Dat
             const { data: chave2 } = await supabase.rpc('wa_telefone_key', { p_telefone: telefone });
             const { data: conv2 } = chave2 ? await supabase.from('wa_conversas').select('id').eq('telefone_key', chave2 as string).maybeSingle() : { data: null };
             await supabase.from('wa_triagem').update({ contato_em: agora.toISOString(), conversa_id: (conv2?.id as string | undefined) ?? conversaId }).eq('lead_uid', p.lead_uid);
+            await registrarCustoIa(supabase, { agente: 'triagem', custoUsd: custoUsd(uso), modelo, uso, conversaId: (conv2?.id as string | undefined) ?? conversaId, leadRef: p.lead_uid });
             console.info('[triagem] primeiro contato enviado', p.lead_uid, `US$ ${custoUsd(uso).toFixed(4)}`);
         } catch (e) {
             r.erros++;
