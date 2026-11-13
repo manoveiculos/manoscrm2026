@@ -34,7 +34,7 @@ export function KpiCards() {
             let lucro = 0;
             let ativosCount = 0;
             
-            negocios?.forEach(n => {
+            negocios?.forEach((n: { status?: string | null; lucro_liquido?: number | string | null }) => {
                 if (n.status === 'Finalizado') {
                     lucro += Number(n.lucro_liquido || 0);
                 } else if (n.status !== 'Cancelado') {
@@ -43,7 +43,7 @@ export function KpiCards() {
             });
 
             let acerto = 0;
-            caixa?.forEach(c => {
+            caixa?.forEach((c: { valor?: number | string | null }) => {
                 acerto += Number(c.valor || 0);
             });
 
