@@ -100,8 +100,35 @@ async function sendToWebhook(payload: NotifyPayload): Promise<void> {
  * Helper para buscar lead em qualquer vertical e normalizar campos para notificação.
  * Prioriza leads_master (Nova fonte da verdade), depois leads_manos_crm e leads_compra.
  */
+/** Linha de leads_distribuicao_crm_26 no formato que o aviso de lead novo usa. */
+export function leadDoCrm26ParaAviso(r: Record<string, any>) {
+    return {
+        id: r.id,
+        name: r.nome ?? null,
+        phone: r.telefone ?? null,
+        vehicle_interest: r.vehicle_interest || r.interesse || null,
+        source: r.origem ?? null,
+        ai_score: r.ai_score ?? null,
+        ai_classification: r.ai_classification ?? null,
+        proxima_acao: r.proxima_acao ?? null,
+        assigned_consultant_id: r.assigned_consultant_id ?? null,
+        valor: r.valor_investimento ?? null,
+        isCompra: false,
+    };
+}
+
 async function fetchLeadForNotify(cleanId: string) {
     const admin = createClient();
+
+    // O lead do CRM (leads_distribuicao_crm_26, o que a roleta distribui) tem id NUMÉRICO. Antes a busca só
+    // tentava tabelas com id uuid, não achava e o aviso de lead novo ao consultor nunca saía (corrigido em 13/11/2026).
+    if (/^\d+$/.test(cleanId)) {
+        const { data: c26 } = await admin.from('leads_distribuicao_crm_26')
+            .select('id, nome, telefone, vehicle_interest, interesse, origem, ai_score, ai_classification, proxima_acao, assigned_consultant_id, valor_investimento')
+            .eq('id', parseInt(cleanId, 10)).maybeSingle();
+        if (c26) return leadDoCrm26ParaAviso(c26);
+        return null; // id numérico não existe nas tabelas de uuid
+    }
     
     // 0. Tentar Master (Consolidação)
     const { data: mLead } = await admin

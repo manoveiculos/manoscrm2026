@@ -26,6 +26,10 @@ test('nível de interesse: sinal de compra em 2+ mensagens é quente; 3+ mensage
     // o selo do Classificador manda quando existe
     assert.equal(nivelDeInteresse({ falasDoCliente: ['oi'], selo: 'quente' }), 'quente');
     assert.equal(nivelDeInteresse({ falasDoCliente: ['oi'], selo: 'morno' }), 'morno');
+    // selo oficial morno + palavra de troca/valor: continua morno (caso real do 1º lead de 13/11)
+    assert.equal(nivelDeInteresse({ falasDoCliente: ['quero trocar meu celta', 'qual o valor de um sedan?', 'tem suv?'], selo: 'morno' }), 'morno');
+    // sem selo, a palavra ainda vale
+    assert.equal(nivelDeInteresse({ falasDoCliente: ['quero trocar meu celta', 'qual o valor de um sedan?'] }), 'quente');
     assert.equal(nivelDeInteresse({ falasDoCliente: ['qual o valor?', 'fotos?', 'e a entrada?'], selo: 'fora_do_perfil' }), 'leve');
 });
 
