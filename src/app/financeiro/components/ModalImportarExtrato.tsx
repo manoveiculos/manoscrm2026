@@ -219,7 +219,7 @@ export function ModalImportarExtrato({
   }
 
   function toggleTodos(selecionar: boolean) {
-    setItens((prev) => prev.map((item) => ({ ...item, selecionado: !item.selecionar })));
+    setItens((prev) => prev.map((item) => ({ ...item, selecionado: selecionar })));
   }
 
   function atualizarItem(id: string, campo: keyof ItemExtratoParsed, valor: any) {
