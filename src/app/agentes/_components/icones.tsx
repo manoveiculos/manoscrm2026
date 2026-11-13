@@ -5,6 +5,7 @@ import {
     Shuffle, Sparkles, TrendingUp, UserRound, type LucideIcon,
 } from 'lucide-react';
 import type { EstadoAgente } from '@/lib/agentes/estado';
+import { rotuloOcioso, ehConsultor } from '@/lib/agentes/ocioso';
 
 export const ICONES: Record<string, LucideIcon> = {
     Bot, BrainCircuit, ClipboardList, Images, Palette, Radar, RefreshCcw, ScanSearch, Send, ShieldCheck,
@@ -13,7 +14,7 @@ export const ICONES: Record<string, LucideIcon> = {
 
 export const ROTULO_ESTADO: Record<EstadoAgente, string> = {
     trabalhando: 'trabalhando agora',
-    ocioso: 'ocioso',
+    ocioso: 'pesquisando',
     aguardando: 'aguardando você',
     erro: 'erro',
     desligado: 'desligado',
@@ -46,4 +47,15 @@ export function horaBRT(iso: string): string {
 export function dolar(v: number | null | undefined): string {
     if (v == null) return '—';
     return `US$ ${v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: v < 1 ? 3 : 2 })}`;
+}
+
+/** Rótulo do chip: sem tarefa = "pesquisando" (consultores: "criando anúncios"). */
+export function rotuloEstado(id: string, estado: EstadoAgente): string {
+    return estado === 'ocioso' ? rotuloOcioso(id) : ROTULO_ESTADO[estado];
+}
+
+/** Cor do chip: consultor sem tarefa ganha um tom âmbar (criando); pesquisando fica azul-claro. */
+export function corEstado(id: string, estado: EstadoAgente): string {
+    if (estado !== 'ocioso') return COR_ESTADO[estado];
+    return ehConsultor(id) ? 'bg-amber-500/10 text-amber-200 border-amber-500/30' : 'bg-sky-500/10 text-sky-200 border-sky-500/30';
 }

@@ -285,6 +285,8 @@ export function montarHistorico(msgs: MensagemParaIa[], limite = 40): TurnoTexto
 
 /** US$ por milhão de tokens — Claude Sonnet 5.5, preço de tabela em 06/11/2026. */
 export const PRECO_SONNET_55 = { entrada: 2, saida: 10, cacheLeitura: 0.2, cacheEscrita: 2.5 };
+/** Haiku 5.5: US$ 0,10 / 0,50 por milhão (prompt até 100 mil tokens). Cache: 10% e 125% da entrada (estimativa). */
+export const PRECO_HAIKU_55 = { entrada: 0.1, saida: 0.5, cacheLeitura: 0.01, cacheEscrita: 0.125 };
 
 export interface UsoTokens {
     input_tokens: number;
@@ -377,4 +379,39 @@ export function repeteMensagemAnterior(texto: string, anteriores: string[]): boo
         if (pergunta && pa && semelhanca(pergunta, pa) >= 0.8 && palavrasChave(pergunta).size >= 3) return true;
     }
     return false;
+}
+
+// ---------------------------------------------------------------------------
+// Comentário sobre o atendimento anterior (caso "Canoas", 11/11/2026)
+// ---------------------------------------------------------------------------
+
+const RX_COMENTA_ANTERIOR = new RegExp([
+    'corrigindo\\s*:',
+    '(mensagem|informa[cç][aã]o|resposta|endere[cç]o)\\s+(anterior|de antes|passad[ao])[^.!?\\n]{0,60}(errad|incorret|equivocad)',
+    'estava\\s+(errad|incorret|equivocad)',
+    'foi\\s+(um\\s+)?(engano|erro)\\s+(noss|meu|da loja|do atendente)',
+    'te\\s+(passaram|informaram|falaram)\\s+errado',
+    'desculp[ea][^.!?\\n]{0,40}(informa[cç][aã]o|mensagem)\\s+errad',
+].join('|'), 'i');
+
+/** A resposta aponta erro do atendimento anterior? (a Laura deve só dar a informação certa) */
+export function comentaAtendimentoAnterior(texto: string): boolean {
+    return RX_COMENTA_ANTERIOR.test(texto || '');
+}
+
+// ---------------------------------------------------------------------------
+// Resposta longa demais (pedido do Alexandre, 13/11/2026: sempre curta e objetiva)
+// ---------------------------------------------------------------------------
+
+/** Linha de carro de uma lista: "Modelo ano · cor · km · preço". */
+const LINHA_DE_CARRO = /·.*·/;
+
+export const LIMITE_RESPOSTA = 280;
+export const LIMITE_RESPOSTA_COM_LISTA = 480;
+
+/** A resposta passou do tamanho? Lista de até 3 carros ganha mais espaço. */
+export function respostaLonga(texto: string): boolean {
+    const t = (texto || '').trim();
+    const comLista = t.split('\n').filter(l => LINHA_DE_CARRO.test(l)).length >= 2;
+    return t.length > (comLista ? LIMITE_RESPOSTA_COM_LISTA : LIMITE_RESPOSTA);
 }

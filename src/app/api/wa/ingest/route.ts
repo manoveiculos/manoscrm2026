@@ -3,7 +3,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { createClient } from '@/lib/supabase/admin';
 import { ingerirWebhook, processarMidiasPendentes, registrarErro } from '@/lib/whatsapp/ingestao';
 import { msgErro } from '@/lib/whatsapp/erro';
-import { marcarHumanoSeNecessario } from '@/lib/whatsapp/envio';
+import { marcarHumanoSeNecessario, reabrirArquivadas } from '@/lib/whatsapp/envio';
 import { rodarLauraDepoisDaIngestao } from '@/lib/whatsapp/ia/motor';
 import { criarLeadLigado, garantirLeadsDasConversas, registrarOrigemDoPayload } from '@/lib/whatsapp/criarLead';
 import { identificarNomeECarro } from '@/lib/identificacao/processar';
@@ -78,6 +78,11 @@ export async function POST(req: NextRequest) {
             after(async () => { await marcarHumanoSeNecessario(createClient(), alvos); });
         }
         const pendentes = r.midiasPendentes;
+        // Cliente escreveu numa conversa arquivada: ela volta para a lista
+        if (r.novasDoCliente.length) {
+            const ids = r.novasDoCliente.map(g => g.conversaId);
+            after(async () => { await reabrirArquivadas(createClient(), ids); });
+        }
         // Nome e carro do cliente (spec nome-e-interesse-automaticos): áudio espera a transcrição.
         const audiosDoCliente = r.novasDoCliente.filter(g => g.tipo === 'audio');
         const outrasDoCliente = r.novasDoCliente.filter(g => g.tipo !== 'audio');

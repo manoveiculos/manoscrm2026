@@ -129,12 +129,12 @@ export async function carregarEntradaAgentes(admin: SupabaseClient, agora: numbe
             link: x.conversa_id ? `/conversas?conversa=${x.conversa_id}` : null,
         });
     }
-    // ── Laura do n8n (mensagens que ela mandou pelo número da loja) ──────
+    // ── Respostas da Laura no WhatsApp da loja (mensagens que ela mandou) ──
     for (const m of msgsLaura) {
         registros.push({
-            id: `laura-n8n:${m.id}`, evento: { tipo: 'fala' },
+            id: `laura-wa:${m.id}`, evento: { tipo: 'fala' },
             agenteId: 'laura', em: m.criada_em, status: 'ok',
-            frase: `respondeu ${nomeDe(m.conversa_id)} no WhatsApp (n8n)`,
+            frase: `respondeu ${nomeDe(m.conversa_id)} no WhatsApp`,
             link: m.conversa_id ? `/conversas?conversa=${m.conversa_id}` : null,
         });
     }

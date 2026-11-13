@@ -53,7 +53,8 @@ test('resumo da última mensagem por tipo', () => {
 
 test('filtros da lista: não lidas, aguardando eu, IA atendendo, quentes e busca', () => {
     const l = CONVERSAS_EXEMPLO;
-    assert.equal(filtrarConversas(l, 'todas').length, 6);
+    assert.equal(filtrarConversas(l, 'todas').length, 5); // a arquivada (encerrada) fica de fora
+    assert.equal(filtrarConversas(l, 'arquivadas').length, 1);
     assert.deepEqual(filtrarConversas(l, 'nao_lidas').map(c => c.nome), ['Mariana Teste', 'Ana Fictícia']);
     assert.deepEqual(filtrarConversas(l, 'aguardando').map(c => c.nome), ['Mariana Teste', 'Ana Fictícia', null]);
     assert.equal(filtrarConversas(l, 'ia').length, 4);
@@ -61,7 +62,7 @@ test('filtros da lista: não lidas, aguardando eu, IA atendendo, quentes e busca
     assert.deepEqual(filtrarConversas(l, 'todas', 'hilux').map(c => c.nome), ['Roberto Exemplo']);
     assert.deepEqual(filtrarConversas(l, 'todas', '98888-0004').map(c => c.telefoneKey), ['47988880004']);
     assert.equal(filtrarConversas(l, 'todas', '98').length, 0); // menos de 3 dígitos não busca telefone
-    assert.deepEqual(contarFiltros(l), { todas: 6, nao_lidas: 2, aguardando: 3, ia: 4, quentes: 2 });
+    assert.deepEqual(contarFiltros(l), { todas: 5, nao_lidas: 2, aguardando: 3, ia: 4, quentes: 2, arquivadas: 1 });
 });
 
 test('reação vira emoji na mensagem alvo, não balão', () => {

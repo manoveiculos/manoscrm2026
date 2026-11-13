@@ -45,6 +45,15 @@ export function ConversasView({
     renderEnsaio?: (c: ConversaItem, agora: Date) => ReactNode;
 }) {
     const [fichaAberta, setFichaAberta] = useState(false);
+    // arquivar tira a conversa da lista; desarquivar devolve
+    const arquivar = async (id: string, acao: 'arquivar' | 'desarquivar') => {
+        try {
+            const r = await fetch(`/api/wa/conversas/${id}/atendimento`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ acao }) });
+            if (!r.ok) return;
+            if (acao === 'arquivar') onSelecionar(null);
+            onAtualizar();
+        } catch { /* sem rede: a conversa continua onde está */ }
+    };
     // relógio para "Hoje"/"Ontem" e horários da lista (fixo na prévia)
     const [agoraMs, setAgoraMs] = useState(() => agoraFixo ?? Date.now());
     useEffect(() => {
@@ -94,11 +103,12 @@ export function ConversasView({
                     url={urlMidia}
                     onVoltar={() => onSelecionar(null)}
                     onAbrirFicha={() => setFichaAberta(true)}
+                    onArquivar={conversa && !renderBarraIa ? () => { void arquivar(conversa.id, conversa.status === 'encerrada' ? 'desarquivar' : 'arquivar'); } : undefined}
                     onCarregarAntigas={onCarregarAntigas}
                     mostrarBotaoFicha={Boolean(conversa)}
                     ensaio={ensaio}
                     rodape={conversa && process.env.NEXT_PUBLIC_WA_ENVIO === 'true'
-                        ? <Compositor key={conversa.id} conversaId={conversa.id} status={conversa.status} onAtualizar={onAtualizar} />
+                        ? <Compositor key={conversa.id} conversaId={conversa.id} status={conversa.status} onAtualizar={onAtualizar} consultor={conversa.vendedorNome} cliente={conversa.nome} />
                         : undefined}
                 />
             </main>

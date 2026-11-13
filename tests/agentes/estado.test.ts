@@ -89,10 +89,10 @@ test('sem a tabela agentes_config o interruptor geral aparece como não instalad
     assert.equal(r.maestro.iaGeral, null);
 });
 
-test('Laura com botão desligado mas respondendo pelo n8n não aparece como desligada', () => {
+test('Laura com botão desligado mas respondendo clientes não aparece como desligada', () => {
     const r = estadoDosAgentes(base({ modoLaura: 'desligada', registros: [reg('laura', 20 * MIN, 'ok')] }));
     assert.notEqual(ag(r, 'laura').estado, 'desligado');
-    assert.match(ag(r, 'laura').observacao || '', /n8n/);
+    assert.match(ag(r, 'laura').observacao || '', /respondeu clientes/);
     const r2 = estadoDosAgentes(base({ modoLaura: 'desligada' }));
     assert.equal(ag(r2, 'laura').estado, 'desligado');
 });
@@ -118,11 +118,11 @@ test('custo do dia soma só o que é de hoje (Brasília); feed ignora rotina e v
 test('feed junta ações iguais do mesmo agente (×N) e não esconde as outras', () => {
     const r = estadoDosAgentes(base({
         registros: [
-            reg('laura', 1 * MIN, 'ok', { frase: 'respondeu Ana no WhatsApp (n8n)' }),
+            reg('laura', 1 * MIN, 'ok', { frase: 'respondeu Ana no WhatsApp' }),
             reg('distribuidor', 2 * MIN, 'ok', { frase: 'lead → Victor' }),
-            reg('laura', 3 * MIN, 'ok', { frase: 'respondeu Ana no WhatsApp (n8n)' }),
-            reg('laura', 4 * MIN, 'ok', { frase: 'respondeu Ana no WhatsApp (n8n)' }),
-            reg('laura', 10 * H, 'ok', { frase: 'respondeu Ana no WhatsApp (n8n)' }), // fora da janela de 6 h: item próprio
+            reg('laura', 3 * MIN, 'ok', { frase: 'respondeu Ana no WhatsApp' }),
+            reg('laura', 4 * MIN, 'ok', { frase: 'respondeu Ana no WhatsApp' }),
+            reg('laura', 10 * H, 'ok', { frase: 'respondeu Ana no WhatsApp' }), // fora da janela de 6 h: item próprio
         ],
     }));
     assert.equal(r.feed.length, 3);

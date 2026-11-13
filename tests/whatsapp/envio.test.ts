@@ -1,7 +1,7 @@
 // Envio pelo CRM e "humano assumiu". Rodar: npm run test:envio (provider e banco fictícios)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { enviarPeloCrm, marcarHumanoSeNecessario, mudarAtendimento, validarConteudo } from '@/lib/whatsapp/envio';
+import { enviarPeloCrm, marcarHumanoSeNecessario, mudarAtendimento, reabrirArquivadas, validarConteudo } from '@/lib/whatsapp/envio';
 import type { WhatsAppProvider } from '@/lib/whatsapp/provider';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
@@ -20,6 +20,7 @@ function banco(msgs: Linha[], conversas: Linha[]) {
             update: (d: Linha) => { op = 'update'; dados = d; return b; },
             eq: (c: string, v: unknown) => { f.push(r => r[c] === v); return b; },
             neq: (c: string, v: unknown) => { f.push(r => r[c] !== v); return b; },
+            in: (c: string, v: unknown[]) => { f.push(r => v.includes(r[c])); return b; },
             maybeSingle: async () => ({ data: rows()[0] ?? null, error: null }),
             then: (ok: (v: unknown) => unknown) => {
                 const saida = rows();
@@ -129,4 +130,27 @@ test('assumir e devolver para a IA', async () => {
     assert.equal(conversas[0].status, 'ia');
     await mudarAtendimento(b.admin, 'c2', 'devolver');
     assert.equal(conversas[1].status, 'encerrada'); // conversa encerrada não reabre
+});
+
+test('arquivar tira a conversa da lista (encerrada); desarquivar volta; assumir/devolver não reabrem arquivada', async () => {
+    const conversas: Linha[] = [{ id: 'c1', status: 'humano', ia_silenciada_ate: null }, { id: 'c2', status: 'ia' }];
+    const b = banco([], conversas);
+    assert.equal(await mudarAtendimento(b.admin, 'c1', 'arquivar'), true);
+    assert.equal(conversas[0].status, 'encerrada');
+    await mudarAtendimento(b.admin, 'c1', 'devolver');
+    assert.equal(conversas[0].status, 'encerrada');
+    await mudarAtendimento(b.admin, 'c1', 'assumir');
+    assert.equal(conversas[0].status, 'encerrada');
+    await mudarAtendimento(b.admin, 'c1', 'desarquivar');
+    assert.equal(conversas[0].status, 'ia');
+    await mudarAtendimento(b.admin, 'c2', 'desarquivar'); // só desarquiva quem está arquivada
+    assert.equal(conversas[1].status, 'ia');
+});
+
+test('cliente escreveu numa conversa arquivada: ela volta; as outras não mudam', async () => {
+    const conversas: Linha[] = [{ id: 'a', status: 'encerrada' }, { id: 'b', status: 'humano' }, { id: 'c', status: 'encerrada' }];
+    const b = banco([], conversas);
+    assert.equal(await reabrirArquivadas(b.admin, ['a', 'b']), 1);
+    assert.deepEqual(conversas.map(c => c.status), ['ia', 'humano', 'encerrada']);
+    assert.equal(await reabrirArquivadas(b.admin, []), 0);
 });

@@ -98,14 +98,32 @@ export async function enviarPeloCrm(
     return { ok: true, providerMessageId: r.providerMessageId };
 }
 
-export type AcaoHumano = 'assumir' | 'devolver';
+export type AcaoHumano = 'assumir' | 'devolver' | 'arquivar' | 'desarquivar';
 
-/** Botões "Assumir" e "Devolver para a IA". */
+/**
+ * Botões "Assumir", "Devolver para a IA", "Arquivar" e "Desarquivar".
+ * Arquivar = status 'encerrada': sai da lista, a Laura não responde. Assumir/Devolver não reabrem arquivada.
+ */
 export async function mudarAtendimento(admin: SupabaseClient, conversaId: string, acao: AcaoHumano): Promise<boolean> {
+    if (acao === 'arquivar') {
+        const { error } = await admin.from('wa_conversas').update({ status: 'encerrada', ia_silenciada_ate: null }).eq('id', conversaId);
+        return !error;
+    }
+    if (acao === 'desarquivar') {
+        const { error } = await admin.from('wa_conversas').update({ status: 'ia', ia_silenciada_ate: null }).eq('id', conversaId).eq('status', 'encerrada');
+        return !error;
+    }
     const { error } = await admin.from('wa_conversas')
         .update(acao === 'assumir' ? { status: 'humano', ia_silenciada_ate: null } : { status: 'ia', ia_silenciada_ate: null })
         .eq('id', conversaId).neq('status', 'encerrada');
     return !error;
+}
+
+/** O cliente escreveu de novo numa conversa arquivada: ela volta para a lista (nunca perde cliente). */
+export async function reabrirArquivadas(admin: SupabaseClient, conversaIds: string[]): Promise<number> {
+    if (!conversaIds.length) return 0;
+    const { data } = await admin.from('wa_conversas').update({ status: 'ia' }).in('id', conversaIds).eq('status', 'encerrada').select('id');
+    return data?.length ?? 0;
 }
 
 /**
@@ -130,4 +148,37 @@ export async function marcarHumanoSeNecessario(
         if (data?.length) n++;
     }
     return n;
+}
+
+/**
+ * Fotos do estoque (por URL) depois do texto do carro. Registra cada uma como do vendedor, igual ao envio normal.
+ * As URLs vêm do feed da Altimus (o servidor confere o carro; nunca aceita URL solta do navegador).
+ */
+export async function enviarFotosPorUrl(
+    admin: SupabaseClient,
+    provider: WhatsAppProvider,
+    conv: ConversaEnvio,
+    urls: string[],
+    quem: QuemEnviou,
+    pausaMs = 1200,
+): Promise<number> {
+    const para = conv.remote_jid || conv.telefone_key;
+    let enviadas = 0;
+    for (const url of urls) {
+        if (enviadas > 0 && pausaMs > 0) await new Promise(r => setTimeout(r, pausaMs));
+        const r = await provider.enviarMidia(para, { tipo: 'imagem', url, mime: 'image/jpeg' }).catch(() => null);
+        if (!r?.ok || !r.providerMessageId) continue;
+        enviadas++;
+        await admin.rpc('wa_registrar_mensagem', { p: {
+            telefone: conv.telefone_key, remote_jid: conv.remote_jid, provider_message_id: r.providerMessageId,
+            autor: quem.autor, consultant_id: quem.consultantId ?? null, tipo: 'imagem', midia_mime: 'image/jpeg',
+            status_entrega: 'enviada', origem: 'crm', criada_em: new Date().toISOString(),
+        } });
+        await admin.from('wa_mensagens').update({ autor: quem.autor, consultant_id: quem.consultantId ?? null, origem: 'crm' }).eq('provider_message_id', r.providerMessageId);
+    }
+    // Vendedor mandando fotos pelo CRM também assume a conversa (a Laura para), igual ao envio de texto.
+    if (enviadas > 0 && quem.autor === 'vendedor') {
+        await admin.from('wa_conversas').update({ status: 'humano', ia_silenciada_ate: null }).eq('id', conv.id).eq('status', 'ia');
+    }
+    return enviadas;
 }

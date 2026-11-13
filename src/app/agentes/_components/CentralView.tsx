@@ -9,7 +9,10 @@ import type { AgenteVisao, CentralAgentes, ItemDecisao, ModoAgente } from '@/lib
 import type { EventoCena } from '@/lib/agentes/eventos';
 import { EscritorioView } from './escritorio/EscritorioView';
 import { JogoView } from './jogo/JogoView';
-import { COR_ESTADO, ICONES, ROTULO_ESTADO, dolar, horaBRT, quandoFoi } from './icones';
+import { COR_ESTADO, ICONES, corEstado, dolar, horaBRT, quandoFoi, rotuloEstado } from './icones';
+import { fraseOciosa } from '@/lib/agentes/ocioso';
+import { CustoIa } from './CustoIa';
+import { AcessosEquipe } from './AcessosEquipe';
 
 type Resposta = { ok: boolean; error?: string };
 
@@ -74,9 +77,9 @@ function CardAgente({ a, agora, onAbrir, refCb }: { a: AgenteVisao; agora: numbe
                 <span className="flex items-center gap-1.5 flex-wrap">
                     <span className="text-[13px] font-black text-white leading-none">{a.nome}</span>
                     {a.etiqueta && <span className="rounded px-1 py-px text-[9px] font-black tracking-wider bg-amber-500/20 text-amber-200 border border-amber-500/40">{a.etiqueta}</span>}
-                    <span className={`rounded-full border px-1.5 py-px text-[9px] font-bold ${COR_ESTADO[a.estado]}`}>{ROTULO_ESTADO[a.estado]}</span>
+                    <span className={`rounded-full border px-1.5 py-px text-[9px] font-bold ${corEstado(a.id, a.estado)}`}>{rotuloEstado(a.id, a.estado)}</span>
                 </span>
-                <span className="block text-[11px] text-white/60 truncate mt-1">{a.frase}</span>
+                <span className="block text-[11px] text-white/60 truncate mt-1" title={a.frase}>{a.estado === 'ocioso' ? fraseOciosa(a.id, Math.floor(agora / 20000)) : a.frase}</span>
                 <span className="block text-[10px] text-white/35 mt-0.5">
                     {quandoFoi(a.ultimaAcaoEm, agora)} · {a.execucoes24h} em 24 h{a.erros24h ? ` · ${a.erros24h} erro${a.erros24h > 1 ? 's' : ''}` : ''}{a.custoHojeUsd != null ? ` · ${dolar(a.custoHojeUsd)} hoje` : ''}
                 </span>
@@ -186,7 +189,7 @@ function GavetaAgente({ a, agora, dados, somenteLeitura, onModo, onFechar }: {
                 <Anel a={a} tamanho="lg" />
                 <div className="min-w-0">
                     <p className="text-[13px] font-bold text-white">{a.frase}</p>
-                    <p className="text-[11px] text-white/45 mt-0.5">{ROTULO_ESTADO[a.estado]} · última ação {quandoFoi(a.ultimaAcaoEm, agora)}</p>
+                    <p className="text-[11px] text-white/45 mt-0.5">{a.estado === 'ocioso' ? 'sem tarefa na fila' : rotuloEstado(a.id, a.estado)} · última ação {quandoFoi(a.ultimaAcaoEm, agora)}</p>
                 </div>
             </div>
             {a.observacao && <p className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-100">{a.observacao}</p>}
@@ -446,7 +449,7 @@ export function CentralView({ dados, conexao, agora, somenteLeitura, eventos = [
                 </div>
                 <div className="flex items-center gap-3">
                     <InterruptorGeral dados={dados} somenteLeitura={somenteLeitura} onModo={onModo} />
-                    <span className="text-[12px] text-white/55">hoje: <b className="text-white">{dolar(m.custoHojeUsd)}</b> de IA</span>
+                    <CustoIa custoHojeUsd={m.custoHojeUsd} />
                 </div>
             </header>
 
@@ -484,6 +487,9 @@ export function CentralView({ dados, conexao, agora, somenteLeitura, eventos = [
                     <div className="max-h-[78vh] overflow-y-auto pr-1"><Feed dados={dados} /></div>
                 </div>
             )}
+
+            {/* Acesso REAL dos vendedores ao CRM (login/logout, tempo online, ações) — não existe na prévia fictícia */}
+            {!somenteLeitura && <AcessosEquipe />}
 
             {/* Barra da fila */}
             <div className="mt-5 rounded-2xl border border-white/[0.08] bg-[#0F0F14] px-4 py-3 flex flex-wrap items-center gap-3">

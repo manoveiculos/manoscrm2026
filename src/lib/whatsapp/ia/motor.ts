@@ -34,13 +34,16 @@ import { msgErro } from '../erro';
 import { lerConfigIa } from './config';
 import { FERRAMENTAS, executarFerramenta, type ContextoRodada, type ConversaIa } from './ferramentas';
 import { LAURA_CRM_PROMPT, contextoDaRodada } from './prompt';
+import { liberarDaTriagem } from './triagemRodada';
 import {
     custoUsd, iaPodeResponder, inicioDoDiaSP, limiteDiario, montarHistorico, somarUso, textoParaIa,
-    repeteMensagemAnterior, valoresCitados, type FichaLaura, type MensagemParaIa, type UsoTokens,
+    comentaAtendimentoAnterior, respostaLonga, repeteMensagemAnterior, valoresCitados, type FichaLaura, type MensagemParaIa, type UsoTokens,
 } from './regras';
 
 export const MODELO_PADRAO = 'claude-sonnet-5-5';
 const MAX_ITERACOES = 6;
+/** Silêncio do cliente antes de a Laura responder (pedido do Alexandre, 13/11/2026: pelo menos 20 s). */
+export const ESPERA_PADRAO_MS = 20_000;
 const TRAVA_VENCIDA_MS = 3 * 60_000;
 
 export interface GatilhoIa {
@@ -52,7 +55,7 @@ export interface GatilhoIa {
 const esperar = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 let clienteClaude: Anthropic | null = null;
-function claude(): Anthropic | null {
+export function claude(): Anthropic | null {
     if (clienteClaude) return clienteClaude;
     const apiKey = (process.env.API_CLAUDE || process.env.ANTHROPIC_API_KEY || '').trim();
     if (!apiKey) return null;
@@ -145,8 +148,9 @@ export async function rodarLaura(g: GatilhoIa): Promise<void> {
         return;
     }
 
-    // 2. junta mensagens seguidas
-    await esperar(Number(process.env.WA_IA_ESPERA_MS) || 8000);
+    // 2. junta mensagens seguidas: espera ESPERA_PADRAO_MS (20 s) de silêncio. Se o cliente mandou outra
+    // mensagem nesse tempo, esta rodada desiste e a da mensagem mais nova responde UMA vez por todas.
+    await esperar(Number(process.env.WA_IA_ESPERA_MS) || ESPERA_PADRAO_MS);
     const ultima = await ultimaDoCliente(supabase, g.conversaId);
     if (!ultima || ultima.id !== g.mensagemId) return;
 
@@ -221,7 +225,13 @@ export async function rodarLaura(g: GatilhoIa): Promise<void> {
         ctx.estoque = estoque;
         ctx.horario = horario;
 
+        let consultor: string | null = null;
+        if (conversa.assigned_consultant_id) {
+            const { data: cn } = await supabase.from('consultants_manos_crm').select('name').eq('id', conversa.assigned_consultant_id).maybeSingle();
+            consultor = (cn?.name as string | null) ?? null;
+        }
         const bloco = contextoDaRodada({
+            consultor,
             agora: ctx.agora,
             lojaAberta: isOpenNow(ctx.agora, horario.horas, horario.feriados),
             nomePerfilWhatsapp: conversa.nome_contato,
@@ -238,6 +248,8 @@ export async function rodarLaura(g: GatilhoIa): Promise<void> {
         const anteriores = msgs.filter(m => m.autor === 'laura' || m.autor === 'vendedor')
             .slice(0, 3).map(m => textoParaIa(m) || '');
         let repeticaoTratada = false;
+        let comentarioTratado = false;
+        let longaTratada = false;
         while (iteracoes < MAX_ITERACOES) {
             iteracoes++;
             // Sonnet 5.5: pensamento adaptativo (padrão) em esforço baixo. O pensamento
@@ -270,6 +282,22 @@ export async function rodarLaura(g: GatilhoIa): Promise<void> {
                 repeticaoTratada = true;
                 messages.push({ role: 'assistant', content: resp.content });
                 messages.push({ role: 'user', content: '<aviso_do_crm>Essa resposta repete o que a loja já disse ou já perguntou. Reescreva respondendo só ao que o cliente acabou de escrever, sem repetir carros, preços, correções nem a pergunta anterior. Se não houver nada novo a perguntar, faça só a próxima etapa (ex.: oferecer fotos ou a visita).</aviso_do_crm>' });
+                texto = '';
+                continue;
+            }
+            if (!longaTratada && texto && respostaLonga(texto)) {
+                // longa demais: pede UMA versão curta (máx. 2 frases), mantendo só o essencial
+                longaTratada = true;
+                messages.push({ role: 'assistant', content: resp.content });
+                messages.push({ role: 'user', content: '<aviso_do_crm>Essa resposta ficou longa. Reescreva em no máximo 2 frases curtas (uns 200 caracteres), só com o essencial e uma pergunta no máximo. Sem repetir o que o cliente disse.</aviso_do_crm>' });
+                texto = '';
+                continue;
+            }
+            if (!comentarioTratado && texto && comentaAtendimentoAnterior(texto)) {
+                // apontou erro de quem atendeu antes: pede UMA reescrita só com a informação certa
+                comentarioTratado = true;
+                messages.push({ role: 'assistant', content: resp.content });
+                messages.push({ role: 'user', content: '<aviso_do_crm>Essa resposta comenta ou corrige o atendimento anterior. Reescreva dando só a informação certa, sem dizer que algo estava errado, sem "corrigindo", sem parênteses explicando. Mantenha o resto da resposta.</aviso_do_crm>' });
                 texto = '';
                 continue;
             }
@@ -312,6 +340,8 @@ export async function rodarLaura(g: GatilhoIa): Promise<void> {
  */
 async function falhaDaIa(supabase: SupabaseClient, conversa: ConversaIa, conversaId: string): Promise<void> {
     try {
+        // a IA falhou: lead preso na triagem nunca fica parado, vai para a roleta
+        if (conversa.lead_uid) await liberarDaTriagem(supabase, conversa.lead_uid, 'laura_indisponivel', { contatado: true, respondeu: true }).catch(() => false);
         if ((process.env.WA_IA_ENVIO_LIBERADO || '').trim() !== 'true') return;
         const desde = new Date(Date.now() - 30 * 60_000).toISOString();
         const { count } = await supabase.from('wa_mensagens').select('id', { count: 'exact', head: true })
@@ -392,6 +422,14 @@ async function executarEnvio(supabase: SupabaseClient, ctx: ContextoRodada, g: G
             tag: `wa-${ctx.conversa.id}`,
         }).catch(() => null);
         ctx.passagem.executada = true;
+        // Lead de anúncio preso na triagem da Laura: qualificado → solta para a roleta, com o resumo.
+        if (ctx.conversa.lead_uid) {
+            const f = ctx.ficha as Record<string, unknown>;
+            await liberarDaTriagem(supabase, ctx.conversa.lead_uid, ctx.passagem.motivo === 'pediu_humano' ? 'pediu_humano' : 'qualificado', {
+                resumoDaLaura: ctx.passagem.resumo, nome: (ctx.ficha.nome as string | null) || ctx.conversa.nome_cliente || ctx.conversa.nome_contato,
+                interesse: typeof f.carro_interesse === 'string' ? f.carro_interesse : null, contatado: true, respondeu: true,
+            }).catch(() => false);
+        }
     }
     return { enviada: true, provider_message_id: r.providerMessageId };
 }

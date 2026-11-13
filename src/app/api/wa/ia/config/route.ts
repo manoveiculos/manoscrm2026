@@ -7,8 +7,8 @@ import { msgErro } from '@/lib/whatsapp/erro';
 /**
  * /api/wa/ia/config — botão "Laura do CRM" na tela Conversas.
  *   GET   gestor/admin: modo efetivo, modo gravado e números do dia
- *   POST  só admin: { modo: 'ensaio' | 'desligada' }
- * "envia" não é aceito aqui: fica bloqueado até a etapa C (WA_IA_ENVIO_LIBERADO).
+ *   POST  só admin: { modo: 'ensaio' | 'desligada' | 'envia' }
+ * "envia" só é aceito com WA_IA_ENVIO_LIBERADO=true no servidor (etapa C, depois do "aprovado").
  */
 const SEM_CACHE = { 'Cache-Control': 'no-store, private' };
 
@@ -35,8 +35,12 @@ export async function POST(req: Request) {
     }
     const corpo = await req.json().catch(() => ({}));
     const modo = corpo?.modo;
-    if (modo !== 'ensaio' && modo !== 'desligada') {
-        return NextResponse.json({ success: false, error: 'modo inválido (use ensaio ou desligada)' }, { status: 400, headers: SEM_CACHE });
+    if (modo !== 'ensaio' && modo !== 'desligada' && modo !== 'envia') {
+        return NextResponse.json({ success: false, error: 'modo inválido (use ensaio, desligada ou envia)' }, { status: 400, headers: SEM_CACHE });
+    }
+    // "envia" manda mensagem de verdade ao cliente: só com a chave de ambiente liberada (etapa C, com o "aprovado")
+    if (modo === 'envia' && (process.env.WA_IA_ENVIO_LIBERADO || '').trim() !== 'true') {
+        return NextResponse.json({ success: false, error: 'envio ao cliente ainda não liberado no servidor (WA_IA_ENVIO_LIBERADO)' }, { status: 409, headers: SEM_CACHE });
     }
     try {
         await gravarModoIa(ctx.admin, modo, ctx.eu.authId);

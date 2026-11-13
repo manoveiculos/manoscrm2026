@@ -1,4 +1,6 @@
 import { createClient } from '@/lib/supabase/admin';
+import { comRotaPorNome } from '@/lib/avisos/webhookVendedor';
+import { registrarAviso } from '@/lib/avisos/registro';
 
 const N8N_WEBHOOK_URL =
     process.env.N8N_VENDOR_WEBHOOK_URL ||
@@ -40,15 +42,23 @@ function classificationEmoji(c?: string): string {
 }
 
 async function sendToWebhook(payload: NotifyPayload): Promise<void> {
+    // histórico do admin (/admin/avisos): grava o resultado de TODO aviso, ok ou falha
+    const registrar = (ok: boolean, erro?: string) => registrarAviso({
+        tipo: payload.type, consultorNome: payload.consultant_name, telefone: payload.consultant_phone, mensagem: payload.message,
+        ok, erro, leadRef: payload.meta?.lead_id != null ? String(payload.meta.lead_id) : null, origem: 'vendorNotifyService', meta: payload.meta,
+    });
     try {
         const res = await fetch(N8N_WEBHOOK_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
+            // o n8n direciona pelo nome: vendedor_lower + mensagem (ver webhookVendedor.ts)
+            body: JSON.stringify(comRotaPorNome(payload)),
             signal: AbortSignal.timeout(8000),
         });
+        if (res.ok) await registrar(true);
         if (!res.ok) {
             const errorText = await res.text().catch(() => '');
+            await registrar(false, `HTTP ${res.status}`);
             console.warn(`[vendorNotify] webhook ${res.status}`, errorText);
             
             // Log de falha no banco (Auditoria Forense)
@@ -68,6 +78,7 @@ async function sendToWebhook(payload: NotifyPayload): Promise<void> {
     } catch (err: any) {
         const msg = err?.message || 'Erro de conexão/timeout';
         console.warn('[vendorNotify] webhook error:', msg);
+        await registrar(false, msg);
 
         // Log de falha no banco (Auditoria Forense)
         try {
@@ -178,6 +189,14 @@ export async function notifyLeadArrival(leadId: string): Promise<void> {
         ? lead.proxima_acao
         : `Olá ${leadFirstName}! Aqui é o ${firstName} da Manos Veículos. Vi seu interesse em ${lead.isCompra ? 'vender seu' : 'comprar um'} ${lead.vehicle_interest || 'veículo'}. Posso te ajudar?`;
 
+    // Resumo da triagem da Laura (handoff_summary começa com "RESUMO DA LAURA"): o consultor já sabe o que ela apurou
+    let resumoLaura = '';
+    if (!lead.isCompra && /^\d+$/.test(cleanId)) {
+        const { data: h } = await admin.from('leads_distribuicao_crm_26').select('handoff_summary').eq('id', parseInt(cleanId, 10)).maybeSingle();
+        const s = (h?.handoff_summary as string | null) || '';
+        if (s.startsWith('RESUMO DA LAURA')) resumoLaura = s.split('\n\n')[0].split('\n').slice(1).join('\n').slice(0, 500);
+    }
+
     const wa = buildWhatsAppLink(lead.phone, script);
     const label = lead.isCompra ? '💰 OFERTA DE COMPRA' : '🚗 INTERESSE DE VENDA';
     const valorLabel = lead.isCompra ? 'Preço cliente' : 'Investimento';
@@ -191,6 +210,7 @@ export async function notifyLeadArrival(leadId: string): Promise<void> {
         interest +
         valorStr +
         `\n📡 ${lead.source || 'Direto'}` +
+        (resumoLaura ? `\n\n🤖 *A LAURA JÁ ATENDEU:*\n${resumoLaura}` : '') +
         `\n\n📋 *SCRIPT SUGERIDO:*` +
         `\n${script}\n` +
         `\n━━━━━━━━━━━━━━━━━━` +

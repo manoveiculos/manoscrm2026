@@ -181,9 +181,9 @@ export function estadoDosAgentes(e: EntradaAgentes): CentralAgentes {
         let observacao: string | null = null;
         let desligado = modo === 'desligado';
         if (a.id === 'laura' && modo === 'desligado' && em24h.length > 0 && !e.configs[a.id]) {
-            // Botão da Laura no CRM desligado, mas a Laura do n8n segue respondendo.
+            // Botão da Laura no CRM desligado, mas há respostas dela nas últimas 24 h.
             desligado = false;
-            observacao = 'A Laura do CRM está desligada; as respostas de hoje saíram pela Laura do n8n.';
+            observacao = 'O botão da Laura está desligado, mas ela respondeu clientes nas últimas 24 h.';
         }
         if (a.ia && iaGeral === 'desligado') {
             desligado = true;
@@ -206,7 +206,7 @@ export function estadoDosAgentes(e: EntradaAgentes): CentralAgentes {
         if (estado === 'erro') frase = `${ERROS_SEGUIDOS} erros seguidos — ${ultima?.frase || ''}`.trim();
 
         if (a.id === 'laura' && modo === 'ensaio' && !observacao) {
-            observacao = 'Laura do CRM em ENSAIO: escreve a resposta, mas não envia. Quem responde o cliente hoje é a Laura do n8n.';
+            observacao = 'Laura em ENSAIO: escreve a resposta, mas não envia ao cliente.';
         }
 
         const custo = regs.filter(r => t(r.em)! >= hoje && typeof r.custoUsd === 'number')

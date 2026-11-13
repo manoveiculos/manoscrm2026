@@ -6,6 +6,8 @@ import { NavigationV2 } from '@/components/v2/NavigationV2';
 import { BackgroundDecor } from '@/components/BackgroundDecor';
 import { ConsultantAlertModal } from '@/components/v2/ConsultantAlertModal';
 import { TrafficAlertBanner } from '@/components/v2/TrafficAlertBanner';
+import { ConfirmarTelefone } from '@/components/v2/ConfirmarTelefone';
+import { PresencaTracker } from '@/components/v2/PresencaTracker';
 import { createClient } from '@/lib/supabase/client';
 
 export const LayoutWrapperV2 = ({ children }: { children: React.ReactNode }) => {
@@ -77,6 +79,8 @@ export const LayoutWrapperV2 = ({ children }: { children: React.ReactNode }) => 
     if (isRepasse) {
         return (
             <div className="min-h-screen bg-[#0C0C0F] font-inter text-white w-full max-w-[100vw]">
+                {/* todo login com cadastro de consultor confirma o WhatsApp (quem não tem cadastro não é cobrado) */}
+                <ConfirmarTelefone />
                 {children}
             </div>
         );
@@ -105,6 +109,10 @@ export const LayoutWrapperV2 = ({ children }: { children: React.ReactNode }) => 
             <BackgroundDecor />
             <NavigationV2 />
             <ConsultantAlertModal />
+            {/* obrigatório ao entrar: confirma o WhatsApp do consultor por código */}
+            <ConfirmarTelefone />
+            {/* presença no CRM (batimento + tela aberta) e aviso de transparência; o servidor ignora admin */}
+            <PresencaTracker />
             <main className="flex-1 min-h-screen w-full relative flex flex-col justify-start items-start">
                 <TrafficAlertBanner />
                 {/* pb-24 no celular: espaço da barra inferior do vendedor */}

@@ -53,3 +53,38 @@ Instagram (Recepção 24h), formulários do Google e do site, cobrança (Camila)
 ## Atenção
 - O segredo na URL aparece em logs do servidor da Evolution. Trocar `WHATSAPP_INGEST_SECRET` na Hostinger e na URL se ele vazar.
 - Com `WA_SEM_N8N=true` e o webhook ainda no n8n, mensagens da Laura do n8n seriam tratadas como "celular da loja" e a conversa viraria humana. **Só ligue as duas coisas juntas, no dia da troca.**
+
+## Lista de variáveis para a Hostinger (copiar e colar)
+
+Painel da Hostinger → o site do CRM → Variáveis de ambiente. Depois de salvar, reiniciar/refazer o deploy.
+A tela **Conversas → Laura do CRM → Prontidão** (só admin) mostra o que ainda falta, sem mostrar valores.
+
+**Base (precisa existir para o ensaio e para o envio):**
+```
+WA_INGEST_ATIVO=true
+WHATSAPP_INGEST_SECRET=<valor longo e aleatório; o mesmo que vai na URL da Evolution>
+WA_LOJA_INSTANCIA=teste
+WA_LOJA_TOKEN=<apikey da instância teste>
+EVOLUTION_BASE_URL=https://evolution.drivvoo.com
+API_CLAUDE=<chave de console.anthropic.com>
+WA_IA_ATIVA=true
+```
+(Já existiam na Hostinger desde 05/11: as quatro primeiras e a do Claude. Conferir `EVOLUTION_BASE_URL`: o manager aparece em `evolution.drivvoo.com`.)
+
+**Nome e carro corrigidos sozinhos (migration já aplicada):**
+```
+WA_IDENTIFICACAO=on
+```
+
+**Só no dia da troca do n8n, com o "aprovado" (todas juntas):**
+```
+WA_CRIAR_LEAD=true
+WA_SEM_N8N=true
+WA_ENVIO_PELO_CRM=true
+NEXT_PUBLIC_WA_ENVIO=true
+WA_IA_ENVIO_LIBERADO=true
+```
+Depois: **Laura do CRM → Ligar envio ao cliente** (botão do admin, pede confirmação), trocar a URL do webhook na Evolution
+e desligar a Laura no n8n (passo a passo acima).
+
+**Opcional:** `WA_IA_LIMITE_DIA=300` (teto de respostas por dia).

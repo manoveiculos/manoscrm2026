@@ -46,7 +46,7 @@ export async function lerConfigIa(supabase: SupabaseClient): Promise<ConfigIa> {
 }
 
 /** O botão do admin só liga ensaio ou desliga. "envia" fica bloqueado até a etapa C. */
-export async function gravarModoIa(supabase: SupabaseClient, modo: 'ensaio' | 'desligada', authId: string | null): Promise<void> {
+export async function gravarModoIa(supabase: SupabaseClient, modo: 'ensaio' | 'desligada' | 'envia', authId: string | null): Promise<void> {
     const { error } = await supabase.from('wa_ia_config')
         .upsert({ id: 1, modo, atualizado_por: authId, atualizado_em: new Date().toISOString() }, { onConflict: 'id' });
     if (error) throw new Error(error.message);

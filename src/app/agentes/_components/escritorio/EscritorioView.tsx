@@ -5,7 +5,8 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { Crown, Power } from 'lucide-react';
 import type { AgenteVisao, CentralAgentes, EstadoAgente } from '@/lib/agentes/estado';
 import { ARCOS } from '@/lib/agentes/catalogo';
-import { COR_ESTADO, ROTULO_ESTADO, dolar, horaBRT, quandoFoi } from '../icones';
+import { corEstado, dolar, horaBRT, quandoFoi, rotuloEstado } from '../icones';
+import { ehConsultor, fraseOciosa } from '@/lib/agentes/ocioso';
 import { Avatar } from './Avatar';
 import { Telao, type LinhaFeed, type Takeover } from './Telao';
 import { ANEL, ENTRADA, H, HUB, MESAS, SALA_DIRECAO, TELAO, W, centro, type EventoCena, type PainelTelao } from './cena';
@@ -34,7 +35,18 @@ const CSS = `
 .av-erro{animation:tremer .25s linear infinite}
 .digita{animation:digita .9s ease-in-out infinite;transform-origin:left center}
 .fluxo{animation:fluxo 1.1s linear infinite}
-@media (prefers-reduced-motion:reduce){.respira,.pisca,.pulso,.pulso-forte,.acena,.balanca,.fala,.av-erro,.digita,.fluxo{animation:none!important}}
+@keyframes olha{0%,35%{transform:translateX(0)}45%,70%{transform:translateX(2.2px)}80%,100%{transform:translateX(-2.2px)}}
+@keyframes balanceia{0%,100%{transform:rotate(-2.5deg)}50%{transform:rotate(2.5deg)}}
+@keyframes ponto{0%,60%,100%{opacity:.25}30%{opacity:1}}
+@keyframes sobe{0%{opacity:0;transform:translateY(6px)}100%{opacity:1;transform:translateY(0)}}
+.olha{animation:olha 7s ease-in-out infinite}
+.balanceia{animation:balanceia 4.2s ease-in-out infinite}
+.pontos i{font-style:normal;margin-left:1px;animation:ponto 1.3s infinite}
+.pontos i:nth-child(2){animation-delay:.22s}
+.pontos i:nth-child(3){animation-delay:.44s}
+.ponto-pensa{animation:ponto 1.8s infinite}
+.entra-feed{animation:sobe .5s ease-out both}
+@media (prefers-reduced-motion:reduce){.respira,.pisca,.pulso,.pulso-forte,.acena,.balanca,.fala,.av-erro,.digita,.fluxo,.olha,.balanceia,.pontos i,.ponto-pensa,.entra-feed{animation:none!important}}
 `;
 
 const DUR_TAKEOVER = 5200;
@@ -92,12 +104,12 @@ function Mesa({ a, estado, fala, agora, onAbrir }: { a: AgenteVisao; estado: Est
                         <span className="text-[16px] font-black text-white leading-none">{a.nome}</span>
                         {a.etiqueta && <span className="rounded px-1 text-[10px] font-black tracking-wider bg-amber-500/20 text-amber-200 border border-amber-500/40">{a.etiqueta}</span>}
                     </div>
-                    <span className={`inline-block mt-1.5 rounded-full border px-2 py-px text-[11px] font-bold ${COR_ESTADO[estado]}`}>{ROTULO_ESTADO[estado]}</span>
+                    <span className={`inline-block mt-1.5 rounded-full border px-2 py-px text-[11px] font-bold ${corEstado(a.id, estado)}`}>{rotuloEstado(a.id, estado)}{estado === 'ocioso' && <span className="pontos" aria-hidden><i>.</i><i>.</i><i>.</i></span>}</span>
                 </div>
                 {/* monitor */}
                 <div aria-hidden className="absolute right-3 top-[48px] z-10 w-[58px] h-[32px] rounded-md border border-white/15 px-1.5 flex flex-col justify-center gap-[4px]" style={{ background: trabalhando ? '#06281f' : '#0a0a0f', boxShadow: trabalhando ? '0 0 16px -2px #10b981' : undefined }}>
                     {[0, 1, 2].map(k => (
-                        <span key={k} className={`block h-[3px] rounded-full ${trabalhando ? 'digita' : ''}`} style={{ width: '100%', background: estado === 'desligado' ? '#27272a' : trabalhando ? '#34d399' : estado === 'erro' ? '#ef4444' : '#ffffff25', animationDelay: `${k * 0.23}s`, transform: trabalhando ? undefined : `scaleX(${0.9 - k * 0.2})`, transformOrigin: 'left center' }} />
+                        <span key={k} className={`block h-[3px] rounded-full ${trabalhando || estado === 'ocioso' ? 'digita' : ''}`} style={{ width: '100%', background: estado === 'desligado' ? '#27272a' : trabalhando ? '#34d399' : estado === 'erro' ? '#ef4444' : estado === 'ocioso' ? (ehConsultor(a.id) ? '#fbbf24aa' : '#38bdf8aa') : '#ffffff25', animationDelay: `${k * 0.23}s`, animationDuration: estado === 'ocioso' ? `${1.8 + k * 0.5}s` : undefined, transform: trabalhando || estado === 'ocioso' ? undefined : `scaleX(${0.9 - k * 0.2})`, transformOrigin: 'left center' }} />
                     ))}
                 </div>
                 <div className="absolute left-3 right-[78px] bottom-[7px] text-[11px] text-white/45 truncate">
@@ -130,6 +142,8 @@ export function EscritorioView({ dados, painel, eventos, agora, rotuloModo, cabe
     }, []);
 
     const nomeDe = useMemo(() => new Map(dados.agentes.map(a => [a.id, a.nome])), [dados.agentes]);
+    const dadosRef = useRef(dados);
+    useEffect(() => { dadosRef.current = dados; }, [dados]);
 
     const ativar = useCallback((id: string, estado: EstadoAgente, ms = DUR_ATIVO) => {
         setAtivos(v => ({ ...v, [id]: { estado, ate: Date.now() + ms } }));
@@ -139,6 +153,22 @@ export function EscritorioView({ dados, painel, eventos, agora, rotuloModo, cabe
     }, []);
     const linha = useCallback((agente: string, texto: string, tom: LinhaFeed['tom']) => {
         setLinhas(v => [{ id: `${Date.now()}-${Math.random()}`, hora: horaBRT(new Date().toISOString()), agente, texto, tom }, ...v].slice(0, 12));
+    }, []);
+
+    // Quem está sem tarefa não fica parado: de vez em quando solta uma fala de descanso
+    // ("pesquisando preços…", "criando um anúncio…"). Não entra no feed real.
+    useEffect(() => {
+        let n = 0;
+        const t = setInterval(() => {
+            if (document.visibilityState !== 'visible') return;
+            const agora = Date.now();
+            const livres = dadosRef.current.agentes.filter(a => a.estado === 'ocioso' && a.modo !== 'desligado');
+            if (!livres.length) return;
+            n++;
+            const a = livres[Math.floor(Math.random() * livres.length)];
+            setFalas(v => (v[a.id] && v[a.id].ate > agora ? v : { ...v, [a.id]: { texto: fraseOciosa(a.id, n + Math.floor(Math.random() * 7)), ate: agora + DUR_FALA } }));
+        }, 3800);
+        return () => clearInterval(t);
     }, []);
 
     // Toca cada evento novo uma única vez.

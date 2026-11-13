@@ -216,7 +216,7 @@ test('estoque: acha pelo modelo, devolve preço e km escritos e ignora carro sem
     assert.equal(r.encontrados.length, 1);
     assert.deepEqual(r.encontrados[0], {
         id: '101', carro: 'Chevrolet Onix LT 1.0', ano: 2020, preco: 'R$ 62.900', km: '58.000 km',
-        cambio: 'Manual', cor: 'Prata', fotos: 5,
+        cambio: 'Manual', cor: 'Prata', fotos: 5, tipo: 'hatch',
     });
     assert.equal(buscarNoEstoque(ESTOQUE, { consulta: 'uno' }).encontrados.length, 0);
 });

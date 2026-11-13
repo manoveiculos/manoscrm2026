@@ -2,7 +2,7 @@
 
 import type { ReactNode } from 'react';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Bot, IdCard, Loader2, MessageCircle, Phone } from 'lucide-react';
+import { Archive, ArchiveRestore, ArrowLeft, Bot, IdCard, Loader2, MessageCircle, Phone } from 'lucide-react';
 import { SeloQualificacao } from '@/components/qualificacao/SeloQualificacao';
 import {
     agruparPorDia, resumoMensagem, separarReacoes, telefoneExibicao, telefoneLink,
@@ -11,7 +11,7 @@ import {
 import { Bolha } from './Bolha';
 import type { UrlMidia } from './Midias';
 
-export function PainelConversa({ detalhe, carregando, carregandoAntigas, erro, agora, url, onVoltar, onAbrirFicha, onCarregarAntigas, mostrarBotaoFicha, ensaio, rodape }: {
+export function PainelConversa({ detalhe, carregando, carregandoAntigas, erro, agora, url, onVoltar, onAbrirFicha, onCarregarAntigas, mostrarBotaoFicha, ensaio, rodape, onArquivar }: {
     detalhe: ConversaDetalhe | null;
     carregando: boolean;
     carregandoAntigas: boolean;
@@ -25,6 +25,8 @@ export function PainelConversa({ detalhe, carregando, carregandoAntigas, erro, a
     mostrarBotaoFicha: boolean;
     /** Gestor/admin: aba "Ensaio da Laura" (rascunho do CRM × resposta enviada). */
     ensaio?: ReactNode;
+    /** Arquivar / desarquivar a conversa (tira da lista). */
+    onArquivar?: () => void;
     /** Responder pelo CRM + Assumir/Devolver (aparece com NEXT_PUBLIC_WA_ENVIO=true). */
     rodape?: ReactNode;
 }) {
@@ -93,6 +95,11 @@ export function PainelConversa({ detalhe, carregando, carregandoAntigas, erro, a
                     <a href={`tel:+${tel}`} aria-label="Ligar para o cliente" className="h-11 w-11 shrink-0 rounded-xl bg-white/[0.05] border border-white/[0.08] flex items-center justify-center text-white/70 active:scale-95">
                         <Phone size={18} />
                     </a>
+                )}
+                {onArquivar && (
+                    <button type="button" onClick={onArquivar} aria-label={c.status === 'encerrada' ? 'Desarquivar conversa' : 'Arquivar conversa'} title={c.status === 'encerrada' ? 'Desarquivar' : 'Arquivar (some da lista)'} className="h-11 w-11 shrink-0 rounded-xl bg-white/[0.05] border border-white/[0.08] flex items-center justify-center text-white/70 active:scale-95">
+                        {c.status === 'encerrada' ? <ArchiveRestore size={18} /> : <Archive size={18} />}
+                    </button>
                 )}
                 {mostrarBotaoFicha && (
                     <button type="button" onClick={onAbrirFicha} aria-label="Ficha do lead" className="xl:hidden h-11 w-11 shrink-0 rounded-xl bg-white/[0.05] border border-white/[0.08] flex items-center justify-center text-white/70 active:scale-95">

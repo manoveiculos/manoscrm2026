@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { ArrowRightLeft, FileText } from 'lucide-react';
+import { PassagensCard } from './PassagensCard';
 
 const MARCADOR_FICHA = 'FICHA IA';
 
@@ -38,10 +39,12 @@ export function FichaIACard({ uid, className = '' }: { uid: string; className?: 
     }, [uid]);
 
     const { briefing, ficha } = separarFicha(texto);
-    if (!briefing && !ficha) return null;
+    // As passagens têm busca própria (a conversa do WhatsApp); o resto vem do handoff_summary.
+    if (!briefing && !ficha) return <PassagensCard uid={uid} className={className} />;
 
     return (
         <div className={`space-y-2 ${className}`}>
+            <PassagensCard uid={uid} />
             {briefing && (
                 <div className="bg-cyan-500/[0.06] border border-cyan-500/20 rounded-xl px-4 py-3 flex gap-3">
                     <ArrowRightLeft size={14} className="text-cyan-400 shrink-0 mt-0.5" />

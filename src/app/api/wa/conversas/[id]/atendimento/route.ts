@@ -4,7 +4,7 @@ import { mudarAtendimento } from '@/lib/whatsapp/envio';
 
 /**
  * POST /api/wa/conversas/:id/atendimento — botões "Assumir" e "Devolver para a IA".
- * Corpo: { acao: 'assumir' | 'devolver' }. Quem vê a conversa (RLS) pode mudar.
+ * Corpo: { acao: 'assumir' | 'devolver' | 'arquivar' | 'desarquivar' }. Quem vê a conversa (RLS) pode mudar.
  * Assumir: a Laura para de responder. Devolver: a Laura volta.
  */
 const SEM_CACHE = { 'Cache-Control': 'no-store, private' };
@@ -17,7 +17,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     if (!ctx.ok) return NextResponse.json({ success: false, error: ctx.erro }, { status: ctx.status, headers: SEM_CACHE });
     const corpo = await req.json().catch(() => ({}));
     const acao = corpo?.acao;
-    if (acao !== 'assumir' && acao !== 'devolver') {
+    if (acao !== 'assumir' && acao !== 'devolver' && acao !== 'arquivar' && acao !== 'desarquivar') {
         return NextResponse.json({ success: false, error: 'ação inválida' }, { status: 400, headers: SEM_CACHE });
     }
     const { data: conv } = await ctx.sessao.from('wa_conversas').select('id').eq('id', id).maybeSingle();
@@ -25,5 +25,5 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const ok = await mudarAtendimento(ctx.admin, id, acao);
     if (!ok) return NextResponse.json({ success: false, error: 'não foi possível mudar' }, { status: 500, headers: SEM_CACHE });
     console.info(`[wa/atendimento] ${ctx.eu.email} → ${acao} (${id})`);
-    return NextResponse.json({ success: true, status: acao === 'assumir' ? 'humano' : 'ia' }, { headers: SEM_CACHE });
+    return NextResponse.json({ success: true, status: acao === 'assumir' ? 'humano' : acao === 'arquivar' ? 'encerrada' : 'ia' }, { headers: SEM_CACHE });
 }
