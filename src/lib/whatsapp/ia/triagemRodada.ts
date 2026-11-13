@@ -14,6 +14,7 @@ import { providerLoja } from '../evolutionProvider';
 import { enviarPeloCrm } from '../envio';
 import { msgErro } from '../erro';
 import { lerConfigIa } from './config';
+import { lerModoDistribuicao } from '@/lib/services/modoDistribuicao';
 import { classificarConversa } from './classificadorRodada';
 import { claude, MODELO_PADRAO } from './motor';
 import { LAURA_CRM_PROMPT } from './prompt';
@@ -53,8 +54,10 @@ export async function liberarDaTriagem(
         const { data: conv } = await supabase.from('wa_conversas').select('id').eq('lead_uid', leadUid).limit(1).maybeSingle();
         if (conv?.id) await Promise.race([classificarConversa(supabase, conv.id as string, { agora }), new Promise(r => setTimeout(r, 25_000))]);
     } catch { /* segue sem classificar */ }
+    // Modo fila: o lead entra na fila de espera (todos avisados, um atende). Modo rodízio: 'aguardando' (o motor distribui).
+    const destino = (await lerModoDistribuicao(supabase)) === 'fila' ? 'fila_espera' : 'aguardando';
     const { data: lib } = await supabase.from('lead_distribuicao')
-        .update({ status: 'aguardando', atualizado_em: agora.toISOString() })
+        .update({ status: destino, atualizado_em: agora.toISOString() })
         .eq('lead_uid', leadUid).eq('status', 'triagem_laura').select('lead_uid');
     if (!lib?.length) return false;
 
@@ -182,7 +185,7 @@ export async function rodarTriagem(supabase: SupabaseClient, opts: { agora?: Dat
                 const envL = await enviarPeloCrm(supabase, providerLoja(), { id: conversaId ?? '', telefone_key: telefone, remote_jid: null }, { tipo: 'texto', texto: revL.texto_seguro }, { autor: 'laura' });
                 if (!envL.ok) { console.warn('[triagem] lembrete falhou:', p.lead_uid, envL.erro); r.erros++; break; }
                 contatos++; r.lembretes = (r.lembretes || 0) + 1;
-                await supabase.from('wa_triagem').update({ lembrete_em: agora.toISOString() }).eq('lead_uid', p.lead_uid);
+                await supabase.from('wa_triagem').update({ lembrete_em: agora.toISOString(), ...(conversaId ? { conversa_id: conversaId } : {}) }).eq('lead_uid', p.lead_uid);
                 continue;
             }
             // só o lead de anúncio (Google) recebe o primeiro contato da Laura; conversa do WhatsApp quem puxou foi o cliente

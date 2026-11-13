@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/admin';
+import { lerModoDistribuicao } from './modoDistribuicao';
 
 /**
  * Motor de Distribuição Round-Robin + SLA 10min.
@@ -224,6 +225,14 @@ export async function distribuirLead(table: LeadTable, native: string | number):
     // Triagem da Laura: lead preso não vai para consultor nenhum até ela qualificar (ou o tempo-limite soltar).
     const { data: preso } = await admin.from('lead_distribuicao').select('status').eq('lead_uid', uidOf(table, native)).maybeSingle();
     if (preso?.status === 'triagem_laura') return { status: 'triagem_laura' };
+    // Fila de espera (13/11/2026): lead novo fica sem dono, todos são avisados e só um atende. Sem rodízio.
+    if (await lerModoDistribuicao(admin) === 'fila') {
+        await admin.from('lead_distribuicao').upsert({
+            lead_uid: uidOf(table, native), table_name: table, native_id: String(native), status: 'fila_espera',
+            assigned_consultant_id: null, distribuido_em: null, tentados: [], atualizado_em: new Date().toISOString(),
+        }, { onConflict: 'lead_uid' });
+        return { status: 'fila_espera' };
+    }
     const { horas, feriados } = await loadHorario(admin);
     const now = new Date();
     if (!isOpenNow(now, horas, feriados)) { await setStatus(admin, table, String(native), 'standby'); return { status: 'standby' }; }
@@ -379,6 +388,13 @@ export async function tickSla(): Promise<{ ok: boolean; closed?: boolean; resgat
     // Fora do horário o resgate continua rodando: o lead entra na fila como
     // 'aguardando' e o 1º tick da abertura já o despeja com dono.
     const resgatados = await enfileirarOrfaos(admin);
+
+    // Fila de espera: o motor NÃO distribui por rodízio e NÃO passa o lead de consultor em consultor.
+    // Quem cuida da fila (aviso, lembrete, escalada) é /api/cron/wa-fila.
+    if (await lerModoDistribuicao(admin) === 'fila') {
+        await admin.from('lead_distribuicao').update({ status: 'fila_espera', atualizado_em: now.toISOString() }).in('status', ['standby', 'aguardando']);
+        return { ok: true, resgatados, distribuidos: 0, escalados: 0 };
+    }
     if (!isOpenNow(now, horas, feriados)) return { ok: true, closed: true, resgatados };
 
     let distribuidos = 0, escalados = 0, esgotados = 0;
