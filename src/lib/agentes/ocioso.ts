@@ -6,17 +6,14 @@
 // e a gaveta do agente mostra "sem tarefa na fila" com a última ação de verdade.
 
 export const ROTULO_OCIOSO = 'pesquisando';
-export const ROTULO_OCIOSO_CONSULTOR = 'criando anúncios';
+// 13/11/2026: o rótulo "criando anúncios" era enfeite e passava a impressão de que o vendedor
+// estava fazendo algo. Sem ação registrada, o consultor aparece como "sem ação registrada";
+// o acesso real (entrou/saiu, tempo online, o que fez) está em "Acesso da equipe ao CRM".
+export const ROTULO_OCIOSO_CONSULTOR = 'sem ação registrada';
 
 export const ehConsultor = (id: string) => id.startsWith('consultor_');
 
-const CONSULTOR = [
-    'Criando um anúncio novo…',
-    'Escolhendo as melhores fotos…',
-    'Escrevendo a descrição do carro…',
-    'Revisando o texto do anúncio…',
-    'Montando o post da semana…',
-];
+const CONSULTOR = ['Nenhuma ação registrada nas últimas horas.'];
 
 const POR_AGENTE: Record<string, string[]> = {
     laura: ['Pesquisando o estoque…', 'Estudando as últimas conversas…', 'Pesquisando como ajudar melhor…'],

@@ -11,6 +11,7 @@ import { EscritorioView } from './escritorio/EscritorioView';
 import { COR_ESTADO, ICONES, corEstado, dolar, horaBRT, quandoFoi, rotuloEstado } from './icones';
 import { fraseOciosa } from '@/lib/agentes/ocioso';
 import { CustoIa } from './CustoIa';
+import { AcessosEquipe } from './AcessosEquipe';
 
 type Resposta = { ok: boolean; error?: string };
 
@@ -461,6 +462,9 @@ export function CentralView({ dados, conexao, agora, somenteLeitura, eventos = [
                     <div className="max-h-[78vh] overflow-y-auto pr-1"><Feed dados={dados} /></div>
                 </div>
             )}
+
+            {/* Acesso REAL dos vendedores ao CRM (login/logout, tempo online, ações) — não existe na prévia fictícia */}
+            {!somenteLeitura && <AcessosEquipe />}
 
             {/* Barra da fila */}
             <div className="mt-5 rounded-2xl border border-white/[0.08] bg-[#0F0F14] px-4 py-3 flex flex-wrap items-center gap-3">
