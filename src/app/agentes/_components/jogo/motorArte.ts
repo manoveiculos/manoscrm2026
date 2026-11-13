@@ -113,8 +113,12 @@ export class MotorArte {
     log: LinhaLog[] = [];
     aviso: Aviso | null = null;
     hora: number | null = null; // sem uso: o cenário é noturno; mantém a mesma interface do motor procedural
-    vendasMes = 5;
-    leads = { quente: 7, morno: 19, frio: 44 };
+    /** Números reais do telão. null = ainda não existem (a cena correspondente não aparece — nada de número inventado). */
+    vendasMes: number | null = null;
+    leads: { quente: number; morno: number; frio: number; semClassificacao?: number } | null = null;
+    maestro: { aprovacoes: number; semDono: number; alertas: number } | null = null;
+    /** Histórico real recente (feed da API) — aparece no telão abaixo das ações ao vivo. */
+    feedReal: LinhaLog[] = [];
 
     private t = 0;
     private seq = 0;
@@ -227,7 +231,7 @@ export class MotorArte {
                 const x = this.p(ev.agenteId);
                 this.linha(nomeDe(ev.agenteId), ev.nome ? `vendeu ${ev.carro} para ${ev.nome}` : 'registrou uma venda', 'rodando');
                 if (x) { x.estado = 'comemorando'; x.ate = this.t + 3.4; x.bolha = { texto: '🎉 Vendi!', ate: this.t + 3.4 }; this.levantar(x); this.confete(x.x, x.y - 260); this.depois(3.6, () => this.sentarDeNovo(x)); }
-                this.vendasMes += 1;
+                if (this.vendasMes != null) this.vendasMes += 1;
                 this.filaAvisos.push({ tipo: 'venda', titulo: 'VENDA EFETUADA! PARABÉNS!', sub: [nomeDe(ev.agenteId), ev.nome, ev.carro].filter(Boolean).join(' · ') });
                 break;
             }
@@ -253,7 +257,7 @@ export class MotorArte {
 
     atualizar(dt: number) {
         this.t += dt; this.cenaT += dt;
-        if (this.cenaT > 9 && !this.aviso) { this.cenaT = 0; this.cena = (this.cena + 1) % 3; }
+        if (this.cenaT > 9 && !this.aviso) { this.cenaT = 0; this.cena = (this.cena + 1) % this.cenas().length; }
         for (const a of [...this.agenda]) if (a.em <= this.t) { this.agenda = this.agenda.filter(x => x !== a); a.fn(); }
         if (this.aviso && this.t > this.avisoAte) this.aviso = null;
         if (!this.aviso && this.filaAvisos.length) { this.aviso = this.filaAvisos.shift()!; this.avisoAte = this.t + 5; }
@@ -455,36 +459,54 @@ export class MotorArte {
         }
     }
 
+    /** Cenas do telão disponíveis agora: só as que têm dado real. */
+    private cenas(): ('ao_vivo' | 'leads' | 'maestro' | 'vendas')[] {
+        const c: ('ao_vivo' | 'leads' | 'maestro' | 'vendas')[] = ['ao_vivo'];
+        if (this.leads) c.push('leads');
+        if (this.maestro) c.push('maestro');
+        if (this.vendasMes != null) c.push('vendas');
+        return c;
+    }
+
     private conteudoTelao(g: CanvasRenderingContext2D) {
         const w = TW_, h = TH_;
         const fundo = g.createLinearGradient(0, 0, 0, h); fundo.addColorStop(0, '#0e1626'); fundo.addColorStop(1, '#05080f');
         g.fillStyle = fundo; g.fillRect(0, 0, w, h);
         g.textBaseline = 'top'; g.textAlign = 'left';
         g.fillStyle = '#ef4444'; g.beginPath(); g.arc(34, 38, 10, 0, 7); g.fill();
-        g.fillStyle = 'rgba(255,255,255,0.9)'; g.font = '800 34px system-ui, sans-serif'; g.fillText(['AO VIVO', 'TERMÔMETRO DE LEADS', 'MAESTRO'][this.cena], 58, 20);
+        const lista = this.cenas();
+        const cena = lista[this.cena % lista.length];
+        g.fillStyle = 'rgba(255,255,255,0.9)'; g.font = '800 34px system-ui, sans-serif'; g.fillText({ ao_vivo: 'AO VIVO', leads: 'TERMÔMETRO DE LEADS', maestro: 'MAESTRO', vendas: 'VENDAS' }[cena], 58, 20);
         g.font = '500 30px system-ui, sans-serif';
-        if (this.cena === 0) {
-            this.log.slice(0, 6).forEach((l, i) => {
+        if (cena === 'ao_vivo') {
+            [...this.log, ...this.feedReal].slice(0, 6).forEach((l, i) => {
                 const y = 96 + i * 66;
                 g.fillStyle = 'rgba(255,255,255,0.38)'; g.fillText(l.hora, 34, y);
                 g.fillStyle = l.tom === 'erro' ? '#f87171' : l.tom === 'espera' ? '#fb7185' : l.tom === 'novo' ? '#fbbf24' : '#34d399'; g.fillRect(140, y + 11, 14, 14);
                 g.fillStyle = 'rgba(255,255,255,0.88)'; g.fillText(`${l.agente}: ${l.texto}`.slice(0, 44), 172, y);
             });
-            if (!this.log.length) { g.fillStyle = 'rgba(255,255,255,0.4)'; g.fillText('Aguardando eventos reais…', 34, 110); }
-        } else if (this.cena === 1) {
-            const tot = Math.max(1, this.leads.quente + this.leads.morno + this.leads.frio);
-            ([['Quentes', this.leads.quente, '#ef4444'], ['Mornos', this.leads.morno, '#f59e0b'], ['Frios', this.leads.frio, '#38bdf8']] as [string, number, string][]).forEach(([r, n, c], i) => {
-                const y = 120 + i * 120;
-                g.fillStyle = 'rgba(255,255,255,0.78)'; g.font = '600 34px system-ui, sans-serif'; g.fillText(r, 34, y);
+            if (!this.log.length && !this.feedReal.length) { g.fillStyle = 'rgba(255,255,255,0.4)'; g.fillText('Aguardando eventos reais…', 34, 110); }
+        } else if (cena === 'leads' && this.leads) {
+            const l = this.leads, sem = l.semClassificacao ?? 0;
+            const tot = Math.max(1, l.quente + l.morno + l.frio + sem);
+            ([['Quentes', l.quente, '#ef4444'], ['Mornos', l.morno, '#f59e0b'], ['Frios', l.frio, '#38bdf8'], ['Sem class.', sem, '#71717a']] as [string, number, string][]).forEach(([r, n, c], i) => {
+                const y = 96 + i * 100;
+                g.fillStyle = 'rgba(255,255,255,0.78)'; g.font = '600 32px system-ui, sans-serif'; g.fillText(r, 34, y);
                 g.fillStyle = 'rgba(255,255,255,0.08)'; g.fillRect(250, y + 4, w - 400, 38);
                 g.fillStyle = c; g.fillRect(250, y + 4, (w - 400) * (n / tot), 38);
                 g.fillStyle = '#fff'; g.font = '800 40px system-ui, sans-serif'; g.fillText(String(n), w - 120, y - 2);
             });
-        } else {
-            g.fillStyle = '#34d399'; g.font = '800 150px system-ui, sans-serif'; g.fillText(String(this.vendasMes), 60, 130);
-            g.fillStyle = 'rgba(255,255,255,0.6)'; g.font = '600 32px system-ui, sans-serif'; g.fillText('vendas no mês', 64, 310);
-            g.fillStyle = '#fbbf24'; g.font = '800 150px system-ui, sans-serif'; g.fillText(String(this.leads.quente), 540, 130);
-            g.fillStyle = 'rgba(255,255,255,0.6)'; g.font = '600 32px system-ui, sans-serif'; g.fillText('leads quentes', 544, 310);
+        } else if (cena === 'maestro' && this.maestro) {
+            const m = this.maestro;
+            ([['Aprovações', m.aprovacoes], ['Sem dono', m.semDono], ['Alertas', m.alertas]] as [string, number][]).forEach(([r, n], i) => {
+                const x = 34 + i * 315;
+                g.fillStyle = n > 0 ? 'rgba(220,38,38,0.2)' : 'rgba(255,255,255,0.05)'; this.rr(g, x, 110, 290, 300, 24); g.fill();
+                g.fillStyle = n > 0 ? '#fca5a5' : 'rgba(255,255,255,0.8)'; g.font = '800 130px system-ui, sans-serif'; g.textAlign = 'center'; g.fillText(String(n), x + 145, 170);
+                g.fillStyle = 'rgba(255,255,255,0.6)'; g.font = '700 30px system-ui, sans-serif'; g.fillText(r, x + 145, 340); g.textAlign = 'left';
+            });
+        } else if (cena === 'vendas' && this.vendasMes != null) {
+            g.fillStyle = '#34d399'; g.font = '800 200px system-ui, sans-serif'; g.fillText(String(this.vendasMes), 60, 120);
+            g.fillStyle = 'rgba(255,255,255,0.65)'; g.font = '600 38px system-ui, sans-serif'; g.fillText('vendas no mês', 70, 360);
         }
         // faixa de linhas de varredura (tela de LED)
         g.fillStyle = 'rgba(255,255,255,0.035)'; for (let y = 0; y < h; y += 6) g.fillRect(0, y, w, 2);

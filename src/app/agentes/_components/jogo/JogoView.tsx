@@ -4,11 +4,12 @@ import { useEffect, useRef } from 'react';
 import type { EventoCena } from '@/lib/agentes/eventos';
 import { MotorJogo } from './motor';
 import { MotorArte } from './motorArte';
+import type { LinhaLog } from './motor';
 
 interface Motor {
     hora: number | null;
-    vendasMes: number;
-    leads: { quente: number; morno: number; frio: number };
+    vendasMes: number | null;
+    leads: { quente: number; morno: number; frio: number } | null;
     emitir: (ev: EventoCena) => void;
     atualizar: (dt: number) => void;
     desenhar: (ctx: CanvasRenderingContext2D, w: number, h: number, dpr: number) => void;
@@ -19,13 +20,16 @@ interface Motor {
  * O laço usa requestAnimationFrame e, se o navegador pausar os quadros (aba/painel oculto),
  * um temporizador de segurança continua avançando a cena.
  */
-export function JogoView({ eventos, arte = false, hora = null, vendasMes, leads }: {
+export function JogoView({ eventos, arte = false, hora = null, vendasMes, leads, maestro, feed }: {
     eventos: EventoCena[];
     /** true = cenário realista com personagens recortados; false = desenho procedural. */
     arte?: boolean;
     hora?: number | null;
     vendasMes?: number;
-    leads?: { quente: number; morno: number; frio: number };
+    leads?: { quente: number; morno: number; frio: number; semClassificacao?: number } | null;
+    maestro?: { aprovacoes: number; semDono: number; alertas: number } | null;
+    /** Histórico real recente para o telão. */
+    feed?: LinhaLog[];
 }) {
     const canvas = useRef<HTMLCanvasElement>(null);
     const caixa = useRef<HTMLDivElement>(null);
@@ -38,9 +42,17 @@ export function JogoView({ eventos, arte = false, hora = null, vendasMes, leads 
     useEffect(() => {
         const m = motor.current!;
         m.hora = hora;
-        if (typeof vendasMes === 'number') m.vendasMes = vendasMes;
-        if (leads) m.leads = leads;
-    }, [hora, vendasMes, leads]);
+        if (m instanceof MotorArte) {
+            // Tela real: sem número, sem cena — nada de valor de exemplo.
+            m.vendasMes = typeof vendasMes === 'number' ? vendasMes : null;
+            m.leads = leads ?? null;
+            m.maestro = maestro ?? null;
+            m.feedReal = feed ?? [];
+        } else {
+            if (typeof vendasMes === 'number') m.vendasMes = vendasMes;
+            if (leads) m.leads = leads;
+        }
+    }, [hora, vendasMes, leads, maestro, feed, arte]);
 
     useEffect(() => {
         const m = motor.current!;

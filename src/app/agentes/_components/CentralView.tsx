@@ -1,13 +1,14 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { AlertTriangle, CheckCircle2, Crown, ExternalLink, Inbox, LayoutGrid, MessageSquareWarning, Power, Tv, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Crown, ExternalLink, Gamepad2, Inbox, LayoutGrid, MessageSquareWarning, Power, Tv, XCircle } from 'lucide-react';
 import { Sheet } from '@/app/fila/_components/Sheet';
 import { ARCOS } from '@/lib/agentes/catalogo';
 import type { AgenteVisao, CentralAgentes, ItemDecisao, ModoAgente } from '@/lib/agentes/estado';
 import type { EventoCena } from '@/lib/agentes/eventos';
 import { EscritorioView } from './escritorio/EscritorioView';
+import { JogoView } from './jogo/JogoView';
 import { COR_ESTADO, ICONES, ROTULO_ESTADO, dolar, horaBRT, quandoFoi } from './icones';
 
 type Resposta = { ok: boolean; error?: string };
@@ -388,14 +389,14 @@ function Constelacao({ dados, agora, onAbrir, onFila }: { dados: CentralAgentes;
 }
 
 // ── Tela ───────────────────────────────────────────────────────────────────
-type Visao = 'escritorio' | 'constelacao';
+type Visao = 'escritorio' | 'constelacao' | 'jogo';
 const CHAVE_VISAO = 'agentes:visao';
 
 export function CentralView({ dados, conexao, agora, somenteLeitura, eventos = [], tv = false, onEntrarTv, onSairTv, onModo, onDecidir }: CentralProps) {
     const [visao, setVisao] = useState<Visao>('constelacao');
     // Preferência guardada no navegador; sem preferência, o escritório é o padrão no desktop.
     useEffect(() => {
-        try { setVisao(localStorage.getItem(CHAVE_VISAO) === 'constelacao' ? 'constelacao' : 'escritorio'); } catch { setVisao('escritorio'); }
+        try { const v = localStorage.getItem(CHAVE_VISAO); setVisao(v === 'constelacao' || v === 'jogo' ? v : 'escritorio'); } catch { setVisao('escritorio'); }
     }, []);
     const trocarVisao = (v: Visao) => { setVisao(v); try { localStorage.setItem(CHAVE_VISAO, v); } catch { /* sem storage: só não lembra */ } };
     const [aberto, setAberto] = useState<string | null>(null);
@@ -403,10 +404,26 @@ export function CentralView({ dados, conexao, agora, somenteLeitura, eventos = [
     const agenteAberto = aberto ? dados.agentes.find(a => a.id === aberto) || null : null;
     const m = dados.maestro;
 
+    // Cena do jogo (arte realista): telão e painel só com números reais; sem número, sem cena.
+    const feedJogo = useMemo(() => dados.feed.slice(0, 8).map(f => ({
+        hora: horaBRT(f.em), agente: f.agenteNome, texto: f.frase,
+        tom: (f.status === 'erro' ? 'erro' : f.status === 'aguardando' ? 'espera' : f.status === 'rodando' ? 'rodando' : 'ok') as 'ok' | 'erro' | 'espera' | 'novo' | 'rodando',
+    })), [dados.feed]);
+    const jogo = (
+        <JogoView
+            eventos={eventos}
+            arte
+            feed={feedJogo}
+            vendasMes={dados.painel?.vendasMes}
+            leads={dados.painel?.leads}
+            maestro={{ aprovacoes: m.aprovacoes, semDono: m.conversasSemDono, alertas: m.alertas }}
+        />
+    );
+
     if (tv) {
         return (
             <div className="fixed inset-0 z-[80] bg-[#03060b] overflow-hidden flex items-start justify-center px-3 pt-2" style={{ cursor: 'none' }}>
-                <EscritorioView dados={dados} painel={dados.painel ?? null} eventos={eventos} agora={agora} tv />
+                {visao === 'jogo' ? <div className="w-full h-full">{jogo}</div> : <EscritorioView dados={dados} painel={dados.painel ?? null} eventos={eventos} agora={agora} tv />}
                 {onSairTv && <button type="button" onClick={onSairTv} className="fixed bottom-3 right-3 rounded-lg bg-white/10 px-3 py-1.5 text-[12px] font-bold text-white/80 opacity-0 hover:opacity-100 focus:opacity-100" style={{ cursor: 'pointer' }}>Sair do modo TV</button>}
             </div>
         );
@@ -423,6 +440,7 @@ export function CentralView({ dados, conexao, agora, somenteLeitura, eventos = [
                 </span>
                 <div className="hidden lg:flex items-center rounded-xl border border-white/10 overflow-hidden text-[12px] font-bold md:ml-auto">
                     <button type="button" onClick={() => trocarVisao('escritorio')} className={`flex items-center gap-1.5 px-3 py-1.5 ${visao === 'escritorio' ? 'bg-white/15 text-white' : 'text-white/55'}`}><Tv size={13} /> Escritório</button>
+                    <button type="button" onClick={() => trocarVisao('jogo')} className={`flex items-center gap-1.5 px-3 py-1.5 ${visao === 'jogo' ? 'bg-white/15 text-white' : 'text-white/55'}`}><Gamepad2 size={13} /> Jogo</button>
                     <button type="button" onClick={() => trocarVisao('constelacao')} className={`flex items-center gap-1.5 px-3 py-1.5 ${visao === 'constelacao' ? 'bg-white/15 text-white' : 'text-white/55'}`}><LayoutGrid size={13} /> Lista</button>
                     {onEntrarTv && <button type="button" onClick={onEntrarTv} className="flex items-center gap-1.5 px-3 py-1.5 border-l border-white/10 text-white/55 hover:text-white"><Tv size={13} /> Modo TV</button>}
                 </div>
@@ -449,7 +467,14 @@ export function CentralView({ dados, conexao, agora, somenteLeitura, eventos = [
             </div>
 
             {/* Desktop: escritório animado (padrão) ou constelação + feed */}
-            {visao === 'escritorio' ? (
+            {visao === 'jogo' ? (
+                <div className="hidden lg:block">
+                    <div className="relative w-full mx-auto" style={{ aspectRatio: '2688 / 1520', maxHeight: 'calc(100vh - 210px)' }}>
+                        {jogo}
+                        <button type="button" onClick={() => setFilaAberta(true)} className={`absolute top-3 right-3 px-4 py-2 rounded-xl text-[13px] font-black ${m.luzAcesa ? 'bg-red-600 text-white' : 'bg-black/60 text-white/80 border border-white/10'}`}>Abrir fila de decisões</button>
+                    </div>
+                </div>
+            ) : visao === 'escritorio' ? (
                 <div className="hidden lg:block">
                     <EscritorioView dados={dados} painel={dados.painel ?? null} eventos={eventos} agora={agora} cabecalho={false} onFila={() => setFilaAberta(true)} onAbrirAgente={a => setAberto(a.id)} />
                 </div>

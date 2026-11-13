@@ -9,6 +9,9 @@ type SemId<T> = T extends unknown ? Omit<T, 'id'> : never;
 const NOMES = ['Bruna', 'Marcos', 'Camila', 'Rafael', 'Thiago', 'Letícia'];
 const CARROS = ['Fiat Mobi', 'BYD Dolphin', 'Jeep Compass', 'VW Polo', 'Hilux SRV', 'Onix LT'];
 const VENDEDORES = ['consultor_wilson', 'consultor_victor'];
+// Números de DEMONSTRAÇÃO (só nesta página de prova).
+const DEMO_LEADS = { quente: 7, morno: 19, frio: 44, semClassificacao: 120 };
+const DEMO_MAESTRO = { aprovacoes: 1, semDono: 30, alertas: 0 };
 const pick = <T,>(a: T[]) => a[Math.floor(Math.random() * a.length)];
 
 export function DemoJogo() {
@@ -43,7 +46,7 @@ export function DemoJogo() {
 
     return (
         <main className="fixed inset-0 bg-[#03050a] text-white">
-            <JogoView eventos={eventos} arte={arte} hora={hora} />
+            <JogoView eventos={eventos} arte={arte} hora={hora} vendasMes={5} leads={DEMO_LEADS} maestro={DEMO_MAESTRO} />
             <div className="absolute top-3 left-4 flex items-center gap-3">
                 <h1 className="text-[20px] font-black">Central dos Agentes</h1>
                 <span className="rounded-full border border-amber-400/40 bg-amber-400/10 px-2.5 py-0.5 text-[11px] font-bold text-amber-200">PROVA DE CONCEITO · eventos simulados</span>
