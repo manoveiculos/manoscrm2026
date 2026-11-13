@@ -4,6 +4,7 @@
 // com preço e km já escritos do jeito que a Laura tem de repetir.
 
 import type { AltimusVehicle } from '@/lib/services/altimusInventory';
+import { ROTULO_CARROCERIA, carroceriaDoModelo, carroceriasPedidas, semPalavrasDeCarroceria, type Carroceria } from '@/lib/vocabulario/carros';
 
 export interface CarroParaIa {
     id: string;
@@ -14,6 +15,8 @@ export interface CarroParaIa {
     cambio: string | null;
     cor: string | null;
     fotos: number;
+    /** Tipo de carroceria (SUV, sedã, hatch, picape…). null = não reconhecido: a Laura não afirma o tipo. */
+    tipo: string | null;
 }
 
 const PARADAS = new Set([
@@ -44,6 +47,7 @@ export function carroParaIa(v: AltimusVehicle): CarroParaIa {
         cambio: v.cambio || null,
         cor: v.cor || null,
         fotos: v.fotos?.length || 0,
+        tipo: (() => { const c = carroceriaDoModelo(v.marca, v.modelo, v.versao); return c ? ROTULO_CARROCERIA[c] : null; })(),
     };
 }
 
@@ -58,15 +62,23 @@ export interface ResultadoEstoque {
     encontrados: CarroParaIa[];
     /** Quando nada bate: até 5 opções na faixa de preço (ou as mais recentes). */
     parecidos: CarroParaIa[];
+    /** Tipo(s) que o cliente pediu (ex.: ["SUV"]). */
+    tiposPedidos?: string[];
+    /** O cliente pediu um tipo e a loja não tem nenhum agora. */
+    semNoTipo?: boolean;
 }
 
 /** Só carro com marca, modelo e preço entra (o resto a Laura não pode oferecer). */
 export function buscarNoEstoque(estoque: AltimusVehicle[], f: FiltroEstoque, limite = 5): ResultadoEstoque {
     const validos = estoque.filter(v => v.marca && v.modelo && v.preco);
-    const tokens = palavras(f.consulta || '');
+    // "quero um SUV automático": o tipo filtra, o resto (marca, modelo, ano) pontua
+    const tipos: Carroceria[] = carroceriasPedidas(f.consulta);
+    const tokens = palavras(tipos.length ? semPalavrasDeCarroceria(f.consulta) : (f.consulta || ''));
+    const tiposPedidos = tipos.map(c => ROTULO_CARROCERIA[c]);
     const cambio = norm(f.cambio).trim();
     const passaFiltro = (v: AltimusVehicle) =>
-        (!f.precoMax || (v.preco || 0) <= f.precoMax * 1.05)
+        (!tipos.length || tipos.includes(carroceriaDoModelo(v.marca, v.modelo, v.versao) as Carroceria))
+        && (!f.precoMax || (v.preco || 0) <= f.precoMax * 1.05)
         && (!f.anoMin || (v.ano || 0) >= f.anoMin)
         && (!cambio || norm(v.cambio).includes(cambio.slice(0, 4)));
 
@@ -84,7 +96,7 @@ export function buscarNoEstoque(estoque: AltimusVehicle[], f: FiltroEstoque, lim
             .slice(0, limite).map(x => carroParaIa(x.v))
         : pontuados.slice(0, limite).map(x => carroParaIa(x.v));
 
-    if (encontrados.length) return { encontrados, parecidos: [] };
+    if (encontrados.length) return { encontrados, parecidos: [], tiposPedidos };
 
     // Nada bateu: oferece opções na mesma faixa de preço (ou as primeiras do feed).
     const alvo = f.precoMax || null;
@@ -92,7 +104,7 @@ export function buscarNoEstoque(estoque: AltimusVehicle[], f: FiltroEstoque, lim
         ? validos.filter(v => (v.preco || 0) <= alvo * 1.1).sort((a, b) => (b.preco || 0) - (a.preco || 0))
         : validos
     ).slice(0, limite).map(carroParaIa);
-    return { encontrados: [], parecidos };
+    return { encontrados: [], parecidos, tiposPedidos, semNoTipo: tipos.length > 0 };
 }
 
 export function acharCarro(estoque: AltimusVehicle[], id: string): AltimusVehicle | null {

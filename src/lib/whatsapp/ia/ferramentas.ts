@@ -34,7 +34,7 @@ export const FERRAMENTAS: Anthropic.Tool[] = [
         input_schema: {
             type: 'object',
             properties: {
-                consulta: { type: 'string', description: 'Marca, modelo ou tipo que o cliente pediu. Ex.: "onix", "hilux", "sedan automático".' },
+                consulta: { type: 'string', description: 'Marca, modelo ou tipo que o cliente pediu. Ex.: "onix", "hilux", "sedan automático", "suv", "picape", "hatch".' },
                 preco_max: { type: 'number', description: 'Valor máximo em reais, se o cliente disse. Ex.: 60000.' },
                 ano_min: { type: 'integer', description: 'Ano mínimo, se o cliente disse.' },
                 cambio: { type: 'string', description: '"automático" ou "manual", se o cliente disse.' },
@@ -191,7 +191,14 @@ function buscarEstoque(e: Record<string, unknown>, ctx: ContextoRodada): Saida {
         anoMin: typeof e.ano_min === 'number' && e.ano_min > 1950 ? e.ano_min : null,
         cambio: str(e.cambio, 20),
     });
-    if (r.encontrados.length) return { encontrados: r.encontrados };
+    if (r.encontrados.length) return { encontrados: r.encontrados, ...(r.tiposPedidos?.length ? { observacao: 'Todos os carros abaixo são do tipo pedido pelo cliente.' } : {}) };
+    if (r.semNoTipo) {
+        return {
+            encontrados: [],
+            parecidos: r.parecidos,
+            observacao: `A loja não tem ${(r.tiposPedidos || []).join(' nem ')} no estoque agora. Diga isso de forma simples e, se fizer sentido, ofereça um dos parecidos (sem chamar de ${(r.tiposPedidos || []).join(' nem ')}).`,
+        };
+    }
     return {
         encontrados: [],
         parecidos: r.parecidos,

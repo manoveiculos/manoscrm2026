@@ -398,3 +398,20 @@ const RX_COMENTA_ANTERIOR = new RegExp([
 export function comentaAtendimentoAnterior(texto: string): boolean {
     return RX_COMENTA_ANTERIOR.test(texto || '');
 }
+
+// ---------------------------------------------------------------------------
+// Resposta longa demais (pedido do Alexandre, 13/11/2026: sempre curta e objetiva)
+// ---------------------------------------------------------------------------
+
+/** Linha de carro de uma lista: "Modelo ano · cor · km · preço". */
+const LINHA_DE_CARRO = /·.*·/;
+
+export const LIMITE_RESPOSTA = 280;
+export const LIMITE_RESPOSTA_COM_LISTA = 480;
+
+/** A resposta passou do tamanho? Lista de até 3 carros ganha mais espaço. */
+export function respostaLonga(texto: string): boolean {
+    const t = (texto || '').trim();
+    const comLista = t.split('\n').filter(l => LINHA_DE_CARRO.test(l)).length >= 2;
+    return t.length > (comLista ? LIMITE_RESPOSTA_COM_LISTA : LIMITE_RESPOSTA);
+}

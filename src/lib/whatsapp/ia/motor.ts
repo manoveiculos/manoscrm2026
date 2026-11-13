@@ -37,11 +37,13 @@ import { LAURA_CRM_PROMPT, contextoDaRodada } from './prompt';
 import { liberarDaTriagem } from './triagemRodada';
 import {
     custoUsd, iaPodeResponder, inicioDoDiaSP, limiteDiario, montarHistorico, somarUso, textoParaIa,
-    comentaAtendimentoAnterior, repeteMensagemAnterior, valoresCitados, type FichaLaura, type MensagemParaIa, type UsoTokens,
+    comentaAtendimentoAnterior, respostaLonga, repeteMensagemAnterior, valoresCitados, type FichaLaura, type MensagemParaIa, type UsoTokens,
 } from './regras';
 
 export const MODELO_PADRAO = 'claude-sonnet-5-5';
 const MAX_ITERACOES = 6;
+/** Silêncio do cliente antes de a Laura responder (pedido do Alexandre, 13/11/2026: pelo menos 20 s). */
+export const ESPERA_PADRAO_MS = 20_000;
 const TRAVA_VENCIDA_MS = 3 * 60_000;
 
 export interface GatilhoIa {
@@ -146,8 +148,9 @@ export async function rodarLaura(g: GatilhoIa): Promise<void> {
         return;
     }
 
-    // 2. junta mensagens seguidas
-    await esperar(Number(process.env.WA_IA_ESPERA_MS) || 8000);
+    // 2. junta mensagens seguidas: espera ESPERA_PADRAO_MS (20 s) de silêncio. Se o cliente mandou outra
+    // mensagem nesse tempo, esta rodada desiste e a da mensagem mais nova responde UMA vez por todas.
+    await esperar(Number(process.env.WA_IA_ESPERA_MS) || ESPERA_PADRAO_MS);
     const ultima = await ultimaDoCliente(supabase, g.conversaId);
     if (!ultima || ultima.id !== g.mensagemId) return;
 
@@ -246,6 +249,7 @@ export async function rodarLaura(g: GatilhoIa): Promise<void> {
             .slice(0, 3).map(m => textoParaIa(m) || '');
         let repeticaoTratada = false;
         let comentarioTratado = false;
+        let longaTratada = false;
         while (iteracoes < MAX_ITERACOES) {
             iteracoes++;
             // Sonnet 5.5: pensamento adaptativo (padrão) em esforço baixo. O pensamento
@@ -278,6 +282,14 @@ export async function rodarLaura(g: GatilhoIa): Promise<void> {
                 repeticaoTratada = true;
                 messages.push({ role: 'assistant', content: resp.content });
                 messages.push({ role: 'user', content: '<aviso_do_crm>Essa resposta repete o que a loja já disse ou já perguntou. Reescreva respondendo só ao que o cliente acabou de escrever, sem repetir carros, preços, correções nem a pergunta anterior. Se não houver nada novo a perguntar, faça só a próxima etapa (ex.: oferecer fotos ou a visita).</aviso_do_crm>' });
+                texto = '';
+                continue;
+            }
+            if (!longaTratada && texto && respostaLonga(texto)) {
+                // longa demais: pede UMA versão curta (máx. 2 frases), mantendo só o essencial
+                longaTratada = true;
+                messages.push({ role: 'assistant', content: resp.content });
+                messages.push({ role: 'user', content: '<aviso_do_crm>Essa resposta ficou longa. Reescreva em no máximo 2 frases curtas (uns 200 caracteres), só com o essencial e uma pergunta no máximo. Sem repetir o que o cliente disse.</aviso_do_crm>' });
                 texto = '';
                 continue;
             }
