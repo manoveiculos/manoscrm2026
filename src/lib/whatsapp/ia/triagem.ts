@@ -161,6 +161,8 @@ export function nivelDeInteresse(p: { falasDoCliente: string[]; selo?: string | 
     const falas = p.falasDoCliente.map(f => (f || '').trim()).filter(Boolean);
     if (p.selo === 'fora_do_perfil') return 'leve';
     if (p.selo === 'quente') return 'quente';
+    // selo morno (regra oficial, já com entrada/troca/prazo avaliados): palavra solta não promove a quente
+    if (p.selo === 'morno') return 'morno';
     if (falas.length >= 2 && falas.some(f => SINAL_QUENTE.test(f))) return 'quente';
     if (falas.length >= 3 || p.selo === 'morno') return 'morno';
     return 'leve';
