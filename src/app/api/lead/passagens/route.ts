@@ -55,6 +55,8 @@ export async function GET(req: NextRequest) {
         classificacao = {
             em: cl.criado_em, modo: cl.modo, categoria: cl.categoria, selo: cl.selo, classe: cl.classe, score: cl.score, confianca: cl.confianca,
             resumo: cl.resumo, proximaAcao: cl.proxima_acao, motivoDoSelo: (cl.extracao as { motivoDoSelo?: string } | null)?.motivoDoSelo ?? null,
+            divergencias: (cl.extracao as { divergencias?: unknown[] } | null)?.divergencias ?? [],
+            seloPelaConversa: (cl.extracao as { seloPelaConversa?: string | null } | null)?.seloPelaConversa ?? null,
             provas: (['carro', 'entrada', 'troca', 'prazo'] as const).filter(k => x[k]?.valor).map(k => ({ campo: k, valor: x[k]?.valor, evidencia: x[k]?.evidencia })),
             gravados: Object.keys((cl.campos_gravados || {}) as object),
         };

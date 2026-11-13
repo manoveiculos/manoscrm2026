@@ -83,6 +83,26 @@ test('nunca sobrescreve o que o consultor ou o cliente já gravou', () => {
     assert.equal(p.selo, 'quente');                    // a regra usa o que está no lead (entrada 35 mil + prazo curto)
 });
 
+test('cadastro desatualizado: avisa a divergência e mostra o selo pela conversa, sem sobrescrever', () => {
+    // caso real de ensaio: o cadastro diz "só pesquisando / 20 mil" e o cliente disse "25 mil" e "essa semana"
+    const v = verificarExtracao(lerExtracao(JSON_BOM)!, FALAS);
+    const p = planejarGravacao({
+        atuais: { vehicle_interest: 'Compass 2019', valor_investimento: '20000', carro_troca: 'Sem troca', prazo_compra: 'pesquisando' }, extracao: v, pisoEstoque: 30000,
+    });
+    assert.deepEqual(p.preencher, {});                                  // nada é sobrescrito
+    assert.equal(p.selo, 'morno');                                      // regra sobre o cadastro
+    assert.deepEqual(p.divergencias.map(d => d.campo).sort(), ['prazo', 'troca']);   // entrada 20000 = "20 mil" não diverge
+    assert.equal(p.seloPelaConversa, 'quente');                         // prazo "esta semana" + troca/entrada
+    // sem divergência, sem sugestão
+    const q = planejarGravacao({ atuais: { vehicle_interest: 'Compass 2019', valor_investimento: 'R$ 20.000', carro_troca: 'Gol 2012', prazo_compra: 'esta_semana' }, extracao: v, pisoEstoque: 30000 });
+    assert.deepEqual(q.divergencias, []);
+    assert.equal(q.seloPelaConversa, null);
+});
+
+test('o prompt aceita "tem carro na troca" sem o modelo', () => {
+    assert.match(CLASSIFICADOR_PROMPT, /Sim, tem \(modelo não informado\)/);
+});
+
 test('o score da IA não contradiz a regra: preso à faixa do selo', () => {
     const base = lerExtracao(JSON_BOM)!;
     const morno = verificarExtracao({ ...base, entrada: { valor: null, evidencia: null }, troca: { valor: null, evidencia: null }, prazo: { valor: 'pesquisando', evidencia: 'Quero fechar essa semana' }, score: 95 }, FALAS);

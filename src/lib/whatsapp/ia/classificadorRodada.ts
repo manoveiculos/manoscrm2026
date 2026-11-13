@@ -117,7 +117,7 @@ export async function classificarConversa(
             extracao: {
                 carro: verificada.carro, entrada: verificada.entrada, troca: verificada.troca, prazo: verificada.prazo,
                 formaPagamento: verificada.formaPagamento, sinaisPositivos: verificada.sinaisPositivos, sinaisNegativos: verificada.sinaisNegativos,
-                jaPreenchidos: plano.jaPreenchidos, motivoDoSelo: plano.resultado.motivo,
+                jaPreenchidos: plano.jaPreenchidos, motivoDoSelo: plano.resultado.motivo, divergencias: plano.divergencias, seloPelaConversa: plano.seloPelaConversa,
             },
             campos_gravados: gravouCampos, classe_gravada: classeGravada, descartados: verificada.descartados, custo_usd: custo,
         });

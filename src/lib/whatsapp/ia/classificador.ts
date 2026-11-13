@@ -57,7 +57,7 @@ REGRAS (a mais importante: só o que o CLIENTE disse)
 - Use SÓ o que o cliente escreveu ou falou (áudios vêm transcritos). O que a Laura ou o consultor disseram NÃO vale como resposta do cliente.
 - "evidencia" é uma frase copiada da fala do cliente, sem mudar uma palavra. Sem frase que prove, o campo é null. Nunca invente, deduza nem arredonde.
 - entrada: "Sem entrada" só se ele disse que não tem/não dá entrada. Se ele não falou de entrada, é null (não é o mesmo que "sem entrada").
-- troca: "Sem troca" só se ele disse que não tem carro para trocar. Se não falou, null.
+- troca: "Sem troca" só se ele disse que não tem carro para trocar. Se disse que TEM carro para dar na troca mas não disse qual, use "Sim, tem (modelo não informado)". Se não falou, null.
 - prazo: esta_semana (hoje, amanhã, essa semana, urgente), este_mes (este mês, até o fim do mês, 15-30 dias), 1_3_meses, pesquisando (só olhando, sem pressa, não sei). Sem dizer nada sobre quando, null.
 - categoria: "vendedor_de_carro" se ele quer VENDER ou avaliar o carro dele sem querer comprar; "outro" para spam, engano, peça, emprego, cobrança; "comprador" nos demais casos.
 - Cliente que perguntou só o preço, ou só "tem esse carro?", sem dizer entrada, troca nem prazo, tem campos null e score baixo: isso é normal.
@@ -155,7 +155,13 @@ export function verificarExtracao(x: Extracao, falasDoCliente: string[]): Extrac
 
 // ── o que gravar no lead ────────────────────────────────────────────────────
 
+export interface Divergencia { campo: 'entrada' | 'troca' | 'prazo'; noLead: string; dito: string; evidencia: string | null }
+
 export interface PlanoGravacao {
+    /** O cliente disse uma coisa na conversa e o cadastro do lead diz outra (o cadastro NÃO é alterado). */
+    divergencias: Divergencia[];
+    /** Selo que sairia se valesse o que o cliente disse na conversa (só aparece quando difere do selo do cadastro). */
+    seloPelaConversa: Selo | null;
     /** Campos de qualificação a preencher (só os que estão VAZIOS no lead). */
     preencher: QualificacaoCampos;
     /** Campos que a IA achou mas já tinham valor: não mexe (o consultor/cliente já gravou). */
@@ -196,15 +202,37 @@ export function planejarGravacao(p: { atuais: QualificacaoCampos; extracao: Extr
         tenta('prazo_compra', x.prazo.valor, vazio(atuais.prazo_compra), 'prazo');
     }
     const camposFinais: QualificacaoCampos = { ...atuais, ...preencher };
+
+    // O que o cliente disse e o cadastro contradiz: avisa, não sobrescreve.
+    const divergencias: Divergencia[] = [];
+    if (x.categoria === 'comprador') {
+        if (x.entrada.valor && !vazio(atuais.valor_investimento) && entradaEmReais(x.entrada.valor) !== entradaEmReais(atuais.valor_investimento)) {
+            divergencias.push({ campo: 'entrada', noLead: String(atuais.valor_investimento), dito: x.entrada.valor, evidencia: x.entrada.evidencia });
+        }
+        if (x.troca.valor && !vazio(atuais.carro_troca) && temTroca(x.troca.valor) !== temTroca(atuais.carro_troca)) {
+            divergencias.push({ campo: 'troca', noLead: String(atuais.carro_troca), dito: x.troca.valor, evidencia: x.troca.evidencia });
+        }
+        if (x.prazo.valor && !vazio(atuais.prazo_compra) && x.prazo.valor !== atuais.prazo_compra) {
+            divergencias.push({ campo: 'prazo', noLead: String(atuais.prazo_compra), dito: x.prazo.valor, evidencia: x.prazo.evidencia });
+        }
+    }
+    const pelaConversa: QualificacaoCampos = {
+        ...camposFinais,
+        ...(x.entrada.valor ? { valor_investimento: x.entrada.valor } : {}),
+        ...(x.troca.valor ? { carro_troca: x.troca.valor } : {}),
+        ...(x.prazo.valor ? { prazo_compra: x.prazo.valor } : {}),
+    };
     const resultado = classificarLead(camposFinais, p.pisoEstoque);
     const selo = resultado.selo;
+    const outro = divergencias.length && x.categoria === 'comprador' ? classificarLead(pelaConversa, p.pisoEstoque).selo : null;
+    const seloPelaConversa = outro && outro !== selo ? outro : null;
     const classe = x.categoria !== 'comprador' ? null : selo === 'quente' ? 'hot' : selo === 'morno' ? 'warm' : selo === 'fora_do_perfil' ? 'cold' : null;
     let score: number | null = null;
     if (classe && x.score != null) {
         const [lo, hi] = SCORE_FAIXA[selo];
         score = Math.min(hi, Math.max(lo, x.score));
     }
-    return { preencher, jaPreenchidos, camposFinais, resultado, selo, classe, score };
+    return { divergencias, seloPelaConversa, preencher, jaPreenchidos, camposFinais, resultado, selo, classe, score };
 }
 
 /**

@@ -18,6 +18,7 @@ interface SituacaoView { situacao: CodigoSituacao; resumo: string; proximaAcao: 
 interface ClassificacaoView {
     em: string; modo: 'ensaio' | 'grava'; categoria: 'comprador' | 'vendedor_de_carro' | 'outro'; selo: string; score: number | null; confianca: string;
     resumo: string | null; proximaAcao: string | null; motivoDoSelo: string | null; provas: { campo: string; valor: string | null; evidencia: string | null }[]; gravados: string[];
+    divergencias: { campo: string; noLead: string; dito: string; evidencia: string | null }[]; seloPelaConversa: string | null;
 }
 
 const ROTULO_SELO: Record<string, string> = { quente: '🔥 Quente', morno: '🌡️ Morno', fora_do_perfil: '⛔ Fora do perfil', sem_qualificacao: '❔ Sem qualificação' };
@@ -64,6 +65,15 @@ export function PassagensCard({ uid, className = '' }: { uid: string; className?
                             </li>
                         ))}
                     </ul>
+                )}
+                {c.divergencias?.length > 0 && (
+                    <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/[0.08] px-3 py-2 text-[12px] text-amber-100">
+                        <p className="font-bold">Atenção: a conversa diz outra coisa que o cadastro</p>
+                        <ul className="mt-1 space-y-0.5">
+                            {c.divergencias.map(d => <li key={d.campo}>{ROTULO_CAMPO[d.campo] || d.campo}: no cadastro “{d.noLead}”, o cliente disse “{d.dito}”</li>)}
+                        </ul>
+                        {c.seloPelaConversa && <p className="mt-1 font-bold">Pela conversa seria: {ROTULO_SELO[c.seloPelaConversa] || c.seloPelaConversa}. Confirme com o cliente e atualize o cadastro.</p>}
+                    </div>
                 )}
                 {c.proximaAcao && <p className="text-[12px] text-violet-200/90 mt-1.5">Próximo passo: {c.proximaAcao}</p>}
                 <p className="text-[10px] text-white/35 mt-1">
