@@ -38,6 +38,13 @@ async function consultores(supabase: SupabaseClient): Promise<(Consultor & { rol
 async function dadosDoLead(supabase: SupabaseClient, leadUid: string): Promise<DadosLeadFila> {
     const link = `${base()}/lead/${encodeURIComponent(leadUid)}`;
     const i = leadUid.indexOf(':');
+    if (i > 0 && leadUid.slice(0, i) === 'leadsfacebook') {
+        // lead do Facebook: tabela própria; o resumo da triagem fica nas observações
+        const { data: f } = await supabase.from('leadsfacebook').select('nome, vehicle_interest, source, observacoes').eq('id', leadUid.slice(i + 1)).maybeSingle();
+        const vi = ((f?.vehicle_interest as string | null) || '').trim();
+        const apurouFb = /O que ela apurou:\s*([^\n]+)/.exec((f?.observacoes as string | null) || '')?.[1] ?? null;
+        return { nome: (f?.nome as string | null) ?? null, carro: vi && vi.toLowerCase() !== String(f?.source || '').trim().toLowerCase() ? vi : null, origem: 'Facebook', resumo: apurouFb, link };
+    }
     if (i <= 0 || leadUid.slice(0, i) !== TABELA) return { nome: null, carro: null, origem: null, resumo: null, link };
     const { data: l } = await supabase.from(TABELA).select('nome, vehicle_interest, interesse, origem, handoff_summary').eq('id', parseInt(leadUid.slice(i + 1), 10)).maybeSingle();
     const hs = (l?.handoff_summary as string | null) || '';

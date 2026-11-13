@@ -19,6 +19,7 @@ import { classificarConversa } from './classificadorRodada';
 import { claude, MODELO_PADRAO } from './motor';
 import { LAURA_CRM_PROMPT } from './prompt';
 import { custoUsd, somarUso, type UsoTokens } from './regras';
+import { arquivarLeadDaTriagem, fonteDoUid, gravarResumoNoLead, lerLeadDaTriagem } from './fonteLead';
 import { registrarCustoIa } from './custos';
 import {
     ESPERA_ENTRE_CONTATOS_MS, MAX_CONTATOS_POR_RODADA, decidirTriagem, instrucaoPrimeiroContato, interesseUtil,
@@ -36,8 +37,7 @@ export interface ResumoTriagem {
     lembretes?: number;
 }
 
-const TABELA = 'leads_distribuicao_crm_26';
-const idDoUid = (uid: string) => { const i = uid.indexOf(':'); return i > 0 && uid.slice(0, i) === TABELA ? parseInt(uid.slice(i + 1), 10) : null; };
+// Lead do CRM (Google/WhatsApp) ou do Facebook: fonteLead.ts esconde a diferença de tabela.
 
 /**
  * Solta o lead para a roleta (status 'aguardando': o motor distribui e avisa o consultor) e grava o
@@ -76,12 +76,7 @@ export async function liberarDaTriagem(
         contatado: Boolean(info.contatado), respondeu: Boolean(info.respondeu), lembreteIgnorado: info.lembreteIgnorado,
     });
     await supabase.from('wa_triagem').update({ liberado_em: agora.toISOString(), motivo, resumo }).eq('lead_uid', leadUid);
-    const id = idDoUid(leadUid);
-    if (id) {
-        const { data: l } = await supabase.from(TABELA).select('handoff_summary').eq('id', id).maybeSingle();
-        const antes = (l?.handoff_summary as string | null) || '';
-        await supabase.from(TABELA).update({ handoff_summary: `${resumo}${antes ? `\n\n${antes}` : ''}`.slice(0, 2000), handoff_at: agora.toISOString() }).eq('id', id);
-    }
+    await gravarResumoNoLead(supabase, leadUid, resumo, agora);
     return true;
 }
 
@@ -91,10 +86,7 @@ export async function liberarDaTriagem(
  */
 export async function descartarNaoCliente(supabase: SupabaseClient, leadUid: string, conversaId: string | null, info: { tipo: string; resumo?: string | null; agora?: Date }): Promise<boolean> {
     const agora = (info.agora ?? new Date()).toISOString();
-    const id = idDoUid(leadUid);
-    if (id) {
-        await supabase.from(TABELA).update({ archived_at: agora, archived_reason: `nao_e_cliente: ${info.tipo}`.slice(0, 120) }).eq('id', id).is('archived_at', null);
-    }
+    await arquivarLeadDaTriagem(supabase, leadUid, `nao_e_cliente: ${info.tipo}`, info.agora ?? new Date());
     const { data: lib } = await supabase.from('lead_distribuicao').update({ status: 'atendido', atendido_em: agora, atualizado_em: agora })
         .eq('lead_uid', leadUid).in('status', ['triagem_laura', 'fila_espera', 'aguardando', 'standby']).select('lead_uid');
     await supabase.from('wa_triagem').update({ liberado_em: agora, motivo: 'nao_e_cliente', resumo: (info.resumo || info.tipo).slice(0, 300) }).eq('lead_uid', leadUid);
@@ -108,9 +100,9 @@ export async function rodarTriagem(supabase: SupabaseClient, opts: { agora?: Dat
     const r: ResumoTriagem = { ok: true, presos: 0, contatados: 0, liberados: {}, esperando: 0, erros: 0 };
     const liberou = (m: string) => { r.liberados[m] = (r.liberados[m] || 0) + 1; };
 
-    const { data: conf, error: eConf } = await supabase.from('wa_ia_config').select('triagem_google, triagem_whatsapp').eq('id', 1).maybeSingle();
+    const { data: conf, error: eConf } = await supabase.from('wa_ia_config').select('triagem_google, triagem_whatsapp, triagem_facebook').eq('id', 1).maybeSingle();
     if (eConf) return { ...r, ok: false, motivo: eConf.message };
-    const chaves: Record<string, boolean> = { google: Boolean(conf?.triagem_google), whatsapp: Boolean(conf?.triagem_whatsapp) };
+    const chaves: Record<string, boolean> = { google: Boolean(conf?.triagem_google), whatsapp: Boolean(conf?.triagem_whatsapp), facebook: Boolean(conf?.triagem_facebook) };
 
     const { data: presos } = await supabase.from('lead_distribuicao').select('lead_uid, criado_em').eq('status', 'triagem_laura').order('criado_em', { ascending: true }).limit(60);
     r.presos = presos?.length ?? 0;
@@ -123,14 +115,14 @@ export async function rodarTriagem(supabase: SupabaseClient, opts: { agora?: Dat
 
     let contatos = 0;
     for (const p of presos || []) {
-        const id = idDoUid(p.lead_uid);
-        if (!id) { await liberarDaTriagem(supabase, p.lead_uid, 'telefone_invalido', { agora }); liberou('telefone_invalido'); continue; }
+        if (!fonteDoUid(p.lead_uid)) { await liberarDaTriagem(supabase, p.lead_uid, 'telefone_invalido', { agora }); liberou('telefone_invalido'); continue; }
         try {
-            const { data: lead } = await supabase.from(TABELA).select('nome, telefone, interesse, vehicle_interest, cidade, origem').eq('id', id).maybeSingle();
-            const chaveLigada = Boolean(chaves[String((lead?.origem as string | null) || '').toLowerCase()]);
-            const telefone = normalizarTelefoneBR(lead?.telefone as string | null);
-            const interesse = interesseUtil((lead?.vehicle_interest as string | null) || (lead?.interesse as string | null));
-            const nome = (lead?.nome as string | null) ?? null;
+            const lead = await lerLeadDaTriagem(supabase, p.lead_uid);
+            const origemLead = lead?.origem ?? '';
+            const chaveLigada = Boolean(chaves[origemLead]);
+            const telefone = normalizarTelefoneBR(lead?.telefone);
+            const interesse = interesseUtil(lead?.interesse);
+            const nome = lead?.nome ?? null;
 
             let { data: tri } = await supabase.from('wa_triagem').select('contato_em, conversa_id, lembrete_em').eq('lead_uid', p.lead_uid).maybeSingle();
             if (!tri) { await supabase.from('wa_triagem').insert({ lead_uid: p.lead_uid }); tri = { contato_em: null, conversa_id: null, lembrete_em: null }; }
@@ -212,15 +204,15 @@ export async function rodarTriagem(supabase: SupabaseClient, opts: { agora?: Dat
                 await supabase.from('wa_triagem').update({ lembrete_em: agora.toISOString(), ...(conversaId ? { conversa_id: conversaId } : {}) }).eq('lead_uid', p.lead_uid);
                 continue;
             }
-            // só o lead de anúncio (Google) recebe o primeiro contato da Laura; conversa do WhatsApp quem puxou foi o cliente
-            if (String((lead?.origem as string | null) || '').toLowerCase() !== 'google') { r.esperando++; continue; }
+            // só o lead de anúncio (Google, Facebook) recebe o primeiro contato da Laura; conversa do WhatsApp quem puxou foi o cliente
+            if (origemLead !== 'google' && origemLead !== 'facebook') { r.esperando++; continue; }
             if (contatos >= MAX_CONTATOS_POR_RODADA || !telefone || !cliente) { r.esperando++; continue; }
 
             // ── primeiro contato ──
             const resp = await cliente.messages.create({
                 model: modelo, max_tokens: 2048,
                 system: [{ type: 'text', text: LAURA_CRM_PROMPT, cache_control: { type: 'ephemeral' } }],
-                messages: [{ role: 'user', content: instrucaoPrimeiroContato({ nome, interesse, cidade: (lead?.cidade as string | null) ?? null }) }],
+                messages: [{ role: 'user', content: instrucaoPrimeiroContato({ nome, interesse, cidade: lead?.cidade ?? null, origem: origemLead }) }],
                 output_config: { effort: 'low' },
             });
             const uso: UsoTokens = somarUso({ input_tokens: 0, output_tokens: 0 }, resp.usage);

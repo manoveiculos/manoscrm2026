@@ -4,7 +4,7 @@ import { withHeartbeat } from '@/lib/services/cronHeartbeat';
 import { rodarTriagem } from '@/lib/whatsapp/ia/triagemRodada';
 
 /**
- * GET /api/cron/wa-triagem — triagem da Laura nos leads de anúncio (Google primeiro).
+ * GET /api/cron/wa-triagem — triagem da Laura nos leads de anúncio (Google, WhatsApp e Facebook).
  * Lead preso em 'triagem_laura': a Laura manda a primeira mensagem ou o lead é liberado para a roleta.
  * Regras em src/lib/whatsapp/ia/triagem.ts. Chamado pelo pg_cron (a cada 2 min).
  *

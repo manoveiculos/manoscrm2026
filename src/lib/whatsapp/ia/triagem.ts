@@ -199,11 +199,14 @@ export function interesseUtil(v: string | null | undefined): string | null {
 }
 
 /** Instrução da PRIMEIRA mensagem (a Laura segue o prompt de sempre como sistema). */
-export function instrucaoPrimeiroContato(p: { nome: string | null; interesse: string | null; cidade: string | null }): string {
+export function instrucaoPrimeiroContato(p: { nome: string | null; interesse: string | null; cidade: string | null; origem?: string | null }): string {
     const nome = primeiroNome(p.nome);
+    const doFacebook = (p.origem || '').toLowerCase() === 'facebook';
     return [
         '<tarefa_do_crm>',
-        'Um cliente pediu informações pelo anúncio da Manos Veículos no Google e deixou o contato. Ele ainda NÃO escreveu no WhatsApp: você vai puxar a conversa.',
+        doFacebook
+            ? 'Um cliente preencheu o formulário do anúncio da Manos Veículos no Facebook/Instagram e deixou o contato. Ele ainda NÃO escreveu no WhatsApp: você vai puxar a conversa.'
+            : 'Um cliente pediu informações pelo anúncio da Manos Veículos no Google e deixou o contato. Ele ainda NÃO escreveu no WhatsApp: você vai puxar a conversa.',
         'Escreva UMA mensagem curta de primeiro contato, simpática e natural: cumprimente, diga que é a Laura, da Manos Veículos, e que viu o interesse dele.',
         nome ? `Nome informado no formulário: ${nome} (use uma vez).` : 'O formulário não trouxe um nome confiável: não invente nome e pergunte com quem você fala.',
         p.interesse ? `Carro que ele viu: ${p.interesse}. Cite só isso, sem preço, km nem condições.` : 'O formulário não diz qual carro: pergunte qual carro ele procura.',
