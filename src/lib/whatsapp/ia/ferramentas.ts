@@ -89,6 +89,18 @@ export const FERRAMENTAS: Anthropic.Tool[] = [
         },
     },
     {
+        name: 'encerrar_contato',
+        description: 'Use quando o contato NÃO é cliente de carro: empresa oferecendo serviço ou divulgação, vendedor de outra coisa, spam, engano, assunto jurídico ou de cobrança, brincadeira. Não chame passar_para_consultor nesses casos: o consultor não deve ser incomodado.',
+        input_schema: {
+            type: 'object',
+            properties: {
+                tipo: { type: 'string', enum: ['oferta_de_servico', 'spam', 'engano', 'assunto_juridico_ou_cobranca', 'brincadeira', 'outro'] },
+                resumo: { type: 'string', description: 'Uma frase: quem é e o que queria.' },
+            },
+            required: ['tipo', 'resumo'],
+        },
+    },
+    {
         name: 'passar_para_consultor',
         description: 'Passa a conversa para um consultor da loja. Use quando a visita for confirmada, quando o cliente pedir para falar com uma pessoa ou quando pedir algo que você não pode fazer (avaliação, parcela, desconto, reserva).',
         input_schema: {
@@ -145,6 +157,8 @@ export interface ContextoRodada {
     fotos: FotoAnotada[];
     agendamento: AgendaAnotada | null;
     passagem: PassagemAnotada | null;
+    /** Contato que não é cliente de carro (a Laura chamou encerrar_contato): não vai a consultor nem gera cobrança. */
+    naoCliente?: { tipo: string; resumo: string; executada?: boolean } | null;
     chamadas: ChamadaFerramenta[];
     /** O que a rodada gravou fora de wa_ia_execucoes (ex.: "nome no lead"). */
     gravacoes: string[];
@@ -170,6 +184,7 @@ export async function executarFerramenta(nome: string, entrada: unknown, ctx: Co
             case 'salvar_ficha': saida = await salvarFicha(e, ctx); break;
             case 'agendar_visita': saida = agendarVisita(e, ctx); break;
             case 'passar_para_consultor': saida = passarParaConsultor(e, ctx); break;
+            case 'encerrar_contato': saida = encerrarContato(e, ctx); break;
             default: saida = { erro: `ferramenta desconhecida: ${nome}` }; erro = true;
         }
         if (saida.erro) erro = true;
@@ -368,4 +383,10 @@ function passarParaConsultor(e: Record<string, unknown>, ctx: ContextoRodada): S
     const resumo = str(e.resumo, 500) || '';
     ctx.passagem = { motivo, resumo };
     return { ok: true, observacao: 'Consultor avisado. Avise o cliente, em uma frase, que o consultor continua o atendimento por aqui.' };
+}
+
+function encerrarContato(e: Record<string, unknown>, ctx: ContextoRodada): Saida {
+    const tipo = str(e.tipo, 40) || 'outro';
+    ctx.naoCliente = { tipo, resumo: str(e.resumo, 300) || '' };
+    return { ok: true, observacao: 'Contato encerrado, sem incomodar o consultor. Responda em UMA frase curta e educada (ou agradeça) e não faça mais perguntas.' };
 }

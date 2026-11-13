@@ -34,7 +34,7 @@ import { msgErro } from '../erro';
 import { lerConfigIa } from './config';
 import { FERRAMENTAS, executarFerramenta, type ContextoRodada, type ConversaIa } from './ferramentas';
 import { LAURA_CRM_PROMPT, contextoDaRodada } from './prompt';
-import { liberarDaTriagem } from './triagemRodada';
+import { descartarNaoCliente, liberarDaTriagem } from './triagemRodada';
 import {
     custoUsd, iaPodeResponder, inicioDoDiaSP, limiteDiario, montarHistorico, somarUso, textoParaIa,
     comentaAtendimentoAnterior, respostaLonga, repeteMensagemAnterior, valoresCitados, type FichaLaura, type MensagemParaIa, type UsoTokens,
@@ -182,7 +182,7 @@ export async function rodarLaura(g: GatilhoIa): Promise<void> {
     const ctx: ContextoRodada = {
         supabase, modo, agora: new Date(), conversa,
         textosDoCliente: [], estoque: [], horario: { horas: { seg_sex: [8, 18], sab: [8, 12], tz: 'America/Sao_Paulo' }, feriados: new Set() },
-        ficha: conversa.ficha, fotos: [], agendamento: null, passagem: null, chamadas: [], gravacoes: [],
+        ficha: conversa.ficha, fotos: [], agendamento: null, passagem: null, naoCliente: null, chamadas: [], gravacoes: [],
     };
 
     const finalizar = async (campos: Record<string, unknown>) => {
@@ -412,6 +412,12 @@ async function executarEnvio(supabase: SupabaseClient, ctx: ContextoRodada, g: G
             vendedor_id: vendedorAuth,
         });
         ctx.agendamento.gravada = !error;
+    }
+    // Contato que não é cliente de carro: arquiva o lead e encerra a conversa, sem avisar nem cobrar consultor
+    if (ctx.naoCliente && !ctx.passagem) {
+        if (ctx.conversa.lead_uid) await descartarNaoCliente(supabase, ctx.conversa.lead_uid, ctx.conversa.id, { tipo: ctx.naoCliente.tipo, resumo: ctx.naoCliente.resumo }).catch(() => false);
+        else await supabase.from('wa_conversas').update({ status: 'encerrada' }).eq('id', ctx.conversa.id);
+        ctx.naoCliente.executada = true;
     }
     if (ctx.passagem) {
         await supabase.from('wa_conversas').update({ status: 'humano' }).eq('id', ctx.conversa.id);

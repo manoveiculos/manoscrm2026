@@ -85,6 +85,23 @@ export async function liberarDaTriagem(
     return true;
 }
 
+/**
+ * Contato que não é cliente de carro: arquiva o lead (reversível: aba Arquivadas), encerra a conversa, tira da triagem e da fila.
+ * Nenhum consultor é avisado e nenhuma cobrança nasce. Devolve false se já tinha sido tratado.
+ */
+export async function descartarNaoCliente(supabase: SupabaseClient, leadUid: string, conversaId: string | null, info: { tipo: string; resumo?: string | null; agora?: Date }): Promise<boolean> {
+    const agora = (info.agora ?? new Date()).toISOString();
+    const id = idDoUid(leadUid);
+    if (id) {
+        await supabase.from(TABELA).update({ archived_at: agora, archived_reason: `nao_e_cliente: ${info.tipo}`.slice(0, 120) }).eq('id', id).is('archived_at', null);
+    }
+    const { data: lib } = await supabase.from('lead_distribuicao').update({ status: 'atendido', atendido_em: agora, atualizado_em: agora })
+        .eq('lead_uid', leadUid).in('status', ['triagem_laura', 'fila_espera', 'aguardando', 'standby']).select('lead_uid');
+    await supabase.from('wa_triagem').update({ liberado_em: agora, motivo: 'nao_e_cliente', resumo: (info.resumo || info.tipo).slice(0, 300) }).eq('lead_uid', leadUid);
+    if (conversaId) await supabase.from('wa_conversas').update({ status: 'encerrada', ia_silenciada_ate: null }).eq('id', conversaId);
+    return Boolean(lib?.length);
+}
+
 export async function rodarTriagem(supabase: SupabaseClient, opts: { agora?: Date; esperar?: (ms: number) => Promise<void> } = {}): Promise<ResumoTriagem> {
     const agora = opts.agora ?? new Date();
     const esperar = opts.esperar ?? ((ms: number) => new Promise<void>(r => setTimeout(r, ms)));
@@ -161,6 +178,13 @@ export async function rodarTriagem(supabase: SupabaseClient, opts: { agora?: Dat
                 ultimaMsgEm, nivel, lembreteEm, lembretePermitido,
             });
 
+            if (d.acao === 'liberar' && (d.motivo === 'esfriou_quente' || d.motivo === 'esfriou_morno' || d.motivo === 'sem_conclusao')) {
+                const { data: cat } = await supabase.from('lead_classificacoes').select('categoria, confianca').eq('lead_uid', p.lead_uid).order('criado_em', { ascending: false }).limit(1).maybeSingle();
+                if (cat?.categoria === 'outro' && cat?.confianca === 'alta') {
+                    if (await descartarNaoCliente(supabase, p.lead_uid, conversaId, { tipo: 'classificador', resumo: 'o Classificador viu que não é comprador', agora })) liberou('nao_e_cliente');
+                    continue;
+                }
+            }
             if (d.acao === 'liberar') {
                 if (await liberarDaTriagem(supabase, p.lead_uid, d.motivo, { nome, interesse, contatado: Boolean(contatoEm), respondeu: falasDoCliente.length > 1 || Boolean(ultimaDoCliente), lembreteIgnorado: Boolean(lembreteEm), agora })) liberou(d.motivo);
                 continue;

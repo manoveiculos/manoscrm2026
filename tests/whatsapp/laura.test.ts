@@ -291,8 +291,8 @@ function contexto(banco: ReturnType<typeof bancoFicticio>, conversa: Partial<Con
     };
 }
 
-test('as 5 ferramentas pedidas existem para o Claude', () => {
-    assert.deepEqual(FERRAMENTAS.map(f => f.name), ['buscar_estoque', 'enviar_fotos', 'salvar_ficha', 'agendar_visita', 'passar_para_consultor']);
+test('as ferramentas pedidas existem para o Claude (5 do atendimento + encerrar_contato)', () => {
+    assert.deepEqual(FERRAMENTAS.map(f => f.name), ['buscar_estoque', 'enviar_fotos', 'salvar_ficha', 'agendar_visita', 'encerrar_contato', 'passar_para_consultor']);
 });
 
 test('salvar_ficha (identificação ligada): nome, cidade e carro vão pelas funções do banco, que aplicam a prioridade', async () => {

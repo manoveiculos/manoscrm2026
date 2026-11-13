@@ -97,6 +97,7 @@ export const ROTULO_FERRAMENTA: Record<string, string> = {
     salvar_ficha: 'ficha',
     agendar_visita: 'agenda',
     passar_para_consultor: 'consultor',
+    encerrar_contato: 'não é cliente',
 };
 
 export function segundos(ms: number | null | undefined): string {
