@@ -35,6 +35,7 @@
     "test:aviso-lead": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/whatsapp/avisoLeadNovo.test.ts",
     "test:fila-espera": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/whatsapp/fila.test.ts",
     "test:nao-cliente": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/whatsapp/naoCliente.test.ts",
+    "test:filtro": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/whatsapp/filtro.test.ts",
     "test:laura": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/whatsapp/laura.test.ts"
   },
   "dependencies": {

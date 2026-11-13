@@ -41,6 +41,14 @@ export interface ResultadoRevisao {
  * @param precosAnunciados preços do estoque (R$) — qualquer outro valor de carro é proibido
  * @param valoresDoCliente números que o próprio cliente disse (faixa, entrada) — podem ser repetidos
  */
+/**
+ * Tração do carro ("4x2", "4x4", "6x4") não é parcela. Sem isto o filtro lia "Frontier 4x2 2014" como "4x de 2014",
+ * barrava a resposta certa e mandava ao cliente a frase de segurança sem relação com a pergunta (caso de 13/11/2026).
+ */
+export function semTracao(texto: string): string {
+    return texto.replace(/\b[2468]\s?x\s?[24](?!\d)/gi, ' ');
+}
+
 export function revisarResposta(
     texto: string,
     precosAnunciados: number[],
@@ -49,7 +57,8 @@ export function revisarResposta(
 ): ResultadoRevisao {
     const t = (texto || '').trim();
     const violacoes = new Set<Violacao>();
-    for (const r of REGRAS) if (r.rx.test(t)) violacoes.add(r.tipo);
+    const paraRegras = semTracao(t);
+    for (const r of REGRAS) if (r.rx.test(paraRegras)) violacoes.add(r.tipo);
 
     // Todo valor em R$ precisa ser preço anunciado (±1%) ou número do próprio cliente.
     const permitido = (v: number) =>
