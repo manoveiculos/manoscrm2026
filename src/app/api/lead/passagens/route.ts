@@ -45,5 +45,19 @@ export async function GET(req: NextRequest) {
             desatualizada: Boolean(sit?.situacao_em && sit?.ultima_mensagem_em && Date.parse(sit.ultima_mensagem_em) > Date.parse(sit.situacao_em)),
         };
     }
-    return NextResponse.json({ success: true, total: passagens.length, passagens: passagens.slice(0, 30), situacao }, { headers: SEM_CACHE });
+    // Última classificação do Classificador de leads (tabela só do servidor: lê com a chave de serviço, depois de a RLS da conversa já ter liberado a leitura)
+    let classificacao: Record<string, unknown> | null = null;
+    const { data: cl } = await ctx.admin.from('lead_classificacoes')
+        .select('criado_em, modo, categoria, selo, classe, score, confianca, resumo, proxima_acao, extracao, campos_gravados')
+        .eq('lead_uid', uid).order('criado_em', { ascending: false }).limit(1).maybeSingle();
+    if (cl) {
+        const x = (cl.extracao || {}) as Record<string, { valor?: string | null; evidencia?: string | null }>;
+        classificacao = {
+            em: cl.criado_em, modo: cl.modo, categoria: cl.categoria, selo: cl.selo, classe: cl.classe, score: cl.score, confianca: cl.confianca,
+            resumo: cl.resumo, proximaAcao: cl.proxima_acao, motivoDoSelo: (cl.extracao as { motivoDoSelo?: string } | null)?.motivoDoSelo ?? null,
+            provas: (['carro', 'entrada', 'troca', 'prazo'] as const).filter(k => x[k]?.valor).map(k => ({ campo: k, valor: x[k]?.valor, evidencia: x[k]?.evidencia })),
+            gravados: Object.keys((cl.campos_gravados || {}) as object),
+        };
+    }
+    return NextResponse.json({ success: true, total: passagens.length, passagens: passagens.slice(0, 30), situacao, classificacao }, { headers: SEM_CACHE });
 }

@@ -14,6 +14,7 @@ import { providerLoja } from '../evolutionProvider';
 import { enviarPeloCrm } from '../envio';
 import { msgErro } from '../erro';
 import { lerConfigIa } from './config';
+import { classificarConversa } from './classificadorRodada';
 import { claude, MODELO_PADRAO } from './motor';
 import { LAURA_CRM_PROMPT } from './prompt';
 import { custoUsd, somarUso, type UsoTokens } from './regras';
@@ -45,6 +46,12 @@ export async function liberarDaTriagem(
     info: { resumoDaLaura?: string | null; nome?: string | null; interesse?: string | null; contatado?: boolean; respondeu?: boolean; agora?: Date } = {},
 ): Promise<boolean> {
     const agora = info.agora ?? new Date();
+    // Classifica ANTES de soltar: o consultor recebe o lead já com o selo e a qualificação preenchida.
+    // Melhor esforço e com tempo-limite: se o classificador falhar ou demorar, o lead sai do mesmo jeito.
+    try {
+        const { data: conv } = await supabase.from('wa_conversas').select('id').eq('lead_uid', leadUid).limit(1).maybeSingle();
+        if (conv?.id) await Promise.race([classificarConversa(supabase, conv.id as string, { agora }), new Promise(r => setTimeout(r, 25_000))]);
+    } catch { /* segue sem classificar */ }
     const { data: lib } = await supabase.from('lead_distribuicao')
         .update({ status: 'aguardando', atualizado_em: agora.toISOString() })
         .eq('lead_uid', leadUid).eq('status', 'triagem_laura').select('lead_uid');

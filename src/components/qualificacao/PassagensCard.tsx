@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Compass, History } from 'lucide-react';
+import { Compass, History, Target } from 'lucide-react';
 import { ROTULO_SITUACAO, type CodigoSituacao } from '@/lib/whatsapp/ia/analista';
 import { ROTULO_FIM, resumoDaPassagem, type Passagem } from '@/lib/whatsapp/passagens';
 
@@ -15,17 +15,26 @@ const fmt = (iso: string) => new Intl.DateTimeFormat('pt-BR', {
  */
 interface SituacaoView { situacao: CodigoSituacao; resumo: string; proximaAcao: string; quando: string | null; confianca: string; analisadaEm: string | null; desatualizada: boolean }
 
+interface ClassificacaoView {
+    em: string; modo: 'ensaio' | 'grava'; categoria: 'comprador' | 'vendedor_de_carro' | 'outro'; selo: string; score: number | null; confianca: string;
+    resumo: string | null; proximaAcao: string | null; motivoDoSelo: string | null; provas: { campo: string; valor: string | null; evidencia: string | null }[]; gravados: string[];
+}
+
+const ROTULO_SELO: Record<string, string> = { quente: '🔥 Quente', morno: '🌡️ Morno', fora_do_perfil: '⛔ Fora do perfil', sem_qualificacao: '❔ Sem qualificação' };
+const ROTULO_CAT: Record<string, string> = { comprador: 'Quer comprar', vendedor_de_carro: 'Quer vender o carro dele', outro: 'Não é comprador' };
+const ROTULO_CAMPO: Record<string, string> = { carro: 'Carro', entrada: 'Entrada', troca: 'Troca', prazo: 'Prazo' };
+
 const dataBR = (d: string) => { const [a, m, dia] = d.split('-'); return `${dia}/${m}/${a}`; };
 
 export function PassagensCard({ uid, className = '' }: { uid: string; className?: string }) {
-    const [dados, setDados] = useState<{ total: number; passagens: Passagem[]; situacao: SituacaoView | null } | null>(null);
+    const [dados, setDados] = useState<{ total: number; passagens: Passagem[]; situacao: SituacaoView | null; classificacao: ClassificacaoView | null } | null>(null);
     const [todas, setTodas] = useState(false);
 
     useEffect(() => {
         let vivo = true;
         fetch(`/api/lead/passagens?uid=${encodeURIComponent(uid)}`, { cache: 'no-store' })
             .then(r => r.json())
-            .then(d => { if (vivo && d?.success) setDados({ total: d.total, passagens: d.passagens, situacao: d.situacao || null }); })
+            .then(d => { if (vivo && d?.success) setDados({ total: d.total, passagens: d.passagens, situacao: d.situacao || null, classificacao: d.classificacao || null }); })
             .catch(() => { /* informativo */ });
         return () => { vivo = false; };
     }, [uid]);
@@ -33,8 +42,35 @@ export function PassagensCard({ uid, className = '' }: { uid: string; className?
     if (!dados || !dados.passagens.length) return null;
     const lista = todas ? dados.passagens : dados.passagens.slice(0, 3);
     const s = dados.situacao;
+    const c = dados.classificacao;
     return (
         <div className={`space-y-2 ${className}`}>
+        {c && (
+            <div className="bg-violet-500/[0.06] border border-violet-500/20 rounded-xl px-4 py-3">
+                <p className="flex items-center gap-2 text-[11px] font-bold text-violet-300 uppercase tracking-widest mb-1">
+                    <Target size={14} /> Classificação da IA
+                </p>
+                <p className="text-[13px] font-bold text-white/90">
+                    {c.categoria === 'comprador' ? (ROTULO_SELO[c.selo] || c.selo) : ROTULO_CAT[c.categoria]}{c.score != null && c.categoria === 'comprador' ? ` · ${c.score}/100` : ''}
+                </p>
+                {c.motivoDoSelo && c.categoria === 'comprador' && <p className="text-[12px] text-white/60">{c.motivoDoSelo}</p>}
+                {c.resumo && <p className="text-[12px] text-white/70 leading-relaxed mt-1">{c.resumo}</p>}
+                {c.provas.length > 0 && (
+                    <ul className="mt-2 space-y-1">
+                        {c.provas.map(p => (
+                            <li key={p.campo} className="text-[12px] text-white/70">
+                                <b className="text-white/90">{ROTULO_CAMPO[p.campo] || p.campo}:</b> {p.valor}
+                                {p.evidencia && <span className="block text-[11px] text-white/40">cliente disse: “{p.evidencia}”</span>}
+                            </li>
+                        ))}
+                    </ul>
+                )}
+                {c.proximaAcao && <p className="text-[12px] text-violet-200/90 mt-1.5">Próximo passo: {c.proximaAcao}</p>}
+                <p className="text-[10px] text-white/35 mt-1">
+                    {c.modo === 'ensaio' ? 'Teste: ainda não gravado no lead' : c.gravados.length ? `Preencheu no lead: ${c.gravados.map(k => ({ vehicle_interest: 'carro', valor_investimento: 'entrada', carro_troca: 'troca', prazo_compra: 'prazo' }[k] || k)).join(', ')}` : 'Nada novo para preencher'}{c.confianca === 'baixa' ? ' · pouca certeza' : ''}
+                </p>
+            </div>
+        )}
         {s && (
             <div className="bg-emerald-500/[0.06] border border-emerald-500/20 rounded-xl px-4 py-3">
                 <p className="flex items-center gap-2 text-[11px] font-bold text-emerald-300 uppercase tracking-widest mb-1">

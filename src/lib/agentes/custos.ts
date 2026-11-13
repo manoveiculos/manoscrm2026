@@ -14,6 +14,7 @@ export const ROTULO_AGENTE_CUSTO: Record<string, string> = {
     followup: 'Follow-up',
     triagem: 'Triagem de leads',
     analista: 'Analista de contexto',
+    classificador: 'Classificador de leads',
 };
 
 export const ROTULO_PERIODO: Record<Periodo, string> = { dia: 'Hoje', semana: 'Semana', mes: 'Mês' };
