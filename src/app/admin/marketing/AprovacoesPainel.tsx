@@ -31,7 +31,9 @@ export function AprovacoesPainel({ pendentes, busyId, onDecide, onAbrirImagens, 
                         const imagens: string[] = Array.isArray(run.metrics?.imagens_publicas) ? run.metrics.imagens_publicas : [];
                         const caption: string | null = run.metrics?.caption_instagram || null;
                         const temArteGerada = run.squad === 'vitrine' || run.squad === 'diretor_arte';
-                        const pronto = imagens.length > 0;
+                        const video: string | null = run.metrics?.video_publico || null;
+                        const capaVideo: string | undefined = run.metrics?.capa_publica || undefined;
+                        const pronto = imagens.length > 0 || !!video;
                         const visualRevisado = !!run.metrics?.visual_revisado;
                         const visualAprovado = !!run.metrics?.visual_aprovado;
                         const problemasVisuais = run.metrics?.problemas_visuais;
@@ -84,7 +86,14 @@ export function AprovacoesPainel({ pendentes, busyId, onDecide, onAbrirImagens, 
                                     </div>
                                 )}
 
-                                {imagens.length > 0 && (
+                                {video && (
+                                <div className="mt-2">
+                                    {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+                                    <video src={video} poster={capaVideo} controls preload="metadata" playsInline className="w-full max-h-[460px] rounded-lg border border-white/[0.08] bg-black" />
+                                    {run.metrics?.data_alvo && <p className="text-xs text-zinc-400 mt-1">Publicação prevista: {String(run.metrics.data_alvo).split('-').reverse().join('/')} às {run.metrics?.hora_publicacao || '19:00'} (depois de aprovado, o Publisher agenda).</p>}
+                                </div>
+                            )}
+                            {imagens.length > 0 && (
                                     <div className="grid grid-cols-3 gap-1.5 mt-2">
                                         {imagens.slice(0, 6).map((url, i) => (
                                             <button
