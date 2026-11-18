@@ -14,7 +14,7 @@
 // dado é o RLS e as rotas de API.
 
 import {
-    Activity, BarChart3, Bike, Bot, Network, CalendarClock, Calculator, CircleUser, ClipboardCheck, DollarSign,
+    Activity, BarChart3, Bike, CarFront, Bot, Network, CalendarClock, Calculator, CircleUser, ClipboardCheck, DollarSign,
     Flame, Handshake, Inbox, KanbanSquare, LayoutDashboard, ListTodo, Megaphone, MessageCircle,
     MessagesSquare, PieChart, PlayCircle, Radar, Banknote, Shield, SlidersHorizontal, Store, Users,
     WalletCards,
@@ -50,6 +50,10 @@ export interface NavItem {
     exclusivo?: Exclusivo;
     /** Abre o modal de perfil em vez de navegar. */
     acao?: 'perfil';
+    /** Não vai para a barra fixa do celular (já tem 6 itens); abre só pelo menu lateral. */
+    foraDaBarra?: boolean;
+    /** Fora do menu (18/11, enxugamento): a rota continua abrindo pelo endereço. */
+    oculto?: boolean;
     /** Aparece desabilitado com "em breve". */
     emBreve?: boolean;
     /** Admin não precisa: já tem o cartão do usuário no rodapé do menu. */
@@ -67,39 +71,40 @@ export const NAV_ITEMS: NavItem[] = [
     { id: 'inbox', label: 'Pegar leads', curto: 'Pegar', icon: Inbox, href: '/inbox', grupo: 'vendas', nivel: 'base', labelAdmin: 'Inbox geral', labelGestor: 'Inbox geral' },
     { id: 'conversas', label: 'Conversas', icon: MessagesSquare, href: '/conversas', grupo: 'vendas', nivel: 'base' },
     { id: 'agenda', label: 'Agenda', icon: CalendarClock, href: '/agenda', grupo: 'vendas', nivel: 'base' },
+    { id: 'espera', label: 'Procurando carro', curto: 'Espera', icon: CarFront, href: '/espera', grupo: 'vendas', nivel: 'base', foraDaBarra: true },
     { id: 'leads', label: 'Meus Leads', curto: 'Leads', icon: Users, href: '/leads', grupo: 'vendas', nivel: 'base', labelAdmin: 'Leads' },
     { id: 'perfil', label: 'Perfil', icon: CircleUser, href: '#perfil', grupo: 'vendas', nivel: 'base', acao: 'perfil', ocultoParaAdmin: true },
     { id: 'prioridade48h', label: 'Painel 48h', icon: Flame, href: '/admin/prioridade48h', grupo: 'vendas', nivel: 'gestor' },
     { id: 'perdidos', label: 'Perdidos', icon: ClipboardCheck, href: '/admin/perdidos', grupo: 'vendas', nivel: 'gestor' },
     { id: 'avisos', label: 'Avisos e cobranças', curto: 'Avisos', icon: Megaphone, href: '/admin/avisos', grupo: 'vendas', nivel: 'gestor' },
-    { id: 'atendimento', label: 'Atendimento', icon: PlayCircle, href: '/atendimento', grupo: 'vendas', nivel: 'admin' },
-    { id: 'pipeline', label: 'Pipeline', icon: KanbanSquare, href: '/pipeline', grupo: 'vendas', nivel: 'admin' },
-    { id: 'resgate', label: 'Resgate', icon: Bot, href: '/admin/rescue', grupo: 'vendas', nivel: 'admin' },
+    { id: 'atendimento', label: 'Atendimento', icon: PlayCircle, href: '/atendimento', grupo: 'vendas', nivel: 'admin', oculto: true },
+    { id: 'pipeline', label: 'Pipeline', icon: KanbanSquare, href: '/pipeline', grupo: 'vendas', nivel: 'admin', oculto: true },
+    { id: 'resgate', label: 'Resgate', icon: Bot, href: '/admin/rescue', grupo: 'vendas', nivel: 'admin', oculto: true },
 
     // ── Compras ───────────────────────────────────────────────────────────
     { id: 'compras', label: 'Compras', icon: Radar, href: '/compras', grupo: 'compras', nivel: 'admin' },
-    { id: 'precificar', label: 'Precificar', icon: Calculator, href: '/precificar', grupo: 'compras', nivel: 'admin' },
-    { id: 'repasse', label: 'Repasse', icon: Store, href: '/repasse', grupo: 'compras', nivel: 'admin', exclusivo: 'repasse' },
-    { id: 'terceiros', label: 'Negociação Terceiros', icon: Handshake, href: '/negociacao-terceiros', grupo: 'compras', nivel: 'admin', exclusivo: 'terceiros' },
-    { id: 'leads-whatsapp', label: 'Leads WhatsApp', icon: MessageCircle, href: '/leads-whatsapp', grupo: 'compras', nivel: 'admin', exclusivo: 'terceiros' },
+    { id: 'precificar', label: 'Precificar', icon: Calculator, href: '/precificar', grupo: 'compras', nivel: 'admin', oculto: true },
+    { id: 'repasse', label: 'Repasse', icon: Store, href: '/repasse', grupo: 'compras', nivel: 'admin', exclusivo: 'repasse', oculto: true },
+    { id: 'terceiros', label: 'Negociação Terceiros', icon: Handshake, href: '/negociacao-terceiros', grupo: 'compras', nivel: 'admin', exclusivo: 'terceiros', oculto: true },
+    { id: 'leads-whatsapp', label: 'Leads WhatsApp', icon: MessageCircle, href: '/leads-whatsapp', grupo: 'compras', nivel: 'admin', exclusivo: 'terceiros', oculto: true },
 
     // ── Financeiro ────────────────────────────────────────────────────────
     { id: 'financeiro', label: 'Financeiro', icon: WalletCards, href: '/financeiro', grupo: 'financeiro', nivel: 'admin', exclusivo: 'financeiro' },
     { id: 'cobranca', label: 'Cobrança', icon: DollarSign, href: '/admin/cobranca', grupo: 'financeiro', nivel: 'admin', exclusivo: 'cobranca' },
-    { id: 'cobranca-acordos', label: 'Cobrança Acordos', icon: DollarSign, href: '/consultor/cobranca', grupo: 'financeiro', nivel: 'admin' },
+    { id: 'cobranca-acordos', label: 'Cobrança Acordos', icon: DollarSign, href: '/consultor/cobranca', grupo: 'financeiro', nivel: 'admin', oculto: true },
     { id: 'divisao-lucro', label: 'Divisão de Lucro', icon: PieChart, href: '/divisaodelucro', grupo: 'financeiro', nivel: 'admin', exclusivo: 'socio' },
-    { id: 'milhao', label: 'Milhão', icon: Banknote, href: '/admin/milhao', grupo: 'financeiro', nivel: 'admin', exclusivo: 'alexandre' },
+    { id: 'milhao', label: 'Milhão', icon: Banknote, href: '/admin/milhao', grupo: 'financeiro', nivel: 'admin', exclusivo: 'alexandre', oculto: true },
 
     // ── Gestão ────────────────────────────────────────────────────────────
     { id: 'agentes', label: 'Central dos Agentes', icon: Network, href: '/agentes', grupo: 'gestao', nivel: 'admin' },
     { id: 'dashboard', label: 'Dashboard', icon: BarChart3, href: '/', grupo: 'gestao', nivel: 'admin' },
-    { id: 'war-room', label: 'War Room', icon: Activity, href: '/admin/live', grupo: 'gestao', nivel: 'admin' },
+    { id: 'war-room', label: 'War Room', icon: Activity, href: '/admin/live', grupo: 'gestao', nivel: 'admin', oculto: true },
     { id: 'conversao', label: 'Conversão', icon: LayoutDashboard, href: '/admin/conversion', grupo: 'gestao', nivel: 'gestor' },
     { id: 'consultores', label: 'Consultores', icon: Shield, href: '/admin/users', grupo: 'gestao', nivel: 'admin' },
     { id: 'saude', label: 'Saúde', icon: Activity, href: '/admin/health', grupo: 'gestao', nivel: 'admin' },
-    { id: 'sdr-bench', label: 'SDR Bench', icon: Bot, href: '/admin/sdr-bench', grupo: 'gestao', nivel: 'admin' },
+    { id: 'sdr-bench', label: 'SDR Bench', icon: Bot, href: '/admin/sdr-bench', grupo: 'gestao', nivel: 'admin', oculto: true },
     { id: 'configuracoes', label: 'Configurações', icon: SlidersHorizontal, href: '/admin/config', grupo: 'gestao', nivel: 'admin' },
-    { id: 'scooters', label: 'Scooters', icon: Bike, href: '/admin/scooters', grupo: 'gestao', nivel: 'admin', exclusivo: 'alexandre' },
+    { id: 'scooters', label: 'Scooters', icon: Bike, href: '/admin/scooters', grupo: 'gestao', nivel: 'admin', exclusivo: 'alexandre', oculto: true },
 
     // ── Marketing ─────────────────────────────────────────────────────────
     { id: 'marketing', label: 'Resumo', icon: LayoutDashboard, href: '/admin/marketing', grupo: 'marketing', nivel: 'admin' },
@@ -165,6 +170,7 @@ export function secoesDoMenu({ perfil, email }: ContextoMenu): SecaoMenu[] {
             itens: NAV_ITEMS.filter(i =>
                 i.grupo === g.id
                 && !i.ocultoParaAdmin
+                && !i.oculto
                 && (!i.exclusivo || podeVerExclusivo(i.exclusivo, e, true)))
                 .map(i => (i.labelAdmin ? { ...i, label: i.labelAdmin } : i)),
         })).filter(s => s.itens.length > 0);
@@ -184,7 +190,7 @@ export function secoesDoMenu({ perfil, email }: ContextoMenu): SecaoMenu[] {
     // decisão do Alexandre (06/11): continuam no menu dele (admin) e abrem
     // pelo endereço para o Wilson.
     const extras = NAV_ITEMS.filter(i =>
-        i.nivel === 'admin' && i.exclusivo && i.exclusivo !== 'terceiros'
+        i.nivel === 'admin' && !i.oculto && i.exclusivo && i.exclusivo !== 'terceiros'
         && podeVerExclusivo(i.exclusivo, e, false));
     if (extras.length) secoes.push({ id: 'extras', label: 'Seus módulos', recolhivel: false, itens: extras });
     return secoes;
@@ -206,7 +212,7 @@ export function itensBarraInferior({ perfil, email }: ContextoMenu): NavItem[] {
     const e = (email || '').toLowerCase();
     if (perfil !== 'vendedor' && perfil !== 'gestor') return [];
     if (CAMILA.includes(e) || e === PAULO || e === IVO) return [];
-    return NAV_ITEMS.filter(i => i.nivel === 'base');
+    return NAV_ITEMS.filter(i => i.nivel === 'base' && !i.foraDaBarra);
 }
 
 /** Item ativo: o href mais específico que casa com a rota atual. */

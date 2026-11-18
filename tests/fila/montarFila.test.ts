@@ -109,20 +109,22 @@ test('carro compatível pelo modelo', () => {
     assert.equal(carroCompativel('HB20', estoque), null);
 });
 
-test('menu: vendedor vê os 6 itens (com a pesca); gestor +3; admin em 5 grupos', () => {
+test('menu: vendedor vê os 7 itens (com a pesca e a lista de espera); gestor +4; admin em 5 grupos', () => {
     const vendedor = secoesDoMenu({ perfil: 'vendedor', email: 'x@exemplo.test' });
-    assert.deepEqual(vendedor.flatMap(s => s.itens.map(i => i.label)), ['Minha Fila', 'Pegar leads', 'Conversas', 'Agenda', 'Meus Leads', 'Perfil']);
+    assert.deepEqual(vendedor.flatMap(s => s.itens.map(i => i.label)), ['Minha Fila', 'Pegar leads', 'Conversas', 'Agenda', 'Procurando carro', 'Meus Leads', 'Perfil']);
+    // A barra do celular segue com 6: a lista de espera abre só pelo menu lateral.
     assert.equal(itensBarraInferior({ perfil: 'vendedor', email: 'x@exemplo.test' }).length, 6);
 
     const gestor = secoesDoMenu({ perfil: 'gestor', email: 'g@exemplo.test' }).flatMap(s => s.itens.map(i => i.label));
-    assert.deepEqual(gestor, ['Minha Fila', 'Inbox geral', 'Conversas', 'Agenda', 'Meus Leads', 'Perfil', 'Painel 48h', 'Perdidos', 'Conversão']);
+    assert.deepEqual(gestor, ['Minha Fila', 'Inbox geral', 'Conversas', 'Agenda', 'Procurando carro', 'Meus Leads', 'Perfil', 'Painel 48h', 'Perdidos', 'Avisos e cobranças', 'Conversão']);
 
     const admin = secoesDoMenu({ perfil: 'admin', email: 'alexandre_gorges@hotmail.com' });
-    assert.deepEqual(admin.map(s => s.label), ['Vendas', 'Compras', 'Financeiro', 'Gestão', 'Marketing']);
+    assert.deepEqual(admin.map(s => s.label), ['Vendas', 'Compras', 'Financeiro', 'Gestão', 'Time de Marketing']);
     // Admin vê todos os leads: rótulo "Leads", não "Meus Leads".
     assert.ok(admin[0].itens.some(i => i.label === 'Leads') && !admin[0].itens.some(i => i.label === 'Meus Leads'));
-    // Os 27 itens de antes + Minha Fila + Conversas + Central dos Agentes.
-    assert.equal(admin.reduce((n, s) => n + s.itens.length, 0), 30);
+    // Enxugamento de 18/11: abas de nicho ou sem uso saíram do menu (oculto), mais a lista de espera.
+    assert.equal(admin.reduce((n, s) => n + s.itens.length, 0), 24);
+    assert.ok(!admin.flatMap(s => s.itens).some(i => ['/pipeline', '/atendimento', '/admin/rescue', '/admin/live'].includes(i.href)));
     assert.ok(admin.find(s => s.label === 'Gestão')!.itens.some(i => i.href === '/agentes'));
     // Vendedor e gestor não veem a Central dos Agentes.
     assert.ok(!vendedor.flatMap(s => s.itens).some(i => i.href === '/agentes'));
@@ -137,17 +139,14 @@ test('menu: regras por pessoa continuam (Camila, Paulo, Wilson)', () => {
     const wilsonHrefs = wilson.flatMap(s => s.itens.map(i => i.href));
     assert.ok(wilsonHrefs.includes('/fila') && !wilsonHrefs.includes('/negociacao-terceiros') && !wilsonHrefs.includes('/leads-whatsapp'));
     assert.ok(!wilson.some(s => s.id === 'extras'));
-    // …mas continuam no menu do Alexandre, e o Financeiro do Ledra fica.
+    // …e em 18/11 saíram também do menu do Alexandre (as rotas seguem abrindo pelo endereço); o Financeiro do Ledra fica.
     const alexandre = secoesDoMenu({ perfil: 'admin', email: 'alexandre_gorges@hotmail.com' }).flatMap(s => s.itens.map(i => i.href));
-    assert.ok(alexandre.includes('/negociacao-terceiros') && alexandre.includes('/leads-whatsapp'));
+    assert.ok(!alexandre.includes('/negociacao-terceiros') && !alexandre.includes('/leads-whatsapp'));
     const ledra = secoesDoMenu({ perfil: 'vendedor', email: 'hgledra@hotmail.com' }).flatMap(s => s.itens.map(i => i.href));
     assert.ok(ledra.includes('/financeiro'));
-    // Sinos: só gestor e admin.
-    assert.equal(mostrarSinos('vendedor'), false);
-    assert.equal(mostrarSinos(null), false);
-    assert.equal(mostrarSinos('gestor'), true);
-    assert.equal(mostrarSinos('admin'), true);
-    // Admin que não é o Alexandre não vê o Milhão.
+    // Sinos: saíram do menu lateral em 18/11 (Alexandre).
+    for (const p of ['vendedor', 'gestor', 'admin', null] as const) assert.equal(mostrarSinos(p), false);
+    // Milhão e Scooters: fora do menu de todos.
     const outroAdmin = secoesDoMenu({ perfil: 'admin', email: 'outro@exemplo.test' }).flatMap(s => s.itens.map(i => i.href));
     assert.ok(!outroAdmin.includes('/admin/milhao'));
 });
