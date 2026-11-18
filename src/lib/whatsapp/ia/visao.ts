@@ -43,7 +43,8 @@ Responda SOMENTE com um JSON, sem texto antes ou depois:
 {"tipo":"carro|print_anuncio|documento|outro","marca":string|null,"modelo":string|null,"ano":string|null,"cor":string|null,"confianca":"alta|media|baixa","resumo":string,"texto_visivel":string|null}
 
 Regras:
-- tipo "carro": foto de um veículo (de rua, de garagem, de anúncio). Identifique marca, modelo e faixa de ano pelo que vê (faróis, grade, lanternas, emblemas, painel). Se não tiver certeza, deixe null o que não souber e use confianca "baixa". Nunca invente.
+- tipo "carro": foto de um veículo (de rua, de garagem, de anúncio). Identifique marca e modelo pelo que vê (e o ano só se der para estimar; use "modelo" sem repetir a marca) (faróis, grade, lanternas, emblemas, painel). Se não tiver certeza, deixe null o que não souber e use confianca "baixa". Nunca invente.
+- cor: no máximo 2 palavras (ex.: "cinza claro").
 - tipo "print_anuncio": captura de tela de anúncio ou site (OLX, Webmotors, Instagram, site da loja...). Copie em texto_visivel só o título do carro, ano e preço anunciado. Preencha marca/modelo/ano se aparecerem.
 - tipo "documento": CNH, RG, CRLV, comprovante, contrato, extrato. Em resumo diga SÓ o tipo do documento. NUNCA copie nome, CPF, RG, números, endereço ou valores. marca/modelo/ano/cor: null.
 - tipo "outro": qualquer coisa que não seja carro nem anúncio (pessoa, paisagem, meme, tela do celular). Resumo curto e neutro.
@@ -76,7 +77,7 @@ export function lerDescricao(bruto: string): DescricaoImagem | null {
         marca: doc ? null : limpa(o.marca, 40),
         modelo: doc ? null : limpa(o.modelo, 60),
         ano: doc ? null : limpa(o.ano, 20),
-        cor: doc ? null : limpa(o.cor, 30),
+        cor: doc ? null : limpa(o.cor, 60),
         confianca: CONFIANCAS.includes(o.confianca as Confianca) ? (o.confianca as Confianca) : 'baixa',
         resumo,
         // documento nunca leva texto da imagem para o histórico
@@ -84,12 +85,21 @@ export function lerDescricao(bruto: string): DescricaoImagem | null {
     };
 }
 
+/** "GAC Aion Aion Y" → "GAC Aion Y" (o modelo costuma repetir a marca). */
+export function semRepetidas(t: string): string {
+    const out: string[] = [];
+    for (const w of t.split(/\s+/)) {
+        if (!out.length || out[out.length - 1].toLowerCase() !== w.toLowerCase()) out.push(w);
+    }
+    return out.join(' ');
+}
+
 /** Linha que entra no histórico da Laura, logo depois de "[foto]". */
 export function descricaoParaIa(d: DescricaoImagem): string {
     if (d.tipo === 'documento') {
         return `(documento do cliente: ${d.resumo}. Não leia nem peça dados dele; o consultor cuida disso.)`;
     }
-    const carro = [d.marca, d.modelo, d.ano].filter(Boolean).join(' ');
+    const carro = semRepetidas([d.marca, d.modelo, d.ano].filter(Boolean).join(' '));
     const partes: string[] = [];
     if (d.tipo === 'print_anuncio') partes.push('print de anúncio');
     if (carro) {

@@ -241,8 +241,9 @@ export async function rodarLaura(g: GatilhoIa): Promise<void> {
 
         let consultor: string | null = null;
         if (conversa.assigned_consultant_id) {
-            const { data: cn } = await supabase.from('consultants_manos_crm').select('name').eq('id', conversa.assigned_consultant_id).maybeSingle();
-            consultor = (cn?.name as string | null) ?? null;
+            const { data: cn } = await supabase.from('consultants_manos_crm').select('name, recebe_leads').eq('id', conversa.assigned_consultant_id).maybeSingle();
+            // Só cita pelo nome quem atende no pátio (recebe_leads). Outro nome vira "o consultor".
+            consultor = cn?.recebe_leads === true ? ((cn?.name as string | null) ?? null) : null;
         }
         const bloco = contextoDaRodada({
             consultor,

@@ -90,6 +90,7 @@ export async function assignNextConsultant(
         .from('consultants_manos_crm')
         .select('id, name, last_lead_assigned_at')
         .eq('is_active', true)
+        .eq('recebe_leads', true)   // só o time do pátio (Victor, Sérgio, Wilson): recebe_leads é a única porta de entrada
         .neq('role', 'admin');
 
     if (error || !consultants || consultants.length === 0) {

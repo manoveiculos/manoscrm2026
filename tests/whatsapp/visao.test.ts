@@ -1,7 +1,7 @@
 // Visão da Laura (fotos do cliente) e filtros de entrada. Rodar: npm run test:visao
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { descricaoDoExtra, descricaoParaIa, lerDescricao, mimeSuportado, FOTO_SEM_DESCRICAO } from '@/lib/whatsapp/ia/visao';
+import { descricaoDoExtra, descricaoParaIa, lerDescricao, mimeSuportado, semRepetidas, FOTO_SEM_DESCRICAO } from '@/lib/whatsapp/ia/visao';
 import { ehRespostaAutomatica, textoParaIa, montarHistorico } from '@/lib/whatsapp/ia/regras';
 
 test('lê o JSON do Claude mesmo com cerca ```json e texto em volta', () => {
@@ -76,4 +76,13 @@ test('só imagens que o Claude aceita', () => {
     assert.equal(mimeSuportado('image/jpg; x=1'), 'image/jpeg');
     assert.equal(mimeSuportado('image/heic'), null);
     assert.equal(mimeSuportado(null), null);
+});
+
+test('nome do carro sem repetir a marca e cor inteira (caso real: GAC Aion Y cinza claro)', () => {
+    const d = lerDescricao('{"tipo":"carro","marca":"GAC Aion","modelo":"Aion Y","ano":null,"cor":"Cinza claro com detalhes em prata","confianca":"media","resumo":"SUV elétrico cinza"}')!;
+    assert.equal(semRepetidas('GAC Aion Aion Y'), 'GAC Aion Y');
+    assert.equal(d.cor, 'Cinza claro com detalhes em prata');
+    const t = descricaoParaIa(d);
+    assert.match(t, /parece ser GAC Aion Y Cinza claro/);
+    assert.doesNotMatch(t, /Aion Aion/);
 });
