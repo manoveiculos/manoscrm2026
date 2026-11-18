@@ -34,10 +34,12 @@ import { msgErro } from '../erro';
 import { lerConfigIa } from './config';
 import { FERRAMENTAS, executarFerramenta, type ContextoRodada, type ConversaIa } from './ferramentas';
 import { LAURA_CRM_PROMPT, contextoDaRodada } from './prompt';
+import { descricaoDoExtra } from './visao';
+import { garantirDescricoesDeImagens } from './visaoRodada';
 import { descartarNaoCliente, liberarDaTriagem } from './triagemRodada';
 import {
     custoUsd, iaPodeResponder, inicioDoDiaSP, limiteDiario, montarHistorico, somarUso, textoParaIa,
-    comentaAtendimentoAnterior, respostaLonga, repeteMensagemAnterior, valoresCitados, type FichaLaura, type MensagemParaIa, type UsoTokens,
+    comentaAtendimentoAnterior, ehRespostaAutomatica, respostaLonga, repeteMensagemAnterior, valoresCitados, type FichaLaura, type MensagemParaIa, type UsoTokens,
 } from './regras';
 
 export const MODELO_PADRAO = 'claude-sonnet-5-5';
@@ -154,6 +156,13 @@ export async function rodarLaura(g: GatilhoIa): Promise<void> {
     const ultima = await ultimaDoCliente(supabase, g.conversaId);
     if (!ultima || ultima.id !== g.mensagemId) return;
 
+    // Resposta automática de outra empresa ("Agradecemos sua mensagem, não estamos disponíveis"): não responde
+    const { data: gat } = await supabase.from('wa_mensagens').select('tipo, texto').eq('id', g.mensagemId).maybeSingle();
+    if (gat?.tipo === 'texto' && ehRespostaAutomatica(gat.texto as string | null)) {
+        await registrarPulada(supabase, g, modo, 'resposta_automatica');
+        return;
+    }
+
     // 3. áudio: espera a transcrição
     await esperarTranscricoes(supabase, g.conversaId);
 
@@ -209,13 +218,18 @@ export async function rodarLaura(g: GatilhoIa): Promise<void> {
         const cliente = claude();
         if (!cliente) { await finalizar({ status: 'erro', motivo: 'sem chave do Claude (API_CLAUDE)' }); return; }
 
+        // fotos do cliente: descreve as que ainda não foram vistas (uma vez só; fica gravado na mensagem)
+        const usoVisao = await garantirDescricoesDeImagens(supabase, cliente, g.conversaId, (process.env.WA_IA_MODELO_VISAO || modelo).trim());
+        uso = somarUso(uso, usoVisao);
+
         // histórico + contexto
         const { data: msgsDesc } = await supabase.from('wa_mensagens')
-            .select('autor, tipo, texto, legenda, transcricao, midia_nome, apagada_em, criada_em')
+            .select('autor, tipo, texto, legenda, transcricao, midia_nome, apagada_em, criada_em, extra')
             .eq('conversa_id', g.conversaId).order('criada_em', { ascending: false }).limit(80);
         const msgs: MensagemParaIa[] = (msgsDesc || []).map(m => ({
             autor: m.autor, tipo: m.tipo, texto: m.texto, legenda: m.legenda, transcricao: m.transcricao,
             midiaNome: m.midia_nome, apagadaEm: m.apagada_em, criadaEm: m.criada_em,
+            descricaoImagem: m.tipo === 'imagem' && m.autor === 'cliente' ? descricaoDoExtra(m.extra) : null,
         }));
         const turnos = montarHistorico(msgs, 40);
         if (!turnos.length) { await finalizar({ status: 'pulada', motivo: 'sem mensagem do cliente para responder' }); return; }

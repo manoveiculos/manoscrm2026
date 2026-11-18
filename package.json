@@ -38,7 +38,8 @@
     "test:filtro": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/whatsapp/filtro.test.ts",
     "test:nome-carro": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/identificacao/nomeCarro.test.ts",
     "test:fonte-lead": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/whatsapp/fonteLead.test.ts",
-    "test:laura": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/whatsapp/laura.test.ts"
+    "test:laura": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/whatsapp/laura.test.ts",
+    "test:visao": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/whatsapp/visao.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",

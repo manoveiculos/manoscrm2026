@@ -70,7 +70,7 @@ const GENERICOS: RegExp[] = [
 ];
 
 const normalizar = (s: string | null | undefined) =>
-    (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+    (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
 
 export function mesmoNome(a: string | null | undefined, b: string | null | undefined): boolean {
     const na = normalizar(a), nb = normalizar(b);
@@ -233,6 +233,8 @@ export interface MensagemParaIa {
     midiaNome: string | null;
     apagadaEm: string | null;
     criadaEm: string;
+    /** O que a IA enxergou na foto do cliente (visao.ts). null = ainda não olhou ou não conseguiu. */
+    descricaoImagem?: string | null;
 }
 
 export interface TurnoTexto {
@@ -245,7 +247,7 @@ export function textoParaIa(m: MensagemParaIa): string | null {
     if (m.apagadaEm) return '[mensagem apagada]';
     const leg = m.legenda ? ` ${m.legenda}` : '';
     switch (m.tipo) {
-        case 'imagem': return `[foto]${leg}`;
+        case 'imagem': return `[foto]${m.descricaoImagem ? ` ${m.descricaoImagem}` : ''}${leg}`;
         case 'video': return `[vídeo]${leg}`;
         case 'audio': return m.transcricao ? `[áudio] ${m.transcricao}` : '[áudio sem transcrição]';
         case 'documento': return `[documento: ${m.midiaNome || 'arquivo'}]${leg}`;
@@ -253,8 +255,29 @@ export function textoParaIa(m: MensagemParaIa): string | null {
         case 'localizacao': return `[localização: ${m.texto || 'enviada'}]`;
         case 'contato': return `[contato: ${m.texto || 'enviado'}]`;
         case 'reacao': return m.texto ? `[reagiu ${m.texto}]` : null;
-        default: return (m.texto || '').trim() || null;
+        default: {
+            const t = (m.texto || '').trim();
+            // O Evolution não conseguiu abrir (ex.: secretEncryptedMessage): a Laura não pode fingir que leu.
+            if (m.autor === 'cliente' && MENSAGEM_NAO_ABERTA.test(t)) return '[mensagem que não consegui abrir]';
+            return t || null;
+        }
     }
+}
+
+/** Texto que o parser grava para tipos que o CRM não desenha: "[mensagem do tipo secretEncryptedMessage]". */
+const MENSAGEM_NAO_ABERTA = /^\[mensagem do tipo [^\]]+\]$/i;
+
+/**
+ * Resposta automática de outra empresa ("Agradecemos sua mensagem. Não estamos disponíveis..."):
+ * a Laura não responde, senão duas máquinas ficam trocando mensagem.
+ */
+export function ehRespostaAutomatica(texto: string | null | undefined): boolean {
+    const t = (texto || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    if (!t) return false;
+    return /\b(resposta|mensagem) automatica\b/.test(t)
+        || /\bagradecemos (a |sua )?(mensagem|contato)\b.*\b(nao estamos|retornaremos|responderemos|em breve|assim que possivel)/.test(t)
+        || /\bnao (estamos|estou) disponivel\b.*\b(responderemos|retornaremos|retorno|assim que possivel)/.test(t)
+        || /\bfora do horario de atendimento\b.*\b(retornaremos|responderemos|retorno)/.test(t);
 }
 
 /**
@@ -345,7 +368,7 @@ const PALAVRAS_VAZIAS = new Set(['de', 'da', 'do', 'e', 'o', 'a', 'os', 'as', 'u
 
 function palavrasChave(s: string): Set<string> {
     return new Set(
-        (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9\s]/g, ' ')
+        (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9\s]/g, ' ')
             .split(/\s+/).filter(p => p.length >= 3 && !PALAVRAS_VAZIAS.has(p)),
     );
 }
