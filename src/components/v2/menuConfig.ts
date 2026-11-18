@@ -29,7 +29,7 @@ export const GRUPOS_MENU: { id: GrupoMenu; label: string }[] = [
     { id: 'compras', label: 'Compras' },
     { id: 'financeiro', label: 'Financeiro' },
     { id: 'gestao', label: 'Gestão' },
-    { id: 'marketing', label: 'Marketing' },
+    { id: 'marketing', label: 'Time de Marketing' },
 ];
 
 /** Quem vê: 'base' = todo consultor; 'gestor' = gestor e admin; 'admin' = só admin. */
@@ -102,7 +102,11 @@ export const NAV_ITEMS: NavItem[] = [
     { id: 'scooters', label: 'Scooters', icon: Bike, href: '/admin/scooters', grupo: 'gestao', nivel: 'admin', exclusivo: 'alexandre' },
 
     // ── Marketing ─────────────────────────────────────────────────────────
-    { id: 'marketing', label: 'Time de Marketing', icon: Megaphone, href: '/admin/marketing', grupo: 'marketing', nivel: 'admin' },
+    { id: 'marketing', label: 'Resumo', icon: LayoutDashboard, href: '/admin/marketing', grupo: 'marketing', nivel: 'admin' },
+    { id: 'marketing-instagram', label: 'Instagram', icon: Megaphone, href: '/admin/marketing/instagram', grupo: 'marketing', nivel: 'admin' },
+    { id: 'marketing-leads', label: 'Leads e compras', icon: Users, href: '/admin/marketing/leads', grupo: 'marketing', nivel: 'admin' },
+    { id: 'marketing-mercado', label: 'Mercado e anúncios', icon: Radar, href: '/admin/marketing/mercado', grupo: 'marketing', nivel: 'admin' },
+    { id: 'marketing-conexoes', label: 'Conexões', icon: Network, href: '/admin/marketing/conexoes', grupo: 'marketing', nivel: 'admin' },
 ];
 
 const CAMILA = ['camila.renatta@hotmail.com', 'camilarenatta@hotmail.com'];
@@ -192,8 +196,9 @@ export function secoesDoMenu({ perfil, email }: ContextoMenu): SecaoMenu[] {
  * decisão do Alexandre (06/11). Com eles saem também os sons desses avisos;
  * o vendedor trabalha pela Minha Fila e pelo "Pegar leads".
  */
-export function mostrarSinos(perfil: Perfil | null): boolean {
-    return perfil === 'gestor' || perfil === 'admin';
+export function mostrarSinos(_perfil: Perfil | null): boolean {
+    // 18/11: os sinos saíram do menu lateral (Alexandre). Os componentes seguem no código.
+    return false;
 }
 
 /** Barra fixa do celular: os itens do vendedor. Admin e logins restritos usam só o menu lateral. */

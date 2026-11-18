@@ -14,7 +14,7 @@ export async function GET(_req: NextRequest) {
     const admin = createClient();
     const weekAgo = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
 
-    const [kpisRes, recentRes, pendingRes, integrationsRes] = await Promise.all([
+    const [kpisRes, recentRes, pendingRes, integrationsRes, rotinasRes] = await Promise.all([
         admin.from('vw_marketing_squad_kpis').select('*'),
         admin
             .from('marketing_agent_runs')
@@ -30,12 +30,14 @@ export async function GET(_req: NextRequest) {
             .order('created_at', { ascending: false })
             .limit(50),
         admin.from('marketing_integrations').select('*'),
+        admin.from('marketing_rotinas').select('*').order('squad'),
     ]);
 
     if (kpisRes.error) console.error('marketing-feed kpis error:', kpisRes.error);
     if (recentRes.error) console.error('marketing-feed recent error:', recentRes.error);
     if (pendingRes.error) console.error('marketing-feed pending error:', pendingRes.error);
     if (integrationsRes.error) console.error('marketing-feed integrations error:', integrationsRes.error);
+    if (rotinasRes.error) console.error('marketing-feed rotinas error:', rotinasRes.error);
 
     // Série diária (14 dias) pro gráfico de tendência, por squad
     const { data: dailyRaw } = await admin
@@ -58,6 +60,7 @@ export async function GET(_req: NextRequest) {
         recentRuns: recentRes.data || [],
         pendingApprovals: pendingRes.data || [],
         integrations: integrationsRes.data || [],
+        rotinas: rotinasRes.data || [],
         daily,
         generated_at: new Date().toISOString(),
         weekAgo,

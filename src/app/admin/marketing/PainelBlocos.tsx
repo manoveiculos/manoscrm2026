@@ -4,6 +4,7 @@ import { AlertTriangle, ArrowRight, CheckCircle2, ChevronRight, Clock, Plug } fr
 import {
     FeedData, IntegrationRow, KpiRow, RunRow, SquadKey, SQUAD_INFO, STATUS_STYLE, timeAgo,
 } from './utils';
+import { diagnosticarErro } from './diagnostico';
 
 /**
  * Blocos de leitura rápida do /admin/marketing:
@@ -17,14 +18,6 @@ const DIA = 24 * 3600 * 1000;
 const dentroDe = (iso: string, dias: number) => Date.now() - new Date(iso).getTime() <= dias * DIA;
 const diasDesde = (iso: string | null | undefined) => (iso ? Math.floor((Date.now() - new Date(iso).getTime()) / DIA) : null);
 const corta = (s: string | null | undefined, n: number) => (!s ? '' : s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s);
-
-/** Erros técnicos conhecidos viram frase para humano, com o que fazer. */
-function explicaErro(msg: string | null | undefined, padrao: string): string {
-    const m = (msg || '').toLowerCase();
-    if (/weekly limit|usage limit|rate.?limit/.test(m)) return 'Limite semanal de uso das rotinas atingido. Elas voltam sozinhas quando o limite renovar.';
-    if (/workflow execution failed/.test(m)) return 'O workflow falhou ao executar. Veja o histórico do squad.';
-    return corta(msg || padrao, 120);
-}
 
 const NOMES_INTEGRACAO: Record<string, string> = { google_ads: 'Google Ads', metricool: 'Metricool', meta_ads: 'Meta Ads' };
 const nomeIntegracao = (provider: string) =>
@@ -60,6 +53,15 @@ const TOM = {
 export function ResumoAtencao({ data, onVerAprovacoes }: { data: FeedData; onVerAprovacoes: () => void }) {
     const itens: ItemAtencao[] = [];
 
+    const rotinas = data.rotinas ?? [];
+    if (rotinas.length > 0 && rotinas.every((r) => !r.ativo)) {
+        itens.push({
+            tom: 'alerta',
+            titulo: `As ${rotinas.length} rotinas agendadas estão pausadas`,
+            detalhe: 'Nada novo é gerado nem publicado sozinho até reprogramarmos. Posts que já estão agendados no Metricool continuam saindo.',
+        });
+    }
+
     const pendentes = data.pendingApprovals.length;
     if (pendentes > 0) {
         itens.push({
@@ -80,10 +82,11 @@ export function ResumoAtencao({ data, onVerAprovacoes }: { data: FeedData; onVer
     for (const r of data.recentRuns) {
         if (r.status !== 'error' || !dentroDe(r.created_at, 7) || vistos.has(r.squad)) continue;
         vistos.add(r.squad);
+        const d = diagnosticarErro(r.error_message);
         itens.push({
             tom: 'erro',
-            titulo: `${SQUAD_INFO[r.squad]?.label ?? r.squad}: ${explicaErro(r.error_message, r.title)}`,
-            detalhe: timeAgo(r.created_at),
+            titulo: `${SQUAD_INFO[r.squad]?.label ?? r.squad}: ${d.tipo === 'outro' ? corta(r.error_message || r.title, 120) : d.causa}`,
+            detalhe: `${timeAgo(r.created_at)} · Bloqueou em: ${d.onde}. ${d.acao}`,
         });
         if (vistos.size >= 3) break;
     }
@@ -254,6 +257,27 @@ export function ChipIntegracao({ ig }: { ig: IntegrationRow }) {
                     {dashboardUrl && <> · <a href={dashboardUrl} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">Gerenciar →</a></>}
                 </p>
             </div>
+        </div>
+    );
+}
+
+// ── Mini card de squad (aba Resumo) ───────────────────────────────────────
+
+export function MiniSquad({ squad, kpi, ultima }: { squad: SquadKey; kpi: KpiRow | undefined; ultima: RunRow | undefined }) {
+    const info = SQUAD_INFO[squad];
+    const Icon = info.icon;
+    const estado = estadoDoSquad(kpi, ultima);
+    const ponto = { ok: 'bg-emerald-500', erro: 'bg-red-500', espera: 'bg-amber-500', parado: 'bg-zinc-500' }[estado];
+    return (
+        <div className="h-full rounded-xl bg-white/[0.03] border border-white/[0.08] px-3 py-2.5 hover:bg-white/[0.06] transition-colors">
+            <div className="flex items-center gap-2">
+                <span className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: `${info.color}22`, color: info.color }}><Icon className="w-4 h-4" /></span>
+                <p className="text-sm font-bold leading-tight truncate">{info.label}</p>
+            </div>
+            <p className="mt-2 flex items-center gap-1.5 text-xs text-zinc-300">
+                <span className={`w-2 h-2 rounded-full ${ponto}`} aria-hidden /> {ESTADO[estado].label}
+            </p>
+            <p className="text-xs text-zinc-500 mt-0.5">{kpi?.runs_7d ?? 0} em 7 dias · {timeAgo(ultima?.created_at || kpi?.last_run_at || null)}</p>
         </div>
     );
 }

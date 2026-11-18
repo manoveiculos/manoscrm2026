@@ -34,6 +34,16 @@ export const SQUAD_GROUPS: Array<{ title: string; note: string; squads: SquadKey
     { title: 'Inteligência & Tráfego pago', note: 'Sentinela (concorrência) e Tráfego (Meta Ads 24h)', squads: ['sentinela', 'trafego'] },
 ];
 
+// Abas do Time de Marketing: cada uma reúne os agentes que trabalham juntos.
+export type AbaId = 'resumo' | 'instagram' | 'leads' | 'mercado' | 'conexoes';
+export const ABAS: Array<{ id: AbaId; label: string; href: string; descricao: string; squads: SquadKey[] }> = [
+    { id: 'resumo', label: 'Resumo', href: '/admin/marketing', descricao: 'O que precisa de você agora e como estão os squads.', squads: [] },
+    { id: 'instagram', label: 'Instagram', href: '/admin/marketing/instagram', descricao: 'Vitrine gera → Diretor de Arte revisa → você aprova → Publisher agenda.', squads: ['vitrine', 'diretor_arte', 'publisher'] },
+    { id: 'leads', label: 'Leads e compras', href: '/admin/marketing/leads', descricao: 'Recepção monta a ficha dos leads; Perito analisa laudo e propõe compra.', squads: ['recepcao', 'perito'] },
+    { id: 'mercado', label: 'Mercado e anúncios', href: '/admin/marketing/mercado', descricao: 'Sentinela vigia a concorrência; Tráfego vigia o Meta Ads e o Google Ads.', squads: ['sentinela', 'trafego'] },
+    { id: 'conexoes', label: 'Conexões', href: '/admin/marketing/conexoes', descricao: 'O que está funcionando, o que falhou e onde o caminho bloqueou.', squads: [] },
+];
+
 export interface KpiRow { squad: SquadKey; total_runs: number; runs_7d: number; runs_24h: number; errors_7d: number; pending_approvals: number; last_run_at: string | null; }
 export interface RunRow {
     id: string; squad: SquadKey; skill_name: string | null; run_type: string; status: string;
@@ -42,7 +52,12 @@ export interface RunRow {
     approved_at: string | null; rejected_by?: string | null; rejected_at?: string | null; rejected_reason: string | null; error_message: string | null; created_at: string;
 }
 export interface IntegrationRow { id: string; provider: string; status: string; details: Record<string, any>; checked_at: string; checked_by: string | null; }
-export interface FeedData { kpis: KpiRow[]; recentRuns: RunRow[]; pendingApprovals: RunRow[]; integrations: IntegrationRow[]; daily: Array<Record<string, any>>; generated_at: string; }
+export interface RotinaRow {
+    id: string; nome: string; squad: string; funcao: string | null; agenda: string | null; ativo: boolean;
+    motivo_pausa: string | null; ultimo_inicio: string | null; ultimo_fim: string | null;
+    ultimo_status: 'ok' | 'erro' | 'bloqueado' | null; ultimo_erro: string | null; bloqueio: string | null; atualizado_em: string;
+}
+export interface FeedData { kpis: KpiRow[]; recentRuns: RunRow[]; pendingApprovals: RunRow[]; integrations: IntegrationRow[]; rotinas?: RotinaRow[]; daily: Array<Record<string, any>>; generated_at: string; }
 
 /** "Aprovado por X · 2d atrás" / "Reprovado por X · …". Linhas antigas reprovadas
  *  guardavam quem decidiu em approved_by — aparecem como "Decidido". */
