@@ -292,7 +292,7 @@ function contexto(banco: ReturnType<typeof bancoFicticio>, conversa: Partial<Con
 }
 
 test('as ferramentas pedidas existem para o Claude (5 do atendimento + encerrar_contato)', () => {
-    assert.deepEqual(FERRAMENTAS.map(f => f.name), ['buscar_estoque', 'enviar_fotos', 'salvar_ficha', 'agendar_visita', 'encerrar_contato', 'passar_para_consultor']);
+    assert.deepEqual(FERRAMENTAS.map(f => f.name), ['buscar_estoque', 'registrar_espera', 'enviar_fotos', 'salvar_ficha', 'agendar_visita', 'encerrar_contato', 'passar_para_consultor']);
 });
 
 test('salvar_ficha (identificação ligada): nome, cidade e carro vão pelas funções do banco, que aplicam a prioridade', async () => {
@@ -401,4 +401,22 @@ test('repetição: mesma pergunta ou mesmo conteúdo das últimas mensagens da l
     assert.equal(repeteMensagemAnterior('Tudo certo, qual a sua cidade?', antes), false);
     assert.equal(repeteMensagemAnterior('Oi!', []), false);
     assert.ok(semelhanca('Onix 2018 prata', 'o Onix 2018 prata automático') > 0.9);
+});
+
+test('registrar_espera: carro que a loja não tem fica anotado; carro do estoque é recusado', async () => {
+    const banco = bancoFicticio({});
+    const ctx = contexto(banco, {}, ['quero uma Ferrari']);
+    const ok = await executarFerramenta('registrar_espera', { consulta: 'Ferrari F40', marca: 'Ferrari', modelo: 'F40' }, ctx);
+    assert.equal(ok.erro, false);
+    assert.equal(ctx.espera?.modelo, 'F40');
+    assert.equal(banco.updates.length, 0);   // no ensaio/rodada só anota; o motor grava no envio
+
+    const nome = ESTOQUE[0];
+    const ctx2 = contexto(bancoFicticio({}), {}, ['quero']);
+    const no = await executarFerramenta('registrar_espera', { consulta: `${nome.marca} ${nome.modelo}` }, ctx2);
+    assert.equal(no.erro, true);
+    assert.equal(ctx2.espera ?? null, null);
+
+    const vazio = await executarFerramenta('registrar_espera', {}, contexto(bancoFicticio({}), {}, []));
+    assert.equal(vazio.erro, true);
 });

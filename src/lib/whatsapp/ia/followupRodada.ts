@@ -36,7 +36,7 @@ export interface ResumoFollowup {
 
 const FECHADOS = new Set(['vendido', 'post_sale', 'comprado', 'perdido', 'arquivado', 'lost', 'lost_by_inactivity', 'frio']);
 
-async function leadFechado(supabase: SupabaseClient, leadUid: string | null): Promise<boolean> {
+export async function leadFechado(supabase: SupabaseClient, leadUid: string | null): Promise<boolean> {
     if (!leadUid) return false;
     const i = leadUid.indexOf(':');
     if (i <= 0 || leadUid.slice(0, i) !== 'leads_distribuicao_crm_26') return false;

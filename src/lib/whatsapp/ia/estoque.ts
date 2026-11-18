@@ -68,6 +68,11 @@ export interface ResultadoEstoque {
     semNoTipo?: boolean;
 }
 
+/** A consulta diz algo concreto (marca, modelo ou tipo)? "carro", "um" etc. não contam. */
+export function temCriterio(consulta: string | null | undefined): boolean {
+    return carroceriasPedidas(consulta).length > 0 || palavras(semPalavrasDeCarroceria(consulta)).length > 0;
+}
+
 /** Só carro com marca, modelo e preço entra (o resto a Laura não pode oferecer). */
 export function buscarNoEstoque(estoque: AltimusVehicle[], f: FiltroEstoque, limite = 5): ResultadoEstoque {
     const validos = estoque.filter(v => v.marca && v.modelo && v.preco);

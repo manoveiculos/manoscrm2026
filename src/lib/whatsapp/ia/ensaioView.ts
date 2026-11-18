@@ -93,6 +93,7 @@ export const ROTULO_VIOLACAO: Record<string, string> = {
 
 export const ROTULO_FERRAMENTA: Record<string, string> = {
     buscar_estoque: 'estoque',
+    registrar_espera: 'lista de espera',
     enviar_fotos: 'fotos',
     salvar_ficha: 'ficha',
     agendar_visita: 'agenda',

@@ -32,6 +32,7 @@ import { enviarPeloCrm } from '../envio';
 import { notifyConsultant } from '@/lib/services/consultantNotifier';
 import { msgErro } from '../erro';
 import { lerConfigIa } from './config';
+import { gravarEspera } from './espera';
 import { FERRAMENTAS, executarFerramenta, type ContextoRodada, type ConversaIa } from './ferramentas';
 import { LAURA_CRM_PROMPT, contextoDaRodada } from './prompt';
 import { descricaoDoExtra } from './visao';
@@ -192,7 +193,7 @@ export async function rodarLaura(g: GatilhoIa): Promise<void> {
     const ctx: ContextoRodada = {
         supabase, modo, agora: new Date(), conversa,
         textosDoCliente: [], estoque: [], horario: { horas: { seg_sex: [8, 18], sab: [8, 12], tz: 'America/Sao_Paulo' }, feriados: new Set() },
-        ficha: conversa.ficha, fotos: [], agendamento: null, passagem: null, naoCliente: null, chamadas: [], gravacoes: [],
+        ficha: conversa.ficha, fotos: [], agendamento: null, passagem: null, espera: null, naoCliente: null, chamadas: [], gravacoes: [],
     };
 
     const finalizar = async (campos: Record<string, unknown>) => {
@@ -422,6 +423,16 @@ async function executarEnvio(supabase: SupabaseClient, ctx: ContextoRodada, g: G
         ctx.agendamento.id = r.id;
         ctx.agendamento.acao = r.acao;
         ctx.agendamento.erro = r.erro;
+    }
+    // Carro que a loja não tem: guarda o pedido na lista de espera (aviso quando entrar = Fase 3)
+    if (ctx.espera && !ctx.espera.executada) {
+        const r = await gravarEspera(supabase, {
+            telefoneKey: ctx.conversa.telefone_key, leadUid: ctx.conversa.lead_uid, conversaId: ctx.conversa.id,
+            consultorId: ctx.conversa.assigned_consultant_id,
+            nomeCliente: (ctx.ficha.nome as string | null) || ctx.conversa.nome_cliente || null, origem: 'laura',
+        }, ctx.espera).catch(() => ({ ok: false, erro: 'falha ao gravar' }));
+        ctx.espera.executada = r.ok;
+        if (r.ok) ctx.gravacoes.push('lista de espera'); else ctx.espera.erro = r.erro;
     }
     // Contato que não é cliente de carro: arquiva o lead e encerra a conversa, sem avisar nem cobrar consultor
     if (ctx.naoCliente && !ctx.passagem) {

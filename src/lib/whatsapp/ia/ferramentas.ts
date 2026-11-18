@@ -13,6 +13,7 @@ import type { AltimusVehicle } from '@/lib/services/altimusInventory';
 import type { HorarioConfig } from '@/lib/services/slaEngine';
 import { businessSecondsBetween, isOpenNow } from '@/lib/services/slaEngine';
 import { horariosDeVisitaDetalhados } from '@/lib/laura/playbook';
+import type { PedidoEspera } from './espera';
 import { acharCarro, buscarNoEstoque, carroParaIa } from './estoque';
 import {
     ROTULO_CAMPO, faltandoNaFicha, limparNome, mesclarFicha, nomeDitoPeloCliente,
@@ -40,6 +41,23 @@ export const FERRAMENTAS: Anthropic.Tool[] = [
                 ano_min: { type: 'integer', description: 'Ano mínimo, se o cliente disse.' },
                 cambio: { type: 'string', description: '"automático" ou "manual", se o cliente disse.' },
             },
+        },
+    },
+    {
+        name: 'registrar_espera',
+        description: 'Coloca o cliente na lista de espera de um carro que a loja NÃO tem agora, para ser avisado quando entrar. Só use depois de buscar_estoque não achar o carro e SE o cliente aceitar ser avisado. Nunca prometa prazo de chegada.',
+        input_schema: {
+            type: 'object',
+            properties: {
+                consulta: { type: 'string', description: 'O carro como o cliente pediu. Ex.: "Civic automático", "SUV até 80 mil".' },
+                marca: { type: 'string' },
+                modelo: { type: 'string' },
+                tipo: { type: 'string', description: 'Tipo, se pediu pelo tipo: suv, sedã, hatch, picape.' },
+                ano_min: { type: 'integer' },
+                preco_max: { type: 'number', description: 'Só se o cliente disse.' },
+                cambio: { type: 'string', description: '"automático" ou "manual", se o cliente disse.' },
+            },
+            required: ['consulta'],
         },
     },
     {
@@ -158,6 +176,8 @@ export interface ContextoRodada {
     fotos: FotoAnotada[];
     agendamento: AgendaAnotada | null;
     passagem: PassagemAnotada | null;
+    /** Pedido de carro que a loja não tem: gravado em carro_espera no envio (motor.ts). */
+    espera?: (PedidoEspera & { executada?: boolean; erro?: string }) | null;
     /** Contato que não é cliente de carro (a Laura chamou encerrar_contato): não vai a consultor nem gera cobrança. */
     naoCliente?: { tipo: string; resumo: string; executada?: boolean } | null;
     chamadas: ChamadaFerramenta[];
@@ -181,6 +201,7 @@ export async function executarFerramenta(nome: string, entrada: unknown, ctx: Co
     try {
         switch (nome) {
             case 'buscar_estoque': saida = buscarEstoque(e, ctx); break;
+            case 'registrar_espera': saida = registrarEspera(e, ctx); break;
             case 'enviar_fotos': saida = enviarFotos(e, ctx); break;
             case 'salvar_ficha': saida = await salvarFicha(e, ctx); break;
             case 'agendar_visita': saida = agendarVisita(e, ctx); break;
@@ -220,6 +241,21 @@ function buscarEstoque(e: Record<string, unknown>, ctx: ContextoRodada): Saida {
         parecidos: r.parecidos,
         observacao: 'Nada exato no estoque. Diga que vai confirmar com o consultor e, se fizer sentido, ofereça um dos parecidos.',
     };
+}
+
+function registrarEspera(e: Record<string, unknown>, ctx: ContextoRodada): Saida {
+    const texto = str(e.consulta, 200);
+    if (!texto) return { erro: 'diga qual carro o cliente quer em "consulta".' };
+    const precoMax = typeof e.preco_max === 'number' && e.preco_max > 0 ? e.preco_max : null;
+    const anoMin = typeof e.ano_min === 'number' && e.ano_min > 1950 ? e.ano_min : null;
+    const cambio = str(e.cambio, 20);
+    // Trava: carro que a loja tem não entra na espera.
+    if (ctx.estoque.length) {
+        const r = buscarNoEstoque(ctx.estoque, { consulta: texto, precoMax, anoMin, cambio });
+        if (r.encontrados.length) return { erro: 'esse carro está no estoque agora: ofereça os que buscar_estoque devolveu em vez de registrar espera.' };
+    }
+    ctx.espera = { texto, marca: str(e.marca, 40), modelo: str(e.modelo, 60), carroceria: str(e.tipo, 30), anoMin, precoMax, cambio };
+    return { ok: true, observacao: 'Pedido anotado. Diga que vai avisar quando entrar um carro assim, sem prometer prazo, e siga a conversa.' };
 }
 
 function enviarFotos(e: Record<string, unknown>, ctx: ContextoRodada): Saida {
