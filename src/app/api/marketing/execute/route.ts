@@ -2,12 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient as createAdminClient } from '@/lib/supabase/admin';
 import { anthropic, AI_MODELS } from '@/lib/aiProviders';
 import { requireAdmin } from '../_guard';
+import { editarFoto } from '@/lib/services/higgsfieldImage';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
+export const maxDuration = 120; // o Higgsfield leva de 20 a 90 s para tratar uma foto
 
 const BUCKET = 'marketing-squad-uploads';
-const VITRINE_WEBHOOK = process.env.N8N_VITRINE_TRATA_FOTO_WEBHOOK_URL || 'https://n8n.drivvoo.com/webhook/vitrine-trata-foto';
 
 const PERITO_SYSTEM_PROMPT = `Você é o Perito, agente de aquisição da Manos Veículos (Rio do Sul/SC). Analisa laudo de
 vistoria cautelar (PDF, foto ou texto) de veículo usado e devolve apontamentos + proposta
@@ -173,22 +173,12 @@ async function runVitrine(admin: ReturnType<typeof createAdminClient>, body: any
     const finalInstrucao = instrucao?.trim() ||
         'Uniformize o fundo e a iluminacao da foto, mantendo o carro real exatamente como esta, sem adicionar nem remover nada do veiculo.';
 
-    const n8nRes = await fetch(VITRINE_WEBHOOK, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image_url: signedIn.signedUrl, instrucao: finalInstrucao }),
-    });
-    const rawText = await n8nRes.text();
-    let n8nJson: any = null;
-    try { n8nJson = JSON.parse(rawText); } catch { /* corpo não-JSON, tratado abaixo */ }
-    // n8n às vezes devolve o item cru ({...}), às vezes envolto em array ([{...}])
-    // dependendo de como o node "Respond to Webhook" serializa — aceita os dois.
-    const item = Array.isArray(n8nJson) ? n8nJson[0] : n8nJson;
-    const fotoBase64: string | undefined = item?.foto_tratada_base64 || item?.data?.foto_tratada_base64;
-
-    if (!n8nRes.ok || !fotoBase64) {
-        const errMsg = item?.message
-            || (rawText ? `n8n (${n8nRes.status}): ${rawText.slice(0, 300)}` : `webhook n8n respondeu ${n8nRes.status} sem corpo`);
+    // Tratamento da foto pelo Higgsfield (o webhook do n8n saiu do fluxo).
+    let editada: Awaited<ReturnType<typeof editarFoto>>;
+    try {
+        editada = await editarFoto(signedIn.signedUrl, finalInstrucao);
+    } catch (e: any) {
+        const errMsg = e?.message || 'falha ao tratar a foto no Higgsfield';
         await admin.from('marketing_agent_runs').insert({
             squad: 'vitrine', skill_name: 'vitrine-trata-foto', run_type: 'tratamento_foto',
             status: 'error', title: 'Falha ao tratar foto', error_message: errMsg,
@@ -197,9 +187,9 @@ async function runVitrine(admin: ReturnType<typeof createAdminClient>, body: any
         throw new Error(errMsg);
     }
 
-    const outBuf = Buffer.from(fotoBase64, 'base64');
-    const outPath = storagePath.replace(/^vitrine\//, 'vitrine/outputs/').replace(/(\.[a-zA-Z0-9]+)?$/, '-tratada.jpg');
-    const { error: upErr } = await admin.storage.from(BUCKET).upload(outPath, outBuf, { contentType: 'image/jpeg', upsert: true });
+    const extSaida = editada.contentType.includes('jpeg') ? 'jpg' : 'png';
+    const outPath = storagePath.replace(/^vitrine\//, 'vitrine/outputs/').replace(/(\.[a-zA-Z0-9]+)?$/, `-tratada.${extSaida}`);
+    const { error: upErr } = await admin.storage.from(BUCKET).upload(outPath, editada.buffer, { contentType: editada.contentType, upsert: true });
     if (upErr) throw new Error(upErr.message);
     const { data: signedOut } = await admin.storage.from(BUCKET).createSignedUrl(outPath, 60 * 60 * 24 * 30);
 

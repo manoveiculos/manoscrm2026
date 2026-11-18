@@ -4,9 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import {
     Megaphone, RefreshCw, CheckCircle2, XCircle, Clock, AlertTriangle, ChevronDown,
-    Loader2, Play, Eye, ImageOff, Maximize2, Plug,
+    Loader2, Play, Eye, ImageOff, Maximize2,
 } from 'lucide-react';
 import { ExecuteModal } from './ExecuteModal';
+import { CardSquad, ChipIntegracao, FunilInstagram, ResumoAtencao } from './PainelBlocos';
 import { SquadDetailModal } from './SquadDetailModal';
 import { Lightbox } from './Lightbox';
 import { MidiaBadge, LogResumo, statusMidia } from './MidiaStatus';
@@ -15,9 +16,9 @@ import {
 } from 'recharts';
 import {
     SquadKey, SQUAD_INFO, SQUAD_ORDER, SQUAD_GROUPS,
-    KpiRow, FeedData,
+    KpiRow, RunRow, FeedData,
     timeAgo, formatBRL, metricLabel, parseRefUrl,
-    STATUS_STYLE, getSquadInfo,
+    STATUS_STYLE, getSquadInfo, decisaoTexto,
 } from './utils';
 
 /**
@@ -39,6 +40,7 @@ export default function MarketingSquadPage() {
     const [showExecute, setShowExecute] = useState(false);
     const [selectedSquad, setSelectedSquad] = useState<SquadKey | null>(null);
     const [lightbox, setLightbox] = useState<{ images: string[]; index: number; title: string } | null>(null);
+    const [filtroAtividade, setFiltroAtividade] = useState<'todas' | 'erros'>('todas');
     const lastFetchRef = useRef(0);
 
     const fetchFeed = useCallback(async () => {
@@ -95,6 +97,13 @@ export default function MarketingSquadPage() {
         return m;
     }, [data]);
 
+    // Última execução de cada squad (recentRuns vem do mais novo para o mais antigo).
+    const ultimaPorSquad = useMemo(() => {
+        const m: Partial<Record<SquadKey, RunRow>> = {};
+        for (const r of data?.recentRuns || []) if (!m[r.squad]) m[r.squad] = r;
+        return m;
+    }, [data]);
+
     const totalPending = data?.pendingApprovals?.length || 0;
     const totalRuns7d = (data?.kpis || []).reduce((s, k) => s + (k.runs_7d || 0), 0);
     const totalErrors7d = (data?.kpis || []).reduce((s, k) => s + (k.errors_7d || 0), 0);
@@ -109,8 +118,9 @@ export default function MarketingSquadPage() {
                             <Megaphone className="w-7 h-7 text-red-500" />
                             Time de Marketing
                         </h1>
-                        <p className="text-xs text-zinc-500 mt-0.5">
-                            8 squads de IA — conteúdo, aquisição e inteligência de mercado. {totalRuns7d} execuções nos últimos 7 dias.
+                        <p className="text-sm text-zinc-400 mt-1">
+                            {SQUAD_ORDER.length} squads de IA — conteúdo, aquisição e inteligência de mercado. {totalRuns7d} execuções nos últimos 7 dias.
+                            {data?.generated_at && <span className="text-zinc-500"> · atualizado {timeAgo(data.generated_at)}</span>}
                         </p>
                     </div>
                     <div className="flex items-center gap-3 text-xs text-zinc-500">
@@ -128,26 +138,8 @@ export default function MarketingSquadPage() {
 
                 {/* CONEXÕES */}
                 {data && data.integrations && data.integrations.length > 0 && (
-                    <div className="flex flex-wrap gap-2 mb-5">
-                        {data.integrations.map((ig) => {
-                            const ok = ig.status === 'connected';
-                            const d = ig.details || {};
-                            const networks = d.networks || {};
-                            const dashboardUrl = d.dashboard_url as string | undefined;
-                            return (
-                                <div key={ig.id} className="flex items-center gap-2 rounded-xl bg-white/[0.03] border border-white/[0.06] px-3 py-2 text-xs">
-                                    <Plug className={`w-3.5 h-3.5 ${ok ? 'text-emerald-400' : 'text-red-400'}`} />
-                                    <span className="font-bold capitalize">{ig.provider}</span>
-                                    <span className={ok ? 'text-emerald-400' : 'text-red-400'}>{ok ? 'conectado' : ig.status}</span>
-                                    {networks.instagram && <span className="text-zinc-500">· Instagram @{networks.instagram}</span>}
-                                    {d.plan && <span className="text-zinc-600">· plano {d.plan}</span>}
-                                    <span className="text-zinc-600">· verificado {timeAgo(ig.checked_at)}</span>
-                                    {dashboardUrl && (
-                                        <a href={dashboardUrl} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">Gerenciar →</a>
-                                    )}
-                                </div>
-                            );
-                        })}
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2 mb-5">
+                        {data.integrations.map((ig) => <ChipIntegracao key={ig.id} ig={ig} />)}
                     </div>
                 )}
 
@@ -155,65 +147,18 @@ export default function MarketingSquadPage() {
                     <div className="text-zinc-500 text-sm py-10 text-center">Carregando…</div>
                 ) : (
                     <>
-                        {/* CARDS POR SQUAD — agrupados por pipeline (separados, como pedido) */}
-                        {SQUAD_GROUPS.map((group) => (
-                            <div key={group.title} className="mb-5">
-                                <div className="flex items-baseline gap-2 mb-2 px-0.5">
-                                    <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-400">{group.title}</h3>
-                                    <span className="text-[10px] text-zinc-600">{group.note}</span>
-                                </div>
-                                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                                    {group.squads.map((key) => {
-                                        const info = SQUAD_INFO[key];
-                                        const kpi = kpiBySquad[key];
-                                        const Icon = info.icon;
-                                        return (
-                                            <button
-                                                key={key}
-                                                onClick={() => setSelectedSquad(key)}
-                                                className="text-left rounded-2xl bg-white/[0.03] border border-white/[0.06] p-4 relative overflow-hidden hover:bg-white/[0.05] hover:border-white/[0.12] transition-colors cursor-pointer"
-                                            >
-                                                <div className="flex items-center gap-2 mb-2">
-                                                    <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0" style={{ backgroundColor: `${info.color}1a`, color: info.color }}>
-                                                        <Icon className="w-4 h-4" />
-                                                    </div>
-                                                    <div className="min-w-0">
-                                                        <p className="font-bold text-sm leading-tight">{info.label}</p>
-                                                        <p className="text-[10px] text-zinc-500 leading-tight truncate" title={info.missao}>{info.missao}</p>
-                                                    </div>
-                                                </div>
-                                                <div className="flex items-end justify-between mt-3">
-                                                    <div>
-                                                        <p className="text-2xl font-black leading-none">{kpi?.runs_7d ?? 0}</p>
-                                                        <p className="text-[10px] text-zinc-500 mt-1">execuções / 7d</p>
-                                                    </div>
-                                                    <div className="text-right">
-                                                        {!!kpi?.pending_approvals && (
-                                                            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded-full mb-1">
-                                                                <Clock className="w-2.5 h-2.5" /> {kpi.pending_approvals} pendente(s)
-                                                            </span>
-                                                        )}
-                                                        <p className="text-[10px] text-zinc-500">{timeAgo(kpi?.last_run_at || null)}</p>
-                                                    </div>
-                                                </div>
-                                                {!!kpi?.errors_7d && (
-                                                    <p className="text-[10px] text-red-400 mt-1.5">{kpi.errors_7d} erro(s) na semana</p>
-                                                )}
-                                                {!kpi && <p className="text-[10px] text-zinc-600 mt-1.5">Sem execuções ainda</p>}
-                                                <p className="text-[9px] text-zinc-600 mt-2">Clique para ver o histórico →</p>
-                                            </button>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-                        ))}
+                        {/* O QUE PRECISA DE VOCÊ + CAMINHO DO POST */}
+                        <div className="space-y-4 mb-5">
+                            <ResumoAtencao data={data!} onVerAprovacoes={() => document.getElementById("aprovacoes")?.scrollIntoView({ behavior: "smooth", block: "start" })} />
+                            <FunilInstagram data={data!} />
+                        </div>
 
                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                             {/* PENDENTES DE APROVAÇÃO */}
-                            <div className="lg:col-span-2 rounded-2xl bg-white/[0.03] border border-white/[0.06] p-4">
+                            <div id="aprovacoes" className="lg:col-span-2 scroll-mt-4 rounded-2xl bg-white/[0.03] border border-white/[0.08] p-4">
                                 <h2 className="text-sm font-bold mb-3 flex items-center gap-2">
                                     <Clock className="w-4 h-4 text-amber-400" /> Aguardando aprovação
-                                    {totalPending > 0 && <span className="text-[10px] font-black bg-amber-500/15 text-amber-400 px-1.5 py-0.5 rounded-full">{totalPending}</span>}
+                                    {totalPending > 0 && <span className="text-xs font-black bg-amber-500/15 text-amber-400 px-1.5 py-0.5 rounded-full">{totalPending}</span>}
                                 </h2>
                                 {totalPending === 0 ? (
                                     <p className="text-xs text-zinc-500">Nada esperando decisão agora.</p>
@@ -233,17 +178,17 @@ export default function MarketingSquadPage() {
                                             const problemasVisuais = run.metrics?.problemas_visuais;
                                             return (
                                                 <div key={run.id} className="rounded-xl bg-black/30 border border-white/[0.06] p-3">
-                                                    <div className="flex items-center gap-1.5 text-[10px] text-zinc-500 mb-1">
+                                                    <div className="flex items-center gap-1.5 text-xs text-zinc-500 mb-1">
                                                         <span style={{ color: info.color }} className="font-bold">{info.label}</span>
                                                         <span>·</span>
                                                         <span>{timeAgo(run.created_at)}</span>
                                                         {temArteGerada && (
                                                             pronto ? (
-                                                                <span className="ml-auto inline-flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded-full">
+                                                                <span className="ml-auto inline-flex items-center gap-1 text-xs font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded-full">
                                                                     <CheckCircle2 className="w-2.5 h-2.5" /> pronto p/ publicar
                                                                 </span>
                                                             ) : (
-                                                                <span className="ml-auto inline-flex items-center gap-1 text-[10px] font-bold text-red-400 bg-red-500/10 px-1.5 py-0.5 rounded-full" title="Sem imagens_publicas no metrics — o Publisher vai bloquear essa pauta ate a Vitrine reprocessar.">
+                                                                <span className="ml-auto inline-flex items-center gap-1 text-xs font-bold text-red-400 bg-red-500/10 px-1.5 py-0.5 rounded-full" title="Sem imagens_publicas no metrics — o Publisher vai bloquear essa pauta ate a Vitrine reprocessar.">
                                                                     <ImageOff className="w-2.5 h-2.5" /> sem imagens públicas
                                                                 </span>
                                                             )
@@ -259,21 +204,21 @@ export default function MarketingSquadPage() {
                                                         <div className="mt-1.5">
                                                             {visualRevisado ? (
                                                                 visualAprovado ? (
-                                                                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-violet-400 bg-violet-500/10 px-1.5 py-0.5 rounded-full">
+                                                                    <span className="inline-flex items-center gap-1 text-xs font-bold text-violet-400 bg-violet-500/10 px-1.5 py-0.5 rounded-full">
                                                                         <Eye className="w-2.5 h-2.5" /> Diretor de Arte aprovou
                                                                     </span>
                                                                 ) : (
-                                                                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-red-400 bg-red-500/10 px-1.5 py-0.5 rounded-full" title={typeof problemasVisuais === 'string' ? problemasVisuais : JSON.stringify(problemasVisuais)}>
+                                                                    <span className="inline-flex items-center gap-1 text-xs font-bold text-red-400 bg-red-500/10 px-1.5 py-0.5 rounded-full" title={typeof problemasVisuais === 'string' ? problemasVisuais : JSON.stringify(problemasVisuais)}>
                                                                         <AlertTriangle className="w-2.5 h-2.5" /> Diretor de Arte reprovou
                                                                     </span>
                                                                 )
                                                             ) : (
-                                                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-zinc-500 bg-white/[0.04] px-1.5 py-0.5 rounded-full">
+                                                                <span className="inline-flex items-center gap-1 text-xs font-bold text-zinc-500 bg-white/[0.04] px-1.5 py-0.5 rounded-full">
                                                                     <Clock className="w-2.5 h-2.5" /> aguardando revisão do Diretor de Arte
                                                                 </span>
                                                             )}
                                                             {visualRevisado && !visualAprovado && problemasVisuais && (
-                                                                <p className="text-[10px] text-red-400/90 mt-1 leading-snug">
+                                                                <p className="text-xs text-red-400/90 mt-1 leading-snug">
                                                                     {Array.isArray(problemasVisuais) ? problemasVisuais.join(' • ') : String(problemasVisuais)}
                                                                 </p>
                                                             )}
@@ -297,7 +242,7 @@ export default function MarketingSquadPage() {
                                                         </div>
                                                     )}
                                                     {caption && (
-                                                        <p className="text-[11px] text-zinc-300 mt-2 leading-snug bg-black/40 border border-white/[0.06] rounded-lg p-2 whitespace-pre-wrap max-h-24 overflow-y-auto custom-scrollbar">{caption}</p>
+                                                        <p className="text-xs text-zinc-300 mt-2 leading-snug bg-black/40 border border-white/[0.06] rounded-lg p-2 whitespace-pre-wrap max-h-24 overflow-y-auto custom-scrollbar">{caption}</p>
                                                     )}
 
                                                     {(proposta || fipe) && (
@@ -307,9 +252,9 @@ export default function MarketingSquadPage() {
                                                     )}
                                                     {outRef.text && (
                                                         outRef.isUrl ? (
-                                                            <a href={outRef.href} target="_blank" rel="noreferrer" className="text-[10px] text-blue-400 hover:underline block mt-1">Ver resultado →</a>
+                                                            <a href={outRef.href} target="_blank" rel="noreferrer" className="text-xs text-blue-400 hover:underline block mt-1">Ver resultado →</a>
                                                         ) : (
-                                                            <p className="text-[10px] text-zinc-400 mt-1 truncate" title={outRef.text}>Resultado: {outRef.text}</p>
+                                                            <p className="text-xs text-zinc-400 mt-1 truncate" title={outRef.text}>Resultado: {outRef.text}</p>
                                                         )
                                                     )}
                                                     <div className="flex gap-2 mt-2.5">
@@ -341,12 +286,28 @@ export default function MarketingSquadPage() {
 
                             {/* ATIVIDADE RECENTE */}
                             <div className="lg:col-span-1 rounded-2xl bg-white/[0.03] border border-white/[0.06] p-4">
-                                <h2 className="text-sm font-bold mb-3">Atividade recente</h2>
+                                <div className="flex items-center justify-between gap-2 mb-3">
+                                    <h2 className="text-base font-bold">Atividade recente</h2>
+                                    <div className="flex gap-1 text-xs" role="group" aria-label="Filtrar atividade">
+                                        {(['todas', 'erros'] as const).map((f) => (
+                                            <button
+                                                key={f}
+                                                onClick={() => setFiltroAtividade(f)}
+                                                aria-pressed={filtroAtividade === f}
+                                                className={`px-2.5 py-1 rounded-lg font-semibold transition-colors ${filtroAtividade === f ? 'bg-white/10 text-white' : 'text-zinc-400 hover:text-white'}`}
+                                            >
+                                                {f === 'todas' ? 'Tudo' : 'Só erros'}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
                                 {(!data?.recentRuns || data.recentRuns.length === 0) ? (
-                                    <p className="text-xs text-zinc-500">Nenhuma execução registrada ainda. Assim que os agentes começarem a rodar, elas aparecem aqui.</p>
+                                    <p className="text-sm text-zinc-400">Nenhuma execução registrada ainda. Assim que os agentes começarem a rodar, elas aparecem aqui.</p>
+                                ) : data.recentRuns.filter((r) => filtroAtividade === 'todas' || r.status === 'error').length === 0 ? (
+                                    <p className="text-sm text-zinc-400">Nenhum erro nas últimas execuções.</p>
                                 ) : (
                                     <div className="space-y-1.5 max-h-[600px] overflow-y-auto custom-scrollbar">
-                                        {data.recentRuns.map((run) => {
+                                        {data.recentRuns.filter((r) => filtroAtividade === 'todas' || r.status === 'error').map((run) => {
                                             const info = getSquadInfo(run.squad);
                                             const st = STATUS_STYLE[run.status] || STATUS_STYLE.success;
                                             const isOpen = expanded === run.id;
@@ -362,14 +323,14 @@ export default function MarketingSquadPage() {
                                                         <span className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${st.dot}`} />
                                                         <div className="min-w-0 flex-1">
                                                             <div className="flex items-center gap-1.5 flex-wrap">
-                                                                <span className="text-[10px] font-bold" style={{ color: info.color }}>{info.label}</span>
-                                                                {run.skill_name && <span className="text-[10px] text-zinc-600">· {run.skill_name}</span>}
-                                                                <span className={`text-[10px] ${st.text}`}>· {st.label}</span>
-                                                                <span className="text-[10px] text-zinc-600 ml-auto">{timeAgo(run.created_at)}</span>
+                                                                <span className="text-xs font-bold" style={{ color: info.color }}>{info.label}</span>
+                                                                {run.skill_name && <span className="text-xs text-zinc-500">· {run.skill_name}</span>}
+                                                                <span className={`text-xs ${st.text}`}>· {st.label}</span>
+                                                                <span className="text-xs text-zinc-500 ml-auto">{timeAgo(run.created_at)}</span>
                                                             </div>
                                                             <p className="text-sm leading-snug truncate">{run.title}</p>
                                                         </div>
-                                                        <ChevronDown className={`w-3.5 h-3.5 text-zinc-600 shrink-0 mt-1 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                                                        <ChevronDown className={`w-3.5 h-3.5 text-zinc-500 shrink-0 mt-1 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
                                                     </button>
                                                     {isOpen && (
                                                         <div className="px-2 pb-3 pl-6 text-xs text-zinc-400 space-y-1.5">
@@ -379,7 +340,7 @@ export default function MarketingSquadPage() {
                                                             {metricEntries.length > 0 && (
                                                                 <div className="flex flex-wrap gap-1.5">
                                                                     {metricEntries.map(([k, v]) => (
-                                                                        <span key={k} className="font-mono bg-black/30 border border-white/[0.06] rounded px-1.5 py-0.5 text-[10px]">
+                                                                        <span key={k} className="font-mono bg-black/30 border border-white/[0.06] rounded px-1.5 py-0.5 text-xs">
                                                                             {metricLabel(k)}: {formatBRL(v) || String(v)}
                                                                         </span>
                                                                     ))}
@@ -401,8 +362,8 @@ export default function MarketingSquadPage() {
                                                                     )
                                                                 )}
                                                             </div>
-                                                            {run.approved_by && (
-                                                                <p className="text-zinc-600">{run.status === 'approved' ? 'Aprovado' : 'Decidido'} por {run.approved_by} · {timeAgo(run.approved_at)}</p>
+                                                            {decisaoTexto(run) && (
+                                                                <p className="text-zinc-500">{decisaoTexto(run)}</p>
                                                             )}
                                                         </div>
                                                     )}
@@ -412,6 +373,23 @@ export default function MarketingSquadPage() {
                                     </div>
                                 )}
                             </div>
+                        </div>
+
+                        {/* CARDS POR SQUAD — agrupados por pipeline */}
+                        <div className="mt-6">
+                            {SQUAD_GROUPS.map((group) => (
+                                <div key={group.title} className="mb-6">
+                                    <div className="flex items-baseline gap-2 mb-2 px-0.5 flex-wrap">
+                                        <h3 className="text-sm font-bold uppercase tracking-wide text-zinc-300">{group.title}</h3>
+                                        <span className="text-xs text-zinc-500">{group.note}</span>
+                                    </div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                                        {group.squads.map((key) => (
+                                            <CardSquad key={key} squad={key} kpi={kpiBySquad[key]} ultima={ultimaPorSquad[key]} onClick={() => setSelectedSquad(key)} />
+                                        ))}
+                                    </div>
+                                </div>
+                            ))}
                         </div>
 
                         {/* TENDÊNCIA */}

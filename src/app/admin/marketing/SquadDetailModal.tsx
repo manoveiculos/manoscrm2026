@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import {
     SquadKey, SQUAD_INFO, RunRow,
-    timeAgo, formatBRL, metricLabel, parseRefUrl, STATUS_STYLE,
+    timeAgo, formatBRL, metricLabel, parseRefUrl, STATUS_STYLE, decisaoTexto,
 } from './utils';
 import { MidiaBadge, LogResumo, statusMidia } from './MidiaStatus';
 import { Lightbox } from './Lightbox';
@@ -100,19 +100,19 @@ export function SquadDetailModal({
 
                                 return (
                                     <div key={run.id} className="rounded-xl bg-black/30 border border-white/[0.06] p-3">
-                                        <div className="flex items-center gap-1.5 text-[10px] text-zinc-500 mb-1 flex-wrap">
+                                        <div className="flex items-center gap-1.5 text-xs text-zinc-500 mb-1 flex-wrap">
                                             <span className={`w-1.5 h-1.5 rounded-full ${st.dot}`} />
                                             <span className={st.text}>{st.label}</span>
                                             <span>·</span>
                                             <span>{timeAgo(run.created_at)}</span>
-                                            {run.skill_name && <span className="text-zinc-600">· {run.skill_name}</span>}
+                                            {run.skill_name && <span className="text-zinc-500">· {run.skill_name}</span>}
                                             {temArteGerada && (
                                                 pronto ? (
-                                                    <span className="ml-auto inline-flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded-full">
+                                                    <span className="ml-auto inline-flex items-center gap-1 text-xs font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded-full">
                                                         <CheckCircle2 className="w-2.5 h-2.5" /> pronto p/ publicar
                                                     </span>
                                                 ) : (
-                                                    <span className="ml-auto inline-flex items-center gap-1 text-[10px] font-bold text-red-400 bg-red-500/10 px-1.5 py-0.5 rounded-full">
+                                                    <span className="ml-auto inline-flex items-center gap-1 text-xs font-bold text-red-400 bg-red-500/10 px-1.5 py-0.5 rounded-full">
                                                         <ImageOff className="w-2.5 h-2.5" /> sem imagens públicas
                                                     </span>
                                                 )
@@ -127,7 +127,7 @@ export function SquadDetailModal({
                                         {problemasRevisao.length > 0 && (
                                             <ul className="mt-1.5 space-y-0.5">
                                                 {problemasRevisao.map((pr, i) => (
-                                                    <li key={i} className="text-[10px] text-red-400/90 leading-snug">• {pr}</li>
+                                                    <li key={i} className="text-xs text-red-400/90 leading-snug">• {pr}</li>
                                                 ))}
                                             </ul>
                                         )}
@@ -136,21 +136,21 @@ export function SquadDetailModal({
                                             <div className="mt-1.5">
                                                 {visualRevisado ? (
                                                     visualAprovado ? (
-                                                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-violet-400 bg-violet-500/10 px-1.5 py-0.5 rounded-full">
+                                                        <span className="inline-flex items-center gap-1 text-xs font-bold text-violet-400 bg-violet-500/10 px-1.5 py-0.5 rounded-full">
                                                             <Eye className="w-2.5 h-2.5" /> Diretor de Arte aprovou
                                                         </span>
                                                     ) : (
-                                                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-red-400 bg-red-500/10 px-1.5 py-0.5 rounded-full">
+                                                        <span className="inline-flex items-center gap-1 text-xs font-bold text-red-400 bg-red-500/10 px-1.5 py-0.5 rounded-full">
                                                             <AlertTriangle className="w-2.5 h-2.5" /> Diretor de Arte reprovou
                                                         </span>
                                                     )
                                                 ) : (
-                                                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-zinc-500 bg-white/[0.04] px-1.5 py-0.5 rounded-full">
+                                                    <span className="inline-flex items-center gap-1 text-xs font-bold text-zinc-500 bg-white/[0.04] px-1.5 py-0.5 rounded-full">
                                                         <Clock className="w-2.5 h-2.5" /> aguardando revisão do Diretor de Arte
                                                     </span>
                                                 )}
                                                 {visualRevisado && !visualAprovado && problemasVisuais && (
-                                                    <p className="text-[10px] text-red-400/90 mt-1 leading-snug">
+                                                    <p className="text-xs text-red-400/90 mt-1 leading-snug">
                                                         {Array.isArray(problemasVisuais) ? problemasVisuais.join(' • ') : String(problemasVisuais)}
                                                     </p>
                                                 )}
@@ -174,7 +174,7 @@ export function SquadDetailModal({
                                             </div>
                                         )}
                                         {caption && (
-                                            <p className="text-[11px] text-zinc-300 mt-2 leading-snug bg-black/40 border border-white/[0.06] rounded-lg p-2 whitespace-pre-wrap max-h-24 overflow-y-auto custom-scrollbar">{caption}</p>
+                                            <p className="text-xs text-zinc-300 mt-2 leading-snug bg-black/40 border border-white/[0.06] rounded-lg p-2 whitespace-pre-wrap max-h-24 overflow-y-auto custom-scrollbar">{caption}</p>
                                         )}
 
                                         {(proposta || fipe) && (
@@ -186,7 +186,7 @@ export function SquadDetailModal({
                                         {metricEntries.length > 0 && (
                                             <div className="flex flex-wrap gap-1.5 mt-1.5">
                                                 {metricEntries.map(([k, v]) => (
-                                                    <span key={k} className="font-mono bg-black/30 border border-white/[0.06] rounded px-1.5 py-0.5 text-[10px] text-zinc-400">
+                                                    <span key={k} className="font-mono bg-black/30 border border-white/[0.06] rounded px-1.5 py-0.5 text-xs text-zinc-400">
                                                         {metricLabel(k)}: {formatBRL(v) || String(v)}
                                                     </span>
                                                 ))}
@@ -196,22 +196,22 @@ export function SquadDetailModal({
                                         <div className="flex gap-3 flex-wrap mt-1.5">
                                             {inRef.text && (
                                                 inRef.isUrl ? (
-                                                    <a href={inRef.href} target="_blank" rel="noreferrer" className="text-[10px] text-blue-400 hover:underline">Entrada →</a>
+                                                    <a href={inRef.href} target="_blank" rel="noreferrer" className="text-xs text-blue-400 hover:underline">Entrada →</a>
                                                 ) : (
-                                                    <span className="text-[10px] text-zinc-500" title={inRef.text}>Entrada: {inRef.text}</span>
+                                                    <span className="text-xs text-zinc-500" title={inRef.text}>Entrada: {inRef.text}</span>
                                                 )
                                             )}
                                             {outRef.text && (
                                                 outRef.isUrl ? (
-                                                    <a href={outRef.href} target="_blank" rel="noreferrer" className="text-[10px] text-blue-400 hover:underline">Resultado →</a>
+                                                    <a href={outRef.href} target="_blank" rel="noreferrer" className="text-xs text-blue-400 hover:underline">Resultado →</a>
                                                 ) : (
-                                                    <span className="text-[10px] text-zinc-500" title={outRef.text}>Resultado: {outRef.text}</span>
+                                                    <span className="text-xs text-zinc-500" title={outRef.text}>Resultado: {outRef.text}</span>
                                                 )
                                             )}
                                         </div>
 
-                                        {run.approved_by && (
-                                            <p className="text-[10px] text-zinc-600 mt-1.5">{run.status === 'approved' ? 'Aprovado' : 'Decidido'} por {run.approved_by} · {timeAgo(run.approved_at)}</p>
+                                        {decisaoTexto(run) && (
+                                            <p className="text-xs text-zinc-500 mt-1.5">{decisaoTexto(run)}</p>
                                         )}
 
                                         {pendente && (

@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
     const admin = createClient();
     const { data, error } = await admin
         .from('marketing_agent_runs')
-        .select('id, squad, skill_name, run_type, status, title, summary, input_ref, output_ref, metrics, requires_approval, approved_by, approved_at, rejected_reason, error_message, created_at')
+        .select('id, squad, skill_name, run_type, status, title, summary, input_ref, output_ref, metrics, requires_approval, approved_by, approved_at, rejected_by, rejected_at, rejected_reason, error_message, created_at')
         .eq('squad', squad)
         .order('created_at', { ascending: false })
         .limit(150);

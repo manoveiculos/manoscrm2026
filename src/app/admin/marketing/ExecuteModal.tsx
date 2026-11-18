@@ -28,8 +28,7 @@ const AUTOMATICOS: Array<{ label: string; freq: string }> = [
 ];
 
 const BLOQUEADOS: Array<{ label: string; motivo: string }> = [
-    { label: 'Captador', motivo: 'pausado — falta uma fonte de dados de leads de troca ativa' },
-    { label: 'Recepção', motivo: 'falta configurar o ManyChat' },
+    { label: 'Captação por DM/comentário no Instagram', motivo: 'falta configurar o ManyChat (hoje a Recepção só monta as fichas dos leads do dia)' },
 ];
 
 const DEFAULT_INSTRUCAO = 'Uniformize o fundo e a iluminação da foto, mantendo o carro real exatamente como está, sem adicionar nem remover nada do veículo.';

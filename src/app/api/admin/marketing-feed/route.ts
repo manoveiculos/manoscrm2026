@@ -18,7 +18,7 @@ export async function GET(_req: NextRequest) {
         admin.from('vw_marketing_squad_kpis').select('*'),
         admin
             .from('marketing_agent_runs')
-            .select('id, squad, skill_name, run_type, status, title, summary, input_ref, output_ref, metrics, requires_approval, approved_by, approved_at, rejected_reason, error_message, created_at')
+            .select('id, squad, skill_name, run_type, status, title, summary, input_ref, output_ref, metrics, requires_approval, approved_by, approved_at, rejected_by, rejected_at, rejected_reason, error_message, created_at')
             .order('created_at', { ascending: false })
             .limit(60),
         admin
@@ -26,6 +26,7 @@ export async function GET(_req: NextRequest) {
             .select('id, squad, skill_name, run_type, title, summary, input_ref, output_ref, metrics, created_at')
             .eq('requires_approval', true)
             .is('approved_at', null)
+            .is('rejected_at', null)
             .order('created_at', { ascending: false })
             .limit(50),
         admin.from('marketing_integrations').select('*'),

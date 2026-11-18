@@ -18,17 +18,19 @@ export const SQUAD_INFO: Record<SquadKey, { label: string; missao: string; icon:
     publisher: { label: 'Publisher', missao: 'Agenda e audita no Instagram', icon: Send, color: '#fb923c' },
     perito: { label: 'Perito', missao: 'Laudo cautelar → proposta de compra', icon: FileSearch, color: '#f59e0b' },
     captador: { label: 'Captador', missao: 'Qualificação de lead de troca por 0km', icon: Repeat, color: '#a3e635' },
-    recepcao: { label: 'Recepção', missao: 'Captação 24h no Instagram (DM/comentário)', icon: MessageCircle, color: '#818cf8' },
+    recepcao: { label: 'Recepção', missao: 'Fichas dos leads do dia e cliente antigo que voltou', icon: MessageCircle, color: '#818cf8' },
     sentinela: { label: 'Sentinela', missao: 'Inteligência de concorrência regional', icon: Radar, color: '#22d3ee' },
     trafego: { label: 'Tráfego', missao: 'Vigilante Meta Ads 24h', icon: TrendingUp, color: '#f87171' },
 };
-export const SQUAD_ORDER: SquadKey[] = ['vitrine', 'diretor_arte', 'publisher', 'perito', 'captador', 'recepcao', 'sentinela', 'trafego'];
+// Captador fica fora da tela: nunca rodou (0 execuções) e está pausado por falta de fonte de dados.
+// A chave segue em SquadKey/SQUAD_INFO só para a API aceitar registros antigos.
+export const SQUAD_ORDER: SquadKey[] = ['vitrine', 'diretor_arte', 'publisher', 'perito', 'recepcao', 'sentinela', 'trafego'];
 
 // Dashboard "separado por pipeline": squads que trabalham juntos ficam
 // agrupados visualmente em vez de uma grade única.
 export const SQUAD_GROUPS: Array<{ title: string; note: string; squads: SquadKey[] }> = [
     { title: 'Conteúdo & Publicação (Instagram)', note: 'Vitrine gera → Diretor de Arte revisa → você aprova → Publisher posta', squads: ['vitrine', 'diretor_arte', 'publisher'] },
-    { title: 'Aquisição & Atendimento', note: 'Perito (laudo → proposta), Captador e Recepção', squads: ['perito', 'captador', 'recepcao'] },
+    { title: 'Aquisição & Atendimento', note: 'Perito (laudo → proposta) e Recepção (fichas dos leads)', squads: ['perito', 'recepcao'] },
     { title: 'Inteligência & Tráfego pago', note: 'Sentinela (concorrência) e Tráfego (Meta Ads 24h)', squads: ['sentinela', 'trafego'] },
 ];
 
@@ -37,10 +39,18 @@ export interface RunRow {
     id: string; squad: SquadKey; skill_name: string | null; run_type: string; status: string;
     title: string; summary: string | null; input_ref: string | null; output_ref: string | null;
     metrics: Record<string, any>; requires_approval: boolean; approved_by: string | null;
-    approved_at: string | null; rejected_reason: string | null; error_message: string | null; created_at: string;
+    approved_at: string | null; rejected_by?: string | null; rejected_at?: string | null; rejected_reason: string | null; error_message: string | null; created_at: string;
 }
 export interface IntegrationRow { id: string; provider: string; status: string; details: Record<string, any>; checked_at: string; checked_by: string | null; }
 export interface FeedData { kpis: KpiRow[]; recentRuns: RunRow[]; pendingApprovals: RunRow[]; integrations: IntegrationRow[]; daily: Array<Record<string, any>>; generated_at: string; }
+
+/** "Aprovado por X · 2d atrás" / "Reprovado por X · …". Linhas antigas reprovadas
+ *  guardavam quem decidiu em approved_by — aparecem como "Decidido". */
+export function decisaoTexto(run: Pick<RunRow, 'status' | 'approved_by' | 'approved_at' | 'rejected_by' | 'rejected_at'>): string | null {
+    if (run.rejected_by) return `Reprovado por ${run.rejected_by} · ${timeAgo(run.rejected_at ?? null)}`;
+    if (!run.approved_by) return null;
+    return `${run.status === 'approved' ? 'Aprovado' : 'Decidido'} por ${run.approved_by} · ${timeAgo(run.approved_at)}`;
+}
 
 export function timeAgo(iso: string | null): string {
     if (!iso) return '—';
