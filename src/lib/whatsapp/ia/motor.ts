@@ -35,6 +35,7 @@ import { lerConfigIa } from './config';
 import { FERRAMENTAS, executarFerramenta, type ContextoRodada, type ConversaIa } from './ferramentas';
 import { LAURA_CRM_PROMPT, contextoDaRodada } from './prompt';
 import { descricaoDoExtra } from './visao';
+import { gravarVisitaDaLaura } from './visitaRodada';
 import { garantirDescricoesDeImagens } from './visaoRodada';
 import { descartarNaoCliente, liberarDaTriagem } from './triagemRodada';
 import {
@@ -412,21 +413,15 @@ async function executarEnvio(supabase: SupabaseClient, ctx: ContextoRodada, g: G
         }
     }
     if (ctx.agendamento && !ctx.agendamento.gravada) {
-        let vendedorAuth: string | null = null;
-        if (ctx.conversa.assigned_consultant_id) {
-            const { data: v } = await supabase.from('consultants_manos_crm').select('auth_id').eq('id', ctx.conversa.assigned_consultant_id).maybeSingle();
-            vendedorAuth = (v?.auth_id as string | null) ?? null;
-        }
-        const { error } = await supabase.from('agendamentos').insert({
-            lead_uid: ctx.conversa.lead_uid,
-            cliente_nome: ctx.ficha.nome || ctx.conversa.nome_cliente || ctx.conversa.nome_contato,
-            veiculo_interesse: ctx.ficha.carro_interesse || null,
-            data_hora: ctx.agendamento.iso,
-            observacoes: 'Agendado pela Laura (CRM)',
-            status: 'agendado',
-            vendedor_id: vendedorAuth,
+        // Visita confirmada → Agenda do consultor (visitaRodada.ts: cria, mantém ou move; nunca duplica; erro fica visível)
+        const r = await gravarVisitaDaLaura(supabase, {
+            iso: ctx.agendamento.iso, conversaId: ctx.conversa.id, conversa: ctx.conversa,
+            nomeNaFicha: ctx.ficha.nome, carroInteresse: ctx.ficha.carro_interesse, agora: ctx.agora,
         });
-        ctx.agendamento.gravada = !error;
+        ctx.agendamento.gravada = r.gravada;
+        ctx.agendamento.id = r.id;
+        ctx.agendamento.acao = r.acao;
+        ctx.agendamento.erro = r.erro;
     }
     // Contato que não é cliente de carro: arquiva o lead e encerra a conversa, sem avisar nem cobrar consultor
     if (ctx.naoCliente && !ctx.passagem) {

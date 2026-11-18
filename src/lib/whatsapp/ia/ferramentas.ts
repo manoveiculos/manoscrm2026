@@ -142,7 +142,7 @@ export interface ChamadaFerramenta {
 }
 
 export interface FotoAnotada { veiculo_id: string; carro: string; urls: string[] }
-export interface AgendaAnotada { iso: string; rotulo: string; gravada?: boolean }
+export interface AgendaAnotada { iso: string; rotulo: string; gravada?: boolean; id?: string; acao?: 'criar' | 'manter' | 'mover'; erro?: string }
 export interface PassagemAnotada { motivo: string; resumo: string; executada?: boolean }
 
 export interface ContextoRodada {
