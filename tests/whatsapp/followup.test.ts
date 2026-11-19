@@ -87,3 +87,19 @@ test('ritmo do dia: o teto de 30 é diluído pelo horário da loja (8h-18h), nã
     assert.equal(em('2026-11-22T15:00:00Z'), 0);    // domingo
     assert.ok(em('2026-11-21T13:00:00Z') <= 30 && em('2026-11-21T13:00:00Z') > 0);   // sábado 10h: janela menor (8h-12h)
 });
+
+test('pausa anti-ban: 8 a 12 min entre follow-ups, com sorteio; sem envio anterior pode', async () => {
+    const { pausaEntreEnviosMs, podeEnviarAgora, MAX_POR_RODADA } = await import('@/lib/whatsapp/ia/followup');
+    assert.equal(MAX_POR_RODADA, 1);
+    assert.equal(pausaEntreEnviosMs(0), 8 * 60_000);
+    assert.equal(pausaEntreEnviosMs(1), 12 * 60_000);
+    assert.equal(pausaEntreEnviosMs(7), 12 * 60_000);      // sorteio fora de 0..1 é limitado
+    const agora = new Date('2026-11-19T15:00:00Z');
+    const ha = (min: number) => new Date(agora.getTime() - min * 60_000).toISOString();
+    assert.equal(podeEnviarAgora(null, agora, 0.5).pode, true);
+    assert.equal(podeEnviarAgora(ha(5), agora, 0).pode, false);
+    assert.equal(podeEnviarAgora(ha(5), agora, 0).faltaMs, 3 * 60_000);
+    assert.equal(podeEnviarAgora(ha(9), agora, 0).pode, true);      // 9 min > 8 min
+    assert.equal(podeEnviarAgora(ha(9), agora, 1).pode, false);     // mas com o sorteio no máximo (12 min) ainda não
+    assert.equal(podeEnviarAgora(ha(13), agora, 1).pode, true);
+});

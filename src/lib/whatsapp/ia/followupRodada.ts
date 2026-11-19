@@ -20,7 +20,7 @@ import { claude, MODELO_PADRAO } from './motor';
 import { LAURA_CRM_PROMPT } from './prompt';
 import { custoUsd, inicioDoDiaSP, limiteDiario, somarUso, textoParaIa, type MensagemParaIa, type UsoTokens } from './regras';
 import {
-    ESPERA_ENTRE_ENVIOS_MS, LIMITE_DIA_PADRAO, MAX_DIAS_DESDE_ANCORA, MAX_POR_RODADA, cotaAteAgora,
+    ESPERA_ENTRE_ENVIOS_MS, LIMITE_DIA_PADRAO, MAX_DIAS_DESDE_ANCORA, MAX_POR_RODADA, cotaAteAgora, podeEnviarAgora,
     ancoraDoSilencio, dataDeCorte, decidirFollowup, instrucaoDoToque, type MsgFollowup,
 } from './followup';
 
@@ -74,6 +74,14 @@ export async function rodarFollowups(supabase: SupabaseClient, opts: { agora?: D
     let restanteDia = cota - (hoje ?? 0);
     if (cfg.modo === 'envia' && restanteDia <= 0) {
         return { ...resumo, motivo: (hoje ?? 0) >= teto ? `teto do dia atingido (${teto})` : `ritmo do dia: ${hoje ?? 0} enviados de ${cota} liberados até agora (teto ${teto})` };
+    }
+
+    // Pausa grande entre envios (anti-ban): nunca dois follow-ups colados, e o intervalo varia (8 a 12 min).
+    if (cfg.modo === 'envia') {
+        const { data: ult } = await supabase.from('wa_followups').select('criado_em').eq('status', 'enviado')
+            .order('criado_em', { ascending: false }).limit(1).maybeSingle();
+        const p = podeEnviarAgora((ult?.criado_em as string | undefined) ?? null, agora, Math.random());
+        if (!p.pode) return { ...resumo, motivo: `pausa entre envios (anti-ban): faltam ${Math.ceil(p.faltaMs / 60_000)} min` };
     }
 
     const cliente = claude();

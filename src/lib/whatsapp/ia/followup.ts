@@ -10,8 +10,26 @@
 // Este arquivo tem a DECISÃO pura (testada) e o prompt. A execução fica em followupRodada.ts.
 
 export const CADENCIA_DIAS = [1, 2, 4, 10] as const;
-export const MAX_POR_RODADA = 3;
+/** Um envio por rodada: o cron roda a cada poucos minutos, então o intervalo vem da pausa abaixo (anti-ban). */
+export const MAX_POR_RODADA = 1;
 export const ESPERA_ENTRE_ENVIOS_MS = 75_000;
+/** Pausa mínima entre dois follow-ups: 8 min + sorteio de 0 a 4 min (nunca em intervalo certinho de robô). */
+export const PAUSA_MIN_ENTRE_ENVIOS_MIN = 8;
+export const PAUSA_SORTEIO_MIN = 4;
+
+/** Pausa exigida desta vez, em ms (entre 8 e 12 min). `sorteio` é um número de 0 a 1 (Math.random). */
+export function pausaEntreEnviosMs(sorteio: number): number {
+    const s = Math.min(1, Math.max(0, Number.isFinite(sorteio) ? sorteio : 0));
+    return Math.round((PAUSA_MIN_ENTRE_ENVIOS_MIN + PAUSA_SORTEIO_MIN * s) * 60_000);
+}
+
+/** Já passou a pausa desde o último follow-up enviado? `faltaMs` diz quanto ainda falta. */
+export function podeEnviarAgora(ultimoEnvioEm: string | null | undefined, agora: Date, sorteio: number): { pode: boolean; faltaMs: number } {
+    const ult = ultimoEnvioEm ? Date.parse(ultimoEnvioEm) : NaN;
+    if (!Number.isFinite(ult)) return { pode: true, faltaMs: 0 };
+    const falta = ult + pausaEntreEnviosMs(sorteio) - agora.getTime();
+    return falta > 0 ? { pode: false, faltaMs: falta } : { pode: true, faltaMs: 0 };
+}
 export const LIMITE_DIA_PADRAO = 30;
 
 /**
