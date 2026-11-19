@@ -24,7 +24,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { dataService } from '@/lib/dataService';
 import { Lead, Consultant, InventoryItem, LeadStatus } from '@/lib/types';
 import { leadService, leadCacheInvalidate } from '@/lib/leadService';
-import { LeadListV2 } from '../pipeline/components/LeadListV2';
+import { ListaLeads, type LinhaLead } from './_components/ListaLeads';
+import { grupoDoLead, ordenarPorUrgencia, type Enriquecimento } from '@/lib/leads/urgencia';
+import { uidDoIdDaLista } from '@/lib/leads/resumo';
 import { LeadProfileModalV2 } from '../components/lead-profile/LeadProfileModalV2';
 import { GavetaLead } from './_components/GavetaLead';
 import { NewLeadModalV2 } from '../pipeline/components/NewLeadModalV2';
@@ -54,6 +56,9 @@ function LeadsContent() {
     const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
     // Clique simples no lead abre a gaveta de resumo; o painel completo (selectedLead) fica para gerenciar/fechar negócio.
     const [gavetaLead, setGavetaLead] = useState<Lead | null>(null);
+    // Situação e última mensagem de cada lead (conversa do WhatsApp), para ordenar por urgência.
+    const [enriqMap, setEnriqMap] = useState<Record<string, Enriquecimento>>({});
+    const [chip, setChip] = useState<'todos' | 'esperando' | 'sem_contato' | 'visita' | 'novos' | 'sem_dono'>('todos');
     const [isNewLeadModalOpen, setIsNewLeadModalOpen] = useState(false);
     const [isManagement, setIsManagement] = useState(false);
     const [userName, setUserName] = useState('');
@@ -301,9 +306,45 @@ function LeadsContent() {
             .map(r => r.lead!)
         : null;
 
+    useEffect(() => {
+        let vivo = true;
+        const carregar = () => {
+            if (document.visibilityState === 'hidden') return;
+            fetch('/api/leads/situacoes', { cache: 'no-store' }).then(x => x.json())
+                .then(j => { if (vivo && j?.success) setEnriqMap(j.itens || {}); }).catch(() => { /* a lista funciona sem isto */ });
+        };
+        carregar();
+        const t = setInterval(carregar, 60_000);
+        return () => { vivo = false; clearInterval(t); };
+    }, []);
+    const enriqDe = (l: Lead): Enriquecimento | undefined => {
+        const uid = uidDoIdDaLista(l.id);
+        return uid ? enriqMap[uid] : undefined;
+    };
+
     // Em modo semântico, usa os leads da busca IA (já ordenados por similarity)
     const displayLeads = (semanticMode && semanticLeads) ? semanticLeads : filteredLeads;
     // ──────────────────────────────────────────────────────────
+
+    // Lista da Fase B: por urgência (na busca semântica mantém a ordem de relevância) e com filtros rápidos.
+    const agoraLista = new Date();
+    const linhasTodas: LinhaLead[] = (semanticMode && semanticLeads)
+        ? displayLeads.map(lead => ({ lead, grupo: grupoDoLead(lead, enriqDe(lead), agoraLista) }))
+        : ordenarPorUrgencia(displayLeads, enriqDe, agoraLista);
+    const passaChip = ({ lead, grupo }: LinhaLead) =>
+        chip === 'todos' ? true
+        : chip === 'esperando' ? grupo === 'esperando_loja'
+        : chip === 'sem_contato' ? grupo === 'sem_contato'
+        : chip === 'visita' ? enriqDe(lead)?.situacao === 'visita_marcada'
+        : chip === 'novos' ? grupo === 'novo_hoje'
+        : !lead.assigned_consultant_id;
+    const linhasLista = linhasTodas.filter(passaChip);
+    const contaChip = (c: typeof chip) => (c === 'todos' ? linhasTodas.length : linhasTodas.filter(l =>
+        c === 'esperando' ? l.grupo === 'esperando_loja'
+        : c === 'sem_contato' ? l.grupo === 'sem_contato'
+        : c === 'visita' ? enriqDe(l.lead)?.situacao === 'visita_marcada'
+        : c === 'novos' ? l.grupo === 'novo_hoje'
+        : !l.lead.assigned_consultant_id).length);
 
     const handleStatusChange = async (leadId: string, newStatus: LeadStatus) => {
         const normalized = normalizeStatus(newStatus);
@@ -658,6 +699,20 @@ function LeadsContent() {
                 </div>
             </div>
 
+            {viewMode === 'list' && (
+                <div className="shrink-0 flex flex-wrap items-center gap-2 px-3 sm:px-6 py-2 border-b border-white/5 bg-[#03060b]">
+                    {([
+                        ['todos', 'Todos'], ['esperando', 'Esperando você'], ['sem_contato', 'Sem contato há 3 dias'],
+                        ['visita', 'Visita marcada'], ['novos', 'Novos hoje'], ...(role === 'admin' ? [['sem_dono', 'Sem dono']] : []),
+                    ] as [typeof chip, string][]).map(([id, rotulo]) => (
+                        <button key={id} onClick={() => setChip(id)}
+                            className={`px-3 py-1.5 rounded-full text-[11px] font-bold border transition ${chip === id ? 'bg-white text-black border-white' : 'bg-white/5 text-white/60 border-white/10 hover:text-white'}`}>
+                            {rotulo} <span className={chip === id ? 'text-black/50' : 'text-white/30'}>{contaChip(id)}</span>
+                        </button>
+                    ))}
+                </div>
+            )}
+
             {/* MAIN CONTENT AREA */}
             <main className="flex-1 w-full overflow-hidden relative">
                 {loading ? (
@@ -678,17 +733,12 @@ function LeadsContent() {
                                     exit={{ opacity: 0, x: 20 }}
                                     className="h-full overflow-y-auto custom-scrollbar pt-6 pb-20"
                                 >
-                                    <LeadListV2
-                                        leads={displayLeads}
-                                        onView={(lead) => setGavetaLead(lead)}
-                                        onManage={(lead) => {
-                                            setIsManagement(true);
-                                            setSelectedLead(lead);
-                                        }}
-                                        onStatusChange={handleStatusChange}
-                                        onConsultantChange={handleConsultantChange}
-                                        role={role}
+                                    <ListaLeads
+                                        linhas={linhasLista}
+                                        enriq={enriqDe}
                                         consultants={consultants}
+                                        onView={(lead) => setGavetaLead(lead)}
+                                        onStatusChange={handleStatusChange}
                                     />
                                 </motion.div>
                             ) : (
