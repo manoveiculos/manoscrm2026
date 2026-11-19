@@ -13,6 +13,23 @@ export const CADENCIA_DIAS = [1, 2, 4, 10] as const;
 export const MAX_POR_RODADA = 3;
 export const ESPERA_ENTRE_ENVIOS_MS = 75_000;
 export const LIMITE_DIA_PADRAO = 30;
+
+/**
+ * Ritmo do dia: o teto diário NÃO sai todo de uma vez. A cota liberada cresce em linha reta desde a abertura
+ * da loja até 1 h antes de fechar (sobra a última hora para respostas); depois disso vale o teto inteiro.
+ * Ex.: teto 30, loja 8h-18h → ~3 por hora; às 9h já pode ter 4, às 13h 16, a partir das 17h os 30.
+ * Domingo (loja fechada) = 0.
+ */
+export function cotaAteAgora(teto: number, agora: Date, horas: { seg_sex: [number, number]; sab: [number, number] }): number {
+    const sp = new Date(agora.getTime() - 3 * 3_600_000);   // Brasília, UTC-3 fixo (mesma premissa do slaEngine)
+    const dia = sp.getUTCDay();
+    if (dia === 0) return 0;
+    const [abre, fecha] = dia === 6 ? horas.sab : horas.seg_sex;
+    const duracaoMin = Math.max(60, (fecha - abre - 1) * 60);
+    const passouMin = sp.getUTCHours() * 60 + sp.getUTCMinutes() - abre * 60;
+    const fracao = Math.min(1, Math.max(0, passouMin / duracaoMin));
+    return Math.min(teto, Math.ceil(teto * fracao));
+}
 /** Nunca dois toques em menos de 20 h, mesmo que a cadência permita. */
 export const MIN_HORAS_ENTRE_TOQUES = 20;
 /** Conversas mais antigas que isso não recebem follow-up (lead morto: fica para o gestor). */

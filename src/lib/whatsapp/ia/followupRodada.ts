@@ -20,7 +20,7 @@ import { claude, MODELO_PADRAO } from './motor';
 import { LAURA_CRM_PROMPT } from './prompt';
 import { custoUsd, inicioDoDiaSP, limiteDiario, somarUso, textoParaIa, type MensagemParaIa, type UsoTokens } from './regras';
 import {
-    ESPERA_ENTRE_ENVIOS_MS, LIMITE_DIA_PADRAO, MAX_DIAS_DESDE_ANCORA, MAX_POR_RODADA,
+    ESPERA_ENTRE_ENVIOS_MS, LIMITE_DIA_PADRAO, MAX_DIAS_DESDE_ANCORA, MAX_POR_RODADA, cotaAteAgora,
     ancoraDoSilencio, dataDeCorte, decidirFollowup, instrucaoDoToque, type MsgFollowup,
 } from './followup';
 
@@ -69,8 +69,12 @@ export async function rodarFollowups(supabase: SupabaseClient, opts: { agora?: D
     const dia = inicioDoDiaSP(agora).toISOString();
     const { count: hoje } = await supabase.from('wa_followups').select('id', { count: 'exact', head: true }).eq('status', 'enviado').gte('criado_em', dia);
     const teto = limiteDiario(process.env.WA_FOLLOWUP_LIMITE_DIA, LIMITE_DIA_PADRAO);
-    let restanteDia = teto - (hoje ?? 0);
-    if (cfg.modo === 'envia' && restanteDia <= 0) return { ...resumo, motivo: `teto do dia atingido (${teto})` };
+    // O teto é diluído pelo horário da loja (cotaAteAgora): não larga tudo de uma vez.
+    const cota = cotaAteAgora(teto, agora, horario.horas);
+    let restanteDia = cota - (hoje ?? 0);
+    if (cfg.modo === 'envia' && restanteDia <= 0) {
+        return { ...resumo, motivo: (hoje ?? 0) >= teto ? `teto do dia atingido (${teto})` : `ritmo do dia: ${hoje ?? 0} enviados de ${cota} liberados até agora (teto ${teto})` };
+    }
 
     const cliente = claude();
     if (!cliente) return { ...resumo, ok: false, motivo: 'sem chave do Claude' };

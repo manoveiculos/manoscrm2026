@@ -75,3 +75,15 @@ test('instrução do toque: objetivo por etapa, sem inventar nome nem carro', ()
     assert.match(instrucaoDoToque({ etapa: 4, nome: null, carro: null, contexto: '' }), /Último toque[\s\S]*Você ainda não sabe o nome/);
     assert.doesNotMatch(instrucaoDoToque({ etapa: 2, nome: null, carro: null, contexto: '' }), /Carro de interesse/);
 });
+
+test('ritmo do dia: o teto de 30 é diluído pelo horário da loja (8h-18h), não sai de uma vez', async () => {
+    const { cotaAteAgora } = await import('@/lib/whatsapp/ia/followup');
+    const horas = { seg_sex: [8, 18] as [number, number], sab: [8, 12] as [number, number] };
+    const em = (iso: string) => cotaAteAgora(30, new Date(iso), horas);   // horários em UTC (Brasília = UTC-3)
+    assert.equal(em('2026-11-19T11:00:00Z'), 0);    // 8h, quinta: abriu agora
+    assert.equal(em('2026-11-19T12:00:00Z'), 4);    // 9h
+    assert.equal(em('2026-11-19T16:00:00Z'), 17);   // 13h
+    assert.equal(em('2026-11-19T20:00:00Z'), 30);   // 17h em diante: teto inteiro
+    assert.equal(em('2026-11-22T15:00:00Z'), 0);    // domingo
+    assert.ok(em('2026-11-21T13:00:00Z') <= 30 && em('2026-11-21T13:00:00Z') > 0);   // sábado 10h: janela menor (8h-12h)
+});
