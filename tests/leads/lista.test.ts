@@ -21,13 +21,18 @@ const mapa: Record<string, Enriquecimento> = {
 };
 const e = (l: LeadMin) => mapa[l.id];
 
-test('página: ordena por urgência, conta chips e informa o próximo offset', () => {
-    const p = montarPagina(leads, FILTROS_VAZIOS, e, { offset: 0, limite: 2, agora });
+test('padrão: por data e horário, do mais novo ao mais antigo', () => {
+    const p = montarPagina([lead('x', { created_at: '2026-11-18T09:00:00Z' }), lead('y', { created_at: '2026-11-19T14:30:00Z' }), lead('z', { created_at: '2026-11-19T08:00:00Z' })], FILTROS_VAZIOS, () => undefined, { offset: 0, limite: 30, agora });
+    assert.deepEqual(p.ids, ['y', 'z', 'x']);
+});
+
+test('com ordem "urgencia": ordena por urgência, conta chips e informa o próximo offset', () => {
+    const p = montarPagina(leads, FILTROS_VAZIOS, e, { offset: 0, limite: 2, agora, ordem: 'urgencia' });
     assert.deepEqual(p.ids, ['a', 'c']);            // esperando a loja → visita marcada
     assert.equal(p.total, 5);
     assert.equal(p.proximo, 2);
     assert.deepEqual(p.contagens, { todos: 5, esperando: 1, sem_contato: 1, visita: 1, novos: 1, sem_dono: 1 });
-    const p2 = montarPagina(leads, FILTROS_VAZIOS, e, { offset: 4, limite: 2, agora });
+    const p2 = montarPagina(leads, FILTROS_VAZIOS, e, { offset: 4, limite: 2, agora, ordem: 'urgencia' });
     assert.deepEqual(p2.ids, ['d']);                 // encerrado por último
     assert.equal(p2.proximo, null);
 });

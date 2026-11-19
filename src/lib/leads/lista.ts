@@ -7,6 +7,8 @@ import { normalizeStatus } from '@/constants/status';
 import { calculateLeadScore } from '@/utils/calculateScore';
 import { grupoDoLead, ordenarPorUrgencia, type Enriquecimento, type GrupoUrgencia } from './urgencia';
 
+export type Ordem = 'data' | 'urgencia';
+
 export type Chip = 'todos' | 'esperando' | 'sem_contato' | 'visita' | 'novos' | 'sem_dono';
 export const CHIPS: Chip[] = ['todos', 'esperando', 'sem_contato', 'visita', 'novos', 'sem_dono'];
 
@@ -90,11 +92,16 @@ export interface PaginaLista {
 
 export function montarPagina<T extends LeadMin>(
     linhas: T[], f: FiltrosLista, enriqDe: (l: T) => Enriquecimento | undefined,
-    opts: { offset: number; limite: number; agora?: Date },
+    opts: { offset: number; limite: number; agora?: Date; ordem?: Ordem },
 ): PaginaLista {
     const agora = opts.agora ?? new Date();
     const base = linhas.filter(l => passaFiltros(l, f, agora));
-    const ordenadas = ordenarPorUrgencia(base, enriqDe, agora);
+    // Padrão: do mais novo para o mais antigo, por data e horário de entrada. "urgencia" fica disponível.
+    const ordenadas = opts.ordem === 'urgencia'
+        ? ordenarPorUrgencia(base, enriqDe, agora)
+        : [...base]
+            .sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())
+            .map(lead => ({ lead, grupo: grupoDoLead(lead, enriqDe(lead), agora) }));
 
     const contagens = Object.fromEntries(CHIPS.map(c => [c, 0])) as Record<Chip, number>;
     for (const { lead, grupo } of ordenadas) {

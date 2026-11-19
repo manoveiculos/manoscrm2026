@@ -14,13 +14,13 @@ const erro = (status: number, error: string) => NextResponse.json({ success: fal
 
 /** Colunas que os filtros e a urgência usam (leves: sem observações nem resumo da IA). */
 const COLS_MIN = 'id,status,created_at,assigned_consultant_id,source,origem,vehicle_interest,ai_score,valor_investimento';
-/** Colunas da linha completa, só das 50 da página (as que existem na view 'leads'). */
+/** Colunas da linha completa, só das 30 da página (as que existem na view 'leads'). */
 const COLS_PAGINA = 'id,name,phone,email,source,origem,status,ai_score,ai_classification,ai_summary,vehicle_interest,assigned_consultant_id,created_at,updated_at,proxima_acao,valor_investimento,observacoes,carro_troca,region,source_table';
 const LIMITE_LINHAS = 5000;
 
 /**
  * GET /api/leads/lista — a lista de Leads da aba, filtrada, ordenada por urgência e paginada no servidor.
- * Params: q, consultor, status, interesse, origem, score, periodo, chip, offset, limite (padrão 50, máx. 100).
+ * Params: q, consultor, status, interesse, origem, score, periodo, chip, offset, limite (padrão 30, máx. 50).
  * Vendedor/gestor só recebem os leads do próprio consultor; só o admin vê (e filtra) todos.
  */
 export async function GET(request: Request) {
@@ -47,20 +47,31 @@ export async function GET(request: Request) {
         chip: !ehAdmin && chip === 'sem_dono' ? 'todos' : chip,
     };
     const offset = Math.max(0, parseInt(sp.get('offset') || '0', 10) || 0);
-    const limite = Math.min(100, Math.max(1, parseInt(sp.get('limite') || '50', 10) || 50));
+    const limite = Math.min(50, Math.max(1, parseInt(sp.get('limite') || '30', 10) || 30));
 
     // 1. linhas leves do banco (escopo, período e busca por texto ficam no SQL)
-    let q = admin.from('leads').select(COLS_MIN, { count: 'exact' });
-    if (!ehAdmin) q = q.eq('assigned_consultant_id', eu.consultorId!);
     const desde = inicioDoPeriodo(sp.get('periodo'), agora);
-    if (desde) q = q.gte('created_at', desde);
     const termo = termoDeBusca(sp.get('q'));
-    if (termo) q = q.or(`name.ilike.%${termo}%,phone.ilike.%${termo}%,vehicle_interest.ilike.%${termo}%,id.ilike.%${termo}%`);
-    const { data: linhas, count, error } = await q.order('created_at', { ascending: false }).range(0, LIMITE_LINHAS - 1);
-    if (error) return erro(500, error.message);
-    const todas = (linhas || []) as unknown as LeadMin[];
+    const montar = () => {
+        let q = admin.from('leads').select(COLS_MIN, { count: 'exact' });
+        if (!ehAdmin) q = q.eq('assigned_consultant_id', eu.consultorId!);
+        if (desde) q = q.gte('created_at', desde);
+        if (termo) q = q.or(`name.ilike.%${termo}%,phone.ilike.%${termo}%,vehicle_interest.ilike.%${termo}%,id.ilike.%${termo}%`);
+        return q.order('created_at', { ascending: false });
+    };
+    // O banco devolve no máximo 1.000 linhas por consulta: busca em blocos de 1.000 até o limite.
+    const todas: LeadMin[] = [];
+    let count: number | null = null;
+    for (let de = 0; de < LIMITE_LINHAS; de += 1000) {
+        const r = await montar().range(de, de + 999);
+        if (r.error) return erro(500, r.error.message);
+        if (count == null) count = r.count;
+        const bloco = (r.data || []) as unknown as LeadMin[];
+        todas.push(...bloco);
+        if (bloco.length < 1000) break;
+    }
 
-    // 2. situação/última mensagem e página
+    // 2. situação/última mensagem e página (ordem: data e horário, do mais novo ao mais antigo)
     let enriq: Awaited<ReturnType<typeof enriquecer>> = {};
     try { enriq = await enriquecer(admin, await lerConversasDeLeads(admin)); } catch { /* a lista funciona sem a conversa */ }
     const enriqDe = (l: LeadMin) => { const uid = uidDoIdDaLista(l.id); return uid ? enriq[uid] : undefined; };

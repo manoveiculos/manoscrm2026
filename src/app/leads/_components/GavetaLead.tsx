@@ -9,7 +9,7 @@ import type { Lead, LeadStatus } from '@/lib/types';
 import type { LinhaFicha, MensagemView, SituacaoView } from '@/lib/leads/resumo';
 
 interface Resumo {
-    lead: { uid: string; nome: string; telefone: string | null; interesse: string | null; origem: string | null; status: string | null; criadoEm: string | null; consultorNome: string | null };
+    lead: { uid: string | null; nome: string; telefone: string | null; interesse: string | null; origem: string | null; status: string | null; criadoEm: string | null; consultorNome: string | null; fichaCompleta: boolean };
     conversa: { id: string; status: string; ultimaMensagemEm: string | null } | null;
     situacao: SituacaoView | null;
     ficha: LinhaFicha[];
@@ -144,7 +144,7 @@ export function GavetaLead({ lead, onClose, onStatusChange }: {
                                         ? <Link href={`/conversas?c=${r.conversa.id}`} className={`${btn} bg-emerald-600 hover:bg-emerald-500 text-white col-span-2`}><MessageCircle className="w-4 h-4" /> Responder no WhatsApp</Link>
                                         : tel && <a href={`https://wa.me/${tel.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" className={`${btn} bg-emerald-600 hover:bg-emerald-500 text-white col-span-2`}><MessageCircle className="w-4 h-4" /> Chamar no WhatsApp</a>}
                                     <Link href={agendar} className={`${btn} bg-zinc-800 hover:bg-zinc-700 text-zinc-100`}><CalendarPlus className="w-4 h-4" /> Agendar visita</Link>
-                                    {uid && <Link href={`/lead/${encodeURIComponent(uid)}`} className={`${btn} bg-zinc-800 hover:bg-zinc-700 text-zinc-100`}><ExternalLink className="w-4 h-4" /> Ficha completa</Link>}
+                                    {uid && r.lead.fichaCompleta && <Link href={`/lead/${encodeURIComponent(uid)}`} className={`${btn} bg-zinc-800 hover:bg-zinc-700 text-zinc-100`}><ExternalLink className="w-4 h-4" /> Ficha completa</Link>}
                                 </div>
                                 <label className="block">
                                     <span className="text-xs text-zinc-400">Etapa</span>

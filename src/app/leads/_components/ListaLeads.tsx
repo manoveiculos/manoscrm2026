@@ -20,6 +20,9 @@ const COR_GRUPO: Record<GrupoUrgencia, string> = {
     normal: '', encerrado: 'bg-zinc-800 text-zinc-500 border-zinc-700',
 };
 
+const dataCurta = (iso?: string | null) => iso ? new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) : '—';
+const horaCurta = (iso?: string | null) => iso ? new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
+
 const DE: Record<string, string> = { cliente: 'Cliente', laura: 'Laura', vendedor: 'Vendedor' };
 
 const ha = (iso: string | null | undefined) => {
@@ -111,7 +114,7 @@ export function ListaLeads({ linhas, enriq, consultants, onView, onStatusChange 
                             <Ultima e={e} />
                             <div className="flex items-center justify-between text-[10px] uppercase tracking-wide">
                                 <span style={{ color: st.color }}>{st.label}</span>
-                                <span className="text-white/30">{dono(lead) || 'Sem vendedor'}{t ? <> · <span className={t.cls}>{t.rotulo}</span></> : null}</span>
+                                <span className="text-white/30">{dataCurta(lead.created_at)} {horaCurta(lead.created_at)} · {dono(lead) || 'Sem vendedor'}{t ? <> · <span className={t.cls}>{t.rotulo}</span></> : null}</span>
                             </div>
                         </div>
                     );
@@ -121,16 +124,17 @@ export function ListaLeads({ linhas, enriq, consultants, onView, onStatusChange 
             {/* computador: tabela */}
             <div className="hidden md:block bg-[#141418] border border-white/[0.07] rounded-2xl overflow-hidden">
                 <div className="overflow-x-auto custom-scrollbar">
-                    <table className="w-full text-left border-collapse table-fixed min-w-[980px]">
+                    <table className="w-full text-left border-collapse table-fixed min-w-[1040px]">
                         <thead>
                             <tr className="border-b border-white/[0.06] bg-[#0F0F12] text-[10px] font-semibold text-white/30 uppercase tracking-widest">
                                 <th className="px-3 py-3 w-12" />
-                                <th className="px-3 py-3 w-[22%]">Nome</th>
-                                <th className="px-3 py-3 w-[17%]">O que quer</th>
-                                <th className="px-3 py-3 w-[17%]">Situação</th>
-                                <th className="px-3 py-3 w-[22%]">Última mensagem</th>
-                                <th className="px-3 py-3 w-[11%]">Consultor</th>
-                                <th className="px-3 py-3 w-[11%] text-center">Etapa</th>
+                                <th className="px-3 py-3 w-[19%]">Nome</th>
+                                <th className="px-3 py-3 w-[16%]">O que quer</th>
+                                <th className="px-3 py-3 w-[15%]">Situação</th>
+                                <th className="px-3 py-3 w-[20%]">Última mensagem</th>
+                                <th className="px-3 py-3 w-[10%]">Consultor</th>
+                                <th className="px-3 py-3 w-[10%] text-center">Etapa</th>
+                                <th className="px-3 py-3 w-[10%] text-right">Entrada</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -157,6 +161,10 @@ export function ListaLeads({ linhas, enriq, consultants, onView, onStatusChange 
                                                 <MoveMenu isOpen={menu === lead.id} currentStatus={lead.status as LeadStatus}
                                                     onStatusChange={s => { onStatusChange(lead.id, s); setMenu(null); }} onClose={() => setMenu(null)} />
                                             </div>
+                                        </td>
+                                        <td className="px-3 py-3 text-right tabular-nums">
+                                            <p className="text-[12px] text-white/70">{dataCurta(lead.created_at)}</p>
+                                            <p className="text-[10px] text-white/30">{horaCurta(lead.created_at)}</p>
                                         </td>
                                     </tr>
                                 );

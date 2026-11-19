@@ -60,7 +60,7 @@ function LeadsContent() {
     // Situação e última mensagem de cada lead (conversa do WhatsApp), para ordenar por urgência.
     const [enriqMap, setEnriqMap] = useState<Record<string, Enriquecimento>>({});
     const [chip, setChip] = useState<Chip>('todos');
-    // Lista paginada no servidor (Fase C): 50 por vez, já filtrada e na ordem de urgência.
+    // Lista paginada no servidor (Fase C): 30 por vez, já filtrada e por data/horário.
     const [lista, setLista] = useState<Lead[]>([]);
     const [listaTotal, setListaTotal] = useState(0);
     const [contagens, setContagens] = useState<Record<Chip, number>>({ todos: 0, esperando: 0, sem_contato: 0, visita: 0, novos: 0, sem_dono: 0 });
@@ -222,7 +222,7 @@ function LeadsContent() {
         const seq = ++seqLista.current;
         setCarregandoLista(true); setErroLista(null);
         try {
-            const p = new URLSearchParams({ offset: String(offset), limite: '50', chip });
+            const p = new URLSearchParams({ offset: String(offset), limite: '30', chip });
             if (buscaAtiva) p.set('q', buscaAtiva);
             if (filterConsultant !== 'all') p.set('consultor', filterConsultant);
             if (filterStatus !== 'all') p.set('status', filterStatus);
@@ -247,17 +247,17 @@ function LeadsContent() {
     // Mudou filtro, busca ou chip: volta ao começo.
     useEffect(() => { buscarLista(0); }, [buscarLista]);
 
-    // Atualização silenciosa: ao voltar para a aba e a cada 2 min, se a pessoa ainda está no topo da lista.
+    // Atualização silenciosa: ao voltar para a aba e a cada 2 min, se a pessoa ainda está na primeira página.
     const listaLenRef = useRef(0);
     listaLenRef.current = lista.length;
     useEffect(() => {
-        const atualizar = () => { if (document.visibilityState === 'visible' && listaLenRef.current <= 50) buscarLista(0); };
+        const atualizar = () => { if (document.visibilityState === 'visible' && listaLenRef.current <= 30) buscarLista(0); };
         const t = setInterval(atualizar, 120_000);
         window.addEventListener('leads:recarregar', atualizar);
         return () => { clearInterval(t); window.removeEventListener('leads:recarregar', atualizar); };
     }, [buscarLista]);
 
-    // Rolagem contínua: ao chegar perto do fim, pede os próximos 50.
+    // Rolagem contínua: ao chegar perto do fim, pede os próximos 30.
     useEffect(() => {
         const el = sentinela.current;
         if (!el || proximo == null || carregandoLista) return;
