@@ -4,25 +4,17 @@ import React, { useState, useEffect, useRef, useCallback, Suspense } from 'react
 import {
     Search,
     Users,
-    Filter,
-    Zap,
-    Target,
-    Calendar,
-    CarFront,
-    Activity,
-    ArrowUpDown,
     Plus,
     RefreshCcw,
     KanbanSquare,
     List,
     Brain,
-    X,
     Loader2,
     Database
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { dataService } from '@/lib/dataService';
-import { Lead, Consultant, InventoryItem, LeadStatus } from '@/lib/types';
+import { Lead, Consultant, LeadStatus } from '@/lib/types';
 import { leadService, leadCacheInvalidate } from '@/lib/leadService';
 import { ListaLeads, type LinhaLead } from './_components/ListaLeads';
 import { grupoDoLead, type Enriquecimento } from '@/lib/leads/urgencia';
@@ -35,7 +27,6 @@ import { KanbanBoardV2 } from '../pipeline/components/KanbanBoardV2';
 import { supabase } from '@/lib/supabase';
 import { ALL_STATUS, normalizeStatus } from '@/constants/status';
 import { calculateLeadScore } from '@/utils/calculateScore';
-import { isLeadQualified } from '@/utils/leadQualification';
 import { HUDSelect } from '../../components/shared_leads/HUDSelect';
 import { updateLeadStatusAction } from '../actions/leads';
 
@@ -55,7 +46,8 @@ function LeadsContent() {
     const [searchTerm, setSearchTerm] = useState('');
     const [viewMode, setViewMode] = useState<'list' | 'kanban'>('list');
     const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
-    // Clique simples no lead abre a gaveta de resumo; o painel completo (selectedLead) fica para gerenciar/fechar negócio.
+    // Clique no lead (lista e Kanban) abre a gaveta de resumo. O painel antigo (selectedLead) só abre para FECHAR como
+    // perdido/vendido: ele tem o motivo estruturado, a auditoria e a roleta da venda (ainda usado também no Dashboard e no Pipeline).
     const [gavetaLead, setGavetaLead] = useState<Lead | null>(null);
     // Situação e última mensagem de cada lead (conversa do WhatsApp), para ordenar por urgência.
     const [enriqMap, setEnriqMap] = useState<Record<string, Enriquecimento>>({});
@@ -80,7 +72,6 @@ function LeadsContent() {
     const [role, setRole] = useState<'admin' | 'consultant'>('consultant');
     const [consultantId, setConsultantId] = useState<string | null>(null);
     const [consultants, setConsultants] = useState<Consultant[]>([]);
-    const [inventory, setInventory] = useState<InventoryItem[]>([]);
 
     // Filters
     const [filterConsultant, setFilterConsultant] = useState('all');
@@ -105,7 +96,6 @@ function LeadsContent() {
             try {
                 const { data: { session } } = await supabase.auth.getSession();
                 const user = session?.user;
-                let userRole: 'admin' | 'consultant' = 'consultant';
                 
                 if (user) {
                     // Busca consultor por user_id OU auth_id (algumas contas têm
@@ -143,24 +133,13 @@ function LeadsContent() {
                         console.warn('[Leads] Consultor sem ID — não carrega leads');
                         setLeads([]);
                         setTotalLeadsCount(0);
-                        const [consultantsData, inventoryData] = await Promise.all([
-                            dataService.getConsultants(),
-                            dataService.getInventory(),
-                        ]);
-                        setConsultants(consultantsData || []);
-                        setInventory(inventoryData || []);
+                        setConsultants((await dataService.getConsultants()) || []);
                         return;
                     }
 
                     // Fase C: a lista normal vem paginada de /api/leads/lista. Os 2.000 leads só
                     // são baixados quando alguém abre o Kanban ou usa a busca por IA (efeito abaixo).
-                    const [consultantsData, inventoryData] = await Promise.all([
-                        dataService.getConsultants(),
-                        dataService.getInventory()
-                    ]);
-
-                    setConsultants(consultantsData || []);
-                    setInventory(inventoryData || []);
+                    setConsultants((await dataService.getConsultants()) || []);
                 }
             } catch (error) {
                 console.error("Error loading Central de Leads data:", error);
@@ -453,8 +432,8 @@ function LeadsContent() {
         }
     };
 
-    const handleConsultantChange = async (leadId: string, newConsultantId: string) => {
-        if (role !== 'admin') return;
+    const handleConsultantChange = async (leadId: string, newConsultantId: string): Promise<boolean> => {
+        if (role !== 'admin') return false;
         try {
             const consultant = consultants.find(c => c.id === newConsultantId);
             const currentLead = acharLead(leadId);
@@ -468,14 +447,14 @@ function LeadsContent() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     lead_id: leadId,
-                    lead_table: (currentLead as any)?.source_table || undefined,
+                    lead_table: (currentLead as { source_table?: string } | undefined)?.source_table || undefined,
                     target_consultant_id: newConsultantId,
                 }),
             });
             const data = await res.json().catch(() => ({}));
             if (!res.ok || !data.success) {
                 alert(`Não foi possível transferir: ${data.error || 'tente novamente'}`);
-                return;
+                return false;
             }
 
             setLeads(prev => prev.map(l => l.id === leadId ? {
@@ -484,6 +463,7 @@ function LeadsContent() {
                 vendedor: consultant?.name,
                 primeiro_vendedor: consultant?.name
             } : l));
+            aplicarNaLista(leadId, { assigned_consultant_id: newConsultantId, vendedor: consultant?.name, primeiro_vendedor: consultant?.name });
 
             // Handoff inteligente — gera briefing para o novo consultor (fire-and-forget)
             if (previousConsultantId && previousConsultantId !== newConsultantId) {
@@ -498,8 +478,10 @@ function LeadsContent() {
                     }),
                 }).catch(() => {});
             }
+            return true;
         } catch (error) {
             console.error("Error updating consultant:", error);
+            return false;
         }
     };
 
@@ -837,10 +819,7 @@ function LeadsContent() {
                                         setLeads={setLeads}
                                         userName={userName}
                                         onView={(lead) => setGavetaLead(lead)}
-                                        onManage={(lead) => {
-                                            setIsManagement(true);
-                                            setSelectedLead(lead);
-                                        }}
+                                        onManage={(lead) => setGavetaLead(lead)}
                                         onStatusChange={handleStatusChange}
                                     />
                                 </motion.div>
@@ -852,13 +831,16 @@ function LeadsContent() {
 
             {gavetaLead && (
                 <GavetaLead
+                    key={gavetaLead.id}
                     lead={gavetaLead}
                     onClose={() => setGavetaLead(null)}
                     onStatusChange={(id, status) => {
                         const final = ['perdido', 'vendido'].includes(normalizeStatus(status));
-                        if (final) setGavetaLead(null);   // perdido/vendido pedem motivo: abre o painel completo
+                        if (final) setGavetaLead(null);   // perdido/vendido pedem motivo/valor: abre o painel de fechamento
                         handleStatusChange(id, status);
                     }}
+                    consultants={role === 'admin' ? consultants : []}
+                    onConsultantChange={role === 'admin' ? handleConsultantChange : undefined}
                 />
             )}
 

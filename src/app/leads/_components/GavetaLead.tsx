@@ -36,20 +36,23 @@ const DE = {
  * Gaveta de resumo do lead (aba Leads): clicou no lead, vê na hora onde ele está, o que já disse,
  * as últimas mensagens e as ações. Substitui o painel antigo de 7 abas para o clique simples.
  */
-export function GavetaLead({ lead, onClose, onStatusChange }: {
+export function GavetaLead({ lead, onClose, onStatusChange, consultants = [], onConsultantChange }: {
     lead: Lead;
     onClose: () => void;
     onStatusChange: (leadId: string, status: LeadStatus) => void;
+    /** Só o admin passa isto: habilita "Passar para outro consultor". */
+    consultants?: { id: string; name: string }[];
+    onConsultantChange?: (leadId: string, consultantId: string) => Promise<boolean> | boolean | void;
 }) {
     const [r, setR] = useState<Resumo | null>(null);
+    const [donoId, setDonoId] = useState('');
     const [erro, setErro] = useState<string | null>(null);
 
     useEffect(() => {
         let vivo = true;
-        setR(null); setErro(null);
         fetch(`/api/leads/resumo?id=${encodeURIComponent(lead.id)}`, { cache: 'no-store' })
             .then(x => x.json())
-            .then(j => { if (!vivo) return; if (j.success) setR(j); else setErro(j.error || 'não foi possível carregar'); })
+            .then(j => { if (!vivo) return; if (j.success) { setR(j); setDonoId(j.lead.consultorId || ''); } else setErro(j.error || 'não foi possível carregar'); })
             .catch(() => vivo && setErro('sem conexão'));
         return () => { vivo = false; };
     }, [lead.id]);
@@ -156,6 +159,24 @@ export function GavetaLead({ lead, onClose, onStatusChange }: {
                                         {ALL_STATUS.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
                                     </select>
                                 </label>
+                                {onConsultantChange && consultants.length > 0 && (
+                                    <label className="block">
+                                        <span className="text-xs text-zinc-400">Passar para outro consultor</span>
+                                        <select
+                                            value={donoId}
+                                            onChange={async e => {
+                                                const novo = e.target.value;
+                                                if (!novo || novo === donoId) return;
+                                                const ok = await onConsultantChange(lead.id, novo);
+                                                if (ok !== false) setDonoId(novo);
+                                            }}
+                                            className="mt-1 w-full rounded-lg bg-zinc-800 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-zinc-500"
+                                        >
+                                            <option value="">Sem vendedor</option>
+                                            {consultants.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                        </select>
+                                    </label>
+                                )}
                             </section>
                         </>
                     )}
