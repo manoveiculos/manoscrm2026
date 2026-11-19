@@ -15,6 +15,7 @@ import { providerLoja } from '../evolutionProvider';
 import { enviarPeloCrm } from '../envio';
 import { msgErro } from '../erro';
 import { lerConfigIa } from './config';
+import { MOTIVO_RESERVA, reservarToque } from './reserva';
 import { claude, MODELO_PADRAO } from './motor';
 import { LAURA_CRM_PROMPT } from './prompt';
 import { custoUsd, inicioDoDiaSP, limiteDiario, somarUso, textoParaIa, type MensagemParaIa, type UsoTokens } from './regras';
@@ -103,9 +104,9 @@ export async function rodarFollowups(supabase: SupabaseClient, opts: { agora?: D
         const ancora = ancoraDoSilencio(msgs, iniciadaPelaLoja);
         if (!ancora) { pular('cliente aguardando resposta ou sem histórico'); continue; }
 
-        const { data: fu } = await supabase.from('wa_followups').select('etapa, status, criado_em').eq('conversa_id', c.id).gt('criado_em', ancora);
+        const { data: fu } = await supabase.from('wa_followups').select('etapa, status, motivo, criado_em').eq('conversa_id', c.id).gt('criado_em', ancora);
         const enviados = (fu || []).filter(f => f.status === 'enviado').map(f => f.criado_em as string);
-        const rascunhos = new Set((fu || []).filter(f => f.status === 'rascunho').map(f => f.etapa as number));
+        const rascunhos = new Set((fu || []).filter(f => f.status === 'rascunho' && f.motivo !== MOTIVO_RESERVA).map(f => f.etapa as number));
 
         const d = decidirFollowup({
             status: c.status, iaSilenciadaAte: c.ia_silenciada_ate, msgs, enviadosDepoisDaAncora: enviados,
@@ -114,6 +115,11 @@ export async function rodarFollowups(supabase: SupabaseClient, opts: { agora?: D
             lojaAberta: true, iniciadaPelaLoja, entregueAoConsultor: Boolean(entregue), agora, corte: dataDeCorte(process.env.WA_FOLLOWUP_DESDE),
         });
         if (d.acao === 'pular') { pular(d.motivo); continue; }
+
+        // Reserva ANTES de gerar: o cron disparou 2 vezes por janela e as rodadas se sobrepunham (mensagem em dobro).
+        const reservaId = await reservarToque(supabase, c.id, d.etapa, ancora, enviados.length);
+        if (!reservaId) { pular('outra rodada já está cuidando'); continue; }
+        const fechar = async (campos: Record<string, unknown>) => { await supabase.from('wa_followups').update(campos).eq('id', reservaId); };
 
         try {
             // texto da Laura
@@ -132,17 +138,17 @@ export async function rodarFollowups(supabase: SupabaseClient, opts: { agora?: D
             });
             const uso: UsoTokens = somarUso({ input_tokens: 0, output_tokens: 0 }, resp.usage);
             const bruto = resp.content.filter((b): b is Anthropic.TextBlock => b.type === 'text').map(b => b.text).join('\n').replace(/<\/?[a-z_]+>/g, '').trim();
-            if (!bruto) { await supabase.from('wa_followups').insert({ conversa_id: c.id, etapa: d.etapa, status: 'erro', motivo: 'resposta vazia' }); resumo.erros++; continue; }
+            if (!bruto) { await fechar({ status: 'erro', motivo: 'resposta vazia' }); resumo.erros++; continue; }
             const rev = revisarResposta(bruto, await precosAnunciadosDoEstoque(), [], { fraseDeCredito: false });
             if (rev.violacoes.length) {
-                await supabase.from('wa_followups').insert({ conversa_id: c.id, etapa: d.etapa, status: 'erro', texto: bruto, motivo: `barrada pelo filtro: ${rev.violacoes.join(', ')}` });
+                await fechar({ status: 'erro', texto: bruto, motivo: `barrada pelo filtro: ${rev.violacoes.join(', ')}` });
                 resumo.erros++; continue;
             }
             const texto = rev.texto_seguro;
             const custo = custoUsd(uso);
 
             if (cfg.modo === 'ensaio') {
-                await supabase.from('wa_followups').insert({ conversa_id: c.id, etapa: d.etapa, status: 'rascunho', texto, custo_usd: custo });
+                await fechar({ status: 'rascunho', motivo: null, texto, custo_usd: custo });
                 resumo.rascunhos++;
                 continue;
             }
@@ -150,19 +156,19 @@ export async function rodarFollowups(supabase: SupabaseClient, opts: { agora?: D
             // Releitura antes de enviar: o cliente pode ter respondido ou um vendedor assumido.
             const { data: atual } = await supabase.from('wa_conversas').select('status').eq('id', c.id).maybeSingle();
             const { data: ult } = await supabase.from('wa_mensagens').select('autor, criada_em').eq('conversa_id', c.id).order('criada_em', { ascending: false }).limit(1).maybeSingle();
-            if (atual?.status !== 'ia' || !ult || ult.autor === 'cliente') { pular('mudou durante a geração'); continue; }
+            if (atual?.status !== 'ia' || !ult || ult.autor === 'cliente') { await supabase.from('wa_followups').delete().eq('id', reservaId); pular('mudou durante a geração'); continue; }
 
             if (enviouNaRodada > 0) await esperar(ESPERA_ENTRE_ENVIOS_MS);
             const r = await enviarPeloCrm(supabase, providerLoja(), { id: c.id, telefone_key: c.telefone_key, remote_jid: c.remote_jid }, { tipo: 'texto', texto }, { autor: 'laura' });
             if (!r.ok) {
-                await supabase.from('wa_followups').insert({ conversa_id: c.id, etapa: d.etapa, status: 'erro', texto, motivo: `envio falhou: ${r.erro || 'sem detalhe'}` });
+                await fechar({ status: 'erro', texto, motivo: `envio falhou: ${r.erro || 'sem detalhe'}` });
                 resumo.erros++;
                 break; // disjuntor: para a rodada no primeiro erro de envio
             }
-            await supabase.from('wa_followups').insert({ conversa_id: c.id, etapa: d.etapa, status: 'enviado', texto, custo_usd: custo });
+            await fechar({ status: 'enviado', motivo: null, texto, custo_usd: custo });
             resumo.enviados++; enviouNaRodada++; restanteDia--;
         } catch (e) {
-            await supabase.from('wa_followups').insert({ conversa_id: c.id, etapa: d.etapa, status: 'erro', motivo: msgErro(e).slice(0, 300) });
+            await fechar({ status: 'erro', motivo: msgErro(e).slice(0, 300) });
             resumo.erros++;
         }
     }

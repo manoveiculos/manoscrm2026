@@ -14,6 +14,7 @@ import { providerLoja } from '../evolutionProvider';
 import { enviarPeloCrm } from '../envio';
 import { msgErro } from '../erro';
 import { lerConfigIa } from './config';
+import { reservar, soltar, type ColunaReserva } from './reserva';
 import { lerModoDistribuicao } from '@/lib/services/modoDistribuicao';
 import { classificarConversa } from './classificadorRodada';
 import { claude, MODELO_PADRAO } from './motor';
@@ -116,6 +117,7 @@ export async function rodarTriagem(supabase: SupabaseClient, opts: { agora?: Dat
     let contatos = 0;
     for (const p of presos || []) {
         if (!fonteDoUid(p.lead_uid)) { await liberarDaTriagem(supabase, p.lead_uid, 'telefone_invalido', { agora }); liberou('telefone_invalido'); continue; }
+        let reservado: ColunaReserva | null = null;   // reserva feita nesta volta e ainda não consumida pelo envio
         try {
             const lead = await lerLeadDaTriagem(supabase, p.lead_uid);
             const origemLead = lead?.origem ?? '';
@@ -186,6 +188,8 @@ export async function rodarTriagem(supabase: SupabaseClient, opts: { agora?: Dat
             // ── lembrete do mesmo dia (lead morno que esfriou) ──
             if (d.acao === 'lembrete') {
                 if (contatos >= MAX_CONTATOS_POR_RODADA || !telefone || !cliente) { r.esperando++; continue; }
+                if (!await reservar(supabase, p.lead_uid, 'lembrete_em', agora)) { r.esperando++; continue; }   // outra rodada já pegou este lead
+                reservado = 'lembrete_em';
                 const rl = await cliente.messages.create({
                     model: modelo, max_tokens: 2048,
                     system: [{ type: 'text', text: LAURA_CRM_PROMPT, cache_control: { type: 'ephemeral' } }],
@@ -196,10 +200,11 @@ export async function rodarTriagem(supabase: SupabaseClient, opts: { agora?: Dat
                 const brutoL = rl.content.filter((b): b is Anthropic.TextBlock => b.type === 'text').map(b => b.text).join('\n').replace(/<\/?[a-z_]+>/g, '').trim();
                 const revL = brutoL ? revisarResposta(brutoL, await precosAnunciadosDoEstoque(), [], { fraseDeCredito: false }) : null;
                 await registrarCustoIa(supabase, { agente: 'followup', custoUsd: custoUsd(usoL), modelo, uso: usoL, conversaId, leadRef: p.lead_uid });
-                if (!revL || revL.violacoes.length) { console.warn('[triagem] lembrete barrado ou vazio:', p.lead_uid); r.erros++; r.esperando++; continue; }
+                if (!revL || revL.violacoes.length) { console.warn('[triagem] lembrete barrado ou vazio:', p.lead_uid); r.erros++; r.esperando++; await soltar(supabase, p.lead_uid, 'lembrete_em'); reservado = null; continue; }
                 if (contatos > 0) await esperar(ESPERA_ENTRE_CONTATOS_MS);
                 const envL = await enviarPeloCrm(supabase, providerLoja(), { id: conversaId ?? '', telefone_key: telefone, remote_jid: null }, { tipo: 'texto', texto: revL.texto_seguro }, { autor: 'laura' });
-                if (!envL.ok) { console.warn('[triagem] lembrete falhou:', p.lead_uid, envL.erro); r.erros++; break; }
+                if (!envL.ok) { console.warn('[triagem] lembrete falhou:', p.lead_uid, envL.erro); r.erros++; await soltar(supabase, p.lead_uid, 'lembrete_em'); reservado = null; break; }
+                reservado = null;
                 contatos++; r.lembretes = (r.lembretes || 0) + 1;
                 await supabase.from('wa_triagem').update({ lembrete_em: agora.toISOString(), ...(conversaId ? { conversa_id: conversaId } : {}) }).eq('lead_uid', p.lead_uid);
                 continue;
@@ -209,6 +214,10 @@ export async function rodarTriagem(supabase: SupabaseClient, opts: { agora?: Dat
             if (contatos >= MAX_CONTATOS_POR_RODADA || !telefone || !cliente) { r.esperando++; continue; }
 
             // ── primeiro contato ──
+            // Reserva ANTES de gerar: o cron roda todo minuto e uma rodada com vários leads passa de 1 min.
+            // Sem isto, rodadas sobrepostas mandavam a mesma saudação 2 e 3 vezes (19/11/2026).
+            if (!await reservar(supabase, p.lead_uid, 'contato_em', agora)) { r.esperando++; continue; }
+            reservado = 'contato_em';
             const resp = await cliente.messages.create({
                 model: modelo, max_tokens: 2048,
                 system: [{ type: 'text', text: LAURA_CRM_PROMPT, cache_control: { type: 'ephemeral' } }],
@@ -220,11 +229,14 @@ export async function rodarTriagem(supabase: SupabaseClient, opts: { agora?: Dat
             const rev = bruto ? revisarResposta(bruto, await precosAnunciadosDoEstoque(), [], { fraseDeCredito: false }) : null;
             if (!rev || rev.violacoes.length) {
                 console.warn('[triagem] mensagem barrada ou vazia:', p.lead_uid, rev?.violacoes.join(',') || 'vazia');
-                r.erros++; r.esperando++; continue;   // tenta de novo na próxima rodada; o tempo-limite libera se não sair
+                r.erros++; r.esperando++;   // tenta de novo na próxima rodada; o tempo-limite libera se não sair
+                await soltar(supabase, p.lead_uid, 'contato_em'); reservado = null;
+                continue;
             }
             if (contatos > 0) await esperar(ESPERA_ENTRE_CONTATOS_MS);
             const env = await enviarPeloCrm(supabase, providerLoja(), { id: conversaId ?? '', telefone_key: telefone, remote_jid: null }, { tipo: 'texto', texto: rev.texto_seguro }, { autor: 'laura' });
-            if (!env.ok) { console.warn('[triagem] envio falhou:', p.lead_uid, env.erro); r.erros++; break; } // disjuntor: para a rodada
+            if (!env.ok) { console.warn('[triagem] envio falhou:', p.lead_uid, env.erro); r.erros++; await soltar(supabase, p.lead_uid, 'contato_em'); reservado = null; break; } // disjuntor: para a rodada
+            reservado = null;
             contatos++; r.contatados++;
             const { data: chave2 } = await supabase.rpc('wa_telefone_key', { p_telefone: telefone });
             const { data: conv2 } = chave2 ? await supabase.from('wa_conversas').select('id').eq('telefone_key', chave2 as string).maybeSingle() : { data: null };
@@ -234,6 +246,7 @@ export async function rodarTriagem(supabase: SupabaseClient, opts: { agora?: Dat
         } catch (e) {
             r.erros++;
             console.warn('[triagem]', p.lead_uid, msgErro(e));
+            if (reservado) await soltar(supabase, p.lead_uid, reservado);   // falhou antes de enviar: deixa a próxima rodada tentar
         }
     }
     return r;
