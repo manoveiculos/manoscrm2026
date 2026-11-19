@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef, Suspense } from 'react';
+import React, { useState, useEffect, useRef, useCallback, Suspense } from 'react';
 import {
     Search,
     Users,
@@ -25,7 +25,8 @@ import { dataService } from '@/lib/dataService';
 import { Lead, Consultant, InventoryItem, LeadStatus } from '@/lib/types';
 import { leadService, leadCacheInvalidate } from '@/lib/leadService';
 import { ListaLeads, type LinhaLead } from './_components/ListaLeads';
-import { grupoDoLead, ordenarPorUrgencia, type Enriquecimento } from '@/lib/leads/urgencia';
+import { grupoDoLead, type Enriquecimento } from '@/lib/leads/urgencia';
+import type { Chip } from '@/lib/leads/lista';
 import { uidDoIdDaLista } from '@/lib/leads/resumo';
 import { LeadProfileModalV2 } from '../components/lead-profile/LeadProfileModalV2';
 import { GavetaLead } from './_components/GavetaLead';
@@ -58,7 +59,21 @@ function LeadsContent() {
     const [gavetaLead, setGavetaLead] = useState<Lead | null>(null);
     // Situação e última mensagem de cada lead (conversa do WhatsApp), para ordenar por urgência.
     const [enriqMap, setEnriqMap] = useState<Record<string, Enriquecimento>>({});
-    const [chip, setChip] = useState<'todos' | 'esperando' | 'sem_contato' | 'visita' | 'novos' | 'sem_dono'>('todos');
+    const [chip, setChip] = useState<Chip>('todos');
+    // Lista paginada no servidor (Fase C): 50 por vez, já filtrada e na ordem de urgência.
+    const [lista, setLista] = useState<Lead[]>([]);
+    const [listaTotal, setListaTotal] = useState(0);
+    const [contagens, setContagens] = useState<Record<Chip, number>>({ todos: 0, esperando: 0, sem_contato: 0, visita: 0, novos: 0, sem_dono: 0 });
+    const [opcoes, setOpcoes] = useState<{ interesses: string[]; origens: string[] }>({ interesses: [], origens: [] });
+    const [proximo, setProximo] = useState<number | null>(null);
+    const [carregandoLista, setCarregandoLista] = useState(true);
+    const [erroLista, setErroLista] = useState<string | null>(null);
+    const [rolePronto, setRolePronto] = useState(false);
+    const [loadingTodos, setLoadingTodos] = useState(false);
+    const [buscaAtiva, setBuscaAtiva] = useState('');
+    const seqLista = useRef(0);
+    const todosCarregados = useRef(false);
+    const sentinela = useRef<HTMLDivElement | null>(null);
     const [isNewLeadModalOpen, setIsNewLeadModalOpen] = useState(false);
     const [isManagement, setIsManagement] = useState(false);
     const [userName, setUserName] = useState('');
@@ -117,6 +132,7 @@ function LeadsContent() {
 
                     setRole(currentRole);
                     setConsultantId(currentConsultantId);
+                    setRolePronto(true);
 
                     console.log('[Leads] User:', user.email, 'Role:', currentRole, 'ConsultantId:', currentConsultantId);
 
@@ -136,18 +152,13 @@ function LeadsContent() {
                         return;
                     }
 
-                    const [leadsResult, consultantsData, inventoryData] = await Promise.all([
-                        leadService.getLeadsPaginated(undefined, {
-                            consultantId: currentRole === 'admin' ? undefined : currentConsultantId!,
-                            role: currentRole,
-                            limit: 2000
-                        }),
+                    // Fase C: a lista normal vem paginada de /api/leads/lista. Os 2.000 leads só
+                    // são baixados quando alguém abre o Kanban ou usa a busca por IA (efeito abaixo).
+                    const [consultantsData, inventoryData] = await Promise.all([
                         dataService.getConsultants(),
                         dataService.getInventory()
                     ]);
 
-                    setLeads(leadsResult.leads || []);
-                    setTotalLeadsCount(leadsResult.totalCount || 0);
                     setConsultants(consultantsData || []);
                     setInventory(inventoryData || []);
                 }
@@ -175,12 +186,88 @@ function LeadsContent() {
                 if (awayMs >= 30_000) {
                     leadCacheInvalidate();
                     loadInitialData(true); // skip loading flag — refetch silencioso
+                    window.dispatchEvent(new Event('leads:recarregar'));
                 }
             }
         };
         document.addEventListener('visibilitychange', onVisibility);
         return () => document.removeEventListener('visibilitychange', onVisibility);
     }, []);
+
+    // Kanban e busca por IA precisam de todos os leads em memória: baixa uma vez, sob demanda.
+    const precisaTodos = viewMode === 'kanban' || semanticMode;
+    useEffect(() => {
+        if (!precisaTodos || todosCarregados.current || !rolePronto) return;
+        if (role === 'consultant' && !consultantId) return;
+        todosCarregados.current = true;
+        setLoadingTodos(true);
+        leadService.getLeadsPaginated(undefined, {
+            consultantId: role === 'admin' ? undefined : consultantId!, role, limit: 2000,
+        }).then(res => { setLeads(res.leads || []); })
+          .finally(() => setLoadingTodos(false));
+    }, [precisaTodos, rolePronto, role, consultantId]);
+    useEffect(() => {
+        if (!precisaTodos) return;
+        fetch('/api/leads/situacoes', { cache: 'no-store' }).then(x => x.json())
+            .then(j => { if (j?.success) setEnriqMap(prev => ({ ...prev, ...(j.itens || {}) })); }).catch(() => { /* opcional */ });
+    }, [precisaTodos]);
+
+    // Busca por texto com espera de 400 ms (o servidor procura em todos os leads, não só nos baixados).
+    useEffect(() => {
+        const t = setTimeout(() => setBuscaAtiva(searchTerm.trim()), 400);
+        return () => clearTimeout(t);
+    }, [searchTerm]);
+
+    const buscarLista = useCallback(async (offset: number) => {
+        const seq = ++seqLista.current;
+        setCarregandoLista(true); setErroLista(null);
+        try {
+            const p = new URLSearchParams({ offset: String(offset), limite: '50', chip });
+            if (buscaAtiva) p.set('q', buscaAtiva);
+            if (filterConsultant !== 'all') p.set('consultor', filterConsultant);
+            if (filterStatus !== 'all') p.set('status', filterStatus);
+            if (filterInterest !== 'all') p.set('interesse', filterInterest);
+            if (filterOrigin !== 'all') p.set('origem', filterOrigin);
+            if (filterScore !== 'all') p.set('score', filterScore);
+            if (filterDate !== 'all' && filterDate !== 'custom') p.set('periodo', filterDate);
+            const res = await fetch(`/api/leads/lista?${p}`, { cache: 'no-store' });
+            const j = await res.json();
+            if (seq !== seqLista.current) return;   // chegou uma resposta mais nova: ignora esta
+            if (!j.success) throw new Error(j.error || 'erro ao carregar');
+            setLista(prev => offset === 0 ? j.leads : [...prev, ...j.leads]);
+            setEnriqMap(prev => ({ ...prev, ...(j.enriq || {}) }));
+            setListaTotal(j.total); setTotalLeadsCount(j.totalBanco); setContagens(j.contagens); setOpcoes(j.opcoes); setProximo(j.proximo);
+        } catch (e) {
+            if (seq === seqLista.current) setErroLista(e instanceof Error ? e.message : 'erro ao carregar');
+        } finally {
+            if (seq === seqLista.current) setCarregandoLista(false);
+        }
+    }, [chip, buscaAtiva, filterConsultant, filterStatus, filterInterest, filterOrigin, filterScore, filterDate]);
+
+    // Mudou filtro, busca ou chip: volta ao começo.
+    useEffect(() => { buscarLista(0); }, [buscarLista]);
+
+    // Atualização silenciosa: ao voltar para a aba e a cada 2 min, se a pessoa ainda está no topo da lista.
+    const listaLenRef = useRef(0);
+    listaLenRef.current = lista.length;
+    useEffect(() => {
+        const atualizar = () => { if (document.visibilityState === 'visible' && listaLenRef.current <= 50) buscarLista(0); };
+        const t = setInterval(atualizar, 120_000);
+        window.addEventListener('leads:recarregar', atualizar);
+        return () => { clearInterval(t); window.removeEventListener('leads:recarregar', atualizar); };
+    }, [buscarLista]);
+
+    // Rolagem contínua: ao chegar perto do fim, pede os próximos 50.
+    useEffect(() => {
+        const el = sentinela.current;
+        if (!el || proximo == null || carregandoLista) return;
+        const obs = new IntersectionObserver(entradas => { if (entradas[0].isIntersecting) buscarLista(proximo); }, { rootMargin: '400px' });
+        obs.observe(el);
+        return () => obs.disconnect();
+    }, [proximo, carregandoLista, buscarLista, lista.length]);
+
+    const acharLead = (id: string) => leads.find(l => l.id === id) || lista.find(l => l.id === id);
+    const aplicarNaLista = (id: string, patch: Partial<Lead>) => setLista(prev => prev.map(l => l.id === id ? { ...l, ...patch } : l));
 
     const filteredLeads = (leads || [])
         .filter(lead => {
@@ -306,17 +393,6 @@ function LeadsContent() {
             .map(r => r.lead!)
         : null;
 
-    useEffect(() => {
-        let vivo = true;
-        const carregar = () => {
-            if (document.visibilityState === 'hidden') return;
-            fetch('/api/leads/situacoes', { cache: 'no-store' }).then(x => x.json())
-                .then(j => { if (vivo && j?.success) setEnriqMap(j.itens || {}); }).catch(() => { /* a lista funciona sem isto */ });
-        };
-        carregar();
-        const t = setInterval(carregar, 60_000);
-        return () => { vivo = false; clearInterval(t); };
-    }, []);
     const enriqDe = (l: Lead): Enriquecimento | undefined => {
         const uid = uidDoIdDaLista(l.id);
         return uid ? enriqMap[uid] : undefined;
@@ -326,32 +402,18 @@ function LeadsContent() {
     const displayLeads = (semanticMode && semanticLeads) ? semanticLeads : filteredLeads;
     // ──────────────────────────────────────────────────────────
 
-    // Lista da Fase B: por urgência (na busca semântica mantém a ordem de relevância) e com filtros rápidos.
+    // Lista da Fase B/C: no modo normal a ordem e os filtros já vêm do servidor; na busca por IA vale a relevância.
     const agoraLista = new Date();
-    const linhasTodas: LinhaLead[] = (semanticMode && semanticLeads)
-        ? displayLeads.map(lead => ({ lead, grupo: grupoDoLead(lead, enriqDe(lead), agoraLista) }))
-        : ordenarPorUrgencia(displayLeads, enriqDe, agoraLista);
-    const passaChip = ({ lead, grupo }: LinhaLead) =>
-        chip === 'todos' ? true
-        : chip === 'esperando' ? grupo === 'esperando_loja'
-        : chip === 'sem_contato' ? grupo === 'sem_contato'
-        : chip === 'visita' ? enriqDe(lead)?.situacao === 'visita_marcada'
-        : chip === 'novos' ? grupo === 'novo_hoje'
-        : !lead.assigned_consultant_id;
-    const linhasLista = linhasTodas.filter(passaChip);
-    const contaChip = (c: typeof chip) => (c === 'todos' ? linhasTodas.length : linhasTodas.filter(l =>
-        c === 'esperando' ? l.grupo === 'esperando_loja'
-        : c === 'sem_contato' ? l.grupo === 'sem_contato'
-        : c === 'visita' ? enriqDe(l.lead)?.situacao === 'visita_marcada'
-        : c === 'novos' ? l.grupo === 'novo_hoje'
-        : !l.lead.assigned_consultant_id).length);
+    const modoBuscaIa = Boolean(semanticMode && semanticLeads);
+    const linhasLista: LinhaLead[] = (modoBuscaIa ? displayLeads : lista)
+        .map(lead => ({ lead, grupo: grupoDoLead(lead, enriqDe(lead), agoraLista) }));
 
     const handleStatusChange = async (leadId: string, newStatus: LeadStatus) => {
         const normalized = normalizeStatus(newStatus);
         
         // Interceptar estados finais para garantir captura de motivo/detalhes via Modal
         if (normalized === 'perdido' || normalized === 'vendido') {
-            const lead = leads.find(l => l.id === leadId);
+            const lead = acharLead(leadId);
             if (lead) {
                 setSelectedLead(lead);
                 setIsManagement(true);
@@ -360,12 +422,13 @@ function LeadsContent() {
         }
 
         try {
-            const oldStatus = leads.find(l => l.id === leadId)?.status;
+            const oldStatus = acharLead(leadId)?.status;
             
             // Usar Server Action para lidar com múltiplos bancos (manos/master) e prefixos (main_/master_)
             await updateLeadStatusAction(leadId, newStatus, oldStatus);
 
             setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: newStatus } : l));
+            aplicarNaLista(leadId, { status: newStatus });
 
             // IA proativa: dispara análise em background ao avançar para etapas decisivas
             if (newStatus === 'ataque' || newStatus === 'fechamento') {
@@ -394,7 +457,7 @@ function LeadsContent() {
         if (role !== 'admin') return;
         try {
             const consultant = consultants.find(c => c.id === newConsultantId);
-            const currentLead = leads.find(l => l.id === leadId);
+            const currentLead = acharLead(leadId);
             const previousConsultantId = currentLead?.assigned_consultant_id;
 
             // Via /api/lead/transfer: o updateLeadDetails do client escrevia na
@@ -440,14 +503,15 @@ function LeadsContent() {
         }
     };
 
-    const interests = Array.from(new Set(leads.map(l => l.vehicle_interest).filter(Boolean) as string[]))
+    // Com todos os leads em memória (Kanban/busca IA) as opções saem deles; senão, do servidor.
+    const interests = leads.length ? Array.from(new Set(leads.map(l => l.vehicle_interest).filter(Boolean) as string[]))
         .filter(interest => {
             const up = interest.toUpperCase();
             const genericIntents = ['COMPRA', 'VENDA', 'TROCA', 'DUVIDA', 'FALAR COM CONSULTOR', '---', 'INTERESSE'];
             return !genericIntents.some(g => up.includes(g)) && up.length > 2;
         })
-        .sort();
-    const origins = Array.from(new Set(leads.map(l => l.source).filter(Boolean) as string[]));
+        .sort() : opcoes.interesses;
+    const origins = leads.length ? Array.from(new Set(leads.map(l => l.source).filter(Boolean) as string[])) : opcoes.origens;
 
     return (
         <div className="flex flex-col h-screen w-full bg-[#03060b] overflow-hidden text-white font-inter">
@@ -681,16 +745,13 @@ function LeadsContent() {
                 <div className="ml-auto flex items-center gap-4">
                     <button 
                         onClick={() => {
-                            setLoading(true);
-                            leadService.getLeadsPaginated(undefined, {
-                                consultantId: role === 'admin' ? undefined : (consultantId || undefined),
-                                role: role,
-                                limit: 2000
-                            }).then((result) => {
-                                setLeads(result.leads || []);
-                                setTotalLeadsCount(result.totalCount || 0);
-                                setLoading(false);
-                            });
+                            leadCacheInvalidate();
+                            buscarLista(0);
+                            if (todosCarregados.current) {
+                                leadService.getLeadsPaginated(undefined, {
+                                    consultantId: role === 'admin' ? undefined : (consultantId || undefined), role, limit: 2000,
+                                }).then(res => setLeads(res.leads || []));
+                            }
                         }}
                         className="p-2.5 h-9 w-9 flex items-center justify-center bg-white/5 border border-white/5 rounded-lg text-white/20 hover:text-white hover:border-white/10 transition-all active:rotate-180"
                     >
@@ -699,15 +760,15 @@ function LeadsContent() {
                 </div>
             </div>
 
-            {viewMode === 'list' && (
+            {viewMode === 'list' && !semanticMode && (
                 <div className="shrink-0 flex flex-wrap items-center gap-2 px-3 sm:px-6 py-2 border-b border-white/5 bg-[#03060b]">
                     {([
                         ['todos', 'Todos'], ['esperando', 'Esperando você'], ['sem_contato', 'Sem contato há 3 dias'],
                         ['visita', 'Visita marcada'], ['novos', 'Novos hoje'], ...(role === 'admin' ? [['sem_dono', 'Sem dono']] : []),
-                    ] as [typeof chip, string][]).map(([id, rotulo]) => (
+                    ] as [Chip, string][]).map(([id, rotulo]) => (
                         <button key={id} onClick={() => setChip(id)}
                             className={`px-3 py-1.5 rounded-full text-[11px] font-bold border transition ${chip === id ? 'bg-white text-black border-white' : 'bg-white/5 text-white/60 border-white/10 hover:text-white'}`}>
-                            {rotulo} <span className={chip === id ? 'text-black/50' : 'text-white/30'}>{contaChip(id)}</span>
+                            {rotulo} <span className={chip === id ? 'text-black/50' : 'text-white/30'}>{contagens[id]}</span>
                         </button>
                     ))}
                 </div>
@@ -715,7 +776,7 @@ function LeadsContent() {
 
             {/* MAIN CONTENT AREA */}
             <main className="flex-1 w-full overflow-hidden relative">
-                {loading ? (
+                {(loading || (viewMode === 'kanban' && loadingTodos && leads.length === 0)) ? (
                     <div className="absolute inset-0 flex items-center justify-center">
                         <div className="flex flex-col items-center gap-4">
                             <div className="h-12 w-12 border-2 border-red-500/20 border-t-red-600 rounded-full animate-spin" />
@@ -733,13 +794,35 @@ function LeadsContent() {
                                     exit={{ opacity: 0, x: 20 }}
                                     className="h-full overflow-y-auto custom-scrollbar pt-6 pb-20"
                                 >
-                                    <ListaLeads
-                                        linhas={linhasLista}
-                                        enriq={enriqDe}
-                                        consultants={consultants}
-                                        onView={(lead) => setGavetaLead(lead)}
-                                        onStatusChange={handleStatusChange}
-                                    />
+                                    {erroLista && (
+                                        <div className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 text-red-300 text-sm px-3 py-2 flex items-center justify-between gap-3">
+                                            <span>Não foi possível carregar a lista: {erroLista}</span>
+                                            <button onClick={() => buscarLista(0)} className="shrink-0 underline">Tentar de novo</button>
+                                        </div>
+                                    )}
+                                    {carregandoLista && !modoBuscaIa && lista.length === 0 && !erroLista ? (
+                                        <div className="py-24 flex flex-col items-center gap-4">
+                                            <div className="h-10 w-10 border-2 border-red-500/20 border-t-red-600 rounded-full animate-spin" />
+                                            <p className="text-[10px] font-black text-white/20 uppercase tracking-[0.3em]">Carregando leads...</p>
+                                        </div>
+                                    ) : (
+                                        <ListaLeads
+                                            linhas={linhasLista}
+                                            enriq={enriqDe}
+                                            consultants={consultants}
+                                            onView={(lead) => setGavetaLead(lead)}
+                                            onStatusChange={handleStatusChange}
+                                        />
+                                    )}
+                                    {!modoBuscaIa && (
+                                        <>
+                                            <div ref={sentinela} className="h-1" />
+                                            <p className="py-4 text-center text-[11px] text-white/30">
+                                                {carregandoLista && lista.length > 0 ? 'Carregando mais…'
+                                                    : lista.length > 0 ? `Mostrando ${lista.length} de ${listaTotal}` : ''}
+                                            </p>
+                                        </>
+                                    )}
                                 </motion.div>
                             ) : (
                                 <motion.div 
@@ -798,6 +881,7 @@ function LeadsContent() {
                 onClose={() => setIsNewLeadModalOpen(false)}
                 onSuccess={(newLead) => {
                     setLeads(prev => [newLead, ...prev]);
+                    buscarLista(0);
                 }}
                 userName={userName}
                 consultantId={consultantId || undefined}
