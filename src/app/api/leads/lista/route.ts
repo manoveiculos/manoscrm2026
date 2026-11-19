@@ -12,8 +12,6 @@ export const maxDuration = 30;
 const headers = { 'Cache-Control': 'no-store' };
 const erro = (status: number, error: string) => NextResponse.json({ success: false, error }, { status, headers });
 
-/** Colunas que os filtros e a urgência usam (leves: sem observações nem resumo da IA). */
-const COLS_MIN = 'id,status,created_at,assigned_consultant_id,source,origem,vehicle_interest,ai_score,valor_investimento';
 /** Colunas da linha completa, só das 30 da página (as que existem na view 'leads'). */
 const COLS_PAGINA = 'id,name,phone,email,source,origem,status,ai_score,ai_classification,ai_summary,vehicle_interest,assigned_consultant_id,created_at,updated_at,proxima_acao,valor_investimento,observacoes,carro_troca,region,source_table';
 const LIMITE_LINHAS = 5000;
@@ -52,28 +50,22 @@ export async function GET(request: Request) {
     // 1. linhas leves do banco (escopo, período e busca por texto ficam no SQL)
     const desde = inicioDoPeriodo(sp.get('periodo'), agora);
     const termo = termoDeBusca(sp.get('q'));
-    const montar = () => {
-        let q = admin.from('leads').select(COLS_MIN, { count: 'exact' });
-        if (!ehAdmin) q = q.eq('assigned_consultant_id', eu.consultorId!);
-        if (desde) q = q.gte('created_at', desde);
-        if (termo) q = q.or(`name.ilike.%${termo}%,phone.ilike.%${termo}%,vehicle_interest.ilike.%${termo}%,id.ilike.%${termo}%`);
-        return q.order('created_at', { ascending: false });
-    };
-    // O banco devolve no máximo 1.000 linhas por consulta: busca em blocos de 1.000 até o limite.
-    const todas: LeadMin[] = [];
-    let count: number | null = null;
-    for (let de = 0; de < LIMITE_LINHAS; de += 1000) {
-        const r = await montar().range(de, de + 999);
-        if (r.error) return erro(500, r.error.message);
-        if (count == null) count = r.count;
-        const bloco = (r.data || []) as unknown as LeadMin[];
-        todas.push(...bloco);
-        if (bloco.length < 1000) break;
-    }
+    // Uma leitura só no banco (função leads_lista_min): a view `leads` é pesada e antes era lida várias vezes por abertura.
+    // Junto, a situação das conversas do WhatsApp (as duas leituras andam em paralelo).
+    const [rpc, conversas] = await Promise.all([
+        admin.rpc('leads_lista_min', {
+            p_consultor: ehAdmin ? null : eu.consultorId, p_desde: desde, p_termo: termo || null, p_limite: LIMITE_LINHAS,
+        }),
+        lerConversasDeLeads(admin).catch(() => []),
+    ]);
+    if (rpc.error) return erro(500, rpc.error.message);
+    const resp = (rpc.data || {}) as { total?: number; linhas?: LeadMin[] };
+    const todas: LeadMin[] = resp.linhas || [];
+    const count: number | null = resp.total ?? null;
 
     // 2. situação/última mensagem e página (ordem: data e horário, do mais novo ao mais antigo)
     let enriq: Awaited<ReturnType<typeof enriquecer>> = {};
-    try { enriq = await enriquecer(admin, await lerConversasDeLeads(admin)); } catch { /* a lista funciona sem a conversa */ }
+    try { enriq = await enriquecer(admin, conversas); } catch { /* a lista funciona sem a conversa */ }
     const enriqDe = (l: LeadMin) => { const uid = uidDoIdDaLista(l.id); return uid ? enriq[uid] : undefined; };
     const pagina = montarPagina(todas, f, enriqDe, { offset, limite, agora });
 

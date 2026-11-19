@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { NavigationV2 } from '@/components/v2/NavigationV2';
+import { BarraCarregando } from '@/components/v2/BarraCarregando';
 import { BackgroundDecor } from '@/components/BackgroundDecor';
 import { ConsultantAlertModal } from '@/components/v2/ConsultantAlertModal';
 import { TrafficAlertBanner } from '@/components/v2/TrafficAlertBanner';
@@ -95,6 +96,7 @@ export const LayoutWrapperV2 = ({ children }: { children: React.ReactNode }) => 
         return (
             <div className="flex min-h-screen bg-[#03060b] font-inter text-white overflow-hidden w-full max-w-[100vw]">
                 <BackgroundDecor />
+                <BarraCarregando />
                 <main className="flex-1 min-h-screen w-full relative">
                     <div className="h-full w-full">
                         {children}
@@ -107,6 +109,7 @@ export const LayoutWrapperV2 = ({ children }: { children: React.ReactNode }) => 
     return (
         <div className="flex min-h-screen bg-[#03060b] font-inter text-white w-full max-w-[100vw] overflow-x-hidden">
             <BackgroundDecor />
+            <BarraCarregando />
             <NavigationV2 />
             <ConsultantAlertModal />
             {/* obrigatório ao entrar: confirma o WhatsApp do consultor por código */}

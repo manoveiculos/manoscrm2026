@@ -8,6 +8,16 @@
  * instantaneamente e o usuário vê algo se preenchendo.
  */
 
+/** Texto visível: a tela está carregando (o esqueleto sozinho parece tela vazia/travada). */
+function Rotulo() {
+    return (
+        <div className="flex items-center gap-2 text-xs font-semibold text-zinc-400" role="status">
+            <span className="h-3.5 w-3.5 rounded-full border-2 border-zinc-600 border-t-red-500 animate-spin" />
+            Carregando…
+        </div>
+    );
+}
+
 function Pulse({ className = '' }: { className?: string }) {
     return <div className={`animate-pulse bg-zinc-800/60 rounded ${className}`} />;
 }
@@ -15,6 +25,7 @@ function Pulse({ className = '' }: { className?: string }) {
 export function ListSkeleton({ rows = 6 }: { rows?: number }) {
     return (
         <div className="space-y-3 p-6">
+            <Rotulo />
             <Pulse className="h-8 w-48 mb-6" />
             {Array.from({ length: rows }).map((_, i) => (
                 <div key={i} className="flex items-center gap-3 p-4 rounded-xl bg-zinc-900/40 border border-zinc-800/50">
@@ -33,6 +44,7 @@ export function ListSkeleton({ rows = 6 }: { rows?: number }) {
 export function DashboardSkeleton() {
     return (
         <div className="p-6 space-y-6">
+            <Rotulo />
             <Pulse className="h-10 w-64" />
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {Array.from({ length: 4 }).map((_, i) => (
@@ -54,6 +66,7 @@ export function LeadDetailSkeleton() {
     return (
         <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr_280px] gap-4 p-6">
             <div className="space-y-3">
+                <Rotulo />
                 <Pulse className="h-6 w-32" />
                 <Pulse className="h-4 w-24" />
                 <Pulse className="h-24 w-full rounded-xl" />
@@ -79,6 +92,7 @@ export function LeadDetailSkeleton() {
 export function GenericSkeleton() {
     return (
         <div className="p-6 space-y-4">
+            <Rotulo />
             <Pulse className="h-8 w-48" />
             <Pulse className="h-4 w-3/4" />
             <Pulse className="h-64 w-full rounded-xl" />
