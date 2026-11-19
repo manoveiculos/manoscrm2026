@@ -26,6 +26,7 @@ import { Lead, Consultant, InventoryItem, LeadStatus } from '@/lib/types';
 import { leadService, leadCacheInvalidate } from '@/lib/leadService';
 import { LeadListV2 } from '../pipeline/components/LeadListV2';
 import { LeadProfileModalV2 } from '../components/lead-profile/LeadProfileModalV2';
+import { GavetaLead } from './_components/GavetaLead';
 import { NewLeadModalV2 } from '../pipeline/components/NewLeadModalV2';
 import { KanbanBoardV2 } from '../pipeline/components/KanbanBoardV2';
 import { supabase } from '@/lib/supabase';
@@ -51,6 +52,8 @@ function LeadsContent() {
     const [searchTerm, setSearchTerm] = useState('');
     const [viewMode, setViewMode] = useState<'list' | 'kanban'>('list');
     const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+    // Clique simples no lead abre a gaveta de resumo; o painel completo (selectedLead) fica para gerenciar/fechar negócio.
+    const [gavetaLead, setGavetaLead] = useState<Lead | null>(null);
     const [isNewLeadModalOpen, setIsNewLeadModalOpen] = useState(false);
     const [isManagement, setIsManagement] = useState(false);
     const [userName, setUserName] = useState('');
@@ -677,10 +680,7 @@ function LeadsContent() {
                                 >
                                     <LeadListV2
                                         leads={displayLeads}
-                                        onView={(lead) => {
-                                            setIsManagement(false);
-                                            setSelectedLead(lead);
-                                        }}
+                                        onView={(lead) => setGavetaLead(lead)}
                                         onManage={(lead) => {
                                             setIsManagement(true);
                                             setSelectedLead(lead);
@@ -703,10 +703,7 @@ function LeadsContent() {
                                         leads={displayLeads}
                                         setLeads={setLeads}
                                         userName={userName}
-                                        onView={(lead) => {
-                                            setIsManagement(false);
-                                            setSelectedLead(lead);
-                                        }}
+                                        onView={(lead) => setGavetaLead(lead)}
                                         onManage={(lead) => {
                                             setIsManagement(true);
                                             setSelectedLead(lead);
@@ -719,6 +716,18 @@ function LeadsContent() {
                     </div>
                 )}
             </main>
+
+            {gavetaLead && (
+                <GavetaLead
+                    lead={gavetaLead}
+                    onClose={() => setGavetaLead(null)}
+                    onStatusChange={(id, status) => {
+                        const final = ['perdido', 'vendido'].includes(normalizeStatus(status));
+                        if (final) setGavetaLead(null);   // perdido/vendido pedem motivo: abre o painel completo
+                        handleStatusChange(id, status);
+                    }}
+                />
+            )}
 
             {/* MODAL INTEGRATION */}
             {selectedLead && (
