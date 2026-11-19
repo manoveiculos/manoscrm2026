@@ -111,6 +111,7 @@ export const NAV_ITEMS: NavItem[] = [
     { id: 'marketing-instagram', label: 'Instagram', icon: Megaphone, href: '/admin/marketing/instagram', grupo: 'marketing', nivel: 'admin' },
     { id: 'marketing-leads', label: 'Leads e compras', icon: Users, href: '/admin/marketing/leads', grupo: 'marketing', nivel: 'admin' },
     { id: 'marketing-mercado', label: 'Mercado e anúncios', icon: Radar, href: '/admin/marketing/mercado', grupo: 'marketing', nivel: 'admin' },
+    { id: 'marketing-trafego', label: 'Tráfego Pago', icon: BarChart3, href: '/admin/marketing/trafego', grupo: 'marketing', nivel: 'admin' },
     { id: 'marketing-conexoes', label: 'Conexões', icon: Network, href: '/admin/marketing/conexoes', grupo: 'marketing', nivel: 'admin' },
 ];
 
