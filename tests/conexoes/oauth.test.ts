@@ -41,6 +41,15 @@ test('Meta: pede ads_read e ads_management e leva o state; o segredo não vai na
     assert.ok(!u.search.includes('msec'));
 });
 
+test('Meta com "Login para empresas": usa config_id e não manda scope', () => {
+    const u = new URL(urlDeAutorizacao('meta', 'https://x/cb', 'zzz', { ...ENV, META_LOGIN_CONFIG_ID: '999888' }));
+    assert.equal(u.searchParams.get('config_id'), '999888');
+    assert.equal(u.searchParams.get('override_default_response_type'), 'true');
+    assert.equal(u.searchParams.get('response_type'), 'code');
+    assert.equal(u.searchParams.get('scope'), null);
+    assert.equal(u.searchParams.get('state'), 'zzz');
+});
+
 test('troca de código: segredos vão no corpo POST, nunca na URL, e o erro não vaza token', async () => {
     const chamadas: { url: string; corpo: string }[] = [];
     const original = globalThis.fetch;

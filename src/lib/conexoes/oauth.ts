@@ -36,10 +36,17 @@ export function urlDeAutorizacao(p: Provedor, retorno: string, state: string, en
         return `https://accounts.google.com/o/oauth2/v2/auth?${q}`;
     }
     const versao = (env.META_API_VERSION || '').trim() || 'v26.0';
-    const q = new URLSearchParams({
-        client_id: (env.META_APP_ID || '').trim(), redirect_uri: retorno, response_type: 'code',
-        scope: ESCOPOS.meta.join(','), state, auth_type: 'rerequest',
-    });
+    const configId = (env.META_LOGIN_CONFIG_ID || '').trim();
+    // "Login do Facebook para empresas": as permissões vêm de uma configuração (config_id), não de scope.
+    const q = configId
+        ? new URLSearchParams({
+            client_id: (env.META_APP_ID || '').trim(), redirect_uri: retorno, response_type: 'code',
+            override_default_response_type: 'true', config_id: configId, state,
+        })
+        : new URLSearchParams({
+            client_id: (env.META_APP_ID || '').trim(), redirect_uri: retorno, response_type: 'code',
+            scope: ESCOPOS.meta.join(','), state, auth_type: 'rerequest',
+        });
     return `https://www.facebook.com/${versao}/dialog/oauth?${q}`;
 }
 
