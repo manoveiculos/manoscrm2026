@@ -21,6 +21,27 @@ export function faltaConfigurar(p: Provedor, env: Record<string, string | undefi
     return chaves.filter(k => !(env[k] || '').trim());
 }
 
+const HOSTS_PUBLICOS = ['manoscrm.com.br', 'www.manoscrm.com.br'];
+const ORIGEM_PADRAO = 'https://manoscrm.com.br';
+
+/**
+ * Endereço PÚBLICO do CRM (https://manoscrm.com.br). Atrás do proxy da Hostinger o servidor enxerga
+ * o endereço interno (0.0.0.0:3000), que o Google e o Meta nunca aceitam. Por isso:
+ *  1. OAUTH_BASE_URL, se definida;
+ *  2. o host do cabeçalho (x-forwarded-host ou host), SÓ se for um dos hosts do CRM (evita forjar o retorno);
+ *  3. localhost, só fora de produção;
+ *  4. caso contrário, https://manoscrm.com.br.
+ */
+export function origemPublica(cabecalho: (nome: string) => string | null, env: Record<string, string | undefined> = process.env): string {
+    const fixa = (env.OAUTH_BASE_URL || '').trim().replace(/\/+$/, '');
+    if (fixa) return fixa;
+    const host = (cabecalho('x-forwarded-host') || cabecalho('host') || '').split(',')[0].trim().toLowerCase();
+    const nome = host.replace(/:\d+$/, '');
+    if (HOSTS_PUBLICOS.includes(nome)) return `https://${nome}`;
+    if (env.NODE_ENV !== 'production' && (nome === 'localhost' || nome === '127.0.0.1')) return `http://${host}`;
+    return ORIGEM_PADRAO;
+}
+
 /** Endereço que o Google/Meta devolvem o usuário. Precisa estar cadastrado igualzinho no painel deles. */
 export function enderecoDeRetorno(p: Provedor, origem: string, env: Record<string, string | undefined> = process.env): string {
     const base = (env.OAUTH_BASE_URL || origem).trim().replace(/\/+$/, '');

@@ -1,6 +1,26 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { enderecoDeRetorno, faltaConfigurar, provedorValido, trocarCodigo, urlDeAutorizacao } from '@/lib/conexoes/oauth';
+import { enderecoDeRetorno, faltaConfigurar, origemPublica, provedorValido, trocarCodigo, urlDeAutorizacao } from '@/lib/conexoes/oauth';
+
+const cab = (h: Record<string, string>) => (n: string) => h[n] ?? null;
+
+test('origem pública: nunca devolve o endereço interno (0.0.0.0:3000) do servidor', () => {
+    const prod = { NODE_ENV: 'production' };
+    assert.equal(origemPublica(cab({ host: '0.0.0.0:3000' }), prod), 'https://manoscrm.com.br');
+    assert.equal(origemPublica(cab({ host: '0.0.0.0:3000', 'x-forwarded-host': 'manoscrm.com.br' }), prod), 'https://manoscrm.com.br');
+    assert.equal(origemPublica(cab({ 'x-forwarded-host': 'www.manoscrm.com.br, 10.0.0.1' }), prod), 'https://www.manoscrm.com.br');
+    assert.equal(origemPublica(cab({}), prod), 'https://manoscrm.com.br');
+});
+
+test('origem pública: host forjado não vira endereço de retorno; localhost só fora de produção', () => {
+    assert.equal(origemPublica(cab({ host: 'site-do-golpista.com' }), { NODE_ENV: 'production' }), 'https://manoscrm.com.br');
+    assert.equal(origemPublica(cab({ host: 'localhost:3000' }), { NODE_ENV: 'production' }), 'https://manoscrm.com.br');
+    assert.equal(origemPublica(cab({ host: 'localhost:3000' }), { NODE_ENV: 'development' }), 'http://localhost:3000');
+});
+
+test('origem pública: OAUTH_BASE_URL manda, sem barra no fim', () => {
+    assert.equal(origemPublica(cab({ host: '0.0.0.0:3000' }), { OAUTH_BASE_URL: 'https://manoscrm.com.br/' }), 'https://manoscrm.com.br');
+});
 
 const ENV = { GOOGLE_ADS_CLIENT_ID: 'gid', GOOGLE_ADS_CLIENT_SECRET: 'gsec', META_APP_ID: 'mid', META_APP_SECRET: 'msec' };
 

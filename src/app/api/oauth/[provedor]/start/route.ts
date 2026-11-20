@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { randomBytes } from 'node:crypto';
 import { requireAdmin } from '../../../marketing/_guard';
-import { enderecoDeRetorno, faltaConfigurar, provedorValido, urlDeAutorizacao } from '@/lib/conexoes/oauth';
+import { enderecoDeRetorno, faltaConfigurar, origemPublica, provedorValido, urlDeAutorizacao } from '@/lib/conexoes/oauth';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,7 +14,8 @@ const VOLTAR = '/admin/marketing/campanhas';
  */
 export async function GET(req: NextRequest, ctx: { params: Promise<{ provedor: string }> }) {
     const { provedor } = await ctx.params;
-    const voltar = (qs: string) => NextResponse.redirect(new URL(`${VOLTAR}?${qs}`, req.nextUrl.origin));
+    const origem = origemPublica(n => req.headers.get(n));
+    const voltar = (qs: string) => NextResponse.redirect(new URL(`${VOLTAR}?${qs}`, origem));
 
     const guard = await requireAdmin();
     if (!guard.ok) return guard.res;
@@ -24,7 +25,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ provedor: s
     if (falta.length) return voltar(`conectar=falta&provedor=${provedor}&vars=${encodeURIComponent(falta.join(','))}`);
 
     const state = randomBytes(24).toString('hex');
-    const retorno = enderecoDeRetorno(provedor, req.nextUrl.origin);
+    const retorno = enderecoDeRetorno(provedor, origem);
     const res = NextResponse.redirect(urlDeAutorizacao(provedor, retorno, state));
     // Anti-falsificação: o retorno só vale se trouxer o mesmo "state" que está neste cookie.
     res.cookies.set(`oauth_state_${provedor}`, state, {

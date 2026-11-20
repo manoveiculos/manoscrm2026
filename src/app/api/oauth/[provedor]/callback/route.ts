@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { timingSafeEqual } from 'node:crypto';
 import { requireAdmin } from '../../../marketing/_guard';
 import { salvarCredencial } from '@/lib/conexoes/credenciais';
-import { enderecoDeRetorno, provedorValido, trocarCodigo } from '@/lib/conexoes/oauth';
+import { enderecoDeRetorno, origemPublica, provedorValido, trocarCodigo } from '@/lib/conexoes/oauth';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
@@ -20,8 +20,9 @@ function iguais(a: string, b: string): boolean {
  */
 export async function GET(req: NextRequest, ctx: { params: Promise<{ provedor: string }> }) {
     const { provedor } = await ctx.params;
+    const origem = origemPublica(n => req.headers.get(n));
     const voltar = (qs: string) => {
-        const r = NextResponse.redirect(new URL(`${VOLTAR}?${qs}`, req.nextUrl.origin));
+        const r = NextResponse.redirect(new URL(`${VOLTAR}?${qs}`, origem));
         r.cookies.delete({ name: `oauth_state_${provedor}`, path: '/api/oauth' });
         return r;
     };
@@ -37,7 +38,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ provedor: s
     const guardado = req.cookies.get(`oauth_state_${provedor}`)?.value || '';
     if (!code || !state || !guardado || !iguais(state, guardado)) return voltar(`conectar=invalido&provedor=${provedor}`);
 
-    const troca = await trocarCodigo(provedor, code, enderecoDeRetorno(provedor, req.nextUrl.origin));
+    const troca = await trocarCodigo(provedor, code, enderecoDeRetorno(provedor, origem));
     if (!troca.ok) return voltar(`conectar=erro&provedor=${provedor}&motivo=${encodeURIComponent(troca.erro)}`);
 
     const salvo = await salvarCredencial(provedor, { ...troca.tokens, conectado_por: guard.email });
