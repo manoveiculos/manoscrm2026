@@ -5,6 +5,7 @@
 // uma conta gerente (MCC), GOOGLE_ADS_LOGIN_CUSTOMER_ID. Sem SDK: um fetch para o token e outro para a consulta.
 
 import { refreshTokenGoogle } from '@/lib/conexoes/credenciais';
+import { explicarErroGoogleAds } from '@/lib/conexoes/googleAdsErro';
 import { somarTotais, GRUPO_VAZIO, type CampanhaLinha, type GrupoCampanhas, type StatusCampanha } from './tipos';
 
 interface LinhaGaql {
@@ -103,9 +104,8 @@ export async function buscarGoogle(desde: string, ate: string): Promise<GrupoCam
             const j = await res.json().catch(() => null) as unknown;
             if (res.status === 404 && !versaoBoa) { ultimoErro = `versão ${v} indisponível`; continue; }   // versão aposentada: tenta a anterior
             if (!res.ok) {
-                const e = (Array.isArray(j) ? (j[0] as { error?: { message?: string } })?.error : (j as { error?: { message?: string } } | null)?.error);
                 versaoBoa = null;
-                throw new Error(`Google Ads (${res.status}): ${e?.message || 'recusou a consulta'}`);
+                throw new Error(explicarErroGoogleAds(res.status, j, { cliente, login }));
             }
             versaoBoa = v;
             const lotes = (Array.isArray(j) ? j : [j]) as { results?: LinhaGaql[] }[];
