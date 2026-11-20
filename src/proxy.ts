@@ -158,7 +158,7 @@ export async function middleware(request: NextRequest) {
         if (isRestrictedBuyer) {
             const allowed = isPaulo
                 ? (path.startsWith('/repasse') || path.startsWith('/compras'))
-                : (path.startsWith('/compras') || path.startsWith('/divisaodelucro'));
+                : (path.startsWith('/compras') || path.startsWith('/divisaodelucro') || path.startsWith('/manosv3'));
             if (!allowed) {
                 const homeUrl = new URL(isPaulo ? '/repasse' : '/compras', request.url);
                 const redirectResponse = NextResponse.redirect(homeUrl);

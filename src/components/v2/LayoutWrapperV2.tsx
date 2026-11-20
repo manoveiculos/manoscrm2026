@@ -17,6 +17,7 @@ export const LayoutWrapperV2 = ({ children }: { children: React.ReactNode }) => 
     const isLogin = pathname === '/login';
     const isRepasse = pathname.startsWith('/repasse'); // app mobile do Paulo, sem sidebar
     const isScooters = pathname.startsWith('/renato'); // app do Renato (RG Scooters), sem sidebar
+    const isManosV3 = pathname.startsWith('/manosv3'); // painel de conferência dos sócios, sem sidebar
     // Prévia de tela com dados fictícios (só existe fora de produção — ver src/app/dev).
     const isDevPreview = pathname.startsWith('/dev/');
     const supabase = createClient();
@@ -85,6 +86,10 @@ export const LayoutWrapperV2 = ({ children }: { children: React.ReactNode }) => 
                 {children}
             </div>
         );
+    }
+
+    if (isManosV3) {
+        return <div className="min-h-screen w-full max-w-[100vw]">{children}</div>;
     }
 
     // App do Renato (/renato): RG Scooters tem tema claro próprio e bottom-nav — sem sidebar do CRM
