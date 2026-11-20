@@ -43,7 +43,7 @@
     "test:visao": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/whatsapp/visao.test.ts",
     "test:visita": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/whatsapp/visita.test.ts",
     "test:trafego": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/trafego/resumo.test.ts",
-    "test:conexoes-login": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/conexoes/login.test.ts"
+    "test:conexoes-login": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/conexoes/login.test.ts tests/conexoes/oauth.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",

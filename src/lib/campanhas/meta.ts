@@ -4,6 +4,7 @@
 // (para ligar o clique no WhatsApp que chegou ao CRM, que traz o ID do ANÚNCIO, à campanha).
 
 import { getMetaAccessToken, getMetaApiVersion } from '@/lib/metaConfig';
+import { tokenMeta } from '@/lib/conexoes/credenciais';
 import { somarTotais, GRUPO_VAZIO, type CampanhaLinha, type GrupoCampanhas, type StatusCampanha } from './tipos';
 
 interface Acao { action_type: string; value: string }
@@ -90,7 +91,7 @@ export interface DadosMeta { grupo: GrupoCampanhas; anuncios: Map<string, string
 
 export async function buscarMeta(desde: string, ate: string): Promise<DadosMeta> {
     const conta = (process.env.META_AD_ACCOUNT_ID || process.env.NEXT_PUBLIC_META_AD_ACCOUNT_ID || '').replace(/^act_/, '').trim();
-    const token = (process.env.META_ADS_ACCESS_TOKEN || getMetaAccessToken() || '').trim();
+    const token = ((await tokenMeta()) || process.env.META_ADS_ACCESS_TOKEN || getMetaAccessToken() || '').trim();
     const vazio = (erro: string): DadosMeta => ({ grupo: { plataforma: 'meta', conectado: false, erro, moeda: 'BRL', totais: GRUPO_VAZIO, campanhas: [] }, anuncios: new Map() });
     if (!conta || !token) return vazio('Meta Ads não conectado: faltam META_AD_ACCOUNT_ID e/ou META_ACCESS_TOKEN no servidor.');
 

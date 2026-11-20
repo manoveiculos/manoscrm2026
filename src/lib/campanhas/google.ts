@@ -4,6 +4,7 @@
 // REFRESH_TOKEN (OAuth), GOOGLE_ADS_DEVELOPER_TOKEN, GOOGLE_ADS_CUSTOMER_ID e, se a conta é filha de
 // uma conta gerente (MCC), GOOGLE_ADS_LOGIN_CUSTOMER_ID. Sem SDK: um fetch para o token e outro para a consulta.
 
+import { refreshTokenGoogle } from '@/lib/conexoes/credenciais';
 import { somarTotais, GRUPO_VAZIO, type CampanhaLinha, type GrupoCampanhas, type StatusCampanha } from './tipos';
 
 interface LinhaGaql {
@@ -59,7 +60,7 @@ async function tokenDeAcesso(): Promise<string> {
     if (tokenCache && tokenCache.expira > Date.now() + 60_000) return tokenCache.valor;
     const corpo = new URLSearchParams({
         client_id: (process.env.GOOGLE_ADS_CLIENT_ID || '').trim(), client_secret: (process.env.GOOGLE_ADS_CLIENT_SECRET || '').trim(),
-        refresh_token: (process.env.GOOGLE_ADS_REFRESH_TOKEN || '').trim(), grant_type: 'refresh_token',
+        refresh_token: await refreshTokenGoogle(), grant_type: 'refresh_token',
     });
     const res = await fetch('https://oauth2.googleapis.com/token', { method: 'POST', body: corpo, signal: AbortSignal.timeout(15_000), cache: 'no-store' });
     const j = await res.json().catch(() => null) as { access_token?: string; expires_in?: number; error?: string; error_description?: string } | null;
@@ -83,7 +84,7 @@ export async function buscarGoogle(desde: string, ate: string): Promise<GrupoCam
     const cliente = (process.env.GOOGLE_ADS_CUSTOMER_ID || '').replace(/\D/g, '');
     const dev = (process.env.GOOGLE_ADS_DEVELOPER_TOKEN || '').trim();
     const login = (process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID || '').replace(/\D/g, '');
-    if (!cliente || !dev || !process.env.GOOGLE_ADS_REFRESH_TOKEN || !process.env.GOOGLE_ADS_CLIENT_ID || !process.env.GOOGLE_ADS_CLIENT_SECRET) {
+    if (!cliente || !dev || !(await refreshTokenGoogle()) || !process.env.GOOGLE_ADS_CLIENT_ID || !process.env.GOOGLE_ADS_CLIENT_SECRET) {
         return vazio('Google Ads não conectado: faltam credenciais (GOOGLE_ADS_CLIENT_ID, CLIENT_SECRET, REFRESH_TOKEN, DEVELOPER_TOKEN, CUSTOMER_ID).');
     }
     try {

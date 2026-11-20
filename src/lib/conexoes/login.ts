@@ -4,7 +4,9 @@
 // recebe o pedido de renovação do acesso (o mesmo que o CRM faz antes de ler as campanhas).
 // Este arquivo NUNCA guarda nem devolve senha ou token: só o motivo e o caminho para reconectar.
 
-export type EstadoLogin = 'ok' | 'caiu' | 'atencao' | 'nao_configurado';
+import { refreshTokenGoogle, tokenMeta } from './credenciais';
+
+export type EstadoLogin ='ok' | 'caiu' | 'atencao' | 'nao_configurado';
 
 export interface Reconectar { rotulo: string; url: string; passos: string[] }
 export interface ResultadoLogin {
@@ -89,7 +91,7 @@ const TEMPO = 10_000;
 async function lerJson(res: Response): Promise<unknown> { try { return await res.json(); } catch { return null; } }
 
 export async function verificarMeta(): Promise<ResultadoLogin> {
-    const token = (process.env.META_ADS_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN || process.env.NEXT_PUBLIC_META_ACCESS_TOKEN || '').trim();
+    const token = (await tokenMeta()) || (process.env.NEXT_PUBLIC_META_ACCESS_TOKEN || '').trim();
     if (!token) return { id: 'meta_login', nome: 'Login do Meta (Instagram/Facebook Ads)', estado: 'nao_configurado', motivo: 'Não há token do Meta nas variáveis do CRM.', reconectar: RECONECTAR_META };
     const versao = (process.env.META_API_VERSION || '').trim() || 'v26.0';
     try {
@@ -105,7 +107,7 @@ export async function verificarMeta(): Promise<ResultadoLogin> {
 export async function verificarGoogle(): Promise<ResultadoLogin> {
     const cid = (process.env.GOOGLE_ADS_CLIENT_ID || '').trim();
     const sec = (process.env.GOOGLE_ADS_CLIENT_SECRET || '').trim();
-    const ref = (process.env.GOOGLE_ADS_REFRESH_TOKEN || '').trim();
+    const ref = await refreshTokenGoogle();
     if (!cid || !sec || !ref) return { id: 'google_login', nome: 'Login do Google (Google Ads)', estado: 'nao_configurado', motivo: 'Faltam as chaves do Google Ads nas variáveis do CRM.', reconectar: RECONECTAR_GOOGLE };
     try {
         const res = await fetch('https://oauth2.googleapis.com/token', {

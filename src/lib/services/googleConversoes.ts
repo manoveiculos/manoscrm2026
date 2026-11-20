@@ -1,6 +1,7 @@
 import { createHash } from 'crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { hashData, normalizePhone } from '@/lib/meta-service';
+import { refreshTokenGoogle } from '@/lib/conexoes/credenciais';
 
 /**
  * CONVERSÕES OFFLINE DO GOOGLE ADS
@@ -167,7 +168,7 @@ async function tokenGoogle(): Promise<string> {
         method: 'POST', cache: 'no-store', signal: AbortSignal.timeout(15_000),
         body: new URLSearchParams({
             client_id: env('GOOGLE_ADS_CLIENT_ID') || '', client_secret: env('GOOGLE_ADS_CLIENT_SECRET') || '',
-            refresh_token: env('GOOGLE_ADS_REFRESH_TOKEN') || '', grant_type: 'refresh_token',
+            refresh_token: (await refreshTokenGoogle()) || env('GOOGLE_ADS_REFRESH_TOKEN') || '', grant_type: 'refresh_token',
         }),
     });
     const j = await res.json().catch(() => null) as { access_token?: string; error?: string; error_description?: string } | null;

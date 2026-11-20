@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AlertTriangle, ArrowRight, CheckCircle2, CircleSlash, Loader2, PauseCircle, RefreshCw } from 'lucide-react';
 import { diagnosticarErro } from '../diagnostico';
+import { BotaoConectar } from '../BotaoConectar';
 import { useMarketing } from '../MarketingProvider';
 import { FeedData, SQUAD_INFO, timeAgo } from '../utils';
 
@@ -148,10 +149,14 @@ export default function MarketingConexoesPage() {
                             {c.acao && c.status !== 'ok' && <p className="text-xs text-zinc-400 mt-1.5">O que fazer: {c.acao}</p>}
                             {c.reconectar && c.status !== 'ok' && (
                                 <div className="mt-2 rounded-lg bg-white/[0.04] border border-white/10 p-2.5">
-                                    <a href={c.reconectar.url} target="_blank" rel="noopener noreferrer"
-                                        className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-100 text-zinc-900 px-3 py-1.5 text-xs font-semibold hover:bg-white">
-                                        {c.reconectar.rotulo} <ArrowRight className="w-3.5 h-3.5" />
-                                    </a>
+                                    {(c.id === 'meta_login' || c.id === 'google_login')
+                                        ? <BotaoConectar provedor={c.id === 'google_login' ? 'google' : 'meta'} rotulo="Reconectar" />
+                                        : (
+                                            <a href={c.reconectar.url} target="_blank" rel="noopener noreferrer"
+                                                className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-100 text-zinc-900 px-3 py-1.5 text-xs font-semibold hover:bg-white">
+                                                {c.reconectar.rotulo} <ArrowRight className="w-3.5 h-3.5" />
+                                            </a>
+                                        )}
                                     <ol className="mt-2 list-decimal pl-4 space-y-0.5 text-xs text-zinc-400">
                                         {c.reconectar.passos.map((p, i) => <li key={i}>{p}</li>)}
                                     </ol>

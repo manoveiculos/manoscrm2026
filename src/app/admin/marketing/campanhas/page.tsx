@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Loader2, MapPinOff, Megaphone, RefreshCw, Search, TriangleAlert } from 'lucide-react';
+import { BotaoConectar } from '../BotaoConectar';
 import type { CampanhaLinha, ConversoesDevolvidas, ForaDaPraca, FunilCrm, GrupoCampanhas, StatusCampanha } from '@/lib/campanhas/tipos';
 
 /**
@@ -152,7 +153,10 @@ function Secao({ titulo, subtitulo, cor, icone, grupo, funil, custoLead, custoVe
             {!grupo.conectado && (
                 <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200 flex gap-3">
                     <TriangleAlert className="w-5 h-5 shrink-0" />
-                    <div><p className="font-medium">Não consegui ler {titulo} agora.</p><p className="text-red-200/80 mt-1 break-words">{grupo.erro}</p></div>
+                    <div className="space-y-2">
+                        <div><p className="font-medium">Não consegui ler {titulo} agora.</p><p className="text-red-200/80 mt-1 break-words">{grupo.erro}</p></div>
+                        <BotaoConectar provedor={grupo.plataforma === 'google' ? 'google' : 'meta'} />
+                    </div>
                 </div>
             )}
 
