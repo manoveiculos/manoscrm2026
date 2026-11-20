@@ -35,13 +35,14 @@ export const SQUAD_GROUPS: Array<{ title: string; note: string; squads: SquadKey
 ];
 
 // Abas do Time de Marketing: cada uma reúne os agentes que trabalham juntos.
-export type AbaId = 'resumo' | 'instagram' | 'leads' | 'mercado' | 'trafego' | 'conexoes';
+export type AbaId = 'resumo' | 'instagram' | 'leads' | 'mercado' | 'trafego' | 'campanhas' | 'conexoes';
 export const ABAS: Array<{ id: AbaId; label: string; href: string; descricao: string; squads: SquadKey[] }> = [
     { id: 'resumo', label: 'Resumo', href: '/admin/marketing', descricao: 'O que precisa de você agora e como estão os squads.', squads: [] },
     { id: 'instagram', label: 'Instagram', href: '/admin/marketing/instagram', descricao: 'Vitrine gera → Diretor de Arte revisa → você aprova → Publisher agenda.', squads: ['vitrine', 'diretor_arte', 'publisher'] },
     { id: 'leads', label: 'Leads e compras', href: '/admin/marketing/leads', descricao: 'Recepção monta a ficha dos leads; Perito analisa laudo e propõe compra.', squads: ['recepcao', 'perito'] },
     { id: 'mercado', label: 'Mercado e anúncios', href: '/admin/marketing/mercado', descricao: 'Sentinela vigia a concorrência; Tráfego vigia o Meta Ads e o Google Ads.', squads: ['sentinela', 'trafego'] },
     { id: 'trafego', label: 'Tráfego Pago', href: '/admin/marketing/trafego', descricao: 'A campanha do site novo: quem chegou pelos anúncios, o que olhou e quem virou lead.', squads: [] },
+    { id: 'campanhas', label: 'Campanhas', href: '/admin/marketing/campanhas', descricao: 'Facebook/Instagram e Google ao vivo, separados: gasto, resultados e o que realmente chegou no CRM.', squads: [] },
     { id: 'conexoes', label: 'Conexões', href: '/admin/marketing/conexoes', descricao: 'O que está funcionando, o que falhou e onde o caminho bloqueou.', squads: [] },
 ];
 

@@ -123,7 +123,7 @@ test('menu: vendedor vê os 7 itens (com a pesca e a lista de espera); gestor +4
     // Admin vê todos os leads: rótulo "Leads", não "Meus Leads".
     assert.ok(admin[0].itens.some(i => i.label === 'Leads') && !admin[0].itens.some(i => i.label === 'Meus Leads'));
     // Enxugamento de 18/11: abas de nicho ou sem uso saíram do menu (oculto), mais a lista de espera.
-    assert.equal(admin.reduce((n, s) => n + s.itens.length, 0), 24);
+    assert.equal(admin.reduce((n, s) => n + s.itens.length, 0), 26);   // 24 + Tráfego Pago + Campanhas ao vivo (Marketing)
     assert.ok(!admin.flatMap(s => s.itens).some(i => ['/pipeline', '/atendimento', '/admin/rescue', '/admin/live'].includes(i.href)));
     assert.ok(admin.find(s => s.label === 'Gestão')!.itens.some(i => i.href === '/agentes'));
     // Vendedor e gestor não veem a Central dos Agentes.
