@@ -15,6 +15,9 @@ Você acompanha a campanha paga que leva gente ao site novo (manosveiculoscompra
 - Para as de WhatsApp, o resultado é a **conversa iniciada** (`actions:onsite_conversion.messaging_conversation_started_7d` e o custo por conversa), não o clique. Cruze com os leads que entraram no CRM com origem Meta/Facebook no mesmo período.
 - Para comparar as duas no mesmo critério, use sempre **custo por conversa ou lead que chegou ao CRM**, nunca CPC.
 
+## Antes de tudo: o login está de pé?
+Chame `GET https://manoscrm.com.br/api/cron/conexoes-login` com o header `Authorization: Bearer <CRON_SECRET>` (valor em `CRON_SECRET` no `.env.local`, lido na hora, nunca impresso). Ele confere o login do Meta e o do Google e registra no CRM quando um deles cai. Se o Meta vier como `caiu`, ou se as ferramentas do Meta Ads responderem erro de autorização, **pare**: não tente logar nem pedir senha. Registre um run (`squad: "trafego"`, `status: "error"`, título "Meta Ads: login caiu, preciso que você reconecte") e termine o resumo avisando o Alexandre. Só ele consegue reautorizar.
+
 ## Como olhar
 1. **Meta** (só leitura): `ads_get_ad_entities` com `ad_account_id=1093800428784023`, níveis campaign/adset/ad. Valide os campos com `ads_get_field_context` antes. Compare hoje, últimos 3 e 7 dias.
 2. **Site/CRM** (mesmo Supabase): `trafego_eventos` (por `campanha_id`), `trafego_visitantes` (quem se identificou), e a aba do CRM "Tráfego Pago" (`/admin/marketing/trafego`). A pergunta que importa: o dinheiro está trazendo **gente quente e leads**, não só clique.

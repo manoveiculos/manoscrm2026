@@ -14,7 +14,7 @@ import { FeedData, SQUAD_INFO, timeAgo } from '../utils';
  */
 
 type StatusCheck = 'ok' | 'erro' | 'atencao' | 'nao_configurado';
-interface Check { id: string; nome: string; status: StatusCheck; detalhe: string; acao?: string; latencia_ms?: number }
+interface Check { id: string; nome: string; status: StatusCheck; detalhe: string; acao?: string; latencia_ms?: number; reconectar?: { rotulo: string; url: string; passos: string[] } }
 
 const COR: Record<StatusCheck, { ponto: string; txt: string; rotulo: string; borda: string }> = {
     ok: { ponto: 'bg-emerald-500', txt: 'text-emerald-300', rotulo: 'Funcionando', borda: 'border-white/[0.08]' },
@@ -146,6 +146,17 @@ export default function MarketingConexoesPage() {
                             </p>
                             <p className="text-sm text-zinc-300 mt-1.5 leading-snug">{c.detalhe}</p>
                             {c.acao && c.status !== 'ok' && <p className="text-xs text-zinc-400 mt-1.5">O que fazer: {c.acao}</p>}
+                            {c.reconectar && c.status !== 'ok' && (
+                                <div className="mt-2 rounded-lg bg-white/[0.04] border border-white/10 p-2.5">
+                                    <a href={c.reconectar.url} target="_blank" rel="noopener noreferrer"
+                                        className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-100 text-zinc-900 px-3 py-1.5 text-xs font-semibold hover:bg-white">
+                                        {c.reconectar.rotulo} <ArrowRight className="w-3.5 h-3.5" />
+                                    </a>
+                                    <ol className="mt-2 list-decimal pl-4 space-y-0.5 text-xs text-zinc-400">
+                                        {c.reconectar.passos.map((p, i) => <li key={i}>{p}</li>)}
+                                    </ol>
+                                </div>
+                            )}
                         </div>
                     ))}
                 </div>

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient as createAdminClient } from '@/lib/supabase/admin';
 import { requireAdmin } from '../../marketing/_guard';
+import { verificarLogins, type Reconectar, type ResultadoLogin } from '@/lib/conexoes/login';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
@@ -12,7 +13,7 @@ export const maxDuration = 30;
  */
 
 type Status = 'ok' | 'erro' | 'atencao' | 'nao_configurado';
-interface Check { id: string; nome: string; status: Status; detalhe: string; acao?: string; latencia_ms?: number }
+interface Check { id: string; nome: string; status: Status; detalhe: string; acao?: string; latencia_ms?: number; reconectar?: Reconectar }
 
 const ALTIMUS_URL = process.env.ALTIMUS_XML_URL || 'https://estoque.altimus.com.br/api/estoquexml?estoque=997c9e91-40d7-4bec-95cb-68e18a2668a3';
 const TEMPO = 8000;
@@ -101,13 +102,23 @@ async function checarRegistradas(): Promise<Check[]> {
     });
 }
 
+/** Login do Meta e do Google: "caiu" vira erro com o botão Reconectar. */
+function deLogin(r: ResultadoLogin): Check {
+    const status: Status = r.estado === 'caiu' ? 'erro' : r.estado;
+    return {
+        id: r.id, nome: r.nome, status, detalhe: r.motivo, reconectar: r.reconectar,
+        acao: r.estado === 'caiu' ? 'Sem esse login o agente de Tráfego fica cego e as campanhas ficam sem vigia.' : undefined,
+    };
+}
+
 export async function GET() {
     const guard = await requireAdmin();
     if (!guard.ok) return guard.res;
 
-    const [supabase, altimus, anthropic, eleven, registradas] = await Promise.all([
+    const [supabase, altimus, anthropic, eleven, registradas, logins] = await Promise.all([
         checarSupabase(), checarAltimus(), checarAnthropic(), checarElevenLabs(), checarRegistradas().catch(() => [] as Check[]),
+        verificarLogins().catch(() => [] as ResultadoLogin[]),
     ]);
-    const checks: Check[] = [supabase, altimus, anthropic, eleven, checarHiggsfield(), ...registradas];
+    const checks: Check[] = [...logins.map(deLogin), supabase, altimus, anthropic, eleven, checarHiggsfield(), ...registradas];
     return NextResponse.json({ checks, gerado_em: new Date().toISOString() });
 }

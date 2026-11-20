@@ -5,6 +5,10 @@
       "schedule": "0 7 * * *"
     },
     {
+      "path": "/api/cron/conexoes-login",
+      "schedule": "30 11 * * *"
+    },
+    {
       "path": "/api/cron/fifteen-min-scheduler",
       "schedule": "0 8 * * *"
     }
