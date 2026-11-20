@@ -5,7 +5,9 @@ import { buscarGoogle } from '@/lib/campanhas/google';
 import {
     anexarLeadsCrm, custoPorLeadReal, foraDaPracaPorGrupo, funilPorGrupo, leadsPorCampanhaMeta, type EventoSite, type LeadCrm,
 } from '@/lib/campanhas/crm';
-import type { GrupoCampanhas } from '@/lib/campanhas/tipos';
+import { resumirFila, type GrupoCampanhas } from '@/lib/campanhas/tipos';
+import { configFunil } from '@/lib/services/metaFunnelEvents';
+import { configGoogleConv } from '@/lib/services/googleConversoes';
 
 /**
  * GET /api/admin/campanhas?dias=7 — campanhas do Facebook/Instagram (Meta Ads) e do Google Ads AO VIVO, separadas,
@@ -44,12 +46,14 @@ export async function GET(req: Request) {
     const desdeIso = new Date(Date.now() - dias * 86_400_000).toISOString();
 
     // plataformas, leads do CRM e visitas do site, tudo em paralelo
-    const [meta, google, dist, fb, eventos] = await Promise.all([
+    const [meta, google, dist, fb, eventos, filaMeta, filaGoogle] = await Promise.all([
         comCache<DadosMeta>(`meta|${desde}|${ate}`, () => buscarMeta(desde, ate)),
         comCache<GrupoCampanhas>(`google|${desde}|${ate}`, () => buscarGoogle(desde, ate)),
         admin.from('leads_distribuicao_crm_26').select('origem, plataforma_meta, utm_params, status, atendimento_iniciado_em').gte('criado_em', desdeIso).limit(20000),
         admin.from('leadsfacebook').select('status').gte('created_at', desdeIso).limit(5000),
         admin.from('trafego_eventos').select('visitor_id, origem_macro, uf, cidade').gte('created_at', desdeIso).limit(30000),
+        admin.from('meta_capi_queue').select('event_name, status, last_error').gte('created_at', desdeIso).limit(10000),
+        admin.from('google_conv_envios').select('event_name, status, last_error').gte('created_at', desdeIso).limit(10000),
     ]);
 
     const leads: LeadCrm[] = [
@@ -73,5 +77,9 @@ export async function GET(req: Request) {
             },
         },
         foraDaPraca: foraDaPracaPorGrupo((eventos.data || []) as EventoSite[]),
+        conversoes: {
+            meta: resumirFila(filaMeta.data || [], configFunil().modo, ''),
+            google: resumirFila(filaGoogle.data || [], configGoogleConv().modo),
+        },
     }, { headers: SEM_CACHE });
 }

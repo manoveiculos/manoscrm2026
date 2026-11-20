@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Loader2, MapPinOff, Megaphone, RefreshCw, Search, TriangleAlert } from 'lucide-react';
-import type { CampanhaLinha, ForaDaPraca, FunilCrm, GrupoCampanhas, StatusCampanha } from '@/lib/campanhas/tipos';
+import type { CampanhaLinha, ConversoesDevolvidas, ForaDaPraca, FunilCrm, GrupoCampanhas, StatusCampanha } from '@/lib/campanhas/tipos';
 
 /**
  * Campanhas: Facebook/Instagram (Meta Ads) e Google Ads AO VIVO, cada grupo separado, com o que o CRM
@@ -19,6 +19,7 @@ interface Resposta {
         custoPorVenda: { meta: number | null; google: number | null };
     };
     foraDaPraca: { meta: ForaDaPraca; google: ForaDaPraca };
+    conversoes: { meta: ConversoesDevolvidas; google: ConversoesDevolvidas };
 }
 
 const PERIODOS = [{ d: 1, r: 'Hoje' }, { d: 7, r: '7 dias' }, { d: 30, r: '30 dias' }];
@@ -38,6 +39,44 @@ function Kpi({ rotulo, valor, destaque = false }: { rotulo: string; valor: strin
         <div className={`rounded-xl border p-3 ${destaque ? 'border-white/20 bg-white/[0.06]' : 'border-white/10 bg-white/[0.03]'}`}>
             <p className="text-[11px] uppercase tracking-wide text-zinc-500">{rotulo}</p>
             <p className="text-lg font-bold text-white tabular-nums mt-0.5">{valor}</p>
+        </div>
+    );
+}
+
+const ROTULO_EVENTO = { QualifiedLead: 'Lead qualificado', Schedule: 'Visita agendada', Purchase: 'Venda' } as const;
+const ROTULO_MODO = {
+    off: { t: 'Desligado', c: 'bg-zinc-700/40 text-zinc-300 border-zinc-600/40', d: 'Os eventos ficam na fila e NÃO são enviados à plataforma.' },
+    test: { t: 'Em teste', c: 'bg-amber-500/15 text-amber-300 border-amber-500/30', d: 'Validando com a plataforma sem gravar nada.' },
+    live: { t: 'Ao vivo', c: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30', d: 'Enviando de verdade para treinar os anúncios.' },
+} as const;
+
+function BlocoConversoes({ nome, c }: { nome: string; c: ConversoesDevolvidas }) {
+    const m = ROTULO_MODO[c.modo];
+    return (
+        <div>
+            <div className="flex flex-wrap items-center gap-2 mb-2">
+                <p className="text-[11px] font-black uppercase tracking-widest text-zinc-500">Conversões devolvidas ao {nome}</p>
+                <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-md border ${m.c}`}>{m.t}</span>
+                <span className="text-xs text-zinc-500">{m.d}</span>
+            </div>
+            <div className="overflow-x-auto rounded-xl border border-white/10">
+                <table className="w-full min-w-[480px] text-left text-sm">
+                    <thead className="bg-white/[0.04] text-[11px] uppercase tracking-wide text-zinc-500">
+                        <tr><th className="px-3 py-2">Evento</th><th className="px-3 py-2 text-right">A enviar</th><th className="px-3 py-2 text-right">Enviadas</th><th className="px-3 py-2 text-right">Falhas</th><th className="px-3 py-2 text-right">Sem identificador</th></tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/5">
+                        {c.itens.map(i => (
+                            <tr key={i.evento}>
+                                <td className="px-3 py-2 text-zinc-100">{ROTULO_EVENTO[i.evento]}</td>
+                                <td className="px-3 py-2 text-right tabular-nums text-zinc-300">{i.aEnviar}</td>
+                                <td className="px-3 py-2 text-right tabular-nums text-zinc-100">{i.enviadas}</td>
+                                <td className={`px-3 py-2 text-right tabular-nums ${i.falhas ? 'text-red-300' : 'text-zinc-300'}`}>{i.falhas}</td>
+                                <td className="px-3 py-2 text-right tabular-nums text-zinc-400">{i.semIdentificador}</td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
         </div>
     );
 }
@@ -93,9 +132,9 @@ function TabelaCampanhas({ campanhas, mostraLeadsCrm }: { campanhas: CampanhaLin
     );
 }
 
-function Secao({ titulo, subtitulo, cor, icone, grupo, funil, custoLead, custoVenda, fora, mostraLeadsCrm, nota }: {
+function Secao({ titulo, subtitulo, cor, icone, grupo, funil, custoLead, custoVenda, fora, mostraLeadsCrm, nota, conversoes }: {
     titulo: string; subtitulo: string; cor: string; icone: React.ReactNode; grupo: GrupoCampanhas; funil: FunilCrm;
-    custoLead: number | null; custoVenda: number | null; fora: ForaDaPraca; mostraLeadsCrm: boolean; nota?: string;
+    custoLead: number | null; custoVenda: number | null; fora: ForaDaPraca; mostraLeadsCrm: boolean; nota?: string; conversoes: ConversoesDevolvidas;
 }) {
     const t = grupo.totais;
     return (
@@ -149,6 +188,8 @@ function Secao({ titulo, subtitulo, cor, icone, grupo, funil, custoLead, custoVe
                     <TabelaCampanhas campanhas={grupo.campanhas} mostraLeadsCrm={mostraLeadsCrm} />
                 </>
             )}
+
+            <BlocoConversoes nome={titulo} c={conversoes} />
         </section>
     );
 }
@@ -224,13 +265,13 @@ export default function CampanhasPage() {
                     {mostraMeta && (
                         <Secao titulo="Facebook / Instagram" subtitulo="Meta Ads" cor="border-blue-500/30 bg-blue-500/10" icone={<Megaphone className="w-6 h-6 text-blue-300" />}
                             grupo={dados.meta} funil={dados.crm.funil.meta} custoLead={dados.crm.custoPorLeadReal.meta} custoVenda={dados.crm.custoPorVenda.meta}
-                            fora={dados.foraDaPraca.meta} mostraLeadsCrm
+                            fora={dados.foraDaPraca.meta} mostraLeadsCrm conversoes={dados.conversoes.meta}
                             nota="Leads do CRM: clique no WhatsApp de anúncio (identificado pelo anúncio), formulários do Facebook e origem Meta/Instagram." />
                     )}
                     {mostraGoogle && (
                         <Secao titulo="Google" subtitulo="Google Ads" cor="border-emerald-500/30 bg-emerald-500/10" icone={<Search className="w-6 h-6 text-emerald-300" />}
                             grupo={dados.google} funil={dados.crm.funil.google} custoLead={dados.crm.custoPorLeadReal.google} custoVenda={dados.crm.custoPorVenda.google}
-                            fora={dados.foraDaPraca.google} mostraLeadsCrm={false}
+                            fora={dados.foraDaPraca.google} mostraLeadsCrm={false} conversoes={dados.conversoes.google}
                             nota="Leads do CRM: origem Google (formulário do site). O Google não informa a campanha no lead, então a ligação por campanha ainda não existe." />
                     )}
                     <p className="text-xs text-zinc-500">

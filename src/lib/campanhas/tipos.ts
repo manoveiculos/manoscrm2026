@@ -65,6 +65,28 @@ export interface ForaDaPraca {
     topCidades: { cidade: string; uf: string; visitantes: number }[];
 }
 
+/** Conversões que o CRM devolve à plataforma (lead qualificado, visita agendada, venda). */
+export interface ConversoesDevolvidas {
+    modo: 'off' | 'test' | 'live';
+    itens: { evento: 'QualifiedLead' | 'Schedule' | 'Purchase'; aEnviar: number; enviadas: number; falhas: number; semIdentificador: number }[];
+}
+
+/** Conta a fila por evento. `ignorados` só entra em "sem identificador" quando o motivo NÃO é "não é do grupo". */
+export function resumirFila(linhas: { event_name: string; status: string; last_error?: string | null }[], modo: ConversoesDevolvidas['modo'], doutroGrupo = 'lead não é do Google'): ConversoesDevolvidas {
+    const eventos = ['QualifiedLead', 'Schedule', 'Purchase'] as const;
+    const itens = eventos.map(evento => {
+        const l = linhas.filter(x => x.event_name === evento);
+        return {
+            evento,
+            aEnviar: l.filter(x => x.status === 'pending').length,
+            enviadas: l.filter(x => x.status === 'sent').length,
+            falhas: l.filter(x => x.status === 'failed').length,
+            semIdentificador: l.filter(x => (x.status === 'ignored' || x.status === 'skipped') && x.last_error !== doutroGrupo).length,
+        };
+    });
+    return { modo, itens };
+}
+
 export const GRUPO_VAZIO: TotaisGrupo = { gasto: 0, impressoes: 0, cliques: 0, ctr: 0, cpc: 0, cpm: 0, resultados: 0, custoPorResultado: null };
 
 const arred = (n: number, casas = 2) => Math.round(n * 10 ** casas) / 10 ** casas;
