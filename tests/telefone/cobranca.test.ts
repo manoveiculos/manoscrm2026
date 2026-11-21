@@ -1,7 +1,7 @@
 // Cobrança do consultor quando o cliente espera. Rodar: npm run test:cobranca
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { decidirCobranca, esperaDesde, textoDaCobranca, type EntradaCobranca, type MsgCobranca } from '@/lib/avisos/cobranca';
+import { decidirCobranca, decidirRetornoParticular, ehAvisoDePrivado, esperaDesde, textoDaCobranca, type EntradaCobranca, type MsgCobranca } from '@/lib/avisos/cobranca';
 
 const T0 = Date.parse('2026-11-12T14:00:00Z');
 const iso = (min: number) => new Date(T0 + min * 60_000).toISOString();
@@ -70,4 +70,41 @@ test('texto do aviso: nome e carro, sem telefone, com link; versão do gestor ap
     assert.match(textoDaCobranca({ nivel: 2, minutos: 35, cliente: null, carro: null, consultor: 'Sérgio Silva', link: 'l', paraGestor: false }), /Você ainda não respondeu/);
     const g = textoDaCobranca({ nivel: 3, minutos: 150, cliente: 'Maria', carro: null, consultor: 'Sérgio Silva', link: 'l', paraGestor: true });
     assert.match(g, /Sérgio deixou cliente esperando 2 h/);
+});
+
+
+// ── atendimento no particular ──
+const mt = (autor: string, min: number, texto: string): MsgCobranca => ({ autor, criadaEm: iso(min), texto });
+const PART = 'Adilson, eu te chamei no meu numero particular para dar continuidade no seu atendimento !';
+
+test('ehAvisoDePrivado: reconhece o aviso do consultor e ignora conversa normal', () => {
+    assert.equal(ehAvisoDePrivado(PART), true);
+    assert.equal(ehAvisoDePrivado('Te chamei no meu whats pessoal'), true);
+    assert.equal(ehAvisoDePrivado('Vou te mandar no meu número particular'), true);
+    assert.equal(ehAvisoDePrivado('Bom dia! O carro está disponível sim.'), false);
+    assert.equal(ehAvisoDePrivado('O dono é particular, não é loja'), false);
+});
+
+test('particular: o cliente responde depois e NÃO há cobrança de "esperando"', () => {
+    const msgs = [mt('vendedor', 0, PART), mt('cliente', 20, 'ok, vi aqui')];
+    const d = decidirCobranca(base({ status: 'humano', msgs, agora: new Date(T0 + 60 * 60_000) }));
+    assert.deepEqual(d, { acao: 'pular', motivo: 'atendimento no particular' });
+});
+
+test('particular: se o consultor volta a escrever na conversa, a cobrança normal volta', () => {
+    const msgs = [mt('vendedor', 0, PART), mt('vendedor', 10, 'Pode ver as fotos aqui'), mt('cliente', 20, 'ok')];
+    const d = decidirCobranca(base({ status: 'humano', msgs, agora: new Date(T0 + 60 * 60_000) }));
+    assert.equal(d.acao, 'avisar');
+});
+
+test('retorno do particular: só depois de 4 h, em horário de loja, uma vez', () => {
+    const msgs = [mt('vendedor', 0, PART)];
+    const em = (h: number, extra: object = {}) => decidirRetornoParticular({ status: 'humano', temConsultor: true, msgs, passagemEm: null, jaPerguntou: false, lojaAberta: true, agora: new Date(T0 + h * 3600_000), ...extra });
+    assert.equal(em(3).acao, 'pular');
+    const ok = em(4.5);
+    assert.equal(ok.acao, 'perguntar');
+    assert.equal(em(5, { jaPerguntou: true }).acao, 'pular');
+    assert.equal(em(5, { lojaAberta: false }).acao, 'pular');
+    assert.equal(em(60).acao, 'pular');
+    assert.equal(em(5, { msgs: [...msgs, mt('vendedor', 120, 'fechamos negócio!')] }).acao, 'pular');
 });

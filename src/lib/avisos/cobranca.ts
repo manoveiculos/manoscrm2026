@@ -12,7 +12,69 @@
 export const NIVEIS_MIN = [10, 30, 120] as const;
 export const MAX_ESPERA_H = 24;
 
-export interface MsgCobranca { autor: string; criadaEm: string }
+export interface MsgCobranca { autor: string; criadaEm: string; texto?: string | null }
+
+// ── atendimento no particular ───────────────────────────────────────────────
+// Quando o consultor escreve "te chamei no meu número particular", a conversa saiu do CRM:
+// não tem sentido cobrar "cliente esperando" (a resposta está acontecendo fora daqui).
+// Em vez disso, depois de RETORNO_PARTICULAR_H horas a Laura pergunta ao consultor como ficou.
+export const RETORNO_PARTICULAR_H = 4;
+export const MAX_RETORNO_PARTICULAR_H = 48;
+
+const MENCAO_PRIVADO = /particular|(no|pelo|do|em) meu (n[uú]mero|whats(app)?|zap|celular|contato|pessoal)|n[uú]mero pessoal|whats(app)? pessoal/i;
+const VERBO_CONTATO = /cham|mand|escrev|fal|entr|cheg|retorn|cont[aeá]t|ligu|ligo|liga|envi/i;
+
+/** A mensagem do consultor avisa que o atendimento continua fora do CRM (número particular)? */
+export function ehAvisoDePrivado(texto: string | null | undefined): boolean {
+    const t = (texto || '').trim();
+    return t.length > 0 && MENCAO_PRIVADO.test(t) && VERBO_CONTATO.test(t);
+}
+
+/** Hora da última mensagem do vendedor avisando o particular. Vale só se a Laura não passou o cliente de novo depois. */
+export function ultimoParticularEm(msgs: MsgCobranca[], passagemEm: string | null): string | null {
+    const p = msgs.filter(m => m.autor === 'vendedor' && ehAvisoDePrivado(m.texto)).map(m => m.criadaEm).sort().pop() ?? null;
+    if (!p) return null;
+    if (passagemEm && passagemEm > p) return null;
+    return p;
+}
+
+export interface EntradaRetornoParticular {
+    status: string | null;
+    temConsultor: boolean;
+    msgs: MsgCobranca[];
+    passagemEm: string | null;
+    /** Já mandei a pergunta "como ficou?" depois deste aviso de particular. */
+    jaPerguntou: boolean;
+    lojaAberta: boolean;
+    agora: Date;
+}
+
+export type DecisaoRetornoParticular =
+    | { acao: 'perguntar'; particularEm: string; horas: number }
+    | { acao: 'pular'; motivo: string };
+
+/** Passadas ~4 h do aviso de particular, pergunta ao consultor o que aconteceu (uma vez só). */
+export function decidirRetornoParticular(e: EntradaRetornoParticular): DecisaoRetornoParticular {
+    const pula = (motivo: string): DecisaoRetornoParticular => ({ acao: 'pular', motivo });
+    if (e.status === 'encerrada') return pula('conversa arquivada');
+    if (!e.temConsultor) return pula('sem consultor responsável');
+    const p = ultimoParticularEm(e.msgs, e.passagemEm);
+    if (!p) return pula('sem aviso de particular');
+    if (e.msgs.some(m => m.autor === 'vendedor' && m.criadaEm > p)) return pula('consultor voltou a escrever na conversa');
+    const horas = (e.agora.getTime() - Date.parse(p)) / 3_600_000;
+    if (horas < RETORNO_PARTICULAR_H) return pula('ainda dentro das 4 h do particular');
+    if (horas > MAX_RETORNO_PARTICULAR_H) return pula('particular antigo demais');
+    if (e.jaPerguntou) return pula('retorno do particular já perguntado');
+    if (!e.lojaAberta) return pula('fora do horário da loja');
+    return { acao: 'perguntar', particularEm: p, horas: Math.floor(horas) };
+}
+
+export function textoDoRetornoParticular(p: { cliente: string | null; carro: string | null; particularEm: string; horas: number; link: string }): string {
+    const quem = (p.cliente || '').trim().split(/\s+/)[0] || 'o cliente';
+    const carro = p.carro ? ` (${p.carro})` : '';
+    const hora = new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(p.particularEm)).replace(':', 'h');
+    return `📞 *E o ${quem}${carro}, como ficou?*\nVocê chamou no particular às ${hora} (há ${p.horas} h). O que aconteceu na conversa? Visita marcada, proposta, perdeu?\n👉 Atualize o lead: ${p.link}`;
+}
 
 export interface EntradaCobranca {
     status: string | null;
@@ -55,6 +117,9 @@ export function decidirCobranca(e: EntradaCobranca): DecisaoCobranca {
     const pula = (motivo: string): DecisaoCobranca => ({ acao: 'pular', motivo });
     if (e.status === 'encerrada') return pula('conversa arquivada');
     if (!e.temConsultor) return pula('sem consultor responsável');
+    // Atendimento no particular: só vale enquanto o consultor não volta a escrever na conversa.
+    const part = ultimoParticularEm(e.msgs, e.passagemEm);
+    if (part && !e.msgs.some(m => m.autor === 'vendedor' && m.criadaEm > part)) return pula('atendimento no particular');
     const desde = esperaDesde(e.msgs, e.passagemEm, e.status);
     if (!desde) return pula('ninguém esperando');
     const min = Math.floor((e.agora.getTime() - Date.parse(desde)) / 60_000);

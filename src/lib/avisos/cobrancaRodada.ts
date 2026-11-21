@@ -8,7 +8,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { horarioLoja, isOpenNow } from '@/lib/services/slaEngine';
 import { enviarAvisoVendedor } from './webhookVendedor';
-import { MAX_ESPERA_H, decidirCobranca, textoDaCobranca } from './cobranca';
+import { MAX_ESPERA_H, decidirCobranca, decidirRetornoParticular, textoDaCobranca, textoDoRetornoParticular, ultimoParticularEm } from './cobranca';
 
 export interface ResumoCobranca {
     ok: boolean;
@@ -17,6 +17,7 @@ export interface ResumoCobranca {
     avisos: number;
     falhas: number;
     semTelefone: number;
+    retornosParticular: number;
     puladas: Record<string, number>;
 }
 
@@ -30,7 +31,7 @@ function urlBase(): string {
 export async function rodarCobranca(supabase: SupabaseClient, opts: { agora?: Date; esperar?: (ms: number) => Promise<void> } = {}): Promise<ResumoCobranca> {
     const agora = opts.agora ?? new Date();
     const esperar = opts.esperar ?? ((ms: number) => new Promise<void>(r => setTimeout(r, ms)));
-    const r: ResumoCobranca = { ok: true, candidatas: 0, avisos: 0, falhas: 0, semTelefone: 0, puladas: {} };
+    const r: ResumoCobranca = { ok: true, candidatas: 0, avisos: 0, falhas: 0, semTelefone: 0, retornosParticular: 0, puladas: {} };
     const pular = (m: string) => { r.puladas[m] = (r.puladas[m] || 0) + 1; };
 
     const horario = await horarioLoja(supabase);
@@ -58,9 +59,9 @@ export async function rodarCobranca(supabase: SupabaseClient, opts: { agora?: Da
         const consultor = porId.get(c.assigned_consultant_id as string);
         if (!consultor || consultor.is_active === false) { pular('consultor inativo'); continue; }
 
-        const { data: linhas } = await supabase.from('wa_mensagens').select('autor, criada_em')
+        const { data: linhas } = await supabase.from('wa_mensagens').select('autor, criada_em, texto')
             .eq('conversa_id', c.id).order('criada_em', { ascending: false }).limit(30);
-        const msgs = (linhas || []).map(m => ({ autor: m.autor as string, criadaEm: m.criada_em as string }));
+        const msgs = (linhas || []).map(m => ({ autor: m.autor as string, criadaEm: m.criada_em as string, texto: (m.texto as string | null) ?? null }));
 
         // quando a Laura passou o cliente: execução da Laura do CRM com passagem enviada
         const { data: ex } = await supabase.from('wa_ia_execucoes').select('terminada_em')
@@ -78,6 +79,30 @@ export async function rodarCobranca(supabase: SupabaseClient, opts: { agora?: Da
         // níveis já avisados nesta espera
         const { data: ja } = await supabase.from('avisos_enviados').select('meta, criado_em')
             .eq('tipo', 'cobranca').eq('conversa_id', c.id).eq('status', 'enviado').gte('criado_em', desde);
+
+        // Consultor chamou o cliente no particular: sem cobrança de "esperando"; ~4 h depois, pergunta como ficou.
+        const ficha0 = (c.ficha && typeof c.ficha === 'object') ? c.ficha as Record<string, unknown> : {};
+        const parti = ultimoParticularEm(msgs, passagemEm);
+        if (parti && !msgs.some(m => m.autor === 'vendedor' && m.criadaEm > parti)) {
+            const { count: jaPerg } = await supabase.from('avisos_enviados').select('id', { count: 'exact', head: true })
+                .eq('tipo', 'cobranca_particular').eq('conversa_id', c.id).eq('status', 'enviado').gte('criado_em', parti);
+            const rp = decidirRetornoParticular({ status: c.status, temConsultor: true, msgs, passagemEm, jaPerguntou: (jaPerg ?? 0) > 0, lojaAberta, agora });
+            if (rp.acao === 'perguntar') {
+                if (!consultor.phone_verified_at || !consultor.phone) { r.semTelefone++; continue; }
+                const res = await enviarAvisoVendedor({
+                    nome: consultor.name as string, telefone: consultor.phone as string, tipo: 'cobranca_particular', consultorId: consultor.id as string,
+                    mensagem: textoDoRetornoParticular({
+                        cliente: (c.nome_cliente as string | null) || (c.nome_contato as string | null),
+                        carro: typeof ficha0.carro_interesse === 'string' ? ficha0.carro_interesse : null,
+                        particularEm: rp.particularEm, horas: rp.horas, link: `${urlBase()}/conversas?c=${c.id}`,
+                    }),
+                    leadRef: (c.lead_uid as string | null) ?? null, conversaId: c.id, origem: 'cobrancaRodada',
+                    meta: { particularEm: rp.particularEm, horas: rp.horas, consultor: consultor.name },
+                });
+                if (res.ok) { r.retornosParticular++; enviados++; } else r.falhas++;
+            } else pular(rp.motivo);
+            continue; // no particular não há cobrança de "esperando"
+        }
 
         const primeira = decidirCobranca({ status: c.status, temConsultor: true, msgs, passagemEm, niveisJaEnviados: [], lojaAberta, agora });
         if (primeira.acao === 'pular') { pular(primeira.motivo); continue; }
