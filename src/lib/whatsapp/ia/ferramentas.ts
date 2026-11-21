@@ -20,6 +20,8 @@ import {
     type FichaLaura, type FichaTroca, type FormaPagamento,
 } from './regras';
 import { msgErro } from '../erro';
+import { SEM_ENTRADA, SEM_TROCA, entradaEmReais, normalizarPrazo, type QualificacaoCampos } from '@/lib/qualificacao';
+import { buscarQualificacao, salvarQualificacao, tabelaSuportaQualificacao } from '@/lib/services/qualificacaoService';
 import { atualizarNomeLead, registrarInteresse } from '@/lib/identificacao/gravar';
 import { gravarInteresseGenerico } from '@/lib/identificacao/interesseGenerico';
 import { identificacaoLigada } from '@/lib/identificacao/chave';
@@ -45,7 +47,7 @@ export const FERRAMENTAS: Anthropic.Tool[] = [
     },
     {
         name: 'registrar_espera',
-        description: 'Coloca o cliente na lista de espera de um carro que a loja NÃO tem agora, para ser avisado quando entrar. Só use depois de buscar_estoque não achar o carro e SE o cliente aceitar ser avisado. Nunca prometa prazo de chegada.',
+        description: 'Coloca o cliente na lista de espera de um carro que a loja NÃO tem agora, para ser avisado quando entrar. Só use depois de buscar_estoque não achar o carro (o CRM já anota sozinho; use esta para completar marca, modelo, tipo ou faixa de preço). Nunca prometa prazo de chegada.',
         input_schema: {
             type: 'object',
             properties: {
@@ -229,17 +231,29 @@ function buscarEstoque(e: Record<string, unknown>, ctx: ContextoRodada): Saida {
         cambio: str(e.cambio, 20),
     });
     if (r.encontrados.length) return { encontrados: r.encontrados, ...(r.tiposPedidos?.length ? { observacao: 'Todos os carros abaixo são do tipo pedido pelo cliente.' } : {}) };
+    // Carro que a loja não tem: o pedido é guardado SEMPRE (demanda real + aviso quando entrar),
+    // sem depender de o cliente aceitar nem de a Laura lembrar de chamar registrar_espera.
+    const consulta = str(e.consulta, 200);
+    if (consulta && !ctx.espera) {
+        ctx.espera = {
+            texto: consulta, marca: null, modelo: null, carroceria: null,
+            anoMin: typeof e.ano_min === 'number' && e.ano_min > 1950 ? e.ano_min : null,
+            precoMax: typeof e.preco_max === 'number' && e.preco_max > 0 ? e.preco_max : null,
+            cambio: str(e.cambio, 20),
+        };
+    }
+    const aviso = ' O pedido do cliente já ficou anotado: se couber, diga que vai avisá-lo quando entrar um assim (sem prometer prazo).';
     if (r.semNoTipo) {
         return {
             encontrados: [],
             parecidos: r.parecidos,
-            observacao: `A loja não tem ${(r.tiposPedidos || []).join(' nem ')} no estoque agora. Diga isso de forma simples e, se fizer sentido, ofereça um dos parecidos (sem chamar de ${(r.tiposPedidos || []).join(' nem ')}).`,
+            observacao: `A loja não tem ${(r.tiposPedidos || []).join(' nem ')} no estoque agora. Diga isso de forma simples e, se fizer sentido, ofereça um dos parecidos (sem chamar de ${(r.tiposPedidos || []).join(' nem ')}).${aviso}`,
         };
     }
     return {
         encontrados: [],
         parecidos: r.parecidos,
-        observacao: 'Nada exato no estoque. Diga que vai confirmar com o consultor e, se fizer sentido, ofereça um dos parecidos.',
+        observacao: `Nada exato no estoque. Diga que vai confirmar com o consultor e, se fizer sentido, ofereça um dos parecidos.${aviso}`,
     };
 }
 
@@ -336,6 +350,10 @@ async function gravarFichaNaConversa(ctx: ContextoRodada, nova: FichaLaura): Pro
     if (error) throw new Error(`ficha: ${error.message}`);
     ctx.gravacoes.push('ficha na conversa');
 
+    // Entrada, troca e prazo que o cliente disse vão para a Qualificação do lead na hora
+    // (antes só o carro ia; o resto ficava na ficha da conversa e a tela mostrava vazio).
+    if (await gravarQualificacaoNoLead(ctx)) ctx.gravacoes.push('qualificação no lead');
+
     // Antes da migration 20261107 (WA_IDENTIFICACAO != on): só a conversa guarda o nome dito.
     if (!identificacaoLigada()) {
         if (nova.nome && c.nome_cliente_origem !== 'manual') {
@@ -372,6 +390,52 @@ async function gravarFichaNaConversa(ctx: ContextoRodada, nova: FichaLaura): Pro
     // mesmo assim, se o campo ainda estiver vazio ou com texto de preenchimento.
     if (!carros.length && !confirmado && nova.carro_interesse) {
         if (await gravarInteresseGenerico(ctx.supabase, c.lead_uid, nova.carro_interesse)) ctx.gravacoes.push('interesse no lead');
+    }
+}
+
+/**
+ * Ficha da Laura → campos de qualificação do lead (entrada, carro na troca, prazo).
+ * Só preenche campo vazio; a troca também é refinada quando o novo texto completa o antigo
+ * ("Song Plus" → "Song Plus 2025"). Nunca atropela o que o consultor digitou. Nunca lança.
+ */
+async function gravarQualificacaoNoLead(ctx: ContextoRodada): Promise<boolean> {
+    try {
+        const uid = ctx.conversa.lead_uid;
+        const i = uid ? uid.indexOf(':') : -1;
+        if (!uid || i <= 0) return false;
+        const tabela = uid.slice(0, i), id = uid.slice(i + 1);
+        if (!tabelaSuportaQualificacao(tabela)) return false;
+        const atuais = (await buscarQualificacao(ctx.supabase, [uid])).get(uid) || {};
+        const f = ctx.ficha;
+        const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+        const novos: QualificacaoCampos = {};
+
+        // troca
+        const t = f.troca;
+        const descTroca = t ? [t.marca, t.modelo, t.ano].filter(Boolean).join(' ').trim() : '';
+        if (descTroca) {
+            const antigo = (atuais.carro_troca || '').trim();
+            const completa = antigo && norm(descTroca).includes(norm(antigo)) && norm(descTroca) !== norm(antigo);
+            if (!antigo || completa) novos.carro_troca = descTroca;
+        } else if (f.tem_troca === false && !(atuais.carro_troca || '').trim()) {
+            novos.carro_troca = SEM_TROCA;
+        }
+
+        // entrada (à vista não tem entrada)
+        if (f.entrada && f.forma_pagamento !== 'a_vista' && !(atuais.valor_investimento || '').trim()) {
+            novos.valor_investimento = entradaEmReais(f.entrada) === 0 ? SEM_ENTRADA : f.entrada;
+        }
+
+        // prazo
+        const prazo = normalizarPrazo(f.prazo);
+        if (prazo && !(atuais.prazo_compra || '').trim()) novos.prazo_compra = prazo;
+
+        if (!Object.keys(novos).length) return false;
+        const r = await salvarQualificacao(ctx.supabase, tabela, id, novos);
+        return r.ok;
+    } catch (e) {
+        console.warn('[laura-crm] qualificação no lead:', msgErro(e));
+        return false;
     }
 }
 
