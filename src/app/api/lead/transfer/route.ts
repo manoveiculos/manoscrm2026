@@ -1,3 +1,4 @@
+import { atualizacaoDaTransferencia } from '@/lib/leads/transferencia';
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/admin';
 import { createServerClient } from '@supabase/ssr';
@@ -93,7 +94,9 @@ export async function POST(req: NextRequest) {
         if (!isAdmin) {
             const { data: atual } = await admin
                 .from(table)
-                .select('assigned_consultant_id, atendimento_iniciado_por')
+                // leads_master não tem atendimento_iniciado_por: pedir a coluna faria a consulta falhar ("lead não encontrado").
+                .select<string, { assigned_consultant_id: string | null; atendimento_iniciado_por?: string | null }>(
+                    table === 'leads_master' ? 'assigned_consultant_id' : 'assigned_consultant_id, atendimento_iniciado_por')
                 .eq('id', realId)
                 .maybeSingle();
             if (!atual) {
@@ -108,18 +111,8 @@ export async function POST(req: NextRequest) {
 
         // Monta os updates para encaminhar o lead
         const nowIso = new Date().toISOString();
-        const updates: Record<string, any> = {
-            assigned_consultant_id: destinatario.id,
-            status: 'new', // Retorna para status 'new' para gerar a notificação sonora/sininho
-            atendimento_iniciado_em: null, // Reseta o atendimento para o novo consultor iniciar
-            atendimento_iniciado_por: null,
-            ultima_interacao_humana: nowIso,
-        };
-
-        // Sincroniza a coluna 'vendedor' de texto (se existir na tabela)
-        if (table === 'leads_distribuicao_crm_26' || table === 'leads_master') {
-            updates.vendedor = destinatario.name;
-        }
+        // Cada tabela recebe só as colunas que tem (leads_master é espelho: sem colunas de atendimento nem `vendedor`).
+        const updates = atualizacaoDaTransferencia(table, destinatario, nowIso);
 
         // O .select() é obrigatório: sem ele um UPDATE que não pegou linha
         // nenhuma (id errado, tabela errada) volta como sucesso e a
