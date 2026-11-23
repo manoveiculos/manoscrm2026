@@ -1,6 +1,7 @@
 import { supabase, supabaseAdmin } from '@/lib/supabase';
 import type { TipoPagamento } from './societarioPdfParser';
 import { calcularAcertoEmpresas, LOJAS, NOME_EMPRESA, socioDaRetirada, type Loja, type NomeSocio } from './societarioAcerto';
+import { normalizarTelefoneBR } from '@/lib/telefone';
 
 export interface Veiculo {
     id?: string;
@@ -42,6 +43,8 @@ export interface ContratoVenda {
     veiculo_id: string;
     comprador_nome: string;
     comprador_cpf_cnpj?: string | null;
+    /** 55+DDD+número. Liga a venda ao lead do CRM (migration 20261126_contrato_venda_whatsapp_lead). */
+    comprador_whatsapp?: string | null;
     vendedor_responsavel?: string | null;
     valor_venda_fechado: number;
     valor_entrada_moeda?: number;
@@ -505,6 +508,7 @@ export async function cadastrarVendaVeiculo(payload: {
     veiculo_id: string;
     comprador_nome: string;
     comprador_cpf_cnpj?: string;
+    comprador_whatsapp?: string;
     vendedor_responsavel?: string;
     loja?: string;
     valor_venda_fechado: number;
@@ -546,6 +550,13 @@ export async function cadastrarVendaVeiculo(payload: {
     }
     if (veiculo.status === 'vendido' || (veiculo.contratos_venda || []).length > 0) {
         throw new Error(`A venda do veículo ${veiculo.placa || veiculo.modelo} já foi registrada. Nada foi gravado.`);
+    }
+
+    // WhatsApp do comprador: o banco liga a venda ao lead por ele (gatilho em contratos_venda).
+    const whatsappDigitado = (payload.comprador_whatsapp || '').trim();
+    const whatsappComprador = whatsappDigitado ? normalizarTelefoneBR(whatsappDigitado) : null;
+    if (whatsappDigitado && !whatsappComprador) {
+        throw new Error('WhatsApp do comprador inválido: use DDD + número, ex.: (47) 99999-0000. Nada foi gravado.');
     }
 
     const dataContrato = payload.data_contrato || hojeIso();
@@ -605,6 +616,9 @@ export async function cadastrarVendaVeiculo(payload: {
             veiculo_id: payload.veiculo_id,
             comprador_nome: payload.comprador_nome,
             comprador_cpf_cnpj: payload.comprador_cpf_cnpj,
+            // Só manda a coluna quando há número: contrato sem WhatsApp grava igual mesmo
+            // antes da migration estar aplicada.
+            ...(whatsappComprador ? { comprador_whatsapp: whatsappComprador } : {}),
             vendedor_responsavel: payload.vendedor_responsavel,
             loja_recebedora: lojaSel,
             valor_venda_fechado: payload.valor_venda_fechado,
@@ -724,7 +738,19 @@ export async function cadastrarVendaVeiculo(payload: {
         console.error('Erro ao registrar fechamento de lucro:', fErr);
     }
 
-    return { contratoVenda, fechamento, trocaVeiculoGeradoId };
+    // 8. O gatilho do contrato ligou a venda a um lead? (a linha da venda guarda o contrato)
+    let vendaLigadaAoLead: { lead_id: string; nome: string | null } | null = null;
+    if (whatsappComprador) {
+        const { data: ligada, error: lErr } = await client
+            .from('sales_manos_crm')
+            .select('lead_id, client_name')
+            .eq('contrato_venda_id', contratoVenda.id)
+            .maybeSingle();
+        if (lErr) console.error('Erro ao conferir a venda ligada ao lead:', lErr);
+        if (ligada) vendaLigadaAoLead = { lead_id: String(ligada.lead_id), nome: ligada.client_name ?? null };
+    }
+
+    return { contratoVenda, fechamento, trocaVeiculoGeradoId, vendaLigadaAoLead };
 }
 
 const CATEGORIAS_CUSTO: CustoAdicional['categoria'][] = ['oficina', 'vistoria', 'polimento', 'transferencia', 'guincho', 'outros'];
