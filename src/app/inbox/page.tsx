@@ -1177,7 +1177,7 @@ const LeadCard = memo(function LeadCard({ lead, messages, isExpanded, onToggle, 
                         {sla.text}
                     </span>
                     <span className="text-[11px] text-gray-500 font-bold flex items-center gap-1.5 bg-zinc-800/50 px-2 py-1 rounded-md">
-                        <Clock className="w-3.5 h-3.5" /> {new Date(lead.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                        <Clock className="w-3.5 h-3.5" /> {new Date(lead.created_at).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
                     </span>
                     {lead.assigned_consultant_id ? (
                         <span className="text-[11px] font-bold flex items-center gap-1 bg-blue-900/40 border border-blue-700/40 text-blue-200 px-2 py-1 rounded-md">

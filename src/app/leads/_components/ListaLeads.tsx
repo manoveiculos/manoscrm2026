@@ -20,8 +20,8 @@ const COR_GRUPO: Record<GrupoUrgencia, string> = {
     normal: '', encerrado: 'bg-zinc-800 text-zinc-500 border-zinc-700',
 };
 
-const dataCurta = (iso?: string | null) => iso ? new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) : '—';
-const horaCurta = (iso?: string | null) => iso ? new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
+const dataCurta = (iso?: string | null) => iso ? new Date(iso).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit' }) : '—';
+const horaCurta = (iso?: string | null) => iso ? new Date(iso).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' }) : '';
 
 const DE: Record<string, string> = { cliente: 'Cliente', laura: 'Laura', vendedor: 'Vendedor' };
 

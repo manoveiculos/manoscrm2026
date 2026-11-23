@@ -163,7 +163,7 @@ export function LeadListV2({
                                     {score}%
                                 </span>
                                 <span className="text-[10px] text-white/25 tabular-nums">
-                                    {new Date(lead.created_at || '').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+                                    {new Date(lead.created_at || '').toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit' })}
                                 </span>
                             </div>
                         </div>
@@ -311,10 +311,10 @@ export function LeadListV2({
                                         <td className="px-4 py-3 text-right">
                                             <div className="flex flex-col items-end">
                                                 <span className="text-[11px] text-white/70 tabular-nums">
-                                                    {new Date(lead.created_at || '').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+                                                    {new Date(lead.created_at || '').toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit' })}
                                                 </span>
                                                 <span className="text-[10px] text-white/20 tabular-nums">
-                                                    {new Date(lead.created_at || '').toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                                                    {new Date(lead.created_at || '').toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' })}
                                                 </span>
                                             </div>
                                         </td>

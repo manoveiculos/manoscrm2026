@@ -67,8 +67,8 @@ function formatLeadEntryDate(iso: string | null): { date: string; time: string; 
     if (!iso) return null;
     const d = new Date(iso);
     if (isNaN(d.getTime())) return null;
-    const date = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-    const time = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    const date = d.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric' });
+    const time = d.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
     const diffMs = Date.now() - d.getTime();
     const diffMin = Math.floor(diffMs / 60000);
     let ago: string;
@@ -834,7 +834,7 @@ export default function LeadDetailPage() {
                             <div className="text-xs uppercase tracking-wider text-blue-400 font-bold">Atendendo desde</div>
                             <div className="text-sm font-semibold mt-0.5">
                                 {new Date(lead.atendimento_iniciado_em).toLocaleString('pt-BR', {
-                                    day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
+                                    timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
                                 })}
                             </div>
                         </div>

@@ -63,7 +63,7 @@ export const ListRow = ({
                                 </span>
                             </div>
                             <span className="text-[9px] font-black text-white/10 uppercase tracking-widest hidden sm:block">
-                                {new Date(lead.created_at || '').toLocaleDateString('pt-BR')} às {new Date(lead.created_at || '').toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                                {new Date(lead.created_at || '').toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })} às {new Date(lead.created_at || '').toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' })}
                             </span>
                         </div>
                     </div>
