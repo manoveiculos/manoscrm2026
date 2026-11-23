@@ -101,7 +101,7 @@ export const FERRAMENTAS: Anthropic.Tool[] = [
     },
     {
         name: 'agendar_visita',
-        description: 'Sem "horario": devolve os próximos horários livres da loja (ofereça 2). Com "horario": confirma a visita nesse horário.',
+        description: 'Sem "horario": devolve sugestões de horário (manhã e tarde, próximos dias; ofereça 2). Com "horario": confirma a visita nesse horário. QUALQUER horário com a loja aberta vale, não só os sugeridos: se o cliente pedir um dia ou período ("sábado de manhã", "fim da tarde"), chame com esse horário.',
         input_schema: {
             type: 'object',
             properties: {
@@ -163,7 +163,13 @@ export interface ChamadaFerramenta {
 
 export interface FotoAnotada { veiculo_id: string; carro: string; urls: string[] }
 export interface AgendaAnotada { iso: string; rotulo: string; gravada?: boolean; id?: string; acao?: 'criar' | 'manter' | 'mover'; erro?: string }
-export interface PassagemAnotada { motivo: string; resumo: string; executada?: boolean }
+export interface PassagemAnotada {
+    motivo: string; resumo: string; executada?: boolean;
+    /** Quantos vendedores receberam o aviso urgente no WhatsApp, e quem (consultor, todos, gestor). */
+    avisados?: number; destinoAviso?: string;
+    /** Passagem forçada pelo CRM (o cliente pediu pessoa e a Laura não chamou a ferramenta). */
+    automatica?: boolean;
+}
 
 export interface ContextoRodada {
     supabase: SupabaseClient;
@@ -243,6 +249,14 @@ function buscarEstoque(e: Record<string, unknown>, ctx: ContextoRodada): Saida {
         };
     }
     const aviso = ' O pedido do cliente já ficou anotado: se couber, diga que vai avisá-lo quando entrar um assim (sem prometer prazo).';
+    if (r.foraDoFiltro?.length) {
+        // O modelo existe no pátio, só difere em câmbio, ano ou preço: NUNCA dizer "não temos esse modelo".
+        return {
+            encontrados: [],
+            mesmo_modelo_com_diferenca: r.foraDoFiltro,
+            observacao: 'A loja TEM este modelo, mas diferente do que o cliente pediu (veja "diferenca" em cada carro). Não diga que não tem: ofereça este carro com preço e km exatos e diga com naturalidade a diferença (ex.: "tenho um Civic 2012 automático por R$ 65.900, um pouco acima do valor que você falou").',
+        };
+    }
     if (r.semNoTipo) {
         return {
             encontrados: [],
@@ -467,7 +481,7 @@ function agendarVisita(e: Record<string, unknown>, ctx: ContextoRodada): Saida {
     const { horas, feriados } = ctx.horario;
     const pedido = str(e.horario, 40);
     if (!pedido) {
-        const livres = horariosDeVisitaDetalhados(horas, feriados, ctx.agora, 3);
+        const livres = horariosDeVisitaDetalhados(horas, feriados, ctx.agora, 5);
         if (!livres.length) return { erro: 'sem horário livre nos próximos dias. Diga que o consultor combina o horário.' };
         return { horarios: livres.map(h => ({ rotulo: h.rotulo, horario: h.iso })) };
     }

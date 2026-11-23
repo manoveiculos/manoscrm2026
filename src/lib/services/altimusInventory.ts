@@ -164,6 +164,26 @@ function parseDescription(desc: string): { marca: string; modelo: string; versao
     return { marca, modelo, versao };
 }
 
+/**
+ * Câmbio do carro. O feed da Altimus NÃO tem <cambio> (conferido em 23/11/2026): o câmbio vem
+ * nos opcionais ("Câmbio Automático") ou na descrição ("... 16V Aut. 4p", "Mec.", "CVT").
+ * Sem isto, toda busca da Laura por "automático" descartava o estoque inteiro (Civic 2012 Aut. "não temos").
+ * "Piloto Automático" e "Manual do Proprietário" NÃO são câmbio.
+ */
+export function cambioDoFeed(tagCambio: string | null | undefined, opcionais: string[], descricao: string | null | undefined): string | undefined {
+    const direto = (tagCambio || '').trim();
+    if (direto) return direto;
+    const op = opcionais.find(o => /c[aâ]mbio/i.test(o));
+    if (op) {
+        if (/autom|cvt|automatiz|dct|dsg|tiptronic/i.test(op)) return 'Automático';
+        if (/manual|mec[aâ]n/i.test(op)) return 'Manual';
+    }
+    const d = ` ${(descricao || '').split(/\s+-\s+/)[0]} `;
+    if (/\b(aut\.?|autom[aá]tic[oa]|cvt|automatizad[oa]|dct|dsg|tiptronic|at)\b/i.test(d)) return 'Automático';
+    if (/\b(mec\.?|manual)\b/i.test(d)) return 'Manual';
+    return undefined;
+}
+
 function parseAltimusXml(xml: string): AltimusVehicle[] {
     if (!xml || xml.length < 50) return [];
 
@@ -186,7 +206,6 @@ function parseAltimusXml(xml: string): AltimusVehicle[] {
         const precoRaw = tag(block, 'PrecoVenda') || tag(block, 'valor') || tag(block, 'preco') || tag(block, 'preço');
         const preco = asNumber(precoRaw);
         const km = asInt(tag(block, 'km') || tag(block, 'quilometragem'));
-        const cambio = tag(block, 'cambio') || tag(block, 'câmbio') || undefined;
         const combustivel = tag(block, 'combustivel') || tag(block, 'combustível') || undefined;
         const cor = tag(block, 'cor') || undefined;
         // Altimus normalmente não traz link no feed, mas mantemos como opcional
@@ -203,6 +222,7 @@ function parseAltimusXml(xml: string): AltimusVehicle[] {
         const opcionais = [...opcionaisXml.matchAll(/<opcional\b[^>]*>([\s\S]*?)<\/opcional>/gi)]
             .map(m => decodeXmlEntities(m[1].replace(/^\s*<!\[CDATA\[|\]\]>\s*$/g, '').trim()))
             .filter(Boolean);
+        const cambio = cambioDoFeed(tag(block, 'cambio') || tag(block, 'câmbio'), opcionais, descricao);
 
         // Regra Anti-Alucinação: Se o preço for incoerente (ex: popular > 300k), ignora o veículo
         // Lista simples de modelos populares para o filtro

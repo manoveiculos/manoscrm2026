@@ -9,6 +9,8 @@
 // Só no horário da loja, só espera que começou nas últimas 24 h (atraso antigo vai para a
 // reunião semanal, não vira enxurrada de aviso) e cada nível sai uma vez por espera.
 
+import { ehSoConfirmacao } from '@/lib/whatsapp/ia/regras';
+
 export const NIVEIS_MIN = [10, 30, 120] as const;
 export const MAX_ESPERA_H = 24;
 
@@ -107,7 +109,13 @@ export function esperaDesde(msgs: MsgCobranca[], passagemEm: string | null, stat
     if (status === 'humano' && ult.autor === 'cliente') {
         // a espera começa na primeira mensagem do cliente depois da última resposta da loja
         let inicio = ult.criadaEm;
-        for (let i = o.length - 1; i >= 0 && o[i].autor === 'cliente'; i--) inicio = o[i].criadaEm;
+        let i = o.length - 1;
+        const pendentes: MsgCobranca[] = [];
+        for (; i >= 0 && o[i].autor === 'cliente'; i--) { inicio = o[i].criadaEm; pendentes.push(o[i]); }
+        // Só "👍 / ok / obrigado" depois de uma fala da loja sem pergunta: ninguém está esperando resposta.
+        // (Os textos só chegam quando a rodada os lê; sem texto, conta como espera, como antes.)
+        const daLoja = i >= 0 ? o[i] : null;
+        if (daLoja && daLoja.texto != null && !daLoja.texto.includes('?') && pendentes.every(m => m.texto != null && ehSoConfirmacao(m.texto))) return null;
         return inicio;
     }
     return null;
@@ -128,7 +136,10 @@ export function decidirCobranca(e: EntradaCobranca): DecisaoCobranca {
     if (!e.lojaAberta) return pula('fora do horário da loja');
     const nivel = (min >= NIVEIS_MIN[2] ? 3 : min >= NIVEIS_MIN[1] ? 2 : 1) as 1 | 2 | 3;
     if (e.niveisJaEnviados.some(n => n >= nivel)) return pula('esse nível já foi avisado');
-    return { acao: 'avisar', nivel, esperaDesde: desde, minutos: min, avisarConsultor: nivel <= 2, avisarGestor: nivel >= 2 };
+    // Loja reabriu com a espera já longa (passagem de domingo, de noite): o consultor ainda não foi avisado
+    // nenhuma vez, então ele recebe também (antes ia só ao Alexandre e o consultor nunca sabia).
+    const consultorNuncaAvisado = !e.niveisJaEnviados.length;
+    return { acao: 'avisar', nivel, esperaDesde: desde, minutos: min, avisarConsultor: nivel <= 2 || consultorNuncaAvisado, avisarGestor: nivel >= 2 };
 }
 
 const primeiroNome = (n: string | null | undefined) => (n || '').trim().split(/\s+/)[0];
