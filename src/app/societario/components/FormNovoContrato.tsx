@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Plus, FileText, CheckCircle2, ArrowRightLeft, X, AlertTriangle, Link2 } from 'lucide-react';
 import { ParsedContratoResult } from '@/lib/services/societarioPdfParser';
 import { comissaoAutomatica, NOME_LOJA, PCT_COMISSAO_VENDA } from '@/lib/services/societarioService';
+import { formatarTelefoneBR, normalizarTelefoneBR } from '@/lib/telefone';
 
 interface FormNovoContratoProps {
     parsedData?: ParsedContratoResult | null;
@@ -61,6 +62,9 @@ export function FormNovoContrato({ parsedData, veiculosExistentes, onSuccess, on
     const [veiculoIdSelecionado, setVeiculoIdSelecionado] = useState('');
     const [compradorNome, setCompradorNome] = useState('');
     const [compradorCpfCnpj, setCompradorCpfCnpj] = useState('');
+    // Liga a venda ao lead do CRM: é assim que a Meta e o Google ficam sabendo qual anúncio vendeu.
+    const [compradorWhatsapp, setCompradorWhatsapp] = useState('');
+    const [avisoVenda, setAvisoVenda] = useState('');
     const [valorVenda, setValorVenda] = useState('');
     const [valorEntradaMoeda, setValorEntradaMoeda] = useState('');
     const [saldoDevedor, setSaldoDevedor] = useState('');
@@ -246,6 +250,10 @@ export function FormNovoContrato({ parsedData, veiculosExistentes, onSuccess, on
                 const valorTrocaNum = num(valorTroca) || 0;
                 if (temTroca && valorTrocaNum <= 0) throw new Error('Informe o valor da troca.');
                 if (temTroca && !trocaModelo && !trocaPlaca) throw new Error('Informe o modelo ou a placa do carro da troca.');
+                const whatsappDigitado = compradorWhatsapp.trim();
+                if (whatsappDigitado && !normalizarTelefoneBR(whatsappDigitado)) {
+                    throw new Error('WhatsApp do comprador inválido: use DDD + número, ex.: (47) 99999-0000.');
+                }
 
                 const res = await fetch('/api/societario/fechamento', {
                     method: 'POST',
@@ -256,6 +264,7 @@ export function FormNovoContrato({ parsedData, veiculosExistentes, onSuccess, on
                         veiculo_id: veiculoIdSelecionado,
                         comprador_nome: compradorNome || 'Cliente Comprador',
                         comprador_cpf_cnpj: compradorCpfCnpj || undefined,
+                        comprador_whatsapp: whatsappDigitado || undefined,
                         vendedor_responsavel: vendedorResponsavel || undefined,
                         valor_venda_fechado: valorVendaNum,
                         valor_entrada_moeda: num(valorEntradaMoeda) ?? entradaCalculada,
@@ -285,6 +294,17 @@ export function FormNovoContrato({ parsedData, veiculosExistentes, onSuccess, on
 
                 const json = await res.json();
                 if (!json.success) throw new Error(json.error || 'Erro ao cadastrar venda.');
+
+                // Venda gravada, mas sem lead com esse WhatsApp: avisa antes de fechar,
+                // porque essa venda não vai chegar aos anúncios.
+                if (whatsappDigitado && !json.vendaLigadaAoLead) {
+                    setAvisoVenda(
+                        `Venda gravada. Não achei lead com o WhatsApp ${formatarTelefoneBR(whatsappDigitado)} no CRM, ` +
+                        'então a Meta e o Google não vão saber desta venda. Confira o número; se o cliente não veio de anúncio, está tudo certo.'
+                    );
+                    onSuccess();
+                    return;
+                }
             }
 
             onSuccess();
@@ -572,6 +592,10 @@ export function FormNovoContrato({ parsedData, veiculosExistentes, onSuccess, on
                                 <Campo label="CPF/CNPJ do Comprador">
                                     <input type="text" value={compradorCpfCnpj} onChange={(e) => setCompradorCpfCnpj(e.target.value)} className={`${inputBase} font-mono focus:border-emerald-500`} />
                                 </Campo>
+                                <Campo label="WhatsApp do Comprador">
+                                    <input type="tel" inputMode="tel" placeholder="(47) 99999-0000" value={compradorWhatsapp} onChange={(e) => setCompradorWhatsapp(e.target.value)} className={`${inputBase} font-mono focus:border-emerald-500`} />
+                                    <p className="mt-1 text-[11px] text-slate-500">Liga a venda ao lead do anúncio (Meta e Google aprendem o que vende).</p>
+                                </Campo>
                                 <Campo label="Entrada em Dinheiro (R$)">
                                     <input type="number" step="0.01" placeholder={entradaCalculada.toFixed(2)} value={valorEntradaMoeda} onChange={(e) => setValorEntradaMoeda(e.target.value)} className={`${inputBase} font-mono focus:border-emerald-500`} />
                                 </Campo>
@@ -661,7 +685,21 @@ export function FormNovoContrato({ parsedData, veiculosExistentes, onSuccess, on
                         </>
                     )}
 
-                    {/* Submit */}
+                    {/* Venda gravada sem lead ligado: só resta fechar */}
+                    {avisoVenda ? (
+                    <div className="pt-4 border-t border-slate-800 space-y-3">
+                        <div className="p-3 bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs rounded-lg flex gap-2">
+                            <AlertTriangle className="w-4 h-4 shrink-0" />
+                            <span>{avisoVenda}</span>
+                        </div>
+                        <div className="flex justify-end">
+                            <button type="button" onClick={onClose} className="px-5 py-2.5 font-bold text-white rounded-xl bg-slate-700 hover:bg-slate-600">
+                                Fechar
+                            </button>
+                        </div>
+                    </div>
+                    ) : (
+                    /* Submit */
                     <div className="pt-4 border-t border-slate-800 flex justify-end gap-3">
                         <button
                             type="button"
@@ -680,6 +718,7 @@ export function FormNovoContrato({ parsedData, veiculosExistentes, onSuccess, on
                             {salvando ? 'Salvando...' : tipo === 'compra' ? 'Cadastrar Entrada de Compra' : 'Finalizar Venda & Apurar Lucro'}
                         </button>
                     </div>
+                    )}
                 </form>
             </div>
         </div>
