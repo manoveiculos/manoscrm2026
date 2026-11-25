@@ -12,7 +12,7 @@ import { getInventory } from '@/lib/services/altimusInventory';
 import { msgErro } from '@/lib/whatsapp/erro';
 import { identificacaoLigada } from './chave';
 import { extrairNome, nomeDoPerfilAceito } from './nome';
-import { carroDoAnuncio, carroDoLinkDoSite, carrosCitados, type CarroInteresse } from './veiculo';
+import { carroDoAnuncio, carroDoLinkDoSite, carrosCitados, respondeTroca, type CarroInteresse } from './veiculo';
 import { atualizarNomeLead, registrarInteresse } from './gravar';
 
 export interface MensagemParaIdentificar {
@@ -73,7 +73,9 @@ async function identificarUma(admin: SupabaseClient, alvo: MensagemParaIdentific
         const doAnuncio = carroDoAnuncio(utm, estoque);
         if (doAnuncio) carros.push(doAnuncio);
     }
-    if (!doLink && texto) carros.push(...carrosCitados(texto, estoque));
+    // Resposta à pergunta da troca ("Qual carro você daria na troca?" → "Celta duas portas 2009"):
+    // o carro citado é o DO CLIENTE, não interesse. Antes ia parar no campo Carro do lead.
+    if (!doLink && texto && !respondeTroca(ultimaDaLoja, texto)) carros.push(...carrosCitados(texto, estoque));
     // o mais confiável por último: vira o mais recente (primeiro na tela)
     for (const c of carros.reverse()) await registrarInteresse(admin, telefone, c, POR);
 }

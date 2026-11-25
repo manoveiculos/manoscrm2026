@@ -27,6 +27,7 @@ import { horarioLoja, isOpenNow } from '@/lib/services/slaEngine';
 import { revisarResposta } from '@/lib/laura/guardrails';
 import { entradaEmReais, parseValorBR } from '@/lib/qualificacao';
 import { enviarPushParaConsultor } from '@/lib/push/enviarPush';
+import { avisarPassagem } from '@/lib/avisos/passagem';
 import { providerLoja } from '../evolutionProvider';
 import { enviarPeloCrm } from '../envio';
 import { notifyConsultant } from '@/lib/services/consultantNotifier';
@@ -41,7 +42,7 @@ import { garantirDescricoesDeImagens } from './visaoRodada';
 import { descartarNaoCliente, liberarDaTriagem } from './triagemRodada';
 import {
     custoUsd, iaPodeResponder, inicioDoDiaSP, limiteDiario, montarHistorico, somarUso, textoParaIa,
-    comentaAtendimentoAnterior, ehRespostaAutomatica, respostaLonga, repeteMensagemAnterior, valoresCitados, type FichaLaura, type MensagemParaIa, type UsoTokens,
+    comentaAtendimentoAnterior, ehRespostaAutomatica, ehSoConfirmacao, pediuHumano, respostaLonga, repeteMensagemAnterior, valoresCitados, type FichaLaura, type MensagemParaIa, type UsoTokens,
 } from './regras';
 
 export const MODELO_PADRAO = 'claude-sonnet-5-5';
@@ -237,6 +238,19 @@ export async function rodarLaura(g: GatilhoIa): Promise<void> {
         if (!turnos.length) { await finalizar({ status: 'pulada', motivo: 'sem mensagem do cliente para responder' }); return; }
         ctx.textosDoCliente = msgs.filter(m => m.autor === 'cliente').map(m => textoParaIa(m) || '').filter(Boolean);
 
+        // O que o cliente mandou desde a última fala da loja (msgs vem do mais novo para o mais antigo)
+        const semReacao = msgs.filter(m => m.tipo !== 'reacao');
+        const iLoja = semReacao.findIndex(m => m.autor !== 'cliente');
+        const novasDoCliente = (iLoja < 0 ? semReacao : semReacao.slice(0, iLoja)).map(m => textoParaIa(m) || '');
+        const ultimaDaLoja = iLoja < 0 ? null : (textoParaIa(semReacao[iLoja]) || '');
+        // Só "👍 / ok / obrigado" depois de uma fala da loja SEM pergunta: não responde (evita despedida em série).
+        if (ultimaDaLoja != null && !ultimaDaLoja.includes('?') && novasDoCliente.length && novasDoCliente.every(t => ehSoConfirmacao(t))) {
+            await finalizar({ status: 'pulada', motivo: 'cliente só confirmou (nada a responder)' });
+            return;
+        }
+        // Pediu pessoa/ligação: a Laura TEM de passar ao consultor (conferido depois da resposta).
+        const pedidoHumano = novasDoCliente.find(t => pediuHumano(t)) ?? null;
+
         const [estoque, horario] = await Promise.all([getInventory(), horarioLoja(supabase)]);
         ctx.estoque = estoque;
         ctx.horario = horario;
@@ -267,6 +281,7 @@ export async function rodarLaura(g: GatilhoIa): Promise<void> {
         let repeticaoTratada = false;
         let comentarioTratado = false;
         let longaTratada = false;
+        let humanoTratado = false;
         while (iteracoes < MAX_ITERACOES) {
             iteracoes++;
             // Sonnet 5.5: pensamento adaptativo (padrão) em esforço baixo. O pensamento
@@ -294,6 +309,14 @@ export async function rodarLaura(g: GatilhoIa): Promise<void> {
                 continue;
             }
             texto = resp.content.filter((b): b is Anthropic.TextBlock => b.type === 'text').map(b => b.text).join('\n').trim();
+            if (pedidoHumano && !ctx.passagem && !humanoTratado && texto) {
+                // o cliente pediu uma pessoa e a Laura não passou: pede UMA vez que passe
+                humanoTratado = true;
+                messages.push({ role: 'assistant', content: resp.content });
+                messages.push({ role: 'user', content: '<aviso_do_crm>O cliente pediu para falar com uma pessoa (consultor, atendente ou ligação). Chame passar_para_consultor agora, com motivo pediu_pessoa e um resumo, e responda em UMA frase curta que o consultor vai falar com ele por aqui.</aviso_do_crm>' });
+                texto = '';
+                continue;
+            }
             if (!repeticaoTratada && texto && repeteMensagemAnterior(texto, anteriores)) {
                 // repetiu: pede UMA nova tentativa, só com o que o cliente acabou de escrever
                 repeticaoTratada = true;
@@ -324,6 +347,10 @@ export async function rodarLaura(g: GatilhoIa): Promise<void> {
         if (parada === 'refusal') { await finalizar({ status: 'erro', motivo: 'o modelo recusou responder' }); return; }
         if (parada === 'tool_use') { await finalizar({ status: 'erro', motivo: `passou de ${MAX_ITERACOES} chamadas de ferramenta` }); return; }
         texto = texto.replace(/<\/?contexto_do_crm>/g, '').trim();
+        // Rede de segurança: pediu pessoa e mesmo assim a Laura não passou → o CRM passa e avisa o vendedor.
+        if (pedidoHumano && !ctx.passagem) {
+            ctx.passagem = { motivo: 'pediu_pessoa', resumo: `Cliente pediu atendimento de uma pessoa: "${pedidoHumano.replace(/\s+/g, ' ').slice(0, 160)}"`, automatica: true };
+        }
         if (!texto) { await finalizar({ status: 'erro', motivo: parada === 'max_tokens' ? 'resposta cortada (max_tokens)' : 'resposta vazia' }); return; }
 
         // 7. filtro de regras
@@ -449,14 +476,25 @@ async function executarEnvio(supabase: SupabaseClient, ctx: ContextoRodada, g: G
             tag: `wa-${ctx.conversa.id}`,
         }).catch(() => null);
         ctx.passagem.executada = true;
+        const f = ctx.ficha as Record<string, unknown>;
+        const nomeCliente = (ctx.ficha.nome as string | null) || ctx.conversa.nome_cliente || ctx.conversa.nome_contato;
+        const carro = typeof f.carro_interesse === 'string' ? f.carro_interesse : null;
         // Lead de anúncio preso na triagem da Laura: qualificado → solta para a roleta, com o resumo.
+        // (a ferramenta usa "pediu_pessoa"; antes só "pediu_humano" contava e todo pedido virava "qualificado")
         if (ctx.conversa.lead_uid) {
-            const f = ctx.ficha as Record<string, unknown>;
-            await liberarDaTriagem(supabase, ctx.conversa.lead_uid, ctx.passagem.motivo === 'pediu_humano' ? 'pediu_humano' : 'qualificado', {
-                resumoDaLaura: ctx.passagem.resumo, nome: (ctx.ficha.nome as string | null) || ctx.conversa.nome_cliente || ctx.conversa.nome_contato,
-                interesse: typeof f.carro_interesse === 'string' ? f.carro_interesse : null, contatado: true, respondeu: true,
+            const pediu = ctx.passagem.motivo === 'pediu_pessoa' || ctx.passagem.motivo === 'pediu_humano';
+            await liberarDaTriagem(supabase, ctx.conversa.lead_uid, pediu ? 'pediu_humano' : 'qualificado', {
+                resumoDaLaura: ctx.passagem.resumo, nome: nomeCliente, interesse: carro, contatado: true, respondeu: true,
             }).catch(() => false);
         }
+        // Aviso URGENTE no WhatsApp do vendedor, na hora (antes só push; o WhatsApp tocava 10 min depois, na cobrança).
+        const av = await avisarPassagem(supabase, {
+            conversaId: ctx.conversa.id, leadUid: ctx.conversa.lead_uid, consultorId: ctx.conversa.assigned_consultant_id,
+            motivo: ctx.passagem.motivo, resumo: ctx.passagem.resumo, cliente: nomeCliente, carro,
+            visita: ctx.agendamento?.rotulo ?? null,
+        });
+        ctx.passagem.avisados = av.avisados;
+        ctx.passagem.destinoAviso = av.destino;
     }
     return { enviada: true, provider_message_id: r.providerMessageId };
 }

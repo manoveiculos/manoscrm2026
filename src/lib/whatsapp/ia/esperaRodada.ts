@@ -87,7 +87,7 @@ export async function rodarEspera(
     if (cfg.modo === 'envia' && !isOpenNow(agora, horario.horas, horario.feriados)) return { ...r, motivo: 'fora do horário da loja' };
 
     const { data: pedidos } = await supabase.from('carro_espera')
-        .select('id, telefone_key, lead_uid, conversa_id, consultor_id, nome_cliente, texto_original, ano_min, preco_max, cambio')
+        .select('id, telefone_key, lead_uid, conversa_id, consultor_id, nome_cliente, texto_original, marca, modelo, carroceria, ano_min, preco_max, cambio')
         .eq('status', 'aguardando').order('criado_em', { ascending: true }).limit(300);
     r.pedidos = pedidos?.length ?? 0;
 
@@ -112,21 +112,37 @@ export async function rodarEspera(
             if (!laura && !consultor) { pular('sem conversa com a Laura e sem consultor'); continue; }
             if (cfg.modo !== 'envia') { r.ensaio++; continue; }
 
+            if (laura && enviouNaRodada >= MAX_AVISOS_POR_RODADA) { pular('teto da rodada'); continue; }
+            // Reserva ANTES de enviar: marca "avisado" só se ainda estiver "aguardando". Antes a marca vinha depois
+            // do envio (e da pausa de 75 s) e a rodada seguinte do cron mandava o mesmo aviso de novo (25/11/2026).
+            const { data: reservado } = await supabase.from('carro_espera').update({
+                status: 'avisado', avisado_em: agoraIso, veiculo_id_avisado: String(carro.id_externo), atualizado_em: agoraIso,
+            }).eq('id', p.id).eq('status', 'aguardando').select('id');
+            if (!reservado?.length) { pular('outra rodada já está avisando'); continue; }
+            // um telefone com dois pedidos casando o mesmo carro: avisa uma vez só (o outro pedido fica marcado junto)
+            const irmaos = ((pedidos || []) as PedidoDoBanco[])
+                .filter(o => o.id !== p.id && o.telefone_key === p.telefone_key && pedidoCombina(o, carro)).map(o => o.id);
+            if (irmaos.length) {
+                await supabase.from('carro_espera').update({
+                    status: 'avisado', avisado_em: agoraIso, veiculo_id_avisado: String(carro.id_externo), atualizado_em: agoraIso,
+                }).in('id', irmaos).eq('status', 'aguardando');
+            }
+
             if (laura) {
-                if (enviouNaRodada >= MAX_AVISOS_POR_RODADA) { pular('teto da rodada'); continue; }
                 if (enviouNaRodada > 0) await esperar(ESPERA_ENTRE_ENVIOS_MS);
                 const env = await enviarPeloCrm(
                     supabase, providerLoja(),
                     { id: conv!.id as string, telefone_key: p.telefone_key, remote_jid: (conv!.remote_jid as string | null) ?? null },
                     { tipo: 'texto', texto: mensagemDeAviso(p, carro) }, { autor: 'laura' },
                 );
-                if (!env.ok) { r.erros++; break; }   // disjuntor: para no primeiro erro de envio
+                if (!env.ok) {
+                    // devolve o pedido para a fila: a próxima rodada tenta de novo
+                    await supabase.from('carro_espera').update({ status: 'aguardando', avisado_em: null, veiculo_id_avisado: null, atualizado_em: agoraIso })
+                        .eq('id', p.id).eq('status', 'avisado');
+                    r.erros++; break;   // disjuntor: para no primeiro erro de envio
+                }
                 enviouNaRodada++; r.avisados++;
             } else r.soConsultor++;
-
-            await supabase.from('carro_espera').update({
-                status: 'avisado', avisado_em: agoraIso, veiculo_id_avisado: String(carro.id_externo), atualizado_em: agoraIso,
-            }).eq('id', p.id);
             if (consultor) {
                 await enviarPushParaConsultor(consultor, {
                     titulo: 'Entrou o carro que o cliente procurava',

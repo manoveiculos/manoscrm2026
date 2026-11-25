@@ -17,6 +17,8 @@ import { msgErro } from '../erro';
 import { lerConfigIa } from './config';
 import { MOTIVO_RESERVA, reservarToque } from './reserva';
 import { claude, MODELO_PADRAO } from './motor';
+import { getInventory } from '@/lib/services/altimusInventory';
+import { buscarNoEstoque } from './estoque';
 import { LAURA_CRM_PROMPT } from './prompt';
 import { custoUsd, inicioDoDiaSP, limiteDiario, somarUso, textoParaIa, type MensagemParaIa, type UsoTokens } from './regras';
 import {
@@ -120,11 +122,15 @@ export async function rodarFollowups(supabase: SupabaseClient, opts: { agora?: D
         const enviados = (fu || []).filter(f => f.status === 'enviado').map(f => f.criado_em as string);
         const rascunhos = new Set((fu || []).filter(f => f.status === 'rascunho' && f.motivo !== MOTIVO_RESERVA).map(f => f.etapa as number));
 
+        // Na lista de espera (aguardando um carro entrar): se ele pediu "me avisa", quem chama é o aviso de entrada.
+        const { count: espera } = await supabase.from('carro_espera').select('id', { count: 'exact', head: true })
+            .eq('telefone_key', c.telefone_key).eq('status', 'aguardando');
         const d = decidirFollowup({
             status: c.status, iaSilenciadaAte: c.ia_silenciada_ate, msgs, enviadosDepoisDaAncora: enviados,
             rascunhoDaEtapaExiste: (e) => rascunhos.has(e),
             leadFechado: await leadFechado(supabase, c.lead_uid), temVisitaMarcada: await temVisita(supabase, c.lead_uid, agora),
-            lojaAberta: true, iniciadaPelaLoja, entregueAoConsultor: Boolean(entregue), agora, corte: dataDeCorte(process.env.WA_FOLLOWUP_DESDE),
+            lojaAberta: true, iniciadaPelaLoja, entregueAoConsultor: Boolean(entregue), naListaDeEspera: (espera ?? 0) > 0,
+            agora, corte: dataDeCorte(process.env.WA_FOLLOWUP_DESDE),
         });
         if (d.acao === 'pular') { pular(d.motivo); continue; }
 
@@ -140,7 +146,24 @@ export async function rodarFollowups(supabase: SupabaseClient, opts: { agora?: D
             const ficha = (c.ficha && typeof c.ficha === 'object') ? c.ficha as Record<string, unknown> : {};
             const nome = (c.nome_cliente as string | null) || null;
             const carro = typeof ficha.carro_interesse === 'string' ? ficha.carro_interesse : null;
-            const instrucao = instrucaoDoToque({ etapa: d.etapa, nome, carro, contexto: `Conversa até agora:\n${transcricao}` });
+            // Confere o estoque de verdade: a conversa pode ter dito "não temos" por erro (Cruze do Bortolaz, 21/11).
+            let noEstoqueAgora: string[] = [];
+            if (carro) {
+                const estoque = await getInventory().catch(() => []);
+                const n = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+                // só o MESMO modelo (pediu Ranger e a loja tem Focus: não é "o carro dele no estoque")
+                noEstoqueAgora = buscarNoEstoque(estoque, { consulta: carro }, 2).encontrados
+                    .filter(x => { const modelo = n(x.carro.split(/\s+/)[1] || ''); return modelo.length >= 2 && n(carro).includes(modelo); })
+                    .map(x => [x.carro, x.ano, x.cor, x.km, x.preco].filter(Boolean).join(' · '));
+            }
+            const { data: toques } = await supabase.from('wa_followups').select('texto').eq('conversa_id', c.id).eq('status', 'enviado')
+                .order('criado_em', { ascending: false }).limit(3);
+            const instrucao = instrucaoDoToque({
+                etapa: d.etapa, nome, carro, contexto: `Conversa até agora:\n${transcricao}`,
+                semRespostaDoCliente: !msgs.some(m => m.autor === 'cliente'),
+                noEstoqueAgora,
+                toquesAnteriores: (toques || []).map(t => String(t.texto || '')).filter(Boolean),
+            });
             const resp = await cliente.messages.create({
                 model: modelo,
                 max_tokens: 2048,

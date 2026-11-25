@@ -280,6 +280,35 @@ export function ehRespostaAutomatica(texto: string | null | undefined): boolean 
         || /\bfora do horario de atendimento\b.*\b(retornaremos|responderemos|retorno)/.test(t);
 }
 
+const semAcento = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+
+/**
+ * Só confirmação/agradecimento ("👍", "Ok", "Obrigado", "Blz", "Certo", "Valeu"): não pede resposta.
+ * A Laura respondia "👍" com mais uma despedida (22/11, Jesaías: 3 mensagens de "está tudo anotado").
+ */
+export function ehSoConfirmacao(texto: string | null | undefined): boolean {
+    const t = semAcento((texto || '').trim());
+    if (!t) return false;
+    // só emoji/pontuação (👍, 🙏, 😉, "!", "...")
+    if (!/[a-z0-9]/.test(t)) return true;
+    const palavras = t.replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(Boolean);
+    if (!palavras.length || palavras.length > 6) return false;
+    const OK = new Set(['ok', 'okay', 'oki', 'okk', 'blz', 'beleza', 'certo', 'certinho', 'combinado', 'show', 'valeu', 'vlw', 'obrigado', 'obrigada',
+        'obg', 'brigado', 'brigada', 'agradeco', 'grato', 'grata', 'ta', 'tah', 'ss', 'sim', 'entendi', 'perfeito', 'otimo', 'top', 'joia', 'massa',
+        'tranquilo', 'de', 'nada', 'muito', 'pela', 'atencao', 'por', 'enquanto', 'boa', 'bom', 'fico', 'no', 'aguardo', 'aguardando', 'tudo', 'bem', 'e', 'pra', 'voce', 'vc', 'tb', 'tambem']);
+    return palavras.every(p => OK.has(p));
+}
+
+/** O cliente pediu uma pessoa (consultor, atendente, ligação)? Laura TEM de passar ao consultor. */
+export function pediuHumano(texto: string | null | undefined): boolean {
+    const t = semAcento(texto || '');
+    if (!t.trim()) return false;
+    return /\b(falar|conversar|tratar|negociar)\s+(direto\s+)?com\s+(um|uma|o|a|algum|alguma|alguem|seu|teu)?\s*(vendedor|consultor|atendente|pessoa|humano|gerente|dono|responsavel|alguem)/.test(t)
+        || /\b(atendente|atendimento humano|pessoa de verdade|pessoa real|voce e (um )?robo|e (um )?robo|falar com (um )?humano)\b/.test(t)
+        || /\b(me liga|me ligue|me ligar|pode(ria)? me ligar|posso (te |lhe )?ligar|liga pra mim|ligar pra (voces|loja|voce|vc)|numero (do|de um|de algum) (vendedor|consultor))\b/.test(t)
+        || /\b(quero|preciso|gostaria de) (falar|conversar) com (alguem|o vendedor|um vendedor|o consultor|um consultor)\b/.test(t);
+}
+
 /**
  * Monta os turnos para o modelo: cliente = user; Laura/vendedor = assistant;
  * aviso do CRM a vendedor fica de fora. Junta mensagens seguidas do mesmo lado,
