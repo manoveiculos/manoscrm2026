@@ -34,8 +34,12 @@ test('níveis: 10 min → consultor; 30 min → consultor e Alexandre; 120 min �
     assert.deepEqual(n1.acao === 'avisar' && [n1.nivel, n1.avisarConsultor, n1.avisarGestor], [1, true, false]);
     const n2 = decidirCobranca(em(35));
     assert.deepEqual(n2.acao === 'avisar' && [n2.nivel, n2.avisarConsultor, n2.avisarGestor], [2, true, true]);
-    const n3 = decidirCobranca(em(130));
+    // 120 min depois de o consultor já ter sido avisado: só o Alexandre
+    const n3 = decidirCobranca({ ...em(130), niveisJaEnviados: [2] });
     assert.deepEqual(n3.acao === 'avisar' && [n3.nivel, n3.avisarConsultor, n3.avisarGestor], [3, false, true]);
+    // 120 min sem NENHUM aviso antes (loja reabriu): o consultor também recebe
+    const n3b = decidirCobranca(em(130));
+    assert.deepEqual(n3b.acao === 'avisar' && [n3b.nivel, n3b.avisarConsultor, n3b.avisarGestor], [3, true, true]);
 });
 
 test('cada nível sai uma vez por espera; depois do atraso, só o nível mais alto devido', () => {
@@ -92,7 +96,7 @@ test('particular: o cliente responde depois e NÃO há cobrança de "esperando"'
 });
 
 test('particular: se o consultor volta a escrever na conversa, a cobrança normal volta', () => {
-    const msgs = [mt('vendedor', 0, PART), mt('vendedor', 10, 'Pode ver as fotos aqui'), mt('cliente', 20, 'ok')];
+    const msgs = [mt('vendedor', 0, PART), mt('vendedor', 10, 'Pode ver as fotos aqui'), mt('cliente', 20, 'e qual o preço à vista?')];
     const d = decidirCobranca(base({ status: 'humano', msgs, agora: new Date(T0 + 60 * 60_000) }));
     assert.equal(d.acao, 'avisar');
 });

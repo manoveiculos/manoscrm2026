@@ -66,6 +66,20 @@ export interface ResultadoEstoque {
     tiposPedidos?: string[];
     /** O cliente pediu um tipo e a loja não tem nenhum agora. */
     semNoTipo?: boolean;
+    /**
+     * O MESMO modelo que o cliente pediu existe, mas fora do filtro (câmbio, ano ou preço).
+     * Ex.: pediu "Civic até 50 mil" e há Civic por 65.900. A Laura tem de contar isso, não dizer "não temos".
+     */
+    foraDoFiltro?: (CarroParaIa & { diferenca: string })[];
+}
+
+/** "automático", "Aut.", "CVT" → 'auto'; "manual", "Mec." → 'manual'; o resto → null (desconhecido). */
+export function tipoDeCambio(s: string | null | undefined): 'auto' | 'manual' | null {
+    const t = norm(s).trim();
+    if (!t) return null;
+    if (/\b(manual|mec|mecanico)\b/.test(t)) return 'manual';
+    if (/auto|cvt|dct|dsg|tiptronic|\bat\b/.test(t)) return 'auto';
+    return null;
 }
 
 /** A consulta diz algo concreto (marca, modelo ou tipo)? "carro", "um" etc. não contam. */
@@ -80,28 +94,58 @@ export function buscarNoEstoque(estoque: AltimusVehicle[], f: FiltroEstoque, lim
     const tipos: Carroceria[] = carroceriasPedidas(f.consulta);
     const tokens = palavras(tipos.length ? semPalavrasDeCarroceria(f.consulta) : (f.consulta || ''));
     const tiposPedidos = tipos.map(c => ROTULO_CARROCERIA[c]);
-    const cambio = norm(f.cambio).trim();
-    const passaFiltro = (v: AltimusVehicle) =>
-        (!tipos.length || tipos.includes(carroceriaDoModelo(v.marca, v.modelo, v.versao) as Carroceria))
-        && (!f.precoMax || (v.preco || 0) <= f.precoMax * 1.05)
-        && (!f.anoMin || (v.ano || 0) >= f.anoMin)
-        && (!cambio || norm(v.cambio).includes(cambio.slice(0, 4)));
+    // Câmbio: compara por tipo (auto × manual). Carro com câmbio desconhecido NÃO é descartado.
+    const cambio = tipoDeCambio(f.cambio);
+    const cambioDo = (v: AltimusVehicle) => tipoDeCambio(v.cambio) ?? tipoDeCambio(v.versao);
+    const motivoFora = (v: AltimusVehicle): string | null => {
+        if (tipos.length && !tipos.includes(carroceriaDoModelo(v.marca, v.modelo, v.versao) as Carroceria)) return 'carroceria diferente da pedida';
+        if (f.precoMax && (v.preco || 0) > f.precoMax * 1.05) return 'preço acima do que o cliente disse';
+        if (f.anoMin && (v.ano || 0) < f.anoMin) return 'ano abaixo do que o cliente pediu';
+        const c = cambioDo(v);
+        if (cambio && c && c !== cambio) return c === 'manual' ? 'câmbio manual' : 'câmbio automático';
+        return null;
+    };
+    const passaFiltro = (v: AltimusVehicle) => motivoFora(v) === null;
+    // "automático" na consulta não é modelo: sai da busca por palavra (o filtro de câmbio cuida)
+    const tokensModelo = tokens.filter(t => !/^(automatic|automatico|automatica|manual|aut|cvt|mec)$/.test(t));
+    const acertosDe = (v: AltimusVehicle) => {
+        const texto = norm(`${v.marca} ${v.modelo} ${v.versao || ''}`).split(/\s+/);
+        return tokensModelo.filter(t => texto.some(p => p === t || p.startsWith(t))).length;
+    };
+
+    // Frase do anúncio ("Kia Soul 1.6 16V Flex automático vermelho"): "flex", "16v", a cor batem em meio pátio.
+    // Se algum carro bate no MODELO pedido, só ele conta; senão, a marca; senão, qualquer palavra.
+    const bateEm = (campo: string, v: AltimusVehicle) => {
+        const ws = norm(campo === 'modelo' ? v.modelo : v.marca).split(/\s+/).filter(Boolean);
+        return tokensModelo.some(t => ws.some(w => w === t || (t.length >= 3 && w.startsWith(t))));
+    };
+    const focar = <T extends { v: AltimusVehicle; acertos: number }>(lista: T[]): T[] => {
+        const com = lista.filter(x => x.acertos > 0);
+        const porModelo = com.filter(x => bateEm('modelo', x.v));
+        if (porModelo.length) return porModelo;
+        const porMarca = com.filter(x => bateEm('marca', x.v));
+        return porMarca.length ? porMarca : com;
+    };
 
     const pontuados = validos
         .filter(passaFiltro)
-        .map(v => {
-            const texto = norm(`${v.marca} ${v.modelo} ${v.versao || ''}`);
-            const acertos = tokens.filter(t => texto.split(/\s+/).some(p => p === t || p.startsWith(t))).length;
-            return { v, acertos };
-        });
+        .map(v => ({ v, acertos: acertosDe(v) }));
 
-    const encontrados = tokens.length
-        ? pontuados.filter(x => x.acertos > 0)
+    const encontrados = tokensModelo.length
+        ? focar(pontuados)
             .sort((a, b) => b.acertos - a.acertos || (b.v.ano || 0) - (a.v.ano || 0))
             .slice(0, limite).map(x => carroParaIa(x.v))
         : pontuados.slice(0, limite).map(x => carroParaIa(x.v));
 
     if (encontrados.length) return { encontrados, parecidos: [], tiposPedidos };
+
+    // O modelo pedido existe, só não passa no filtro (câmbio, ano, preço): a Laura precisa saber.
+    const foraDoFiltro = tokensModelo.length
+        ? focar(validos.map(v => ({ v, acertos: acertosDe(v), motivo: motivoFora(v) })))
+            .filter(x => x.motivo)
+            .sort((a, b) => b.acertos - a.acertos || (b.v.ano || 0) - (a.v.ano || 0))
+            .slice(0, 3).map(x => ({ ...carroParaIa(x.v), diferenca: x.motivo as string }))
+        : [];
 
     // Nada bateu: oferece opções na mesma faixa de preço (ou as primeiras do feed).
     const alvo = f.precoMax || null;
@@ -109,7 +153,10 @@ export function buscarNoEstoque(estoque: AltimusVehicle[], f: FiltroEstoque, lim
         ? validos.filter(v => (v.preco || 0) <= alvo * 1.1).sort((a, b) => (b.preco || 0) - (a.preco || 0))
         : validos
     ).slice(0, limite).map(carroParaIa);
-    return { encontrados: [], parecidos, tiposPedidos, semNoTipo: tipos.length > 0 };
+    // "Sem nenhum desse tipo" só quando a loja não tem MESMO nenhum (e não quando o ano/preço/câmbio é que barrou):
+    // antes, "Cruze sedã 2022" virava "nenhum sedã no estoque" com Civic e Fusion no pátio.
+    const semNoTipo = tipos.length > 0 && !validos.some(v => tipos.includes(carroceriaDoModelo(v.marca, v.modelo, v.versao) as Carroceria));
+    return { encontrados: [], parecidos, tiposPedidos, semNoTipo, ...(foraDoFiltro.length ? { foraDoFiltro } : {}) };
 }
 
 export function acharCarro(estoque: AltimusVehicle[], id: string): AltimusVehicle | null {

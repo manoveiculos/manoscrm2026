@@ -15,7 +15,9 @@ export const RESPOSTA_SEGURA =
 const REGRAS: { tipo: Violacao; rx: RegExp }[] = [
     // "48x de R$ 1.200", "parcela de 900", "parcelas ficam em R$ 1.100", "prestação de..."
     { tipo: 'simulou_parcela', rx: /\b\d{1,3}\s*x\s*(de\s*)?(r\$\s*)?\d/i },
-    { tipo: 'simulou_parcela', rx: /\b(parcela|presta[cç][aã]o|mensalidade)s?\s+(de|fica\w*|sai\w*|seria\w*|em|por|a partir de)(\s+(em|de|por|uns?|umas?|tipo|mais ou menos))*\s+(r\$\s*)?\d/i },
+    // Só o NÚMERO de parcelas ("parcela em 48x", "em 60 vezes") não é simulação: a Laura repete o pedido e diz
+    // que o consultor simula (falso positivo de 23/11/2026). Valor de parcela continua barrado.
+    { tipo: 'simulou_parcela', rx: /\b(parcela|presta[cç][aã]o|mensalidade)s?\s+(de|fica\w*|sai\w*|seria\w*|em|por|a partir de)(\s+(em|de|por|uns?|umas?|tipo|mais ou menos))*\s+(r\$\s*)?\d+(?:[.,]\d+)*(?![\d.,])(?!\s*(?:x|vezes)\b)/i },
     { tipo: 'simulou_parcela', rx: /\btaxa\s+(de\s+)?\d+([.,]\d+)?\s*%/i },
     // "seu carro vale R$ 30 mil", "pagamos 25 mil no seu", "avaliação em R$..."
     { tipo: 'avaliou_carro', rx: /\b(seu|teu|o)\s+(carro|ve[ií]culo|usado)\s+(vale|fica|sai|entra|[eé] avaliado)\b/i },
@@ -64,7 +66,8 @@ export function revisarResposta(
     const permitido = (v: number) =>
         precosAnunciados.some(p => Math.abs(p - v) <= p * 0.01) ||
         valoresDoCliente.some(c => Math.abs(c - v) <= Math.max(1, c * 0.01));
-    const valores = t.match(/r\$\s*[\d.,]+(\s*(mil|k)\b)?|\b\d+([.,]\d+)?\s*(mil|k)\b/gi) || [];
+    // "110 mil km" é quilometragem, não preço (falso positivo de 24/11/2026: a Laura confirmava o km da troca)
+    const valores = t.match(/r\$\s*[\d.,]+(\s*(mil|k)\b)?|\b\d+([.,]\d+)?\s*(mil|k)\b(?!\s*(km|quil[oô]metros?|rodad))/gi) || [];
     for (const bruto of valores) {
         const v = parseValorBR(bruto);
         if (v != null && v >= 1000 && !permitido(v)) { violacoes.add('preco_fora_do_anuncio'); break; }

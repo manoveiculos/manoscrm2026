@@ -35,12 +35,15 @@ export function horariosDeVisita(horas: HorarioConfig, feriados: Set<string>, ag
 
 /** Mesmos horários de horariosDeVisita, com a data/hora exata (para gravar na agenda). */
 export function horariosDeVisitaDetalhados(horas: HorarioConfig, feriados: Set<string>, agora = new Date(), quantidade = 3): { rotulo: string; iso: string }[] {
-    const preferidos = [10, 14, 16, 9, 11, 15, 17];
+    // Alterna manhã e tarde entre os dias (antes saía tudo às 10h e quem trabalha de manhã ficava sem opção).
+    const manha = [10, 9, 11, 14, 16, 15, 17];
+    const tarde = [16, 17, 14, 15, 10, 9, 11];
     const out: { rotulo: string; iso: string }[] = [];
     const minimo = agora.getTime() + 2 * 3600 * 1000;
     for (let d = 0; d < 8 && out.length < quantidade; d++) {
         const base = new Date(agora.getTime() - 3 * 3600 * 1000 + d * 86400_000); // "relógio" de SP
         const y = base.getUTCFullYear(), m = base.getUTCMonth(), dd = base.getUTCDate(), wd = base.getUTCDay();
+        const preferidos = out.length % 2 === 0 ? manha : tarde;
         for (const h of preferidos) {
             const slot = new Date(Date.UTC(y, m, dd, h + 3, 0, 0));
             if (slot.getTime() < minimo) continue;

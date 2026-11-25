@@ -357,7 +357,7 @@ test('enviar_fotos no ensaio: só anota as URLs (nada sai)', async () => {
 test('agendar_visita: sem horário lista os livres; com horário valida loja aberta e antecedência', async () => {
     const ctx = contexto(bancoFicticio({}), {}, []);
     const lista = await executarFerramenta('agendar_visita', {}, ctx);
-    assert.equal((lista.saida.horarios as unknown[]).length, 3);
+    assert.equal((lista.saida.horarios as unknown[]).length, 5);   // 23/11: 5 sugestões, manhã e tarde
     assert.equal((await executarFerramenta('agendar_visita', { horario: '2026-11-06T11:00:00-03:00' }, ctx)).erro, true); // < 2 h
     assert.equal((await executarFerramenta('agendar_visita', { horario: '2026-11-07T15:00:00-03:00' }, ctx)).erro, true); // sábado à tarde
     const ok = await executarFerramenta('agendar_visita', { horario: '2026-11-09T10:00:00-03:00' }, ctx);

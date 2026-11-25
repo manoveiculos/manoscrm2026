@@ -59,15 +59,25 @@ function doFeed(v: AltimusVehicle, origem: OrigemCarro, trecho: string): CarroIn
 const LINK = /manosveiculos\.com\.br\/(veiculos?)\/([a-z0-9-]+)/i;
 
 /** Resolve o link do botão do site no feed. "/veiculo/4422425" pelo id; "/veiculos/<slug>/" pelas palavras. */
+// Anúncio da loja no Webmotors: /comprar/honda/civic/1.8-lxl-se-16v-flex-4p-automatico/4-portas/2012-2012/81152662
+const LINK_WEBMOTORS = /webmotors\.com\.br\/comprar\/((?:[a-z0-9.-]+\/){3,4}(?:19|20)\d\d(?:-(?:19|20)\d\d)?)/i;
+
 export function carroDoLinkDoSite(texto: string | null | undefined, estoque: AltimusVehicle[]): CarroInteresse | null {
     const m = (texto || '').match(LINK);
-    if (!m) return null;
+    if (!m) {
+        // Link do Webmotors: quase sempre é o NOSSO anúncio de lá (o cliente clica e cai no WhatsApp da loja).
+        const w = (texto || '').match(LINK_WEBMOTORS);
+        return w ? carroPeloSlug(tokens(w[1].replace(/\//g, '-')), estoque, w[0]) : null;
+    }
     const trecho = m[0];
     if (m[1].toLowerCase() === 'veiculo' && /^\d+$/.test(m[2])) {
         const v = estoque.find(x => String(x.id_externo) === m[2]);
         return v ? doFeed(v, 'link_site', trecho) : null;
     }
-    const slug = tokens(m[2]);
+    return carroPeloSlug(tokens(m[2]), estoque, trecho);
+}
+
+function carroPeloSlug(slug: string[], estoque: AltimusVehicle[], trecho: string): CarroInteresse | null {
     const anosSlug = slug.filter(t => /^(19|20)\d\d$/.test(t)).map(Number);
     let melhor: { v: AltimusVehicle; pontos: number } | null = null;
     for (const v of estoque) {
@@ -156,6 +166,13 @@ export function carrosCitados(
         }
     }
     return out;
+}
+
+/** A loja acabou de perguntar do carro de troca e o cliente não falou de carro que QUER? Então ele está respondendo a troca. */
+export function respondeTroca(ultimaDaLoja: string | null, textoDoCliente: string): boolean {
+    const p = (ultimaDaLoja || '').toLowerCase();
+    if (!/troca|trocar|seu carro|carro (seu|atual|de voc)|dar de entrada|dar na entrada/.test(p)) return false;
+    return !/\b(quero|procuro|busco|interess|gostei|prefiro|queria|to procurando|tô procurando|estou procurando)\b/i.test(textoDoCliente);
 }
 
 /** Título e texto do anúncio que trouxe o lead (utm_params do E04). */
