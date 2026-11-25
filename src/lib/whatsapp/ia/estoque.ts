@@ -82,9 +82,12 @@ export function tipoDeCambio(s: string | null | undefined): 'auto' | 'manual' | 
     return null;
 }
 
-/** A consulta diz algo concreto (marca, modelo ou tipo)? "carro", "um" etc. não contam. */
+/** Palavras da versão que muitos carros têm: nunca bastam para dizer que um carro "bate" com o pedido. */
+const GENERICAS = /^(automatic|automatico|automatica|manual|aut|cvt|mec|mecanico|\d+v|\d+p|\d+x\d+|flex|flexone|tflex|gasolina|alcool|etanol|diesel|turbo|tb|tsi|tdi|tfsi|hibrido|eletrico|cd|cs|ce|cab|cabine|dupla|simples|portas?|completo|basico|vermelh[oa]|pret[oa]|branc[oa]|prata|cinza|azul|verde|amarel[oa]|marrom|bege|dourad[oa]|vinho|laranja|grafite|chumbo|cor|unico|dono|km|motor|versao|sedan|seda|hatch)$/;
+
+/** A consulta diz algo concreto (marca, modelo ou tipo)? "carro", "um", "automático", "flex", cor etc. não contam. */
 export function temCriterio(consulta: string | null | undefined): boolean {
-    return carroceriasPedidas(consulta).length > 0 || palavras(semPalavrasDeCarroceria(consulta)).length > 0;
+    return carroceriasPedidas(consulta).length > 0 || palavras(semPalavrasDeCarroceria(consulta)).some(t => !GENERICAS.test(t));
 }
 
 /** Só carro com marca, modelo e preço entra (o resto a Laura não pode oferecer). */
@@ -106,8 +109,9 @@ export function buscarNoEstoque(estoque: AltimusVehicle[], f: FiltroEstoque, lim
         return null;
     };
     const passaFiltro = (v: AltimusVehicle) => motivoFora(v) === null;
-    // "automático" na consulta não é modelo: sai da busca por palavra (o filtro de câmbio cuida)
-    const tokensModelo = tokens.filter(t => !/^(automatic|automatico|automatica|manual|aut|cvt|mec)$/.test(t));
+    // Câmbio, motor, combustível, cor, portas: não identificam carro. "16V" casava Kia Soul com Fiat Toro (25/11/2026).
+    // O câmbio continua valendo pelo filtro; o resto só não conta como "acerto".
+    const tokensModelo = tokens.filter(t => !GENERICAS.test(t));
     const acertosDe = (v: AltimusVehicle) => {
         const texto = norm(`${v.marca} ${v.modelo} ${v.versao || ''}`).split(/\s+/);
         return tokensModelo.filter(t => texto.some(p => p === t || p.startsWith(t))).length;
