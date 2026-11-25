@@ -113,12 +113,26 @@ export function buscarNoEstoque(estoque: AltimusVehicle[], f: FiltroEstoque, lim
         return tokensModelo.filter(t => texto.some(p => p === t || p.startsWith(t))).length;
     };
 
+    // Frase do anúncio ("Kia Soul 1.6 16V Flex automático vermelho"): "flex", "16v", a cor batem em meio pátio.
+    // Se algum carro bate no MODELO pedido, só ele conta; senão, a marca; senão, qualquer palavra.
+    const bateEm = (campo: string, v: AltimusVehicle) => {
+        const ws = norm(campo === 'modelo' ? v.modelo : v.marca).split(/\s+/).filter(Boolean);
+        return tokensModelo.some(t => ws.some(w => w === t || (t.length >= 3 && w.startsWith(t))));
+    };
+    const focar = <T extends { v: AltimusVehicle; acertos: number }>(lista: T[]): T[] => {
+        const com = lista.filter(x => x.acertos > 0);
+        const porModelo = com.filter(x => bateEm('modelo', x.v));
+        if (porModelo.length) return porModelo;
+        const porMarca = com.filter(x => bateEm('marca', x.v));
+        return porMarca.length ? porMarca : com;
+    };
+
     const pontuados = validos
         .filter(passaFiltro)
         .map(v => ({ v, acertos: acertosDe(v) }));
 
     const encontrados = tokensModelo.length
-        ? pontuados.filter(x => x.acertos > 0)
+        ? focar(pontuados)
             .sort((a, b) => b.acertos - a.acertos || (b.v.ano || 0) - (a.v.ano || 0))
             .slice(0, limite).map(x => carroParaIa(x.v))
         : pontuados.slice(0, limite).map(x => carroParaIa(x.v));
@@ -127,8 +141,8 @@ export function buscarNoEstoque(estoque: AltimusVehicle[], f: FiltroEstoque, lim
 
     // O modelo pedido existe, só não passa no filtro (câmbio, ano, preço): a Laura precisa saber.
     const foraDoFiltro = tokensModelo.length
-        ? validos.map(v => ({ v, acertos: acertosDe(v), motivo: motivoFora(v) }))
-            .filter(x => x.acertos > 0 && x.motivo)
+        ? focar(validos.map(v => ({ v, acertos: acertosDe(v), motivo: motivoFora(v) })))
+            .filter(x => x.motivo)
             .sort((a, b) => b.acertos - a.acertos || (b.v.ano || 0) - (a.v.ano || 0))
             .slice(0, 3).map(x => ({ ...carroParaIa(x.v), diferenca: x.motivo as string }))
         : [];

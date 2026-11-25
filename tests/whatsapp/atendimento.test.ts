@@ -129,3 +129,58 @@ test('horários de visita: alternam manhã e tarde', () => {
     const horas = det.map(h => Number(/às (\d+)h/.exec(h.rotulo)?.[1]));
     assert.ok(horas.some(h => h < 12) && horas.some(h => h >= 14), horas.join(','));
 });
+
+// ── 25/11/2026: Kia Soul, filtro de regras e follow-up ──
+import { revisarResposta } from '@/lib/laura/guardrails';
+import { conversaEncerrada, decidirFollowup, instrucaoDoToque, pediuAviso, type MsgFollowup } from '@/lib/whatsapp/ia/followup';
+
+test('frase do anúncio do Facebook acha o Kia Soul e não traz carro só por "flex"/"16V"', () => {
+    const est = [...ESTOQUE,
+        carro({ id_externo: '9', marca: 'Kia', modelo: 'Soul', versao: '1.6/ 1.6 16V FLEX Aut.', ano: 2016, preco: 76900 }),
+        carro({ id_externo: '10', marca: 'Toyota', modelo: 'Corolla', versao: 'Cross GR-S 2.0 16V Flex Aut.', ano: 2024, preco: 159900 })];
+    const r = buscarNoEstoque(est, { consulta: 'Kia Soul 1.6 16V Flex automático vermelho 2015/2016', cambio: 'automático', anoMin: 2015 });
+    assert.deepEqual(r.encontrados.map(c => c.id), ['9']);
+});
+
+test('filtro: "110 mil km" não é preço; "parcela em 48x" sem valor não é simulação', () => {
+    assert.equal(revisarResposta('Anotei seu Fiesta 2016. Só confirmando: ele tem 110 mil km?', [76900], []).ok, true);
+    assert.equal(revisarResposta('A simulação da parcela em 48x é o consultor que faz na loja.', [76900], []).ok, true);
+    assert.equal(revisarResposta('A parcela fica em R$ 1.200 em 48x.', [76900], []).ok, false);
+    assert.equal(revisarResposta('Esse sai por 50 mil.', [76900], []).ok, false);
+});
+
+const f = (autor: string, h: number, texto: string): MsgFollowup => ({ autor, criadaEm: new Date(T0 + h * 3600_000).toISOString(), texto });
+const entrada = (msgs: MsgFollowup[], extra: object = {}) => ({
+    status: 'ia', iaSilenciadaAte: null, msgs, enviadosDepoisDaAncora: [], leadFechado: false, temVisitaMarcada: false,
+    lojaAberta: true, agora: new Date(T0 + 30 * 3600_000), ...extra,
+});
+
+test('follow-up: "Não obrigado 👍🏼" e "Já deu certo obrigado" param os toques', () => {
+    for (const fala of ['Não  obrigado 👍🏼', 'Já deu certo obrigado', 'já resolvi, valeu']) {
+        const d = decidirFollowup(entrada([f('laura', 0, 'Tenho estes. Algum te interessa?'), f('cliente', 1, fala), f('laura', 2, 'Tranquilo! Que tipo de carro você procura?')]));
+        assert.equal(d.acao, 'pular', fala);
+    }
+});
+
+test('follow-up: conversa encerrada com despedida não recebe toque; "Valeu, vou pensar" recebe', () => {
+    const fim = [f('laura', 0, 'Valeu, Élida! Se mudar de ideia é só chamar.'), f('cliente', 1, 'Igualmente!!'), f('laura', 1.1, 'Até, Élida! Qualquer coisa é só chamar.')];
+    assert.equal(conversaEncerrada(fim), true);
+    assert.deepEqual(decidirFollowup(entrada(fim)), { acao: 'pular', motivo: 'conversa encerrada com despedida' });
+    const pensar = [f('laura', 0, 'O Fox está por R$ 41.900.'), f('cliente', 1, 'Valeu, vou pensar'), f('laura', 1.1, 'Combinado, fico à disposição.')];
+    assert.equal(conversaEncerrada(pensar), false);
+});
+
+test('follow-up: na lista de espera e pediu "me avisa" → não insiste', () => {
+    const msgs = [f('laura', 0, 'Ranger não tenho agora.'), f('cliente', 1, 'Quando tiver me avisa'), f('laura', 1.1, 'Anotado! Com quem eu falo?')];
+    assert.equal(pediuAviso(msgs), true);
+    assert.equal(decidirFollowup(entrada(msgs, { naListaDeEspera: true })).acao, 'pular');
+    assert.equal(decidirFollowup(entrada(msgs, { naListaDeEspera: false })).acao, 'enviar');
+});
+
+test('follow-up: lead que nunca respondeu não recebe "ficou alguma dúvida"; carro no estoque entra no texto', () => {
+    const t = instrucaoDoToque({ etapa: 1, nome: null, carro: null, contexto: 'x', semRespostaDoCliente: true });
+    assert.match(t, /NÃO pergunte se "ficou alguma dúvida"/);
+    const e = instrucaoDoToque({ etapa: 2, nome: 'Bortolaz', carro: 'Cruze 2018', contexto: 'x', noEstoqueAgora: ['Chevrolet Cruze Sport LTZ · 2018 · R$ 94.900'], toquesAnteriores: ['Oi, Bortolaz! Passando só pra saber...'] });
+    assert.match(e, /No estoque AGORA/);
+    assert.match(e, /não repita a abertura/);
+});
