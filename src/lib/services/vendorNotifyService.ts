@@ -1,10 +1,5 @@
 import { createClient } from '@/lib/supabase/admin';
-import { comRotaPorNome } from '@/lib/avisos/webhookVendedor';
-import { registrarAviso } from '@/lib/avisos/registro';
-
-const N8N_WEBHOOK_URL =
-    process.env.N8N_VENDOR_WEBHOOK_URL ||
-    'https://n8n.drivvoo.com/webhook/chamadavendedorcrm';
+import { enviarAvisoVendedor } from '@/lib/avisos/webhookVendedor';
 
 export type NotifyType = 'lead_arrival' | 'morning_brief' | 'sla_warning' | 'hot_leak_alert';
 
@@ -41,58 +36,21 @@ function classificationEmoji(c?: string): string {
     return '❄️';
 }
 
+/** Envia o aviso direto pelo WhatsApp (sem n8n). enviarAvisoVendedor já grava o resultado em avisos_enviados. */
 async function sendToWebhook(payload: NotifyPayload): Promise<void> {
-    // histórico do admin (/admin/avisos): grava o resultado de TODO aviso, ok ou falha
-    const registrar = (ok: boolean, erro?: string) => registrarAviso({
-        tipo: payload.type, consultorNome: payload.consultant_name, telefone: payload.consultant_phone, mensagem: payload.message,
-        ok, erro, leadRef: payload.meta?.lead_id != null ? String(payload.meta.lead_id) : null, origem: 'vendorNotifyService', meta: payload.meta,
+    const r = await enviarAvisoVendedor({
+        nome: payload.consultant_name, telefone: payload.consultant_phone, tipo: payload.type, mensagem: payload.message,
+        leadRef: payload.meta?.lead_id != null ? String(payload.meta.lead_id) : null, origem: 'vendorNotifyService', meta: payload.meta,
     });
+    if (r.ok) return;
+    console.warn('[vendorNotify] envio falhou:', r.erro);
+    // Log de falha no banco (Auditoria Forense)
     try {
-        const res = await fetch(N8N_WEBHOOK_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            // o n8n direciona pelo nome: vendedor_lower + mensagem (ver webhookVendedor.ts)
-            body: JSON.stringify(comRotaPorNome(payload)),
-            signal: AbortSignal.timeout(8000),
+        await createClient().from('notification_failures').insert({
+            lead_id: payload.meta?.lead_id, channel: `whatsapp_${payload.type}`, payload, error_message: r.erro || 'falha no envio', resolved: false,
         });
-        if (res.ok) await registrar(true);
-        if (!res.ok) {
-            const errorText = await res.text().catch(() => '');
-            await registrar(false, `HTTP ${res.status}`);
-            console.warn(`[vendorNotify] webhook ${res.status}`, errorText);
-            
-            // Log de falha no banco (Auditoria Forense)
-            try {
-                const admin = createClient();
-                await admin.from('notification_failures').insert({
-                    lead_id: payload.meta?.lead_id,
-                    channel: `n8n_${payload.type}`,
-                    payload: payload,
-                    error_message: `HTTP ${res.status}: ${errorText}`,
-                    resolved: false
-                });
-            } catch (dbErr) {
-                console.error('[vendorNotify] Erro ao gravar falha no banco:', dbErr);
-            }
-        }
-    } catch (err: any) {
-        const msg = err?.message || 'Erro de conexão/timeout';
-        console.warn('[vendorNotify] webhook error:', msg);
-        await registrar(false, msg);
-
-        // Log de falha no banco (Auditoria Forense)
-        try {
-            const admin = createClient();
-            await admin.from('notification_failures').insert({
-                lead_id: payload.meta?.lead_id,
-                channel: `n8n_${payload.type}`,
-                payload: payload,
-                error_message: msg,
-                resolved: false
-            });
-        } catch (dbErr) {
-            console.error('[vendorNotify] Erro ao gravar falha no banco:', dbErr);
-        }
+    } catch (dbErr) {
+        console.error('[vendorNotify] Erro ao gravar falha no banco:', dbErr);
     }
 }
 

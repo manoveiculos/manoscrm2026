@@ -1,7 +1,7 @@
 // src/lib/avisos/cobrancaRodada.ts — roda a cobrança dos consultores (SÓ SERVIDOR)
 //
 // Chamado por /api/cron/wa-cobranca (a cada 5 min). Liga com WA_COBRANCA_ATIVA=true.
-// Manda pelo webhook único (chamadavendedorcrm), registra em avisos_enviados (tela /admin/avisos)
+// Manda direto pelo WhatsApp (Evolution), registra em avisos_enviados (tela /admin/avisos)
 // e só avisa telefone JÁ CONFIRMADO por código (phone_verified_at). Tetos para não virar spam:
 // 3 avisos por rodada, 15 s entre eles.
 
