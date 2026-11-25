@@ -1,11 +1,6 @@
 import { createClient } from '@/lib/supabase/admin';
-import { comRotaPorNome } from '@/lib/avisos/webhookVendedor';
-import { registrarAviso } from '@/lib/avisos/registro';
+import { enviarAvisoVendedor } from '@/lib/avisos/webhookVendedor';
 import { pickNextConsultant } from './consultantService';
-
-const N8N_WEBHOOK_URL =
-    process.env.N8N_VENDOR_WEBHOOK_URL ||
-    'https://n8n.drivvoo.com/webhook/chamadavendedorcrm';
 
 const HOT_THRESHOLD = 60;
 const WARNING_AFTER_HOURS = 24;
@@ -51,31 +46,11 @@ async function pushToVendor(
     meta: Record<string, any> = {}
 ): Promise<void> {
     if (!consultantPhone) return;
-    try {
-        const res = await fetch(N8N_WEBHOOK_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(comRotaPorNome({
-                consultant_name: consultantName,
-                consultant_phone: onlyDigits(consultantPhone),
-                type,
-                message,
-                meta,
-            })),
-            signal: AbortSignal.timeout(8000),
-        });
-        if (!res.ok) console.warn('[reassignment] push falhou', res.status);
-        await registrarAviso({
-            tipo: type, consultorNome: consultantName, telefone: consultantPhone, mensagem: message, ok: res.ok,
-            erro: res.ok ? null : `HTTP ${res.status}`, leadRef: meta.lead_id != null ? String(meta.lead_id) : null, origem: 'reassignmentService', meta,
-        });
-    } catch (err: any) {
-        console.warn('[reassignment] push erro:', err?.message);
-        await registrarAviso({
-            tipo: type, consultorNome: consultantName, telefone: consultantPhone, mensagem: message, ok: false,
-            erro: err?.message || 'falha de rede', leadRef: meta.lead_id != null ? String(meta.lead_id) : null, origem: 'reassignmentService', meta,
-        });
-    }
+    const r = await enviarAvisoVendedor({
+        nome: consultantName, telefone: consultantPhone, tipo: type, mensagem: message,
+        leadRef: meta.lead_id != null ? String(meta.lead_id) : null, origem: 'reassignmentService', meta,
+    });
+    if (!r.ok) console.warn('[reassignment] push falhou', r.erro);
 }
 
 // ════════════════════════════════════════════════════════════════

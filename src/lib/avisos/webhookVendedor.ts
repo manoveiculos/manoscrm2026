@@ -1,23 +1,19 @@
-// src/lib/avisos/webhookVendedor.ts — aviso no WhatsApp do consultor pelo webhook do n8n
+// src/lib/avisos/webhookVendedor.ts — aviso no WhatsApp do consultor (SÓ SERVIDOR)
 //
-// Decisão do Alexandre (11/11/2026): TODO aviso a consultor (lead novo, cliente pediu humano,
-// cobrança, resumo do dia) sai pelo MESMO webhook, e o n8n direciona só pelo NOME:
-// o Switch do fluxo lê `vendedor_lower` (sergio | victor | wilson | alexandre) e manda `mensagem`.
+// Decisão do Alexandre (25/11/2026): o n8n SAI dos avisos. Todo aviso a consultor (lead novo, fila, cobrança,
+// cliente voltou, resumo do dia) sai direto do CRM pela Evolution, para o telefone confirmado de cada consultor,
+// e cada tentativa fica em avisos_enviados com o resultado REAL do envio (antes "enviado" só dizia que o n8n
+// respondeu 200, e o Sergio/Victor ficavam sem receber).
 //
-// O corpo leva os campos do fluxo (vendedor, vendedor_lower, mensagem) e também os que o CRM
-// já mandava (consultant_name, type, message, meta), para nada antigo quebrar.
+// Instância: EVOLUTION_AVISOS_INSTANCE (+ EVOLUTION_AVISOS_TOKEN); sem elas usa a EVOLUTION_INSTANCE_NAME de sempre.
+// As funções corpoDoAviso/comRotaPorNome ficam só por compatibilidade (testes); o envio não usa mais webhook.
 //
 // Telefone: sempre 55 + DDD + número, só dígitos (ex.: 5547988467855), em `telefone` e em
 // `consultant_phone`. Número que não fecha nesse formato vai vazio (nunca meio número).
 
 import { normalizarTelefoneBR } from '@/lib/telefone';
+import { sendWhatsApp } from '@/lib/services/whatsappSender';
 import { registrarAviso } from './registro';
-
-export const WEBHOOK_VENDEDOR_PADRAO = 'https://n8n.drivvoo.com/webhook/chamadavendedorcrm';
-
-export function urlWebhookVendedor(): string {
-    return (process.env.N8N_VENDOR_WEBHOOK_URL || WEBHOOK_VENDEDOR_PADRAO).trim();
-}
 
 /** Telefone do consultor no formato do webhook: "5547988467855", ou "" se não for válido. */
 export function telefoneDoAviso(bruto: string | null | undefined): string {
@@ -66,21 +62,22 @@ export function comRotaPorNome<T extends { consultant_name?: string | null; cons
     };
 }
 
-/** Envia o aviso e deixa registrado no histórico do admin. Nunca lança: devolve ok/erro. */
+/** Envia o aviso direto pela Evolution e deixa registrado no histórico do admin. Nunca lança: devolve ok/erro. */
 export async function enviarAvisoVendedor(a: AvisoVendedor & { consultorId?: string | null; leadRef?: string | null; conversaId?: string | null; origem?: string | null }): Promise<{ ok: boolean; erro?: string }> {
     if (!chaveDoNome(a.nome) || !a.mensagem.trim()) return { ok: false, erro: 'aviso sem nome ou sem mensagem' };
+    const telefone = telefoneDoAviso(a.telefone);
     let r: { ok: boolean; erro?: string };
-    try {
-        const segredo = (process.env.N8N_VENDOR_WEBHOOK_SECRET || '').trim();
-        const res = await fetch(urlWebhookVendedor(), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', ...(segredo ? { 'x-manos-secret': segredo } : {}) },
-            body: JSON.stringify(corpoDoAviso(a)),
-            signal: AbortSignal.timeout(8000),
+    if (!telefone) {
+        r = { ok: false, erro: 'telefone do consultor ausente ou inválido' };
+    } else {
+        const instancia = (process.env.EVOLUTION_AVISOS_INSTANCE || '').replace(/"/g, '').trim();
+        const token = (process.env.EVOLUTION_AVISOS_TOKEN || '').replace(/"/g, '').trim();
+        const x = await sendWhatsApp({
+            toPhone: telefone, message: a.mensagem, kind: 'vendor_alert', consultantId: a.consultorId ?? undefined,
+            leadId: a.leadRef ?? undefined, skipDedup: true,
+            ...(instancia ? { evolutionInstance: { name: instancia, token: token || undefined } } : {}),
         });
-        r = res.ok ? { ok: true } : { ok: false, erro: `HTTP ${res.status}` };
-    } catch (e) {
-        r = { ok: false, erro: e instanceof Error ? e.message : 'falha de rede' };
+        r = x.ok ? { ok: true } : { ok: false, erro: (x.error || 'falha no envio').slice(0, 300) };
     }
     await registrarAviso({
         tipo: a.tipo, consultorNome: a.nome, consultorId: a.consultorId, telefone: a.telefone, mensagem: a.mensagem,
