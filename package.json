@@ -25,7 +25,7 @@
     "test:followup": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/whatsapp/followup.test.ts",
     "test:time-agentes": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/whatsapp/agentes.test.ts",
     "test:telefone": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/telefone/telefone.test.ts",
-    "test:avisos": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/telefone/avisos.test.ts",
+    "test:avisos": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/telefone/avisos.test.ts tests/telefone/comprador.test.ts",
     "test:cobranca": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/telefone/cobranca.test.ts",
     "test:reserva": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/whatsapp/reserva.test.ts",
     "test:triagem": "node --experimental-strip-types --no-warnings --import ./tests/registrar-alias.mjs --test tests/whatsapp/triagem.test.ts",

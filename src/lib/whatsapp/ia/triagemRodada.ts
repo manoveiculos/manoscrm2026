@@ -17,6 +17,7 @@ import { lerConfigIa } from './config';
 import { reservar, soltar, type ColunaReserva } from './reserva';
 import { lerModoDistribuicao } from '@/lib/services/modoDistribuicao';
 import { classificarConversa } from './classificadorRodada';
+import { encaminharParaComprador } from '@/lib/avisos/compradorRodada';
 import { claude, MODELO_PADRAO } from './motor';
 import { LAURA_CRM_PROMPT } from './prompt';
 import { custoUsd, somarUso, type UsoTokens } from './regras';
@@ -55,6 +56,19 @@ export async function liberarDaTriagem(
         const { data: conv } = await supabase.from('wa_conversas').select('id').eq('lead_uid', leadUid).limit(1).maybeSingle();
         if (conv?.id) await Promise.race([classificarConversa(supabase, conv.id as string, { agora }), new Promise(r => setTimeout(r, 25_000))]);
     } catch { /* segue sem classificar */ }
+    // Cliente que quer VENDER o carro dele (já com as informações recolhidas pela Laura): vai direto ao Felipe Ledra, sem fila.
+    try {
+        const { data: cat } = await supabase.from('lead_classificacoes').select('categoria').eq('lead_uid', leadUid).order('criado_em', { ascending: false }).limit(1).maybeSingle();
+        if (cat?.categoria === 'vendedor_de_carro') {
+            const resumoCompra = info.resumoDaLaura ?? null;
+            if (await encaminharParaComprador(supabase, leadUid, { nome: info.nome, carro: info.interesse, resumo: resumoCompra, agora })) {
+                const resumo = resumoParaConsultor({ motivo, quando: agora, nome: info.nome ?? null, interesse: info.interesse ?? null, resumoDaLaura: resumoCompra, contatado: Boolean(info.contatado), respondeu: Boolean(info.respondeu), lembreteIgnorado: info.lembreteIgnorado });
+                await supabase.from('wa_triagem').update({ liberado_em: agora.toISOString(), motivo, resumo }).eq('lead_uid', leadUid);
+                await gravarResumoNoLead(supabase, leadUid, resumo, agora);
+                return true;
+            }
+        }
+    } catch (e) { console.warn('[triagem] encaminhar ao comprador falhou, segue para a fila:', msgErro(e)); }
     // Modo fila: o lead entra na fila de espera (todos avisados, um atende). Modo rodízio: 'aguardando' (o motor distribui).
     const destino = (await lerModoDistribuicao(supabase)) === 'fila' ? 'fila_espera' : 'aguardando';
     const { data: lib } = await supabase.from('lead_distribuicao')
