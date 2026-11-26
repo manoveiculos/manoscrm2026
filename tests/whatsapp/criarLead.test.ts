@@ -21,7 +21,7 @@ type Linha = Record<string, any>;
 
 function banco(init: { conversas: Linha[]; leads?: Linha[]; msgs?: Linha[]; falhaInsertUnico?: boolean }) {
     const leads = init.leads || [];
-    const log = { inserts: 0, erros: [] as Linha[], vincular: 0, updates: [] as Linha[] };
+    const log = { inserts: 0, erros: [] as Linha[], vincular: 0, updates: [] as Linha[], upserts: [] as Linha[] };
     const from = (tabela: string) => {
         let op = 'select'; let dados: Linha = {};
         const f: ((r: Linha) => boolean)[] = [];
@@ -30,6 +30,7 @@ function banco(init: { conversas: Linha[]; leads?: Linha[]; msgs?: Linha[]; falh
             select: () => b, order: () => b, limit: () => b,
             insert: (d: Linha) => { op = 'insert'; dados = d; return b; },
             update: (d: Linha) => { op = 'update'; dados = d; return b; },
+            upsert: (d: Linha) => { op = 'upsert'; dados = d; log.upserts.push({ tabela, dados: d }); return b; },
             eq: (c: string, v: unknown) => { f.push(r => r[c] === v); return b; },
             maybeSingle: async () => ({ data: rows()[0] ?? null, error: null }),
             single: async () => {
@@ -130,8 +131,8 @@ test('criação simultânea (índice único falha): usa o lead que o outro criou
     assert.equal(b.leads.length, 1);
 });
 
-test('fornecedor / vaga / quer vender: não vira lead de venda e fica registrado', async () => {
-    for (const [texto, tipo] of [['Quero apresentar meu trabalho de pintura automotiva', 'fornecedor'], ['tem vaga de emprego?', 'emprego'], ['quero vender meu carro', 'vender_carro']] as const) {
+test('fornecedor / vaga: não vira lead de venda e fica registrado', async () => {
+    for (const [texto, tipo] of [['Quero apresentar meu trabalho de pintura automotiva', 'fornecedor'], ['tem vaga de emprego?', 'emprego']] as const) {
         const b = banco({
             conversas: [{ id: 'c1', telefone_key: '47988880002', nome_contato: 'X', lead_uid: null }],
             msgs: [{ conversa_id: 'c1', autor: 'cliente', texto }],
@@ -167,4 +168,20 @@ test('telefone inválido e conversa inexistente são ignorados', async () => {
     const b = banco({ conversas: [{ id: 'c1', telefone_key: '123', nome_contato: null, lead_uid: null }] });
     assert.equal((await garantirLead(b.admin, 'c1', deps)).acao, 'ignorado');
     assert.equal((await garantirLead(b.admin, 'zzz', deps)).acao, 'ignorado');
+});
+
+test('quero vender meu carro: vira lead, NÃO entra na roleta e fica na triagem para sair ao Felipe', async () => {
+    const b = banco({
+        conversas: [{ id: 'c1', telefone_key: '47988880003', nome_contato: 'Marcos', lead_uid: null }],
+        msgs: [{ conversa_id: 'c1', autor: 'cliente', texto: 'quero vender meu carro' }],
+    });
+    distribuiu.length = 0;
+    const r = await garantirLead(b.admin, 'c1', deps);
+    assert.equal(r.acao, 'criado');
+    assert.equal((r as { distribuicao: string | null }).distribuicao, 'triagem_laura');
+    assert.equal(b.leads.length, 1);
+    assert.equal(b.leads[0].interesse, 'Quer vender o carro dele');
+    assert.equal(distribuiu.length, 0);
+    assert.equal(b.log.upserts[0].dados.status, 'triagem_laura');
+    assert.equal(b.log.upserts[0].dados.lead_uid, `leads_distribuicao_crm_26:${b.leads[0].id}`);
 });
