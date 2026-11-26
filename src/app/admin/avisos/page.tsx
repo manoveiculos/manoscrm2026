@@ -27,6 +27,18 @@ export default function AvisosPage() {
     const [dados, setDados] = useState<Resposta | null>(null);
     const [carregando, setCarregando] = useState(true);
     const [erro, setErro] = useState<string | null>(null);
+    const [testando, setTestando] = useState(false);
+    const [teste, setTeste] = useState<{ nome: string; telefone: string | null; ok: boolean; erro?: string }[] | null>(null);
+    const rodarTeste = async () => {
+        if (!window.confirm('Enviar uma mensagem de teste para o WhatsApp de cada consultor agora?')) return;
+        setTestando(true); setTeste(null);
+        try {
+            const r = await fetch('/api/admin/avisos/teste', { method: 'POST' });
+            const j = await r.json();
+            if (!r.ok || !j.success) setErro(j.error || 'Não foi possível enviar o teste.'); else setTeste(j.resultados);
+        } catch { setErro('Não foi possível enviar o teste.'); }
+        setTestando(false); void carregar();
+    };
 
     const consulta = useMemo(() => {
         const p = new URLSearchParams({ semana: semanaRef });
@@ -67,8 +79,20 @@ export default function AvisosPage() {
                     <p className="text-[12px] text-white/50">Tudo que o CRM mandou aos consultores pelo WhatsApp, guardado para a reunião semanal.</p>
                 </div>
                 <button type="button" onClick={() => void carregar()} aria-label="Atualizar" className="h-11 w-11 rounded-xl bg-white/[0.06] flex items-center justify-center text-white/70"><RefreshCw size={16} className={carregando ? 'animate-spin' : ''} /></button>
+                <button type="button" onClick={() => void rodarTeste()} disabled={testando} className="min-h-[44px] rounded-xl bg-emerald-500/15 text-emerald-300 px-4 text-[13px] font-black disabled:opacity-50">{testando ? 'Enviando…' : 'Enviar teste a todos'}</button>
                 <a href={csv} className="min-h-[44px] rounded-xl bg-white text-black px-4 text-[13px] font-black flex items-center gap-2"><Download size={15} /> Baixar planilha</a>
             </header>
+
+            {teste && (
+                <div className="rounded-2xl bg-white/[0.04] p-4 space-y-1.5" role="status">
+                    <p className="text-[13px] font-black text-white">Resultado do teste</p>
+                    {teste.map(t => (
+                        <p key={t.nome} className={`text-[13px] ${t.ok ? 'text-emerald-300' : 'text-red-300'}`}>
+                            {t.ok ? '✅' : '❌'} {t.nome} ({t.telefone}){t.ok ? ' — enviado, confirme se chegou no celular' : ` — ${t.erro}`}
+                        </p>
+                    ))}
+                </div>
+            )}
 
             <div className="flex items-center gap-2">
                 <button type="button" onClick={() => mover(-1)} aria-label="Semana anterior" className="h-11 w-11 rounded-xl bg-white/[0.06] flex items-center justify-center"><ChevronLeft size={18} /></button>
