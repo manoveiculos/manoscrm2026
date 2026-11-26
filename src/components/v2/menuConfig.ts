@@ -104,6 +104,8 @@ export const NAV_ITEMS: NavItem[] = [
     { id: 'saude', label: 'Saúde', icon: Activity, href: '/admin/health', grupo: 'gestao', nivel: 'admin' },
     { id: 'sdr-bench', label: 'SDR Bench', icon: Bot, href: '/admin/sdr-bench', grupo: 'gestao', nivel: 'admin', oculto: true },
     { id: 'configuracoes', label: 'Configurações', icon: SlidersHorizontal, href: '/admin/config', grupo: 'gestao', nivel: 'admin' },
+    // Espelho só leitura de um número do WhatsApp (pedido do Alexandre, 26/11/2026)
+    { id: 'whatsapp-espelho', label: 'WhatsApp', icon: MessageCircle, href: '/admin/whatsapp', grupo: 'gestao', nivel: 'admin' },
     { id: 'scooters', label: 'Scooters', icon: Bike, href: '/admin/scooters', grupo: 'gestao', nivel: 'admin', exclusivo: 'alexandre', oculto: true },
 
     // ── Marketing ─────────────────────────────────────────────────────────
