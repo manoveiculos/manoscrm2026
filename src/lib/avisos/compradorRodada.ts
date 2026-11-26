@@ -7,6 +7,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { fonteDoUid, TABELA_CRM } from '@/lib/whatsapp/ia/fonteLead';
+import { classificarContato } from '@/lib/whatsapp/criarLead';
 import { enviarAvisoVendedor } from './webhookVendedor';
 import { escolherComprador, textoCompra } from './comprador';
 
@@ -43,4 +44,13 @@ export async function encaminharParaComprador(
         meta: { categoria: 'vendedor_de_carro' },
     });
     return true;
+}
+
+/** O cliente disse com todas as letras que quer vender o carro? (rede de segurança se o Classificador não leu a conversa) */
+export async function disseQueQuerVender(supabase: SupabaseClient, leadUid: string): Promise<boolean> {
+    const { data: conv } = await supabase.from('wa_conversas').select('id').eq('lead_uid', leadUid).limit(1).maybeSingle();
+    if (!conv?.id) return false;
+    const { data: msgs } = await supabase.from('wa_mensagens').select('texto, legenda, transcricao')
+        .eq('conversa_id', conv.id).eq('autor', 'cliente').order('criada_em', { ascending: true }).limit(6);
+    return classificarContato((msgs || []).map(m => (m.texto || m.legenda || m.transcricao) as string | null)).tipo === 'vender_carro';
 }

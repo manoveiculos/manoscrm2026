@@ -22,7 +22,7 @@ const norm = (s: string | null | undefined) =>
     (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim();
 
 const REGRAS: { tipo: Exclude<TipoContato, 'cliente'>; rx: RegExp }[] = [
-    // quer VENDER o carro dele (não comprar): vai para a fila de compra, não para a de venda
+    // quer VENDER o carro dele (não comprar): vira lead, mas vai ao Felipe Ledra (comprador), não à roleta dos vendedores
     { tipo: 'vender_carro', rx: /\b(quero|gostaria de|queria|pretendo|vim|estou querendo|to querendo)\s+(de\s+)?(vender|negociar)\s+(o\s+|um\s+|uma\s+|meu\s+|minha\s+)?(carro|moto|veiculo|caminhonete|camionete)/ },
     { tipo: 'vender_carro', rx: /\b(voces|vcs|a loja)\s+(compram|compra|pagam|avaliam)\s+(carro|moto|veiculo)/ },
     { tipo: 'vender_carro', rx: /\bvendo\s+(meu|minha|um|uma)\s+(carro|moto|veiculo|caminhonete)/ },
@@ -50,7 +50,7 @@ export type ResultadoLead =
     | { acao: 'ja_tinha'; leadUid: string; subiu: boolean }
     | { acao: 'vinculado'; leadUid: string | null }
     | { acao: 'criado'; leadUid: string; distribuicao: string | null }
-    | { acao: 'outra_fila'; tipo: Exclude<TipoContato, 'cliente'> }
+    | { acao: 'outra_fila'; tipo: Exclude<TipoContato, 'cliente' | 'vender_carro'> }
     | { acao: 'ignorado'; motivo: string };
 
 export interface DepsLead {
@@ -120,13 +120,14 @@ export async function garantirLead(admin: SupabaseClient, conversaId: string, de
         .eq('conversa_id', conversaId).eq('autor', 'cliente')
         .order('criada_em', { ascending: true }).limit(4);
     const c = classificarContato((msgs || []).map(m => m.texto || m.legenda || m.transcricao));
-    if (c.tipo !== 'cliente') {
+    const querVender = c.tipo === 'vender_carro';
+    if (c.tipo !== 'cliente' && !querVender) {
         await admin.from('webhook_errors').insert({
             source: 'wa_triagem',
             error_message: `contato classificado como ${c.tipo}: não virou lead de venda`.slice(0, 1000),
             payload: { conversa_id: conversaId, tipo: c.tipo, trecho: c.trecho },
         });
-        return { acao: 'outra_fila', tipo: c.tipo };
+        return { acao: 'outra_fila', tipo: c.tipo as Exclude<TipoContato, 'cliente' | 'vender_carro'> };
     }
 
     // 3. Cria o lead (sem dono: a roleta distribui e avisa o consultor)
@@ -137,6 +138,7 @@ export async function garantirLead(admin: SupabaseClient, conversaId: string, de
             telefone,
             status: 'received',
             origem: 'WhatsApp',
+            ...(querVender ? { interesse: 'Quer vender o carro dele' } : {}),
             ai_classification: 'warm',
             ai_score: 50,
             assigned_consultant_id: null,
@@ -155,6 +157,15 @@ export async function garantirLead(admin: SupabaseClient, conversaId: string, de
     const uid = await vincular(admin, conversaId);
 
     let distribuicao: string | null = null;
+    if (querVender) {
+        // Quer VENDER o carro dele: não entra na roleta dos vendedores. Fica na triagem da Laura (ela recolhe os dados do carro)
+        // e, ao sair dela, vai direto ao Felipe Ledra (liberarDaTriagem → encaminharParaComprador).
+        await admin.from('lead_distribuicao').upsert({
+            lead_uid: `leads_distribuicao_crm_26:${id}`, table_name: 'leads_distribuicao_crm_26', native_id: String(id),
+            status: 'triagem_laura', assigned_consultant_id: null, atualizado_em: new Date().toISOString(),
+        }, { onConflict: 'lead_uid' });
+        return { acao: 'criado', leadUid: uid ?? `leads_distribuicao_crm_26:${id}`, distribuicao: 'triagem_laura' };
+    }
     try {
         const r = await (deps.distribuir ?? distribuirLead)('leads_distribuicao_crm_26', String(id));
         distribuicao = r.status;
