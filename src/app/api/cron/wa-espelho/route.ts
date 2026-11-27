@@ -31,7 +31,7 @@ export async function GET(request: Request) {
         if (!r.ok) throw new Error(r.erro || 'falha na sincronização');
         return {
             result: NextResponse.json(r),
-            metrics: { novas: r.novas, importadas: r.importadas, paginas: r.paginasLidas, importacao_pagina: r.importacaoPagina },
+            metrics: { novas: r.novas, recuperadas: r.recuperadas, importadas: r.importadas, paginas: r.paginasLidas, importacao_pagina: r.importacaoPagina },
         };
     });
 }

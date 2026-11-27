@@ -17,6 +17,27 @@ import { eventosDosRegistros, separarEventos, type ConfigEspelho } from './mapea
 export const TAMANHO_PAGINA = 200;
 const TIMEOUT_EVOLUTION_MS = 25_000;
 const MAX_PAGINAS_NOVAS = 15;
+/** Sempre lê pelo menos estas páginas: mensagem que chega com atraso cai um pouco abaixo do topo. */
+const MIN_PAGINAS_NOVAS = 3;
+/**
+ * Revarredura (a cada 15 min): relê as últimas 48 h de mensagens da Evolution.
+ * Quando uma instância fica travada e volta (restart, novo QR), o WhatsApp entrega
+ * as mensagens atrasadas com o horário ORIGINAL, misturadas com as novas. Elas
+ * caem abaixo de mensagens que já estão no banco e a etapa "novas" pararia antes
+ * de chegar nelas. A revarredura pega essas. Repetidas são ignoradas pelo banco.
+ */
+const JANELA_REVARREDURA_S = 48 * 3600;
+const MAX_PAGINAS_REVARREDURA = 80;
+const INTERVALO_REVARREDURA_MIN = 15;
+
+/** Menor e maior messageTimestamp (segundos) de uma página da Evolution. */
+export function faixaDeHorario(registros: unknown[]): { min: number; max: number } | null {
+    const ts = registros
+        .map(r => Number((r as { messageTimestamp?: unknown })?.messageTimestamp))
+        .filter(n => Number.isFinite(n) && n > 0)
+        .map(n => (n > 1e12 ? Math.floor(n / 1000) : n));
+    return ts.length ? { min: Math.min(...ts), max: Math.max(...ts) } : null;
+}
 
 export interface PaginaEvolution {
     registros: unknown[];
@@ -87,6 +108,8 @@ export async function gravarPagina(admin: SupabaseClient, cfg: ConfigEspelho, re
 export interface ResultadoSync {
     ok: boolean;
     novas: number;
+    /** Mensagens atrasadas achadas pela revarredura das últimas 48 h. */
+    recuperadas: number;
     importadas: number;
     paginasLidas: number;
     importacaoPagina: number;
@@ -103,7 +126,7 @@ interface EstadoSync {
 export async function sincronizarEspelho(
     admin: SupabaseClient,
     cfg: ConfigEspelho,
-    opts: { orcamentoMs: number; importar?: boolean },
+    opts: { orcamentoMs: number; importar?: boolean; revarrer?: boolean },
 ): Promise<ResultadoSync> {
     const inicio = Date.now();
     const sobra = () => opts.orcamentoMs - (Date.now() - inicio);
@@ -113,20 +136,40 @@ export async function sincronizarEspelho(
     const estado: EstadoSync = (est as EstadoSync | null) ?? { importacao_pagina: 1, importacao_concluida: false };
 
     const r: ResultadoSync = {
-        ok: true, novas: 0, importadas: 0, paginasLidas: 0,
+        ok: true, novas: 0, recuperadas: 0, importadas: 0, paginasLidas: 0,
         importacaoPagina: estado.importacao_pagina, importacaoConcluida: estado.importacao_concluida, totalEvolution: null,
     };
 
     try {
         // 1. novas
-        for (let p = 1; p <= MAX_PAGINAS_NOVAS && sobra() > 8_000; p++) {
-            const pg = await buscarPagina(cfg, p);
+        let pagina = 1;
+        let maisNova: number | null = null;
+        let fimDaLista = false;
+        for (; pagina <= MAX_PAGINAS_NOVAS && sobra() > 8_000; pagina++) {
+            const pg = await buscarPagina(cfg, pagina);
             r.paginasLidas++;
             r.totalEvolution = pg.total ?? r.totalEvolution;
-            if (!pg.registros.length) break;
+            if (!pg.registros.length) { fimDaLista = true; break; }
+            if (maisNova === null) maisNova = faixaDeHorario(pg.registros)?.max ?? null;
             const g = await gravarPagina(admin, cfg, pg.registros);
             r.novas += g.gravadas;
-            if (g.gravadas === 0) break; // nada novo nesta página: o resto já está no banco
+            // nada novo nesta página (e já leu o mínimo): o resto já está no banco
+            if (g.gravadas === 0 && pagina >= MIN_PAGINAS_NOVAS) { pagina++; break; }
+        }
+
+        // 1b. revarredura das últimas 48 h (mensagens atrasadas)
+        const revarrer = opts.revarrer ?? (new Date().getUTCMinutes() % INTERVALO_REVARREDURA_MIN === 0);
+        if (revarrer && !fimDaLista && maisNova !== null) {
+            const corte = maisNova - JANELA_REVARREDURA_S;
+            for (let lidas = 0; lidas < MAX_PAGINAS_REVARREDURA && sobra() > 8_000; lidas++, pagina++) {
+                const pg = await buscarPagina(cfg, pagina);
+                r.paginasLidas++;
+                if (!pg.registros.length) break;
+                const g = await gravarPagina(admin, cfg, pg.registros);
+                r.recuperadas += g.gravadas;
+                const faixa = faixaDeHorario(pg.registros);
+                if (!faixa || faixa.max < corte) break; // passou da janela de 48 h
+            }
         }
 
         // 2. importação do histórico
@@ -150,7 +193,7 @@ export async function sincronizarEspelho(
     await admin.from('wa_espelho_sync').upsert({
         instancia: cfg.instancia,
         ultima_sync_em: agora,
-        ultima_sync_gravadas: r.novas + r.importadas,
+        ultima_sync_gravadas: r.novas + r.recuperadas + r.importadas,
         importacao_pagina: r.importacaoPagina,
         importacao_concluida: r.importacaoConcluida,
         total_evolution: r.totalEvolution,
