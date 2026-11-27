@@ -53,3 +53,11 @@ test('@lid usa o telefone alternativo', () => {
     assert.equal(s.linhas.length, 1);
     assert.match(s.linhas[0].telefone_key, /^\d{10,11}$/);
 });
+
+test('faixa de horário da página: segundos ou milissegundos, ignora lixo', async () => {
+    const { faixaDeHorario } = await import('@/lib/espelho/sincronizar');
+    assert.deepEqual(faixaDeHorario([{ messageTimestamp: 1795700000 }, { messageTimestamp: '1795600000' }, { messageTimestamp: 1795650000000 }, {}]),
+        { min: 1795600000, max: 1795700000 });
+    assert.equal(faixaDeHorario([]), null);
+    assert.equal(faixaDeHorario([{ messageTimestamp: 'x' }]), null);
+});
